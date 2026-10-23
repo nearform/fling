@@ -1,6 +1,8 @@
 /**
- * One site: its URL, visibility, share link, current version and actions, with the version
- * history behind a disclosure. Archived sites are offline, so they only offer restore and delete.
+ * One site, compact: name, visibility and URL on the first line, when it was updated and the
+ * disclosures on the second, and the less-used actions behind a "more" menu. Visibility and the
+ * share link (Sharing), the current files and the version history fold away until asked for.
+ * Archived sites are offline, so they only offer restore and delete.
  */
 import type { Site } from '@fling/shared'
 import {
@@ -9,13 +11,15 @@ import {
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
   ChevronDownIcon,
+  ClipboardDocumentIcon,
+  EllipsisVerticalIcon,
   GlobeAltIcon,
   LinkIcon,
   LockClosedIcon,
   NoSymbolIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
-import { Fragment, useState } from 'react'
+import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { useSiteActions, useSiteDetail } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../lib/format'
@@ -26,6 +30,7 @@ import { Modal } from './Modal'
 import { VersionFiles } from './VersionFiles'
 
 type Dialog = 'refresh-share' | 'revoke-share' | 'archive' | 'delete' | null
+type Panel = 'sharing' | 'files' | 'versions'
 
 export function VisibilityBadge({ visibility }: { visibility: Site['visibility'] }) {
   return visibility === 'public' ? (
@@ -42,9 +47,14 @@ export function VisibilityBadge({ visibility }: { visibility: Site['visibility']
 export function SiteCard({ site }: { site: Site }) {
   const actions = useSiteActions(site.name)
   const [dialog, setDialog] = useState<Dialog>(null)
-  const [showVersions, setShowVersions] = useState(false)
-  const [showFiles, setShowFiles] = useState(false)
+  const [open, setOpen] = useState<Record<Panel, boolean>>({
+    sharing: false,
+    files: false,
+    versions: false,
+  })
+  const id = useId()
   const close = () => setDialog(null)
+  const toggle = (panel: Panel) => setOpen(o => ({ ...o, [panel]: !o[panel] }))
 
   const createShare = (rotating: boolean) =>
     actions.share.mutate(undefined, {
@@ -59,78 +69,178 @@ export function SiteCard({ site }: { site: Site }) {
       },
     })
 
+  const copyShare = async (shareUrl: string) => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      showToast('Share link copied')
+    } catch {
+      showToast('Could not copy — open Sharing and copy the link by hand', 'warning')
+    }
+  }
+
+  const disclosure = (panel: Panel, label: string) => (
+    <button
+      type="button"
+      className="btn btn-ghost btn-xs h-6 min-h-6 gap-0.5 px-1.5 font-normal"
+      aria-expanded={open[panel]}
+      aria-controls={`${id}-${panel}`}
+      onClick={() => toggle(panel)}
+    >
+      {label}
+      <ChevronDownIcon
+        className={`h-3 w-3 transition-transform ${open[panel] ? 'rotate-180' : ''}`}
+        aria-hidden
+      />
+    </button>
+  )
+
   return (
-    <article className="surface-panel space-y-4">
-      {/* Name, badges, actions */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-lg leading-tight break-all">{site.name}</h2>
+    <article className="surface-panel px-4 py-2.5">
+      <div className="flex items-start gap-2">
+        {/* Line 1: name, badges, URL */}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <h2 className="text-base font-medium leading-tight break-all">{site.name}</h2>
+          {site.archived ? (
+            <span className="badge badge-sm badge-ghost">Archived</span>
+          ) : (
+            <VisibilityBadge visibility={site.visibility} />
+          )}
+          {site.shareUrl && !site.archived && (
+            <span className="badge badge-sm badge-ghost gap-1" title="Has a share link">
+              <LinkIcon className="h-3 w-3" aria-hidden />
+              Shared
+            </span>
+          )}
+          {site.spa && (
+            <span className="badge badge-sm badge-ghost" title="Unknown paths serve /index.html">
+              SPA
+            </span>
+          )}
+          <span className="flex min-w-0 max-w-full items-center">
             {site.archived ? (
-              <span className="badge badge-sm badge-ghost">Archived</span>
-            ) : (
-              <VisibilityBadge visibility={site.visibility} />
-            )}
-            {site.spa && (
-              <span className="badge badge-sm badge-ghost" title="Unknown paths serve /index.html">
-                SPA
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1 min-w-0">
-            {site.archived ? (
-              <span className="text-sm text-muted truncate">{displayUrl(site.url)}</span>
+              <span className="truncate text-sm text-muted">{displayUrl(site.url)}</span>
             ) : (
               <a
                 href={site.url}
                 target="_blank"
                 rel="noreferrer"
-                className="link link-hover text-sm truncate inline-flex items-center gap-1"
+                className="link link-hover inline-flex min-w-0 items-center gap-1 text-sm"
               >
-                {displayUrl(site.url)}
-                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{displayUrl(site.url)}</span>
+                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="sr-only">(opens in a new tab)</span>
               </a>
             )}
-            <CopyButton text={site.url} label="Copy URL" />
-          </div>
+            <CopyButton
+              text={site.url}
+              label={`Copy the URL of ${site.name}`}
+              className="btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 shrink-0"
+            />
+          </span>
         </div>
-        <div className="flex flex-wrap gap-1.5">
-          {site.archived ? (
+
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          {site.archived && (
             <button
               type="button"
-              className="btn btn-sm"
+              className="btn btn-xs"
               onClick={() => actions.unarchive.mutate(undefined)}
               disabled={actions.unarchive.isPending}
             >
-              <ArchiveBoxXMarkIcon className="h-4 w-4" />
+              <ArchiveBoxXMarkIcon className="h-3.5 w-3.5" aria-hidden />
               Unarchive
             </button>
-          ) : (
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => setDialog('archive')}
-            >
-              <ArchiveBoxArrowDownIcon className="h-4 w-4" />
-              Archive
-            </button>
           )}
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost text-error"
-            onClick={() => setDialog('delete')}
-          >
-            <TrashIcon className="h-4 w-4" />
-            Delete
-          </button>
+          <ActionsMenu label={`More actions for ${site.name}`}>
+            {close => (
+              <>
+                {!site.archived && (
+                  <>
+                    <MenuItem
+                      icon={site.visibility === 'public' ? LockClosedIcon : GlobeAltIcon}
+                      disabled={actions.setVisibility.isPending}
+                      onClick={() => {
+                        close()
+                        actions.setVisibility.mutate(
+                          site.visibility === 'public' ? 'private' : 'public'
+                        )
+                      }}
+                    >
+                      {site.visibility === 'public' ? 'Make Nearformers only' : 'Make public'}
+                    </MenuItem>
+                    {site.shareUrl ? (
+                      <MenuItem
+                        icon={ClipboardDocumentIcon}
+                        onClick={() => {
+                          close()
+                          if (site.shareUrl) copyShare(site.shareUrl)
+                        }}
+                      >
+                        Copy share link
+                      </MenuItem>
+                    ) : (
+                      <MenuItem
+                        icon={LinkIcon}
+                        disabled={actions.share.isPending}
+                        onClick={() => {
+                          close()
+                          createShare(false)
+                        }}
+                      >
+                        Create share link
+                      </MenuItem>
+                    )}
+                    <li className="my-1 border-t border-[color:var(--border-subtle)]" />
+                    <MenuItem
+                      icon={ArchiveBoxArrowDownIcon}
+                      onClick={() => {
+                        close()
+                        setDialog('archive')
+                      }}
+                    >
+                      Archive…
+                    </MenuItem>
+                  </>
+                )}
+                <MenuItem
+                  icon={TrashIcon}
+                  className="text-error"
+                  onClick={() => {
+                    close()
+                    setDialog('delete')
+                  }}
+                >
+                  Delete…
+                </MenuItem>
+              </>
+            )}
+          </ActionsMenu>
         </div>
       </div>
 
-      {!site.archived && (
-        <div className="grid gap-4 md:grid-cols-2">
+      {/* Line 2: meta + disclosures, full width under the actions */}
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-secondary">
+        <span className="mr-1">
+          <span className="max-sm:sr-only">Updated </span>
+          <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
+          <span className="max-sm:hidden">
+            {' · '}
+            <code className="text-xs" title={site.currentVersionId ?? undefined}>
+              {shortVersion(site.currentVersionId)}
+            </code>
+          </span>
+        </span>
+        {!site.archived && disclosure('sharing', 'Sharing')}
+        {site.currentVersionId && disclosure('files', 'Files')}
+        {disclosure('versions', 'Versions')}
+      </div>
+
+      {open.sharing && !site.archived && (
+        <div id={`${id}-sharing`} className="mt-2 grid gap-2 md:grid-cols-2">
           {/* Visibility */}
-          <div className="surface-inset p-3 space-y-1">
-            <label className="flex items-center justify-between gap-3 cursor-pointer">
+          <div className="surface-inset space-y-0.5 px-3 py-2">
+            <label className="flex cursor-pointer items-center justify-between gap-3">
               <span className="text-sm font-medium">Public</span>
               <input
                 type="checkbox"
@@ -150,7 +260,7 @@ export function SiteCard({ site }: { site: Site }) {
           </div>
 
           {/* Share link */}
-          <div className="surface-inset p-3 space-y-1.5">
+          <div className="surface-inset space-y-0.5 px-3 py-2">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium">Share link</span>
               {site.shareUrl ? (
@@ -204,49 +314,20 @@ export function SiteCard({ site }: { site: Site }) {
           </div>
         </div>
       )}
-
-      {/* Meta + files / versions disclosures */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-secondary">
-        <span>
-          Updated <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
-          {' · '}
-          version <code className="text-xs">{shortVersion(site.currentVersionId)}</code>
-        </span>
-        <span className="flex gap-1">
-          {site.currentVersionId && (
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs"
-              aria-expanded={showFiles}
-              onClick={() => setShowFiles(v => !v)}
-            >
-              Files
-              <ChevronDownIcon
-                className={`h-3.5 w-3.5 transition-transform ${showFiles ? 'rotate-180' : ''}`}
-              />
-            </button>
-          )}
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            aria-expanded={showVersions}
-            onClick={() => setShowVersions(v => !v)}
-          >
-            Versions
-            <ChevronDownIcon
-              className={`h-3.5 w-3.5 transition-transform ${showVersions ? 'rotate-180' : ''}`}
-            />
-          </button>
-        </span>
-      </div>
-      {showFiles && site.currentVersionId && (
-        <VersionFiles
-          name={site.name}
-          versionId={site.currentVersionId}
-          siteUrl={site.archived ? undefined : site.url}
-        />
+      {open.files && site.currentVersionId && (
+        <div id={`${id}-files`} className="mt-2">
+          <VersionFiles
+            name={site.name}
+            versionId={site.currentVersionId}
+            siteUrl={site.archived ? undefined : site.url}
+          />
+        </div>
       )}
-      {showVersions && <Versions site={site} />}
+      {open.versions && (
+        <div id={`${id}-versions`} className="mt-2">
+          <Versions site={site} />
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={dialog === 'refresh-share'}
@@ -289,6 +370,88 @@ export function SiteCard({ site }: { site: Site }) {
   )
 }
 
+/**
+ * A "⋮" dropdown on a native <details>, so it opens with Enter/Space like any disclosure. Escape,
+ * a click outside or tabbing away closes it; Escape hands focus back to the trigger.
+ */
+function ActionsMenu({
+  label,
+  children,
+}: {
+  label: string
+  children: (close: () => void) => ReactNode
+}) {
+  const ref = useRef<HTMLDetailsElement>(null)
+  const [isOpen, setIsOpen] = useState(false)
+  const close = () => ref.current?.removeAttribute('open')
+
+  useEffect(() => {
+    if (!isOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) ref.current?.removeAttribute('open')
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [isOpen])
+
+  return (
+    <details
+      ref={ref}
+      className="dropdown dropdown-end"
+      onToggle={e => setIsOpen(e.currentTarget.open)}
+      onKeyDown={e => {
+        if (e.key === 'Escape' && ref.current?.open) {
+          e.stopPropagation()
+          close()
+          ref.current.querySelector('summary')?.focus()
+        }
+      }}
+      onBlur={e => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) close()
+      }}
+    >
+      <summary
+        className="btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 list-none"
+        aria-label={label}
+        title="More actions"
+      >
+        <EllipsisVerticalIcon className="h-4 w-4" aria-hidden />
+      </summary>
+      <ul className="dropdown-content popover-surface z-30 mt-1 w-56 space-y-0.5 p-1.5">
+        {children(close)}
+      </ul>
+    </details>
+  )
+}
+
+function MenuItem({
+  icon: Icon,
+  className = '',
+  disabled,
+  onClick,
+  children,
+}: {
+  icon: typeof TrashIcon
+  className?: string
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        className={`nav-item flex w-full items-center gap-2 px-2.5 py-1.5 text-sm ${className}`}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        <Icon className="h-4 w-4" aria-hidden />
+        {children}
+      </button>
+    </li>
+  )
+}
+
 function Versions({ site }: { site: Site }) {
   const detail = useSiteDetail(site.name, true)
   const { restoreVersion } = useSiteActions(site.name)
@@ -308,7 +471,7 @@ function Versions({ site }: { site: Site }) {
 
   return (
     <div className="surface-inset overflow-x-auto">
-      <table className="table table-sm">
+      <table className="table table-xs">
         <thead>
           <tr>
             <th>Version</th>

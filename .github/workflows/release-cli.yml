@@ -6,8 +6,12 @@ name: Release CLI
 #   git tag cli-v0.2.0 && git push origin cli-v0.2.0
 #
 # The tag must match apps/cli/package.json's version. The gate (ci.yml) runs on the tagged commit
-# first. The package is published with npm provenance (id-token: write), linking it to this run.
-# `pnpm pack` writes the tarball (it rewrites any workspace: ranges), `npm publish` uploads it.
+# first. `pnpm pack` writes the tarball (it rewrites any workspace: ranges), `npm publish` uploads it.
+#
+# Publishing uses npm trusted publishing (OIDC): no npm token is stored in GitHub. On npmjs.com,
+# @nearform/fling → Settings → Trusted publishing trusts GitHub Actions, nearform/fling,
+# workflow `release-cli.yml`. npm exchanges this job's OIDC token for a short-lived publish
+# credential and adds provenance automatically (public repo + public package). Needs npm >= 11.5.1.
 on:
   push:
     tags: ['cli-v*']
@@ -23,7 +27,6 @@ jobs:
   ci:
     name: CI
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
 
   publish:
     name: Publish @nearform/fling
@@ -32,7 +35,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v7
 
@@ -64,11 +67,9 @@ jobs:
           tar -tzf "$tarball" | grep -q '^package/dist/cli.js$' || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
+      # Trusted publishing needs npm >= 11.5.1; don't depend on the version bundled with Node.
+      - name: Update npm
+        run: npm install -g npm@^11.5.1 && npm --version
+
       - name: Publish
-        run: |
-          set -euo pipefail
-          npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
-        env:
-          # A token that can publish @nearform/fling.
-          NPM_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public

@@ -9,6 +9,7 @@ import { type ConfigStore, createConfigStore, type Env, type ResolvedConfig } fr
 import { NotLoggedInError } from './errors.ts'
 import type { LocateOptions } from './locate.ts'
 import { BIN_NAME } from './package-info.ts'
+import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import { createLogger, type Logger } from './utils/logger.ts'
 import { createOutput, type Output } from './utils/output.ts'
 
@@ -35,6 +36,8 @@ export interface CommandContext {
   binName: string
   /** Where file names are looked up (default: this machine; tests pass a fake). */
   locate?: LocateOptions
+  /** Waits for a new site / share link to reach the edge; absent → no wait (tests). */
+  waitReady?: ReadyWaiter
 }
 
 export interface ContextOptions {
@@ -67,6 +70,7 @@ export async function createContext(options: ContextOptions = {}): Promise<Comma
     prompt: ttyPrompt,
     progress: interactive ? ttyProgress : () => {},
     binName: BIN_NAME,
+    waitReady: createReadyWaiter({ env: options.env }),
   }
 }
 

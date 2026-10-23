@@ -84,6 +84,8 @@ sites.all('*', async c => {
       // fall through to the 404 page
     }
   }
+  // Like the deployed 404 page: never cached, so it doesn't outlive a site that appears later.
+  c.header('cache-control', 'no-store')
   try {
     return c.html(await readFile(notFoundPage, 'utf8'), 404)
   } catch {

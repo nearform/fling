@@ -58,6 +58,8 @@ export type PublishOutcome =
       totalBytes: number
       generatedIndex: boolean
       warnings: string[]
+      /** every path in the published version (picks the URL the readiness wait polls) */
+      paths: string[]
     }
 
 const tooLarge = (message: string) => new ApiError(413, 'too_large', message)
@@ -154,7 +156,13 @@ export async function publishFiles(
     { manifest: { files: manifest }, spa: opts.spa, visibility: opts.visibility },
     { presign: false }
   )
-  const common = { fileCount: files.size, totalBytes, generatedIndex, warnings }
+  const common = {
+    fileCount: files.size,
+    totalBytes,
+    generatedIndex,
+    warnings,
+    paths: [...files.keys()],
+  }
   if (res.status !== 'upload') {
     return {
       kind: 'published',

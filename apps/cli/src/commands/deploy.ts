@@ -29,6 +29,7 @@ import {
   NO_INDEX_WARNING,
   withHtmlListing,
 } from '../manifest.ts'
+import { waitWithSpinner } from '../ready.ts'
 import { checkName, discoverSitesBase, type SitesBase, sitesBaseFor, siteUrlFor } from '../sites.ts'
 import { formatBytes } from '../utils/output.ts'
 
@@ -134,7 +135,21 @@ async function deployPrepared(
       `Deployed ${result.name} ${chalk.dim(`(${summary}; uploaded ${result.uploaded}, version ${result.versionId})`)}`
     )
 
-  ctx.out.data({ status: result.status, site: result.site }, () => {
+  // A new or re-pointed version takes a few seconds to reach every edge: don't hand out a URL
+  // that 404s. (`unchanged` was already live.)
+  const ready =
+    result.status === 'unchanged'
+      ? true
+      : (
+          await waitWithSpinner(
+            ctx.waitReady,
+            result.url,
+            local.files.map(f => f.path),
+            { progress: ctx.progress, warn: m => ctx.log.warn(m) }
+          )
+        ).ready
+
+  ctx.out.data({ status: result.status, site: result.site, ready }, () => {
     const lines = [chalk.bold(result.url)]
     if (result.site.visibility === 'private')
       lines.push(

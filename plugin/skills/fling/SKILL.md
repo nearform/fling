@@ -127,9 +127,11 @@ their shell):
   `index.html` in Downloads, Desktop and Claude output folders (last 14 days by default).
 - `fling_list { archived? }` — the user's sites with URL, visibility and share link.
 - `fling_info { name }` — one site with its version history.
+- `fling_files { name, versionId? }` — the files in the live version (or an earlier one): use it to
+  check what was published, e.g. when the user reports a 404 (no root `index.html` → the root 404s).
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
-CLI equivalents: `fling ls`, `fling info <name>`, `fling versions <name>`, `fling share <name>
+CLI equivalents: `fling ls`, `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
 [--refresh|--revoke]`, `fling visibility <name> private|public`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

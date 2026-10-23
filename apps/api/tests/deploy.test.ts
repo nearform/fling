@@ -41,9 +41,14 @@ describe('deploy', () => {
     expect(body.versionId).toMatch(/^[a-f0-9]{16}$/)
     const html = body.uploads.find((u: any) => u.path === 'index.html')
     const js = body.uploads.find((u: any) => u.path === 'app.js')
-    expect(html.headers['cache-control']).toBe('public, max-age=60')
+    // browsers revalidate unhashed names (HTML included); the CDN keeps the versioned path a year
+    expect(html.headers['cache-control']).toBe(
+      'public, max-age=0, must-revalidate, s-maxage=31536000'
+    )
     expect(html.headers['content-type']).toBe('text/html')
-    expect(js.headers['cache-control']).toBe('public, max-age=31536000, immutable')
+    expect(js.headers['cache-control']).toBe(
+      'public, max-age=0, must-revalidate, s-maxage=31536000'
+    )
 
     // not live yet, and not listed
     expect(kvsSite()).toBeUndefined()
@@ -69,6 +74,23 @@ describe('deploy', () => {
     // finalize is idempotent
     const again = await api(env, key, 'POST', `/api/sites/hello/deploys/${body.versionId}/finalize`)
     expect(again.status).toBe(200)
+  })
+
+  it('content-hashed asset names are presigned as immutable', async () => {
+    const files = [
+      file('index.html', '<h1>x</h1>'),
+      file('assets/index-Bk3x9a2Q.js', 'x()', 'text/javascript'),
+      file('assets/style.css', 'body{}', 'text/css'),
+    ]
+    const body = await json(
+      await api(env, key, 'POST', '/api/sites/hello/deploys', { manifest: manifest(files) })
+    )
+    const cc = (p: string) => body.uploads.find((u: any) => u.path === p).headers['cache-control']
+    expect(cc('assets/index-Bk3x9a2Q.js')).toBe('public, max-age=31536000, immutable')
+    expect(cc('assets/style.css')).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
+    expect(cc('index.html')).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
+    // the signature covers the header: the upload still verifies
+    await upload(env, body.uploads, files)
   })
 
   it('identical content → unchanged; old content → repointed', async () => {

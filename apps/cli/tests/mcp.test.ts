@@ -402,6 +402,32 @@ describe('MCP server', () => {
     expect(dataOf(r)).toMatchObject({ current: true, files: [{ path: 'hello.html' }] })
   })
 
+  it('fling_share waits for a new link to reach the edge and says so when it has not', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      'GET /api/sites/my-app': () => jsonResponse({ ...site(), versions: [] }),
+      'POST /api/sites/my-app/share': () => jsonResponse({ shareUrl: 'https://s-new.test/' }),
+      'GET /api/sites/my-app/versions/abcdef0123456789/files': () =>
+        jsonResponse({
+          versionId: 'abcdef0123456789',
+          files: [{ path: 'index.html', size: 1, contentType: 'text/html' }],
+          totalBytes: 1,
+          generatedIndex: false,
+        }),
+    })
+    const waited: string[] = []
+    const client = await connect(store, m.fetch, undefined, {
+      waitReady: async url => {
+        waited.push(url)
+        return { ready: false, waitedMs: 15_000 }
+      },
+    })
+    const r = await client.callTool({ name: 'fling_share', arguments: { name: 'my-app' } })
+    expect(waited).toEqual(['https://s-new.test/'])
+    expect(text(r)).toMatch(/reload if you see a 404/)
+    expect(dataOf(r)).toMatchObject({ action: 'created', ready: false })
+  })
+
   it('fling_delete requires confirm: true', async () => {
     const store = await loggedInStore()
     const m = mockFetch({ 'DELETE /api/sites/my-app': () => new Response(null, { status: 204 }) })

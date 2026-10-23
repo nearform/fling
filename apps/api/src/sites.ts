@@ -17,6 +17,7 @@
  * setting (new sites: private, non-SPA).
  */
 import {
+  cacheControlFor,
   type DeployRequest,
   type DeployResponse,
   initialsFromEmail,
@@ -73,8 +74,8 @@ async function detectGeneratedIndex(
   return bytes ? isGeneratedListing(new TextDecoder().decode(bytes)) : false
 }
 
-export const cacheControlFor = (path: string) =>
-  /\.html?$/i.test(path) ? 'public, max-age=60' : 'public, max-age=31536000, immutable'
+/** Re-exported for the upload paths (see @fling/shared cache-control.ts for the rule). */
+export { cacheControlFor }
 
 const protocol = (deps: Deps) => `${deps.config.siteScheme}:`
 

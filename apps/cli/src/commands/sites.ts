@@ -3,6 +3,7 @@ import type { Site, SiteDetail, Visibility } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
+import { waitWithSpinner } from '../ready.ts'
 import {
   archiveSite,
   deleteSite,
@@ -124,13 +125,27 @@ export async function runShare(
   opts: { refresh?: boolean; revoke?: boolean }
 ): Promise<void> {
   if (opts.refresh && opts.revoke) throw new CliError('Use either --refresh or --revoke, not both')
-  const result = await share(requireClient(ctx), name, opts)
+  const client = requireClient(ctx)
+  const result = await share(client, name, opts)
+  let ready: boolean | undefined
+  if (result.action === 'created' || result.action === 'refreshed') {
+    // a new share label takes a few seconds to reach every edge
+    const files = ctx.waitReady ? await versionFiles(client, name).catch(() => null) : null
+    ready = (
+      await waitWithSpinner(ctx.waitReady, result.shareUrl, files?.files.map(f => f.path) ?? [], {
+        progress: ctx.progress,
+        warn: m => ctx.log.warn(m),
+      })
+    ).ready
+  }
   if (result.action === 'revoked') ctx.log.success(`Share link for ${name} revoked`)
   else if (result.action === 'refreshed')
     ctx.log.success('New share link — the old one no longer works')
   else if (result.action === 'created')
     ctx.log.success('Share link created — anyone with it can view the site')
-  ctx.out.data(result, () => result.shareUrl ?? chalk.dim('(no share link)'))
+  ctx.out.data(ready === undefined ? result : { ...result, ready }, () =>
+    result.shareUrl ? result.shareUrl : chalk.dim('(no share link)')
+  )
 }
 
 export async function runVisibility(

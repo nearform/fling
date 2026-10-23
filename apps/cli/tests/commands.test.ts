@@ -185,6 +185,7 @@ describe('commands', () => {
       name: 'my-app',
       action: 'created',
       shareUrl: 'https://s-new.test/',
+      ready: true,
     })
 
     const rotated = mockFetch({

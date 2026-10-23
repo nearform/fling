@@ -131,8 +131,10 @@ jobs:
         env:
           BUCKET: ${{ steps.config.outputs.SITES_BUCKET }}
         run: |
+          # no-store: a browser that hits the 404 in the seconds before a new site (or share link)
+          # reaches the edge must not keep showing it once the site is there.
           aws s3 cp apps/web/dist-404/404.html "s3://$BUCKET/_fling/404.html" --no-progress \
-            --content-type "text/html; charset=utf-8" --cache-control "public, max-age=300"
+            --content-type "text/html; charset=utf-8" --cache-control "no-store"
 
       - name: Publish the site router
         env:

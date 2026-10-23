@@ -133,6 +133,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 |---|---|
 | `fling ls [--archived]` | your sites |
 | `fling info <name>` / `fling versions <name>` | details and version history |
+| `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
 | `fling visibility <name> private\|public` | require sign-in, or not |
@@ -143,7 +144,8 @@ Global options: `--json` prints machine-readable output, and `--server <url>` po
 server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
-(where files given by name are looked for first).
+(where files given by name are looked for first), `FLING_NO_WAIT=1` (after a deploy or a new share
+link, don't wait the few seconds it takes to reach every edge).
 
 ## Claude Code plugin and MCP
 

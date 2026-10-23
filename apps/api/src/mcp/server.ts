@@ -9,7 +9,12 @@ import {
   MCP_REMOTE_INSTRUCTIONS,
   type McpToolDef,
   mcpTools,
+  NOT_READY_NOTE,
+  probeUrl,
+  READY_TIMEOUT_LAMBDA_MS,
+  readinessWaitDisabled,
   type Site,
+  waitUntilReachable,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -66,7 +71,31 @@ const describeSite = (s: Site) =>
   `${s.url} (${s.visibility}${s.archived ? ', archived' : ''}${s.spa ? ', spa' : ''})` +
   (s.shareUrl ? ` — share link: ${s.shareUrl}` : '')
 
-function publishResult(name: string, outcome: PublishOutcome, retryWith: string): Result {
+/** Wait (capped well inside the connector's ~10 s timeout) for the edge to route a new URL. */
+async function edgeReady(deps: Deps, url: string, paths: readonly string[]) {
+  let ready = true
+  try {
+    if (deps.waitReady) ready = (await deps.waitReady(url, paths)).ready
+    else if (!readinessWaitDisabled(process.env)) {
+      ready = (
+        await waitUntilReachable(probeUrl(url, paths), {
+          timeoutMs: READY_TIMEOUT_LAMBDA_MS,
+          fetch: deps.fetch,
+        })
+      ).ready
+    }
+  } catch {
+    ready = false
+  }
+  return { ready, note: ready ? '' : ` Not reachable yet at ${url}: ${NOT_READY_NOTE}.` }
+}
+
+async function publishResult(
+  deps: Deps,
+  name: string,
+  outcome: PublishOutcome,
+  retryWith: string
+): Promise<Result> {
   if (outcome.kind === 'needs_decision') {
     const n = outcome.htmlPages.length
     const shown = outcome.htmlPages.slice(0, 20).join(', ')
@@ -99,9 +128,13 @@ function publishResult(name: string, outcome: PublishOutcome, retryWith: string)
     site.visibility === 'private'
       ? ' Only signed-in Nearformers can open it; use fling_share for a public link.'
       : ''
+  const edge =
+    status === 'unchanged'
+      ? { ready: true, note: '' }
+      : await edgeReady(deps, site.url, outcome.paths)
   return {
     text:
-      `${what}${extra}: ${site.url} (${site.visibility}).${privacy}${warnings}` +
+      `${what}${extra}: ${site.url} (${site.visibility}).${privacy}${edge.note}${warnings}` +
       `\nTo check exactly which files the site has, call fling_files with name "${site.name}".`,
     data: {
       status,
@@ -111,6 +144,7 @@ function publishResult(name: string, outcome: PublishOutcome, retryWith: string)
       spa: site.spa,
       shareUrl: site.shareUrl,
       versionId: outcome.versionId,
+      ready: edge.ready,
       fileCount: outcome.fileCount,
       totalBytes: outcome.totalBytes,
       generatedIndex: outcome.generatedIndex,
@@ -227,7 +261,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
       visibility: visibilityOf(args.public),
       listHtml: args.listHtml,
     })
-    return publishResult(args.name, outcome, 'fling_publish')
+    return publishResult(deps, args.name, outcome, 'fling_publish')
   })
 
   register(mcpTools.uploadBegin, async args => {
@@ -260,7 +294,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   register(mcpTools.uploadFinish, async args => {
     const upload = await deps.store.getUpload(args.uploadId)
     const outcome = await finishUpload(deps, user, args.uploadId, { listHtml: args.listHtml })
-    return publishResult(upload?.name ?? 'the site', outcome, 'fling_upload_finish')
+    return publishResult(deps, upload?.name ?? 'the site', outcome, 'fling_upload_finish')
   })
 
   register(mcpTools.share, async args => {
@@ -281,9 +315,23 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
     const { shareUrl } = await sites.rotateShare(deps, user, args.name)
     const action = current.shareToken ? 'rotated' : 'created'
+    // An archived (or never published) site isn't served, so there is nothing to wait for.
+    const served =
+      current.currentVersionId && !current.archived
+        ? await sites
+            .versionFiles(deps, user, args.name, current.currentVersionId)
+            .catch(() => null)
+        : null
+    const edge = served
+      ? await edgeReady(
+          deps,
+          shareUrl,
+          served.files.map(f => f.path)
+        )
+      : { ready: true, note: '' }
     return {
-      text: `Share link (${action}) for ${args.name}: ${shareUrl} — anyone with it can view the site.`,
-      data: { action, shareUrl },
+      text: `Share link (${action}) for ${args.name}: ${shareUrl} — anyone with it can view the site.${edge.note}`,
+      data: { action, shareUrl, ready: edge.ready },
     }
   })
 

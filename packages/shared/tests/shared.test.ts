@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CACHE_IMMUTABLE, cacheControlFor, isHashedFileName } from '../src/cache-control.ts'
 import {
   initialsFromEmail,
   isValidSiteName,
@@ -77,5 +78,37 @@ describe('site cookie', () => {
     expect(verifySiteCookie(c, 'other', 1000)).toBeNull()
     expect(verifySiteCookie(c, 'k', 3000)).toBeNull()
     expect(verifySiteCookie(`${c}x`, 'k', 1000)).toBeNull()
+  })
+})
+
+describe('cacheControlFor', () => {
+  it('treats content-hashed file names as immutable', () => {
+    for (const p of [
+      'index-Bk3x9a2Q.js',
+      'assets/main.3f9a2c1b.css',
+      'chunk-7XK2LQ9P.mjs',
+      'app.a1b2c3d4e5.js',
+      'static/js/main.3f9a2c1b.chunk.js',
+    ]) {
+      expect([p, isHashedFileName(p)]).toEqual([p, true])
+      expect(cacheControlFor(p)).toBe(CACHE_IMMUTABLE)
+    }
+  })
+
+  it('makes everything else (HTML included) revalidate in the browser, cached at the CDN', () => {
+    for (const p of [
+      'style.css',
+      'jquery-3.7.1.min.js',
+      'logo.png',
+      'my-long-filename.js',
+      'report-2024final.pdf',
+      'index.html',
+      'docs/page.html',
+      'a1b2c3d4e5f6/style.css',
+      'Bk3x9a2Q.js',
+    ]) {
+      expect([p, isHashedFileName(p)]).toEqual([p, false])
+      expect(cacheControlFor(p)).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
+    }
   })
 })

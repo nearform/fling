@@ -57,7 +57,12 @@ Notes:
   links serve `index.html` instead of 404.
 - **Vite and absolute paths work**: each site has its own subdomain, so `/assets/x.js` resolves —
   no need to change Vite's `base`.
-- Dotfiles, `node_modules` and anything in a `.flingignore` (gitignore syntax) are skipped. Limits:
+- **Fling never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or
+  files that contain secrets; it stops and tells you which file and line.** There is no override:
+  never rename, re-encode or split a file to get past it. Tell the user which file and line, and
+  suggest removing the secret (and rotating it if it was shared) or leaving the file out. Skipped
+  dotfiles and gitignored files are listed in the result (`skipped`).
+- `node_modules` and anything in a `.flingignore` (gitignore syntax) are skipped too. Limits:
   25 MB per file, 100 MB per deploy.
 - **No `index.html` at the root, but HTML pages.** `fling_deploy` and `fling_publish` don't deploy.
   They report the pages. Ask the user whether to generate an index page that links them (retry with

@@ -36,7 +36,9 @@ const RESERVED = [
   'status',
   'www',
 ]
-const DOT_SEGMENT_RE = /(^|\/)(\.|%2e){1,2}(\/|$)/i
+// Any path segment starting with a dot (incl. `.`/`..` traversal and `.env`, `.git/…`,
+// percent-encoded too): never served, even from versions flung before dotfiles were refused.
+const DOT_SEGMENT_RE = /(^|\/)(\.|%2e)/i
 
 // Same rules as parseLabel() in shared/hosts.ts; returns the KVS key or null.
 function kvsKeyForLabel(label) {

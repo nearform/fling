@@ -56,6 +56,12 @@ const INLINE_ONLY =
   'If you created the content in this conversation, pass it directly — never pass file paths from your ' +
   'sandbox (this server cannot read them) and never try to curl/upload from your sandbox.'
 
+/** Shown to Claude wherever files are sent (no override exists, so don't let it look for one). */
+export const NEVER_PUBLISHED =
+  'Fling never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or files that contain ' +
+  'secrets (API keys, tokens, private keys, passwords in database URLs); it stops and tells you which file and line. ' +
+  'Remove the secret (or leave the file out) and retry — there is no way to override this.'
+
 const ENCODING =
   '`encoding` is "utf8" (default, for text: HTML, CSS, JS, SVG, JSON, Markdown…) or "base64" (binary: images, fonts, PDFs).'
 
@@ -79,7 +85,7 @@ const sitePath = z
   .min(1)
   .max(1024)
   .describe(
-    'Site-relative path with forward slashes, e.g. "index.html", "css/app.css", "img/logo.png". The root page must be "index.html".'
+    'Site-relative path with forward slashes, e.g. "index.html", "css/app.css", "img/logo.png". The root page must be "index.html". No dotfiles (".env", ".well-known/…")'
   )
 
 const encoding = z
@@ -170,7 +176,7 @@ export const mcpTools = {
       `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
       'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too); ' +
       'publishing identical content again is a no-op. ' +
-      `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ` +
+      `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
       'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
       'the site has.',
     inputSchema: {
@@ -212,7 +218,7 @@ export const mcpTools = {
       'Add one file to a chunked upload started with fling_upload_begin. Sending the same path again replaces it. ' +
       `A file larger than ${MCP_UPLOAD_CHUNK_MAX_CHARS / 1024 / 1024} MB of content can span calls: send the first ` +
       'part normally, then the following parts in order with `append: true` (same path and encoding; send appends ' +
-      `one at a time, not in parallel). ${ENCODING}`,
+      `one at a time, not in parallel). ${ENCODING} ${NEVER_PUBLISHED}`,
     inputSchema: {
       uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
       path: sitePath,
@@ -320,6 +326,7 @@ export const MCP_REMOTE_INSTRUCTIONS = [
   'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
     'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +
     '(`listHtml: false`, the root URL will 404), then retry.',
+  NEVER_PUBLISHED,
   `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
     '`append` for big files) and fling_upload_finish.',
   'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +

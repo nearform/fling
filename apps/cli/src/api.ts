@@ -188,14 +188,30 @@ async function readBody(response: Response): Promise<unknown> {
 function errorFromResponse(status: number, body: unknown, method: string, path: string) {
   const envelope = ErrorEnvelopeSchema.safeParse(body)
   if (envelope.success) {
-    return new CliApiError({
+    const { code } = envelope.data.error
+    const error = new CliApiError({
       status,
-      code: envelope.data.error.code,
+      code,
       body,
       message: envelope.data.error.message,
+      hint: code ? NEVER_PUBLISHED_HINTS[code] : undefined,
     })
+    // The server's secret checks (the guarantee behind the CLI's own): keep the details for --json.
+    const extra = (body as { error?: { findings?: unknown; paths?: unknown } }).error
+    if (Array.isArray(extra?.findings)) Object.assign(error, { findings: extra.findings })
+    if (Array.isArray(extra?.paths)) Object.assign(error, { paths: extra.paths })
+    return error
   }
   return new CliApiError({ status, body, message: `${method} ${path} failed with HTTP ${status}` })
+}
+
+/** Hints for the server refusing dotfiles, secret files and secrets (no override exists). */
+const NEVER_PUBLISHED_HINTS: Record<string, string> = {
+  secret_detected:
+    'Remove the secret from the file (and rotate it if it was ever shared), or add the file to .flingignore if the site does not need it.',
+  secret_file:
+    'Move the secret files out of the folder, or add them to .flingignore if the site does not need them.',
+  dotfile: `Dotfiles are never flung. Update the CLI (\`npm i -g @nearform/fling@latest\`), which skips them.`,
 }
 
 function describeCause(cause: unknown): string {

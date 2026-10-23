@@ -272,6 +272,7 @@ describe('fling [dir] command', () => {
       status: 'unchanged',
       site: site(),
       ready: true,
+      skipped: { dotfiles: [], gitignored: [] },
     })
   })
 

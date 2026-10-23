@@ -4,9 +4,13 @@
  * - a folder: as is;
  * - a single .html/.htm file: copied to a temp folder as `index.html`;
  * - a .zip: extracted to a temp folder (zip-slip safe, within the shared size limits), skipping
- *   `__MACOSX/` and dotfiles, and unwrapping a single top-level folder;
+ *   `__MACOSX/`, OS junk and dotfiles (reported in `skippedDotfiles`, except `.DS_Store` / `._*`),
+ *   and unwrapping a single top-level folder;
  * - any other single file (.svg, .pdf, .png, .md…): copied to a temp folder next to a generated
  *   minimal `index.html` that shows or links it.
+ *
+ * A single file whose name starts with `.` (`.env`) or is a secret file (`server.key`) is refused:
+ * Fling never publishes those.
  *
  * Default site names: a folder uses the folder naming algorithm (naming.ts); a file uses its own
  * name without the extension or a browser's " (1)" duplicate suffix ("Pitch Deck (1).html" →
@@ -15,9 +19,16 @@
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve, sep } from 'node:path'
-import { MAX_DEPLOY_BYTES, MAX_FILE_BYTES, MAX_FILES } from '@fling/shared'
+import {
+  isSecretPath,
+  MAX_DEPLOY_BYTES,
+  MAX_FILE_BYTES,
+  MAX_FILES,
+  NEVER_PUBLISHED_NOTE,
+} from '@fling/shared'
 import { unzipSync } from 'fflate'
 import { CliError } from './errors.ts'
+import { SecretFilesError } from './manifest.ts'
 import { defaultSiteName, fitName } from './naming.ts'
 import { formatBytes } from './utils/output.ts'
 
@@ -30,6 +41,8 @@ export interface PreparedInput {
   /** The folder to deploy (a temp folder unless `kind` is `folder`). */
   dir: string
   defaultName: string
+  /** Dotfiles left out of a zip (reported to the user; never flung). */
+  skippedDotfiles: string[]
   /** Remove the temp folder (no-op for folders). */
   cleanup(): Promise<void>
 }
@@ -68,13 +81,25 @@ export async function prepareInput(path: string): Promise<PreparedInput> {
   const kind = inputKind(path, info.isDirectory())
   const defaultName = defaultNameFor(path, info.isDirectory())
   if (kind === 'folder')
-    return { kind, source: path, dir: path, defaultName, cleanup: async () => {} }
+    return {
+      kind,
+      source: path,
+      dir: path,
+      defaultName,
+      skippedDotfiles: [],
+      cleanup: async () => {},
+    }
+  const file = basename(path)
+  if (file.startsWith('.'))
+    throw new CliError(`Not flung: ${file} is a dotfile. ${NEVER_PUBLISHED_NOTE}`)
+  if (kind === 'file' && isSecretPath(file)) throw new SecretFilesError([file])
 
   if (info.size > MAX_DEPLOY_BYTES)
     throw new CliError(
       `${basename(path)} is ${formatBytes(info.size)}; the limit is ${formatBytes(MAX_DEPLOY_BYTES)}`
     )
   const tmp = await tempFolder()
+  const skippedDotfiles: string[] = []
   try {
     if (kind === 'html') {
       if (info.size > MAX_FILE_BYTES)
@@ -83,7 +108,7 @@ export async function prepareInput(path: string): Promise<PreparedInput> {
         )
       await copyFile(path, join(tmp.dir, 'index.html'))
     } else if (kind === 'zip') {
-      await extractZip(await readFile(path), tmp.dir)
+      await extractZip(await readFile(path), tmp.dir, skippedDotfiles)
     } else {
       const name = basename(path)
       await copyFile(path, join(tmp.dir, name))
@@ -93,7 +118,7 @@ export async function prepareInput(path: string): Promise<PreparedInput> {
     await tmp.cleanup()
     throw error
   }
-  return { kind, source: path, dir: tmp.dir, defaultName, cleanup: tmp.cleanup }
+  return { kind, source: path, dir: tmp.dir, defaultName, skippedDotfiles, cleanup: tmp.cleanup }
 }
 
 // ---- zip -----------------------------------------------------------------------------------
@@ -127,8 +152,32 @@ export function unwrapSingleFolder(paths: string[]): string[] {
   }
 }
 
-/** Extract a zip into `dest` (see the module comment). Throws on unsafe names or over-limit sizes. */
-export async function extractZip(data: Uint8Array, dest: string): Promise<string[]> {
+/**
+ * A dot entry in a zip worth telling the user about (`.env`, `site/.npmrc`, `.vscode/`), or null.
+ * `.git/` and macOS junk (`.DS_Store`, `._*`, anything under `__MACOSX/`) are skipped silently.
+ */
+export function zipDotEntry(name: string): string | null {
+  const segments = name
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(s => s !== '' && s !== '.')
+  if (segments[0] === '__MACOSX') return null
+  const i = segments.findIndex(s => s.startsWith('.'))
+  if (i === -1) return null
+  const seg = segments[i] as string
+  if (seg === '.DS_Store' || seg === '.git' || seg.startsWith('._')) return null
+  return i < segments.length - 1 ? `${segments.slice(0, i + 1).join('/')}/` : segments.join('/')
+}
+
+/**
+ * Extract a zip into `dest` (see the module comment). Throws on unsafe names or over-limit sizes.
+ * Dot entries that were left out are added to `skippedDotfiles` (once per file / dot-directory).
+ */
+export async function extractZip(
+  data: Uint8Array,
+  dest: string,
+  skippedDotfiles: string[] = []
+): Promise<string[]> {
   const unsafe: string[] = []
   let declared = 0
   let count = 0
@@ -141,7 +190,11 @@ export async function extractZip(data: Uint8Array, dest: string): Promise<string
           unsafe.push(file.name)
           return false
         }
-        if (path === null) return false
+        if (path === null) {
+          const dot = zipDotEntry(file.name)
+          if (dot && !skippedDotfiles.includes(dot)) skippedDotfiles.push(dot)
+          return false
+        }
         count++
         declared += file.originalSize
         if (file.originalSize > MAX_FILE_BYTES)

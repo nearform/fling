@@ -12,6 +12,9 @@
  * index.html it generates the listing when there are HTML pages (else warns), and a taken name
  * fails with suggestions (it never silently picks another name). `--list-html` / `--no-list-html`
  * decide the listing up front.
+ *
+ * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
+ * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
  */
 import { isValidSiteName, SITE_NAME_MAX } from '@fling/shared'
 import chalk from 'chalk'
@@ -24,6 +27,7 @@ import { type PreparedInput, prepareInput } from '../inputs.ts'
 import { FOUND_AS_GIVEN, resolveInput } from '../locate.ts'
 import {
   buildManifest,
+  describeSkipped,
   hasRootIndex,
   htmlPages,
   NO_INDEX_WARNING,
@@ -80,6 +84,9 @@ async function deployPrepared(
   ask: boolean
 ): Promise<void> {
   let local = await buildManifest(prepared.dir)
+  local.skipped.dotfiles.unshift(...prepared.skippedDotfiles)
+  // Never flung, whatever the flags: say so, so nobody wonders where .env went.
+  for (const line of describeSkipped(local.skipped)) ctx.log.info(line)
   let name =
     opts.name !== undefined ? resolveSiteName(prepared.dir, opts.name) : prepared.defaultName
   if (opts.name === undefined && ask) name = await confirmSiteName(ctx, client, name, base)
@@ -149,7 +156,7 @@ async function deployPrepared(
           )
         ).ready
 
-  ctx.out.data({ status: result.status, site: result.site, ready }, () => {
+  ctx.out.data({ status: result.status, site: result.site, ready, skipped: local.skipped }, () => {
     const lines = [chalk.bold(result.url)]
     if (result.site.visibility === 'private')
       lines.push(

@@ -16,10 +16,12 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   describeVersionFiles,
+  isSecretPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
   type McpToolDef,
   mcpTools,
+  NEVER_PUBLISHED,
   NOT_READY_NOTE,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -40,7 +42,14 @@ import {
   type Resolved,
   resolveInput,
 } from './locate.ts'
-import { buildManifest, hasRootIndex, htmlPages, withHtmlListing } from './manifest.ts'
+import {
+  buildManifest,
+  describeSkipped,
+  hasRootIndex,
+  htmlPages,
+  SecretFilesError,
+  withHtmlListing,
+} from './manifest.ts'
 import { NPX_COMMAND, VERSION } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
@@ -91,6 +100,7 @@ export const MCP_LOCAL_INSTRUCTIONS = [
     'it is looked up in Downloads, Desktop, Documents/Claude and Claude Desktop output folders. Use fling_find_files to see recent candidates when unsure which file the user means.',
   'Confirm the site name with the user before publishing (fling_check_name shows whether it is free and, for a path, the generated name). Names are global, first come first served; when one is taken, offer the suggestions.',
   'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
+  NEVER_PUBLISHED,
   'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
   'Sites are private (Nearformers only) by default; only make one public if asked. Use fling_share for a link people outside Nearform can open. Always give the user the URL that comes back.',
 ].join('\n\n')
@@ -153,9 +163,15 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       public?: boolean
       listHtml?: boolean
       retryWith: string
+      /** Dotfiles already left out (from a zip or the inline files). */
+      skippedDotfiles?: string[]
     }
   ): Promise<DeployOutcome> {
     let local = await buildManifest(dir)
+    local.skipped.dotfiles.unshift(...(opts.skippedDotfiles ?? []))
+    const skippedNote = describeSkipped(local.skipped)
+      .map(l => `\n${l}.`)
+      .join('')
     let generatedIndex = false
     if (!hasRootIndex(local)) {
       const pages = htmlPages(local).map(f => f.path)
@@ -211,7 +227,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     return {
       kind: 'deployed',
       summary:
-        `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}${edge.note}` +
+        `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}${skippedNote}${edge.note}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
@@ -222,6 +238,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         site: result.site,
         generatedIndex,
         warnings: result.warnings,
+        skipped: local.skipped,
       },
     }
   }
@@ -250,7 +267,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If the name is taken it fails with free suggestions — ask the user to pick one, then retry with `name`. ' +
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
-        'Re-deploying identical content is a no-op. Sites are private to signed-in Nearformers unless `public` is set.',
+        'Re-deploying identical content is a no-op. Sites are private to signed-in Nearformers unless `public` is set. ' +
+        NEVER_PUBLISHED,
       inputSchema: {
         path: z
           .string()
@@ -287,6 +305,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             public: args.public,
             listHtml: args.listHtml,
             retryWith: 'fling_deploy',
+            skippedDotfiles: prepared.skippedDotfiles,
           })
           const where =
             located.foundIn === FOUND_AS_GIVEN
@@ -375,8 +394,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         const name = resolveSiteName('.', args.name)
         const tmp = await mkdtemp(join(tmpdir(), 'fling-publish-'))
         try {
-          await writeInlineFiles(tmp, args.files)
+          const { skippedDotfiles } = await writeInlineFiles(tmp, args.files)
           const outcome = await deployFolder(c, tmp, {
+            skippedDotfiles,
             name,
             nameGiven: true,
             spa: args.spa,
@@ -604,16 +624,36 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
 const textResult = (text: string): CallToolResult => ({ content: [{ type: 'text', text }] })
 
-/** Inline files (fling_publish) → a folder: `./a` and `/a` mean `a`; no traversal, no duplicates. */
+/**
+ * Inline files (fling_publish) → a folder: `./a` and `/a` mean `a`; no traversal, no duplicates.
+ * Dotfiles (`.env`, `.well-known/x`) are left out and returned in `skippedDotfiles`; secret files
+ * (`server.key`, `id_rsa`…) are refused. Contents are scanned for secrets by buildManifest.
+ */
 export async function writeInlineFiles(
   dir: string,
   files: readonly { path: string; content: string; encoding?: 'utf8' | 'base64' }[]
-): Promise<void> {
+): Promise<{ skippedDotfiles: string[] }> {
   const seen = new Set<string>()
+  const skippedDotfiles: string[] = []
+  const secretFiles: string[] = []
   let total = 0
   for (const f of files) {
     const path = f.path.replace(/^(\.\/)+/, '').replace(/^\/+/, '')
+    const segments = path.split('/')
+    if (
+      path &&
+      !path.includes('\\') &&
+      segments.every(s => s !== '' && s !== '.' && s !== '..') &&
+      segments.some(s => s.startsWith('.'))
+    ) {
+      skippedDotfiles.push(path)
+      continue
+    }
     if (!isValidSitePath(path)) throw new CliError(`Invalid file path: "${f.path}"`)
+    if (isSecretPath(path)) {
+      secretFiles.push(path)
+      continue
+    }
     if (seen.has(path)) throw new CliError(`"${path}" is listed twice`)
     seen.add(path)
     const bytes = Buffer.from(f.content, f.encoding === 'base64' ? 'base64' : 'utf8')
@@ -624,6 +664,8 @@ export async function writeInlineFiles(
     await mkdir(dirname(target), { recursive: true })
     await writeFile(target, bytes)
   }
+  if (secretFiles.length > 0) throw new SecretFilesError(secretFiles)
+  return { skippedDotfiles }
 }
 
 function describeError(error: unknown): string {

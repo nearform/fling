@@ -353,6 +353,11 @@
     background: var(--tone-info-surface);
     border-color: var(--tone-info-border);
   }
+  .tone-warning {
+    color: var(--text-primary);
+    background: var(--tone-warning-surface);
+    border-color: var(--tone-warning-border);
+  }
 
   /* Application shell — quiet, but each layer visually distinct */
   .app-canvas {

@@ -20,6 +20,7 @@ import {
   type DeployRequest,
   type DeployResponse,
   initialsFromEmail,
+  isGeneratedListing,
   isValidSiteName,
   type KvsSiteValue,
   type Manifest,
@@ -37,6 +38,7 @@ import {
   sitePrefix,
   siteUrl,
   slugify,
+  type VersionFiles,
   type Visibility,
 } from '@fling/shared'
 import { computeVersionId } from '@fling/shared/version-id'
@@ -49,6 +51,27 @@ import type { Deps } from './types.ts'
 
 const HEAD_CONCURRENCY = 16
 const MAX_MISSING_LISTED = 50
+/** A root index.html bigger than this can't be a generated listing page; don't read it. */
+const MAX_LISTING_BYTES = 1024 * 1024
+
+/**
+ * What's kept at manifestKey(): the deploy manifest plus, once finalized, whether the root
+ * index.html is Fling's generated "List HTML files" page (absent on versions finalized earlier).
+ */
+type StoredManifest = Manifest & { generatedIndex?: boolean }
+
+/** Is the version's root index.html the generated listing page? Reads it (it's small) to check. */
+async function detectGeneratedIndex(
+  deps: Deps,
+  siteId: string,
+  versionId: string,
+  files: readonly ManifestFile[]
+): Promise<boolean> {
+  const index = files.find(f => f.path === 'index.html')
+  if (!index || index.size > MAX_LISTING_BYTES) return false
+  const bytes = await deps.storage.get(siteObjectKey(siteId, versionId, 'index.html'))
+  return bytes ? isGeneratedListing(new TextDecoder().decode(bytes)) : false
+}
 
 export const cacheControlFor = (path: string) =>
   /\.html?$/i.test(path) ? 'public, max-age=60' : 'public, max-age=31536000, immutable'
@@ -250,9 +273,7 @@ export async function finalize(deps: Deps, user: User, name: string, versionId: 
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
 
   if (version.status === 'pending') {
-    const manifest = await storage.getJson<{ files: ManifestFile[] }>(
-      manifestKey(site.id, versionId)
-    )
+    const manifest = await storage.getJson<StoredManifest>(manifestKey(site.id, versionId))
     if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
     const checks = await mapLimit(manifest.files, HEAD_CONCURRENCY, async file => {
       const head = await storage.head(siteObjectKey(site.id, versionId, file.path))
@@ -269,6 +290,11 @@ export async function finalize(deps: Deps, user: User, name: string, versionId: 
         { missing }
       )
     }
+    const generatedIndex = await detectGeneratedIndex(deps, site.id, versionId, manifest.files)
+    await storage.putJson(manifestKey(site.id, versionId), {
+      files: manifest.files,
+      generatedIndex,
+    } satisfies StoredManifest)
     await store.putVersion(user.email, { ...version, status: 'complete' })
   }
 
@@ -300,6 +326,31 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
         totalBytes: v.totalBytes,
         createdAt: v.createdAt,
       })),
+  }
+}
+
+/** GET /api/sites/:name/versions/:versionId/files — one (complete) version's files, by path. */
+export async function versionFiles(
+  deps: Deps,
+  user: User,
+  name: string,
+  versionId: string
+): Promise<VersionFiles> {
+  const site = await requireSite(deps, user, name)
+  const version = await deps.store.getVersion(user.email, site.id, versionId)
+  if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
+  const manifest = await deps.storage.getJson<StoredManifest>(manifestKey(site.id, versionId))
+  if (!manifest) throw notFound(`Manifest for version ${versionId} of "${name}" is gone`)
+  const files = manifest.files
+    .map(f => ({ path: f.path, size: f.size, contentType: f.contentType }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return {
+    versionId,
+    files,
+    totalBytes: files.reduce((n, f) => n + f.size, 0),
+    generatedIndex:
+      manifest.generatedIndex ??
+      (await detectGeneratedIndex(deps, site.id, versionId, manifest.files)),
   }
 }
 

@@ -42,6 +42,27 @@ export type SiteDetail = z.infer<typeof SiteDetailSchema>
 export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
 
 /**
+ * GET /api/sites/:name/versions/:versionId/files — the files in one version (owner only; 404 for
+ * an unknown site or version). Paths are sorted. `generatedIndex` is true when the root
+ * index.html is the "List HTML files" page Fling generated (it carries the `fling-listing`
+ * generator marker).
+ */
+export const SiteFileSchema = z.object({
+  path: z.string(),
+  size: z.number(),
+  contentType: z.string(),
+})
+export type SiteFile = z.infer<typeof SiteFileSchema>
+
+export const VersionFilesSchema = z.object({
+  versionId: z.string(),
+  files: z.array(SiteFileSchema),
+  totalBytes: z.number(),
+  generatedIndex: z.boolean(),
+})
+export type VersionFiles = z.infer<typeof VersionFilesSchema>
+
+/**
  * GET /api/names/:name — can the caller fling to this name?
  * - available: nobody has it   - yours: the caller's existing site (a fling updates it)
  * - taken: someone else's       - invalid: fails isValidSiteName (incl. reserved)

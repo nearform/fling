@@ -60,6 +60,7 @@ describe('MCP server', () => {
       'fling_check_name',
       'fling_delete',
       'fling_deploy',
+      'fling_files',
       'fling_find_files',
       'fling_info',
       'fling_list',
@@ -378,6 +379,27 @@ describe('MCP server', () => {
 
     const neither = await client.callTool({ name: 'fling_check_name', arguments: {} })
     expect(neither.isError).toBe(true)
+  })
+
+  it('fling_files lists the served version and warns when the root has no index.html', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      'GET /api/sites/my-app': () => jsonResponse({ ...site(), versions: [] }),
+      'GET /api/sites/my-app/versions/abcdef0123456789/files': () =>
+        jsonResponse({
+          versionId: 'abcdef0123456789',
+          files: [{ path: 'hello.html', size: 12, contentType: 'text/html' }],
+          totalBytes: 12,
+          generatedIndex: false,
+        }),
+    })
+    const client = await connect(store, m.fetch)
+    const r = await client.callTool({ name: 'fling_files', arguments: { name: 'my-app' } })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toMatch(/my-app current version abcdef0123456789: 1 file, 12 B/)
+    expect(text(r)).toMatch(/no index\.html at the root/)
+    expect(text(r)).toContain('- hello.html (12 B, text/html)')
+    expect(dataOf(r)).toMatchObject({ current: true, files: [{ path: 'hello.html' }] })
   })
 
   it('fling_delete requires confirm: true', async () => {

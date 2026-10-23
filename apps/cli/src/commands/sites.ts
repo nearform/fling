@@ -1,5 +1,5 @@
 /** Site management: ls, info, versions, rollback, share, visibility, archive/unarchive, rm. */
-import type { Site, Visibility } from '@fling/shared'
+import type { Site, SiteDetail, Visibility } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
@@ -11,6 +11,7 @@ import {
   rollback,
   setVisibility,
   share,
+  versionFiles,
 } from '../sites.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 
@@ -30,7 +31,7 @@ export async function runList(ctx: CommandContext, opts: { archived?: boolean })
   )
 }
 
-function describeSite(site: Site): string[] {
+function describeSite(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
   return [
     row('Name', site.name),
@@ -39,9 +40,20 @@ function describeSite(site: Site): string[] {
     row('SPA', site.spa ? 'yes' : 'no'),
     row('Share link', site.shareUrl ?? '-'),
     row('Version', site.currentVersionId ?? '-'),
+    ...filesRow(site, row),
     row('Created', formatDate(site.createdAt)),
     row('Updated', formatDate(site.updatedAt)),
   ]
+}
+
+function filesRow(
+  site: Site & { versions?: SiteDetail['versions'] },
+  row: (label: string, value: string) => string
+): string[] {
+  const current = site.versions?.find(v => v.id === site.currentVersionId)
+  if (!current) return []
+  const n = current.fileCount
+  return [row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`)]
 }
 
 export async function runInfo(ctx: CommandContext, name: string): Promise<void> {
@@ -50,7 +62,9 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
     [
       ...describeSite(site),
       '',
-      chalk.dim(`${site.versions.length} version(s) — \`fling versions ${name}\``),
+      chalk.dim(
+        `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
+      ),
     ].join('\n')
   )
 }
@@ -68,6 +82,30 @@ export async function runVersions(ctx: CommandContext, name: string): Promise<vo
         { header: 'CREATED', value: v => formatDate(v.createdAt) },
       ])
   )
+}
+
+export async function runFiles(
+  ctx: CommandContext,
+  name: string,
+  versionId?: string
+): Promise<void> {
+  const result = await versionFiles(requireClient(ctx), name, versionId)
+  if (!result.files.some(f => f.path === 'index.html')) {
+    ctx.log.warn('No index.html at the root — the site root URL will 404')
+  }
+  ctx.out.data(result, () => {
+    const n = result.files.length
+    const header = chalk.dim(
+      `${result.versionId}${result.current ? ' (current)' : ' (not served)'} — ${n} file${n === 1 ? '' : 's'}, ` +
+        `${formatBytes(result.totalBytes)}${result.generatedIndex ? ', generated index.html' : ''}`
+    )
+    const table = renderTable(result.files, [
+      { header: 'PATH', value: f => f.path },
+      { header: 'SIZE', value: f => formatBytes(f.size) },
+      { header: 'TYPE', value: f => f.contentType },
+    ])
+    return `${header}\n${table}`
+  })
 }
 
 export async function runRollback(

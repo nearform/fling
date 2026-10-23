@@ -18,6 +18,8 @@ import {
   type SiteDetail,
   SiteDetailSchema,
   SiteListSchema,
+  type VersionFiles,
+  VersionFilesSchema,
   type Visibility,
 } from '@fling/shared'
 
@@ -127,6 +129,9 @@ export const api = {
     return sites
   },
   getSite: (name: string): Promise<SiteDetail> => request(site(name), SiteDetailSchema),
+  /** The files in one version of a site, sorted by path. */
+  versionFiles: (name: string, versionId: string): Promise<VersionFiles> =>
+    request(`${site(name)}/versions/${encodeURIComponent(versionId)}/files`, VersionFilesSchema),
   updateSite: (name: string, body: { visibility?: Visibility; spa?: boolean }) =>
     request(site(name), ignoreBody, { method: 'PATCH', body }),
   /** Creates the share link, or rotates it when one exists (the old link stops working). */

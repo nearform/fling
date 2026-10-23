@@ -71,6 +71,7 @@ describe('/mcp tools', () => {
         'fling_archive',
         'fling_check_name',
         'fling_delete',
+        'fling_files',
         'fling_info',
         'fling_list',
         'fling_publish',
@@ -113,6 +114,7 @@ describe('/mcp tools', () => {
       warnings: [],
     })
     expect(r.content[0]?.text).toContain('https://q3-report.fling.test/')
+    expect(r.content[0]?.text).toContain('fling_files')
     const kvs = JSON.parse(env.kvs.data.get(siteKvsKey('q3-report')) ?? '{}')
     expect(kvs.v).toBe(r.structuredContent.versionId)
     const png = await env.storage.get(`sites/${kvs.id}/${kvs.v}/dot.png`)
@@ -214,6 +216,31 @@ describe('/mcp tools', () => {
       fileCount: 3,
     })
     expect(without.structuredContent.warnings[0]).toMatch(/404/)
+
+    // fling_files: the served version has no index.html → warning; the earlier one was generated
+    const listing = await callTool(env, bearer, 'fling_files', { name: 'pages' })
+    expect(listing.isError).toBeFalsy()
+    expect(listing.structuredContent).toMatchObject({
+      name: 'pages',
+      current: true,
+      versionId: without.structuredContent.versionId,
+      generatedIndex: false,
+    })
+    expect(listing.structuredContent.files.map((f: any) => f.path)).toEqual([
+      'a.html',
+      'docs/b.html',
+      'style.css',
+    ])
+    expect(listing.content[0]?.text).toMatch(/no index\.html at the root/)
+    expect(listing.content[0]?.text).toContain('- docs/b.html (')
+    const older = await callTool(env, bearer, 'fling_files', {
+      name: 'pages',
+      versionId: listed.structuredContent.versionId,
+    })
+    expect(older.structuredContent).toMatchObject({ current: false, generatedIndex: true })
+    expect(older.content[0]?.text).toMatch(/not the version being served/)
+    const missing = await callTool(env, bearer, 'fling_files', { name: 'nope' })
+    expect(missing.isError).toBe(true)
 
     // no HTML at all: no question, just a warning
     const assets = await callTool(env, bearer, 'fling_publish', {

@@ -4,6 +4,7 @@
  * handlers call the site service layer directly.
  */
 import {
+  describeVersionFiles,
   MCP_PUBLISH_MAX_BYTES,
   MCP_REMOTE_INSTRUCTIONS,
   type McpToolDef,
@@ -99,7 +100,9 @@ function publishResult(name: string, outcome: PublishOutcome, retryWith: string)
       ? ' Only signed-in Nearformers can open it; use fling_share for a public link.'
       : ''
   return {
-    text: `${what}${extra}: ${site.url} (${site.visibility}).${privacy}${warnings}`,
+    text:
+      `${what}${extra}: ${site.url} (${site.visibility}).${privacy}${warnings}` +
+      `\nTo check exactly which files the site has, call fling_files with name "${site.name}".`,
     data: {
       status,
       name: site.name,
@@ -170,6 +173,20 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     return {
       text: `${site.name}: ${describeSite(site)}\nVersions (newest first):\n${versions || '(none)'}`,
       data: site,
+    }
+  })
+
+  register(mcpTools.files, async args => {
+    const site = await sites.requireSite(deps, user, args.name)
+    const versionId = args.versionId ?? site.currentVersionId
+    if (!versionId)
+      throw new ApiError(404, 'not_found', `${args.name} has no published version yet`)
+    const files = await sites.versionFiles(deps, user, args.name, versionId)
+    const current = versionId === site.currentVersionId
+    const url = sites.toSite(deps, user, site).url
+    return {
+      text: describeVersionFiles(site.name, files, { current, url }),
+      data: { name: site.name, current, ...files },
     }
   })
 

@@ -3,6 +3,8 @@ import { CliApiError, createApiClient, exitCodeForStatus } from '../src/api.ts'
 import { runWhoami } from '../src/commands/auth.ts'
 import {
   runArchive,
+  runFiles,
+  runInfo,
   runList,
   runRemove,
   runShare,
@@ -106,6 +108,60 @@ describe('commands', () => {
     const { ctx, out } = await testContext({ store, fetch: m.fetch })
     await runVersions(ctx, 'my-app')
     expect(out.content()).toMatch(/\*\s+abcdef0123456789\s+2\s+2\.0 KB/)
+  })
+
+  it("info shows the live version's file count and size", async () => {
+    const store = await loggedInStore()
+    const detail = {
+      ...site(),
+      versions: [
+        { id: 'abcdef0123456789', fileCount: 3, totalBytes: 2048, createdAt: site().createdAt },
+      ],
+    }
+    const m = mockFetch({ '/api/sites/my-app': () => jsonResponse(detail) })
+    const { ctx, out } = await testContext({ store, fetch: m.fetch })
+    await runInfo(ctx, 'my-app')
+    expect(out.content()).toMatch(/Files:\s+3 files, 2\.0 KB/)
+  })
+
+  it('files lists the live version (or a given one) as a table or JSON', async () => {
+    const store = await loggedInStore()
+    const filesBody = (versionId: string, paths: string[]) => ({
+      versionId,
+      files: paths.map(path => ({ path, size: 1024, contentType: 'text/html' })),
+      totalBytes: 1024 * paths.length,
+      generatedIndex: false,
+    })
+    const m = mockFetch({
+      'GET /api/sites/my-app': () => jsonResponse({ ...site(), versions: [] }),
+      'GET /api/sites/my-app/versions/abcdef0123456789/files': () =>
+        jsonResponse(filesBody('abcdef0123456789', ['docs/a.html', 'index.html'])),
+      'GET /api/sites/my-app/versions/0000000000000000/files': () =>
+        jsonResponse(filesBody('0000000000000000', ['page.html'])),
+    })
+    const a = await testContext({ store, fetch: m.fetch })
+    await runFiles(a.ctx, 'my-app')
+    expect(a.out.content()).toMatch(/abcdef0123456789 \(current\) — 2 files, 2\.0 KB/)
+    expect(a.out.content()).toMatch(/PATH\s+SIZE\s+TYPE/)
+    expect(a.out.content()).toMatch(/docs\/a\.html\s+1\.0 KB\s+text\/html/)
+
+    const b = await testContext({ store, fetch: m.fetch, json: true })
+    await runFiles(b.ctx, 'my-app', '0000000000000000')
+    expect(JSON.parse(b.out.content())).toMatchObject({
+      name: 'my-app',
+      current: false,
+      versionId: '0000000000000000',
+      files: [{ path: 'page.html' }],
+    })
+
+    const never = mockFetch({
+      'GET /api/sites/my-app': () =>
+        jsonResponse({ ...site({ currentVersionId: null }), versions: [] }),
+    })
+    const c = await testContext({ store, fetch: never.fetch })
+    expect(await captureError(runFiles(c.ctx, 'my-app'))).toMatchObject({
+      message: expect.stringMatching(/no published version/),
+    })
   })
 
   it('share: returns an existing link without POSTing; --refresh POSTs; --revoke DELETEs', async () => {

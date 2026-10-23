@@ -13,10 +13,13 @@ import {
   SiteListSchema,
   SiteSchema,
   siteUrl,
+  type VersionFiles,
+  VersionFilesSchema,
   type Visibility,
 } from '@fling/shared'
 import { z } from 'zod'
 import type { ApiClient } from './api.ts'
+import { CliError } from './errors.ts'
 
 /**
  * Response of `POST /api/sites/:name/share`. Not (yet) in `@fling/shared/api.ts`, so it lives here;
@@ -111,6 +114,30 @@ export async function listSites(
 
 export function getSite(client: ApiClient, name: string): Promise<SiteDetail> {
   return client.request('GET', sitePath(name), { schema: SiteDetailSchema })
+}
+
+export interface SiteFiles extends VersionFiles {
+  name: string
+  url: string
+  /** the version being served */
+  current: boolean
+}
+
+/** The files in `versionId`, or in the version being served when omitted. */
+export async function versionFiles(
+  client: ApiClient,
+  name: string,
+  versionId?: string
+): Promise<SiteFiles> {
+  const site = await getSite(client, name)
+  const id = versionId ?? site.currentVersionId
+  if (!id) throw new CliError(`${name} has no published version yet`)
+  const files = await client.request(
+    'GET',
+    `${sitePath(name)}/versions/${encodeURIComponent(id)}/files`,
+    { schema: VersionFilesSchema }
+  )
+  return { name: site.name, url: site.url, current: id === site.currentVersionId, ...files }
 }
 
 /**

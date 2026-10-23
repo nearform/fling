@@ -14,7 +14,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { isValidSitePath, MAX_DEPLOY_BYTES, type McpToolDef, mcpTools } from '@fling/shared'
+import {
+  describeVersionFiles,
+  isValidSitePath,
+  MAX_DEPLOY_BYTES,
+  type McpToolDef,
+  mcpTools,
+} from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -47,6 +53,7 @@ import {
   share,
   sitesPattern,
   siteUrlFor,
+  versionFiles,
   whoami,
 } from './sites.ts'
 import { silentLogger } from './utils/logger.ts'
@@ -182,7 +189,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     const warnings = result.warnings.length ? `\nWarnings:\n- ${result.warnings.join('\n- ')}` : ''
     return {
       kind: 'deployed',
-      summary: `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}`,
+      summary:
+        `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}` +
+        `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
         name: result.name,
@@ -492,6 +501,19 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     run(async c => {
       const site = await getSite(c, args.name)
       return { summary: `${site.name}: ${site.url}`, data: site }
+    })
+  )
+
+  server.registerTool(t.files.name, toolDef(t.files), args =>
+    run(async c => {
+      const result = await versionFiles(c, args.name, args.versionId)
+      return {
+        summary: describeVersionFiles(result.name, result, {
+          current: result.current,
+          url: result.url,
+        }),
+        data: result,
+      }
     })
   )
 

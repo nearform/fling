@@ -18,6 +18,7 @@ import {
   SiteListSchema,
   SiteSchema,
   UpdateSiteRequestSchema,
+  VersionFilesSchema,
 } from '@fling/shared'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
@@ -132,6 +133,16 @@ apiRoutes.get('/sites', async c => {
 apiRoutes.get('/sites/:name', async c => {
   const detail = await sites.siteDetail(c.get('deps'), c.get('user'), c.req.param('name'))
   return c.json(SiteDetailSchema.parse(detail))
+})
+
+apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
+  const files = await sites.versionFiles(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    c.req.param('versionId')
+  )
+  return c.json(VersionFilesSchema.parse(files))
 })
 
 apiRoutes.patch('/sites/:name', async c => {

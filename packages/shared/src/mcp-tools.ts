@@ -7,6 +7,7 @@
  * content inline (`fling_publish`, or the chunked `fling_upload_*` trio for bigger sites).
  */
 import { z } from 'zod'
+import type { VersionFiles } from './api.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
 import { MAX_FILES } from './limits.ts'
 
@@ -130,6 +131,25 @@ export const mcpTools = {
     annotations: { readOnlyHint: true, openWorldHint: false },
   }),
 
+  files: tool({
+    name: 'fling_files',
+    title: 'List site files',
+    description:
+      "List the files in a site's current version (or in `versionId`, from fling_info): path, size and content " +
+      'type, sorted by path. Use it to check what was actually published — e.g. when the user sees a 404, confirm ' +
+      'the page exists at that path and that there is a root index.html (without one the site root 404s).',
+    inputSchema: {
+      name: siteName,
+      versionId: z
+        .string()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('Version id (from fling_info); omit for the version being served'),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }),
+
   checkName: tool({
     name: 'fling_check_name',
     title: 'Check a site name',
@@ -151,7 +171,8 @@ export const mcpTools = {
       'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too); ' +
       'publishing identical content again is a no-op. ' +
       `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ` +
-      'The result includes `warnings`. Share the returned URL with the user.',
+      'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
+      'the site has.',
     inputSchema: {
       name: siteName,
       files: z
@@ -302,7 +323,47 @@ export const MCP_REMOTE_INSTRUCTIONS = [
   `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
     '`append` for big files) and fling_upload_finish.',
   'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +
-    'to restore a version, fling_archive rather than fling_delete unless the user insists.',
+    'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
+    'exactly which files a site has (e.g. when the user reports a 404).',
 ].join('\n\n')
+
+/** Max files listed in a fling_files text result (structured data always has them all). */
+export const MCP_FILES_LISTED = 200
+
+/**
+ * The text of a fling_files result (both servers): a header, a root-404 warning when there is no
+ * index.html, then one `path (size, type)` line per file.
+ */
+export function describeVersionFiles(
+  name: string,
+  files: VersionFiles,
+  opts: { current: boolean; url?: string | null }
+): string {
+  const kb = (n: number) =>
+    n < 1024
+      ? `${n} B`
+      : n < 1024 * 1024
+        ? `${(n / 1024).toFixed(1)} KB`
+        : `${(n / 1024 / 1024).toFixed(1)} MB`
+  const n = files.files.length
+  const which = opts.current ? 'current version' : 'version'
+  const lines = [
+    `${name} ${which} ${files.versionId}: ${n} file${n === 1 ? '' : 's'}, ${kb(files.totalBytes)}` +
+      (opts.current && opts.url ? ` — served at ${opts.url}` : '') +
+      (opts.current ? '' : ' (not the version being served)'),
+  ]
+  if (!files.files.some(f => f.path === 'index.html')) {
+    lines.push(
+      'Warning: there is no index.html at the root, so the site root URL returns 404 (each file still works at its own path).'
+    )
+  } else if (files.generatedIndex) {
+    lines.push('index.html is a generated page listing the HTML pages.')
+  }
+  for (const f of files.files.slice(0, MCP_FILES_LISTED)) {
+    lines.push(`- ${f.path} (${kb(f.size)}, ${f.contentType})`)
+  }
+  if (n > MCP_FILES_LISTED) lines.push(`… and ${n - MCP_FILES_LISTED} more`)
+  return lines.join('\n')
+}
 
 export type McpToolName = (typeof mcpTools)[keyof typeof mcpTools]['name']

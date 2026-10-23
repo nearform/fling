@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractHtmlTitle, renderHtmlListing } from '../src/listing.ts'
+import { extractHtmlTitle, isGeneratedListing, renderHtmlListing } from '../src/listing.ts'
 
 describe('html listing', () => {
   it('extracts titles', () => {
@@ -26,5 +26,11 @@ describe('html listing', () => {
   })
   it('handles no pages', () => {
     expect(renderHtmlListing('x', [])).toContain('No HTML pages')
+  })
+
+  it('recognises a generated listing by its generator marker', () => {
+    expect(isGeneratedListing(renderHtmlListing('x', [{ path: 'a.html' }]))).toBe(true)
+    expect(isGeneratedListing('<!doctype html><title>Mine</title><h1>hi</h1>')).toBe(false)
+    expect(isGeneratedListing('<meta name="generator" content="other">')).toBe(false)
   })
 })

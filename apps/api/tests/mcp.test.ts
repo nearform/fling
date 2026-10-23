@@ -1,5 +1,6 @@
 import { siteKvsKey } from '@fling/shared'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Storage } from '../src/storage/types.ts'
 import { APP_ORIGIN, createUser, type Env, json, setup } from './helpers.ts'
 import { callTool, connect, rpc } from './oauth-helpers.ts'
 
@@ -71,6 +72,7 @@ describe('/mcp tools', () => {
         'fling_archive',
         'fling_check_name',
         'fling_delete',
+        'fling_files',
         'fling_info',
         'fling_list',
         'fling_publish',
@@ -113,6 +115,7 @@ describe('/mcp tools', () => {
       warnings: [],
     })
     expect(r.content[0]?.text).toContain('https://q3-report.fling.test/')
+    expect(r.content[0]?.text).toContain('fling_files')
     const kvs = JSON.parse(env.kvs.data.get(siteKvsKey('q3-report')) ?? '{}')
     expect(kvs.v).toBe(r.structuredContent.versionId)
     const png = await env.storage.get(`sites/${kvs.id}/${kvs.v}/dot.png`)
@@ -130,6 +133,64 @@ describe('/mcp tools', () => {
       public: true,
     })
     expect(pub.structuredContent.visibility).toBe('public')
+  })
+
+  it('server-side puts use the cache rule: hashed names immutable, the rest revalidate', async () => {
+    const put = vi.spyOn(env.storage as Storage, 'put')
+    const r = await callTool(env, bearer, 'fling_publish', {
+      name: 'cached',
+      files: [
+        { path: 'a.html', content: page('A') },
+        { path: 'main.3f9a2c1b.css', content: 'body{}' },
+        { path: 'style.css', content: 'p{}' },
+      ],
+      listHtml: true,
+    })
+    expect(r.structuredContent.status).toBe('live')
+    const cc = Object.fromEntries(
+      put.mock.calls.map(([key, , opts]) => [key.split('/').pop(), opts?.cacheControl])
+    )
+    const revalidate = 'public, max-age=0, must-revalidate, s-maxage=31536000'
+    expect(cc).toEqual({
+      'index.html': revalidate, // the generated listing too
+      'a.html': revalidate,
+      'style.css': revalidate,
+      'main.3f9a2c1b.css': 'public, max-age=31536000, immutable',
+    })
+  })
+
+  it('waits for the edge after publishing / sharing; says so when it is not there yet', async () => {
+    const waited: { url: string; paths: readonly string[] }[] = []
+    let ready = false
+    env.deps.waitReady = async (url, paths) => {
+      waited.push({ url, paths })
+      return { ready }
+    }
+    const files = [{ path: 'page.html', content: page('P') }]
+    const r = await callTool(env, bearer, 'fling_publish', {
+      name: 'edgy',
+      files,
+      listHtml: false,
+    })
+    expect(r.structuredContent).toMatchObject({ status: 'live', ready: false })
+    expect(r.content[0]?.text).toMatch(/reload if you see a 404/)
+    expect(waited).toEqual([{ url: 'https://edgy.fling.test/', paths: ['page.html'] }])
+
+    // unchanged: already live, no wait
+    const same = await callTool(env, bearer, 'fling_publish', {
+      name: 'edgy',
+      files,
+      listHtml: false,
+    })
+    expect(same.structuredContent).toMatchObject({ status: 'unchanged', ready: true })
+    expect(waited).toHaveLength(1)
+
+    ready = true
+    const share = await callTool(env, bearer, 'fling_share', { name: 'edgy' })
+    expect(share.structuredContent).toMatchObject({ action: 'created', ready: true })
+    expect(share.content[0]?.text).not.toMatch(/reload/)
+    expect(waited[1]?.url).toBe(share.structuredContent.shareUrl)
+    expect(waited[1]?.paths).toEqual(['page.html'])
   })
 
   it('name_taken comes back as a tool error with suggestions', async () => {
@@ -214,6 +275,31 @@ describe('/mcp tools', () => {
       fileCount: 3,
     })
     expect(without.structuredContent.warnings[0]).toMatch(/404/)
+
+    // fling_files: the served version has no index.html → warning; the earlier one was generated
+    const listing = await callTool(env, bearer, 'fling_files', { name: 'pages' })
+    expect(listing.isError).toBeFalsy()
+    expect(listing.structuredContent).toMatchObject({
+      name: 'pages',
+      current: true,
+      versionId: without.structuredContent.versionId,
+      generatedIndex: false,
+    })
+    expect(listing.structuredContent.files.map((f: any) => f.path)).toEqual([
+      'a.html',
+      'docs/b.html',
+      'style.css',
+    ])
+    expect(listing.content[0]?.text).toMatch(/no index\.html at the root/)
+    expect(listing.content[0]?.text).toContain('- docs/b.html (')
+    const older = await callTool(env, bearer, 'fling_files', {
+      name: 'pages',
+      versionId: listed.structuredContent.versionId,
+    })
+    expect(older.structuredContent).toMatchObject({ current: false, generatedIndex: true })
+    expect(older.content[0]?.text).toMatch(/not the version being served/)
+    const missing = await callTool(env, bearer, 'fling_files', { name: 'nope' })
+    expect(missing.isError).toBe(true)
 
     // no HTML at all: no question, just a warning
     const assets = await callTool(env, bearer, 'fling_publish', {

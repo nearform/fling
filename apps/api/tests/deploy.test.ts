@@ -1,4 +1,4 @@
-import { shareKvsKey, siteKvsKey } from '@fling/shared'
+import { renderHtmlListing, shareKvsKey, siteKvsKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 
@@ -41,9 +41,14 @@ describe('deploy', () => {
     expect(body.versionId).toMatch(/^[a-f0-9]{16}$/)
     const html = body.uploads.find((u: any) => u.path === 'index.html')
     const js = body.uploads.find((u: any) => u.path === 'app.js')
-    expect(html.headers['cache-control']).toBe('public, max-age=60')
+    // browsers revalidate unhashed names (HTML included); the CDN keeps the versioned path a year
+    expect(html.headers['cache-control']).toBe(
+      'public, max-age=0, must-revalidate, s-maxage=31536000'
+    )
     expect(html.headers['content-type']).toBe('text/html')
-    expect(js.headers['cache-control']).toBe('public, max-age=31536000, immutable')
+    expect(js.headers['cache-control']).toBe(
+      'public, max-age=0, must-revalidate, s-maxage=31536000'
+    )
 
     // not live yet, and not listed
     expect(kvsSite()).toBeUndefined()
@@ -69,6 +74,23 @@ describe('deploy', () => {
     // finalize is idempotent
     const again = await api(env, key, 'POST', `/api/sites/hello/deploys/${body.versionId}/finalize`)
     expect(again.status).toBe(200)
+  })
+
+  it('content-hashed asset names are presigned as immutable', async () => {
+    const files = [
+      file('index.html', '<h1>x</h1>'),
+      file('assets/index-Bk3x9a2Q.js', 'x()', 'text/javascript'),
+      file('assets/style.css', 'body{}', 'text/css'),
+    ]
+    const body = await json(
+      await api(env, key, 'POST', '/api/sites/hello/deploys', { manifest: manifest(files) })
+    )
+    const cc = (p: string) => body.uploads.find((u: any) => u.path === p).headers['cache-control']
+    expect(cc('assets/index-Bk3x9a2Q.js')).toBe('public, max-age=31536000, immutable')
+    expect(cc('assets/style.css')).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
+    expect(cc('index.html')).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
+    // the signature covers the header: the upload still verifies
+    await upload(env, body.uploads, files)
   })
 
   it('identical content → unchanged; old content → repointed', async () => {
@@ -255,6 +277,71 @@ describe('site operations', () => {
     const bob = await createUser(env, 'bob@nearform.com')
     expect((await api(env, bob.key, 'GET', '/api/sites/hello')).status).toBe(404)
     expect((await json(await api(env, bob.key, 'GET', '/api/sites'))).sites).toEqual([])
+  })
+})
+
+describe('version files', () => {
+  const filesOf = (name: string, versionId: string, k = key) =>
+    api(env, k, 'GET', `/api/sites/${name}/versions/${versionId}/files`)
+
+  it('lists the files of a version, sorted by path, with total bytes', async () => {
+    const live = await deployLive(v1)
+    const res = await filesOf('hello', live.versionId)
+    expect(res.status).toBe(200)
+    const body = await json(res)
+    expect(body).toEqual({
+      versionId: live.versionId,
+      files: [
+        { path: 'app.js', size: v1[1].meta.size, contentType: 'text/javascript' },
+        { path: 'index.html', size: v1[0].meta.size, contentType: 'text/html' },
+      ],
+      totalBytes: v1[0].meta.size + v1[1].meta.size,
+      generatedIndex: false,
+    })
+  })
+
+  it('older versions stay listable after a new deploy', async () => {
+    const first = await deployLive(v1)
+    await deployLive(v2)
+    const body = await json(await filesOf('hello', first.versionId))
+    expect(body.files.map((f: any) => f.path)).toEqual(['app.js', 'index.html'])
+  })
+
+  it('flags a generated "List HTML files" index (stored at finalize, detected for older manifests)', async () => {
+    const pages = [
+      file('index.html', renderHtmlListing('hello', [{ path: 'a.html' }])),
+      file('a.html', '<h1>a</h1>'),
+    ]
+    const live = await deployLive(pages)
+    expect((await json(await filesOf('hello', live.versionId))).generatedIndex).toBe(true)
+
+    // a manifest written before the flag existed: detected from the object itself
+    const siteId = kvsSite().id
+    const key_ = `sites/${siteId}/_manifests/${live.versionId}.json`
+    const stored = await env.storage.getJson<any>(key_)
+    expect(stored.generatedIndex).toBe(true)
+    await env.storage.putJson(key_, { files: stored.files })
+    expect((await json(await filesOf('hello', live.versionId))).generatedIndex).toBe(true)
+  })
+
+  it('no root index.html → listed without one, generatedIndex false', async () => {
+    const live = await deployLive([file('page.html', '<h1>p</h1>')])
+    const body = await json(await filesOf('hello', live.versionId))
+    expect(body.files.map((f: any) => f.path)).toEqual(['page.html'])
+    expect(body.generatedIndex).toBe(false)
+  })
+
+  it('unknown site, unknown or pending version, other user → 404', async () => {
+    expect((await filesOf('nope', 'abc')).status).toBe(404)
+    const live = await deployLive(v1)
+    expect((await filesOf('hello', 'abc')).status).toBe(404)
+    const pending = await json(
+      await api(env, key, 'POST', '/api/sites/hello/deploys', { manifest: manifest(v2) })
+    )
+    expect(pending.status).toBe('upload')
+    expect((await filesOf('hello', pending.versionId)).status).toBe(404)
+    const bob = await createUser(env, 'bob@nearform.com')
+    expect((await filesOf('hello', live.versionId, bob.key)).status).toBe(404)
   })
 })
 

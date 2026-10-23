@@ -15,7 +15,7 @@ import {
   NoSymbolIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useSiteActions, useSiteDetail } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../lib/format'
@@ -23,6 +23,7 @@ import { showToast } from '../lib/toast'
 import { ConfirmModal } from './ConfirmModal'
 import { CopyButton } from './CopyButton'
 import { Modal } from './Modal'
+import { VersionFiles } from './VersionFiles'
 
 type Dialog = 'refresh-share' | 'revoke-share' | 'archive' | 'delete' | null
 
@@ -42,6 +43,7 @@ export function SiteCard({ site }: { site: Site }) {
   const actions = useSiteActions(site.name)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [showVersions, setShowVersions] = useState(false)
+  const [showFiles, setShowFiles] = useState(false)
   const close = () => setDialog(null)
 
   const createShare = (rotating: boolean) =>
@@ -203,25 +205,47 @@ export function SiteCard({ site }: { site: Site }) {
         </div>
       )}
 
-      {/* Meta + versions disclosure */}
+      {/* Meta + files / versions disclosures */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-secondary">
         <span>
           Updated <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
           {' · '}
           version <code className="text-xs">{shortVersion(site.currentVersionId)}</code>
         </span>
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs"
-          aria-expanded={showVersions}
-          onClick={() => setShowVersions(v => !v)}
-        >
-          Versions
-          <ChevronDownIcon
-            className={`h-3.5 w-3.5 transition-transform ${showVersions ? 'rotate-180' : ''}`}
-          />
-        </button>
+        <span className="flex gap-1">
+          {site.currentVersionId && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs"
+              aria-expanded={showFiles}
+              onClick={() => setShowFiles(v => !v)}
+            >
+              Files
+              <ChevronDownIcon
+                className={`h-3.5 w-3.5 transition-transform ${showFiles ? 'rotate-180' : ''}`}
+              />
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs"
+            aria-expanded={showVersions}
+            onClick={() => setShowVersions(v => !v)}
+          >
+            Versions
+            <ChevronDownIcon
+              className={`h-3.5 w-3.5 transition-transform ${showVersions ? 'rotate-180' : ''}`}
+            />
+          </button>
+        </span>
       </div>
+      {showFiles && site.currentVersionId && (
+        <VersionFiles
+          name={site.name}
+          versionId={site.currentVersionId}
+          siteUrl={site.archived ? undefined : site.url}
+        />
+      )}
       {showVersions && <Versions site={site} />}
 
       <ConfirmModal
@@ -268,6 +292,7 @@ export function SiteCard({ site }: { site: Site }) {
 function Versions({ site }: { site: Site }) {
   const detail = useSiteDetail(site.name, true)
   const { restoreVersion } = useSiteActions(site.name)
+  const [filesOf, setFilesOf] = useState<string | null>(null)
 
   if (detail.isPending) {
     return (
@@ -298,31 +323,53 @@ function Versions({ site }: { site: Site }) {
         <tbody>
           {detail.data.versions.map(version => {
             const current = version.id === detail.data.currentVersionId
+            const open = filesOf === version.id
             return (
-              <tr key={version.id}>
-                <td>
-                  <code className="text-xs" title={version.id}>
-                    {shortVersion(version.id)}
-                  </code>
-                </td>
-                <td title={fullDate(version.createdAt)}>{timeAgo(version.createdAt)}</td>
-                <td className="tabular-nums">{version.fileCount}</td>
-                <td className="tabular-nums">{formatBytes(version.totalBytes)}</td>
-                <td className="text-right">
-                  {current ? (
-                    <span className="badge badge-sm tone-primary">Current</span>
-                  ) : (
+              <Fragment key={version.id}>
+                <tr>
+                  <td>
+                    <code className="text-xs" title={version.id}>
+                      {shortVersion(version.id)}
+                    </code>
+                  </td>
+                  <td title={fullDate(version.createdAt)}>{timeAgo(version.createdAt)}</td>
+                  <td className="tabular-nums">{version.fileCount}</td>
+                  <td className="tabular-nums">{formatBytes(version.totalBytes)}</td>
+                  <td className="text-right whitespace-nowrap space-x-1">
                     <button
                       type="button"
-                      className="btn btn-xs"
-                      disabled={restoreVersion.isPending || site.archived}
-                      onClick={() => restoreVersion.mutate(version.id)}
+                      className="btn btn-ghost btn-xs"
+                      aria-expanded={open}
+                      onClick={() => setFilesOf(open ? null : version.id)}
                     >
-                      Restore
+                      Files
                     </button>
-                  )}
-                </td>
-              </tr>
+                    {current ? (
+                      <span className="badge badge-sm tone-primary">Current</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-xs"
+                        disabled={restoreVersion.isPending || site.archived}
+                        onClick={() => restoreVersion.mutate(version.id)}
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </td>
+                </tr>
+                {open && (
+                  <tr>
+                    <td colSpan={5} className="p-2">
+                      <VersionFiles
+                        name={site.name}
+                        versionId={version.id}
+                        siteUrl={current && !site.archived ? site.url : undefined}
+                      />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             )
           })}
         </tbody>

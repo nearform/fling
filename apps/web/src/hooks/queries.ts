@@ -8,6 +8,7 @@ export const queryKeys = {
   sites: (archived: boolean) => ['sites', archived ? 'archived' : 'active'] as const,
   allSites: ['sites'] as const,
   site: (name: string) => ['site', name] as const,
+  versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
   keys: ['keys'] as const,
   connections: ['connections'] as const,
 }
@@ -22,6 +23,16 @@ export function useSites(archived: boolean) {
 
 export function useSiteDetail(name: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.site(name), queryFn: () => api.getSite(name), enabled })
+}
+
+/** A version's files never change (versions are content-addressed), so fetch once, when shown. */
+export function useVersionFiles(name: string, versionId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.versionFiles(name, versionId),
+    queryFn: () => api.versionFiles(name, versionId),
+    enabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
 }
 
 export function useApiKeys() {

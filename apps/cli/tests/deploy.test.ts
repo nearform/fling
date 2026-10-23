@@ -222,6 +222,38 @@ describe('deploy flow', () => {
 })
 
 describe('fling [dir] command', () => {
+  it('waits for the edge after a deploy goes live, and warns when it times out', async () => {
+    const dir = await folder()
+    const m = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse({ status: 'repointed', versionId: VERSION, site: site() }),
+    })
+    const store = await loggedInStore()
+    const { ctx, out, log } = await testContext({ store, fetch: m.fetch, json: true })
+    const waited: string[] = []
+    ctx.waitReady = async url => {
+      waited.push(url)
+      return { ready: false, waitedMs: 15_000 }
+    }
+    await runDeploy(ctx, dir, {})
+    expect(waited).toEqual([site().url])
+    expect(JSON.parse(out.content())).toMatchObject({ status: 'repointed', ready: false })
+    expect(log.lines.join('\n')).toMatch(/reload if you see a 404/)
+
+    // unchanged: already live, no wait
+    const same = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse({ status: 'unchanged', versionId: VERSION, site: site() }),
+    })
+    const b = await testContext({ store, fetch: same.fetch })
+    b.ctx.waitReady = async url => {
+      waited.push(url)
+      return { ready: true, waitedMs: 0 }
+    }
+    await runDeploy(b.ctx, dir, {})
+    expect(waited).toHaveLength(1)
+  })
+
   it('prints the URL, and the site + status under --json', async () => {
     const dir = await folder()
     const m = mockFetch({
@@ -236,7 +268,11 @@ describe('fling [dir] command', () => {
 
     const json = await testContext({ store, fetch: m.fetch, json: true })
     await runDeploy(json.ctx, dir, {})
-    expect(JSON.parse(json.out.content())).toEqual({ status: 'unchanged', site: site() })
+    expect(JSON.parse(json.out.content())).toEqual({
+      status: 'unchanged',
+      site: site(),
+      ready: true,
+    })
   })
 
   it('a bare file name is found in Downloads, said so, and named from the file', async () => {

@@ -33,6 +33,12 @@ export interface Deps {
   oauth?: OAuthClient
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
+  /**
+   * Remote MCP: wait until a new site / share link is routed by the edge (`url` with the served
+   * version's `paths`). Default: poll for up to READY_TIMEOUT_LAMBDA_MS, skipped by FLING_NO_WAIT
+   * and in tests.
+   */
+  waitReady?: (url: string, paths: readonly string[]) => Promise<{ ready: boolean }>
 }
 
 export type AuthVia = 'session' | 'api_key' | 'oauth'

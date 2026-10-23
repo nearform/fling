@@ -1,8 +1,9 @@
 /** Site management: ls, info, versions, rollback, share, visibility, archive/unarchive, rm. */
-import type { Site, Visibility } from '@fling/shared'
+import type { Site, SiteDetail, Visibility } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
+import { waitWithSpinner } from '../ready.ts'
 import {
   archiveSite,
   deleteSite,
@@ -11,6 +12,7 @@ import {
   rollback,
   setVisibility,
   share,
+  versionFiles,
 } from '../sites.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 
@@ -30,7 +32,7 @@ export async function runList(ctx: CommandContext, opts: { archived?: boolean })
   )
 }
 
-function describeSite(site: Site): string[] {
+function describeSite(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
   return [
     row('Name', site.name),
@@ -39,9 +41,20 @@ function describeSite(site: Site): string[] {
     row('SPA', site.spa ? 'yes' : 'no'),
     row('Share link', site.shareUrl ?? '-'),
     row('Version', site.currentVersionId ?? '-'),
+    ...filesRow(site, row),
     row('Created', formatDate(site.createdAt)),
     row('Updated', formatDate(site.updatedAt)),
   ]
+}
+
+function filesRow(
+  site: Site & { versions?: SiteDetail['versions'] },
+  row: (label: string, value: string) => string
+): string[] {
+  const current = site.versions?.find(v => v.id === site.currentVersionId)
+  if (!current) return []
+  const n = current.fileCount
+  return [row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`)]
 }
 
 export async function runInfo(ctx: CommandContext, name: string): Promise<void> {
@@ -50,7 +63,9 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
     [
       ...describeSite(site),
       '',
-      chalk.dim(`${site.versions.length} version(s) — \`fling versions ${name}\``),
+      chalk.dim(
+        `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
+      ),
     ].join('\n')
   )
 }
@@ -70,6 +85,30 @@ export async function runVersions(ctx: CommandContext, name: string): Promise<vo
   )
 }
 
+export async function runFiles(
+  ctx: CommandContext,
+  name: string,
+  versionId?: string
+): Promise<void> {
+  const result = await versionFiles(requireClient(ctx), name, versionId)
+  if (!result.files.some(f => f.path === 'index.html')) {
+    ctx.log.warn('No index.html at the root — the site root URL will 404')
+  }
+  ctx.out.data(result, () => {
+    const n = result.files.length
+    const header = chalk.dim(
+      `${result.versionId}${result.current ? ' (current)' : ' (not served)'} — ${n} file${n === 1 ? '' : 's'}, ` +
+        `${formatBytes(result.totalBytes)}${result.generatedIndex ? ', generated index.html' : ''}`
+    )
+    const table = renderTable(result.files, [
+      { header: 'PATH', value: f => f.path },
+      { header: 'SIZE', value: f => formatBytes(f.size) },
+      { header: 'TYPE', value: f => f.contentType },
+    ])
+    return `${header}\n${table}`
+  })
+}
+
 export async function runRollback(
   ctx: CommandContext,
   name: string,
@@ -86,13 +125,27 @@ export async function runShare(
   opts: { refresh?: boolean; revoke?: boolean }
 ): Promise<void> {
   if (opts.refresh && opts.revoke) throw new CliError('Use either --refresh or --revoke, not both')
-  const result = await share(requireClient(ctx), name, opts)
+  const client = requireClient(ctx)
+  const result = await share(client, name, opts)
+  let ready: boolean | undefined
+  if (result.action === 'created' || result.action === 'refreshed') {
+    // a new share label takes a few seconds to reach every edge
+    const files = ctx.waitReady ? await versionFiles(client, name).catch(() => null) : null
+    ready = (
+      await waitWithSpinner(ctx.waitReady, result.shareUrl, files?.files.map(f => f.path) ?? [], {
+        progress: ctx.progress,
+        warn: m => ctx.log.warn(m),
+      })
+    ).ready
+  }
   if (result.action === 'revoked') ctx.log.success(`Share link for ${name} revoked`)
   else if (result.action === 'refreshed')
     ctx.log.success('New share link — the old one no longer works')
   else if (result.action === 'created')
     ctx.log.success('Share link created — anyone with it can view the site')
-  ctx.out.data(result, () => result.shareUrl ?? chalk.dim('(no share link)'))
+  ctx.out.data(ready === undefined ? result : { ...result, ready }, () =>
+    result.shareUrl ? result.shareUrl : chalk.dim('(no share link)')
+  )
 }
 
 export async function runVisibility(

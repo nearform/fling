@@ -20,6 +20,14 @@ const escapeHtml = (s: string) =>
 /** Percent-encode each path segment so names with spaces etc. still link correctly. */
 const hrefFor = (path: string) => path.split('/').map(encodeURIComponent).join('/')
 
+/** Does this HTML carry the generator marker renderHtmlListing() writes? (Checks the <head> only.) */
+export function isGeneratedListing(html: string): boolean {
+  return new RegExp(
+    `<meta\\s+name=["']generator["']\\s+content=["']${LISTING_GENERATOR_META}["']`,
+    'i'
+  ).test(html.slice(0, 4096))
+}
+
 export function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path)
 }

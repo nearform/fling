@@ -14,7 +14,14 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
-import { isValidSitePath, MAX_DEPLOY_BYTES, type McpToolDef, mcpTools } from '@fling/shared'
+import {
+  describeVersionFiles,
+  isValidSitePath,
+  MAX_DEPLOY_BYTES,
+  type McpToolDef,
+  mcpTools,
+  NOT_READY_NOTE,
+} from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -35,6 +42,7 @@ import {
 } from './locate.ts'
 import { buildManifest, hasRootIndex, htmlPages, withHtmlListing } from './manifest.ts'
 import { NPX_COMMAND, VERSION } from './package-info.ts'
+import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
   archiveSite,
   checkName,
@@ -47,6 +55,7 @@ import {
   share,
   sitesPattern,
   siteUrlFor,
+  versionFiles,
   whoami,
 } from './sites.ts'
 import { silentLogger } from './utils/logger.ts'
@@ -67,6 +76,8 @@ export interface McpDeps {
   loginWaitMs?: number
   /** How long the login listener stays up in the background (default 5 min). */
   loginTimeoutMs?: number
+  /** Waits for a new site / share link to reach the edge (default: real polling, skipped by FLING_NO_WAIT and in tests). */
+  waitReady?: ReadyWaiter
 }
 
 export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens the browser to sign in with Nearform Google), or ask the user to run \`${NPX_COMMAND} login\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login\`), then try again.`
@@ -100,6 +111,16 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   const fetchImpl: FetchLike = deps.fetch ?? ((input, init) => fetch(input, init))
   const cwd = deps.cwd ?? process.cwd()
   const locate: LocateOptions = deps.locate ?? { ...systemLocateOptions(), cwd }
+  const waitReady: ReadyWaiter = deps.waitReady ?? createReadyWaiter()
+
+  /** Wait for the edge; never throws. `ready: false` → append the "reload" note. */
+  async function edgeReady(url: string, paths: readonly string[]) {
+    const r = await waitReady(url, paths).catch(() => ({ ready: false, waitedMs: 0 }))
+    return {
+      ready: r.ready,
+      note: r.ready ? '' : `\nNot reachable yet at ${url}: ${NOT_READY_NOTE}.`,
+    }
+  }
 
   async function client(): Promise<ApiClient> {
     const config = await store.resolve({ serverUrl: deps.server })
@@ -180,11 +201,21 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           ? `Restored version ${result.versionId}`
           : `Deployed ${result.fileCount} files (uploaded ${result.uploaded})`
     const warnings = result.warnings.length ? `\nWarnings:\n- ${result.warnings.join('\n- ')}` : ''
+    const edge =
+      result.status === 'unchanged'
+        ? { ready: true, note: '' }
+        : await edgeReady(
+            result.url,
+            local.files.map(f => f.path)
+          )
     return {
       kind: 'deployed',
-      summary: `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}`,
+      summary:
+        `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}${edge.note}` +
+        `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
+        ready: edge.ready,
         name: result.name,
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
@@ -495,15 +526,34 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
+  server.registerTool(t.files.name, toolDef(t.files), args =>
+    run(async c => {
+      const result = await versionFiles(c, args.name, args.versionId)
+      return {
+        summary: describeVersionFiles(result.name, result, {
+          current: result.current,
+          url: result.url,
+        }),
+        data: result,
+      }
+    })
+  )
+
   server.registerTool(t.share.name, toolDef(t.share), args =>
     run(async c => {
       if (args.refresh && args.revoke) throw new CliError('Use either refresh or revoke, not both')
       const result = await share(c, args.name, args)
-      const summary =
-        result.action === 'revoked'
-          ? `Share link for ${args.name} revoked`
-          : `Share link (${result.action}): ${result.shareUrl} — anyone with it can view the site`
-      return { summary, data: result }
+      if (result.action === 'revoked')
+        return { summary: `Share link for ${args.name} revoked`, data: result }
+      let edge = { ready: true, note: '' }
+      if (result.action !== 'existing') {
+        const files = await versionFiles(c, args.name).catch(() => null)
+        edge = await edgeReady(result.shareUrl, files?.files.map(f => f.path) ?? [])
+      }
+      return {
+        summary: `Share link (${result.action}): ${result.shareUrl} — anyone with it can view the site${edge.note}`,
+        data: { ...result, ready: edge.ready },
+      }
     })
   )
 

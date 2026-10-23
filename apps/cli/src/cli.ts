@@ -8,6 +8,7 @@ import { runLogin, runLogout, runWhoami } from './commands/auth.ts'
 import { runDeploy } from './commands/deploy.ts'
 import {
   runArchive,
+  runFiles,
   runInfo,
   runList,
   runRemove,
@@ -146,6 +147,12 @@ program
   .command('versions <name>')
   .description("list a site's versions (* = live)")
   .action(action((ctx, name: string) => runVersions(ctx, name)))
+program
+  .command('files <name> [versionId]')
+  .description("list the files in a site's live version (or in versionId)")
+  .action(
+    action((ctx, name: string, versionId: string | undefined) => runFiles(ctx, name, versionId))
+  )
 program
   .command('rollback <name> <versionId>')
   .description('serve an earlier version again')

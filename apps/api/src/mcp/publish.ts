@@ -1,7 +1,8 @@
 /**
  * Server-side publishing for the remote MCP connector: the content arrives inline (fling_publish)
- * or staged in the bucket (fling_upload_*), so instead of presigning PUTs we hash it, run the
- * normal deploy (idempotent: unchanged / repointed), write the objects ourselves and finalize.
+ * or staged in the bucket (fling_upload_*). This module handles what is MCP-specific (paths as
+ * agents write them, encodings, the generated listing page, `needs_decision`) and hands the bytes
+ * to publication.publishBytes, which admits, scans, writes and makes them live.
  *
  * Chunked uploads: fling_upload_begin stores an UploadRecord (1 h); every fling_upload_file call
  * writes its content, as sent (still encoded), to `uploads/<id>/<sha(path)>/<part>` and bumps the
@@ -14,21 +15,16 @@ import {
   isHtmlPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
-  MAX_FILE_BYTES,
-  MAX_FILES,
-  type ManifestFile,
   MCP_UPLOAD_MAX_FILES,
   MCP_UPLOAD_TTL_SECONDS,
   renderHtmlListing,
   type Site,
-  siteObjectKey,
   type Visibility,
 } from '@fling/shared'
-import { assertNoSecrets, assertPublishablePaths } from '../guard.ts'
 import { mapLimit } from '../lib/concurrency.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import { newId } from '../lib/ids.ts'
-import { contentTypeFor } from '../lib/mime.ts'
+import { assertPublishablePaths, publishBytes } from '../publication.ts'
 import * as sites from '../sites.ts'
 import { uploadPrefix } from '../storage/types.ts'
 import type { UploadRecord, User } from '../store/types.ts'
@@ -96,8 +92,6 @@ export function decodeContent(content: string, encoding: Encoding, path: string)
   return new Uint8Array(Buffer.from(clean, 'base64'))
 }
 
-const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-
 export async function publishFiles(
   deps: Deps,
   user: User,
@@ -110,14 +104,8 @@ export async function publishFiles(
   for (const f of input) {
     const path = normalizePath(f.path)
     if (files.has(path)) throw badRequest(`"${path}" is listed twice`, 'duplicate_path')
-    if (f.bytes.byteLength > MAX_FILE_BYTES) {
-      throw tooLarge(`${path} is larger than ${MAX_FILE_BYTES / 1024 / 1024} MB`)
-    }
     files.set(path, f.bytes)
   }
-  // Scan exactly the bytes we are about to write, before anything is stored.
-  assertNoSecrets(files)
-
   const warnings: string[] = []
   let generatedIndex = false
   if (!files.has('index.html')) {
@@ -145,51 +133,22 @@ export async function publishFiles(
     warnings.push('spa is on but there is no index.html to fall back to.')
   }
 
-  if (files.size > MAX_FILES) throw tooLarge(`Too many files (max ${MAX_FILES})`)
-  const manifest: ManifestFile[] = [...files].map(([path, bytes]) => ({
-    path,
-    sha256: sha256(bytes),
-    size: bytes.byteLength,
-    contentType: contentTypeFor(path),
-  }))
-  const totalBytes = manifest.reduce((n, f) => n + f.size, 0)
-  if (totalBytes > MAX_DEPLOY_BYTES) {
-    throw tooLarge(`The site is larger than ${MAX_DEPLOY_BYTES / 1024 / 1024} MB`)
-  }
-
-  const res = await sites.deploy(
+  const published = await publishBytes(
     deps,
     user,
     name,
-    { manifest: { files: manifest }, spa: opts.spa, visibility: opts.visibility },
-    { presign: false }
+    [...files].map(([path, bytes]) => ({ path, bytes })),
+    { spa: opts.spa, visibility: opts.visibility }
   )
-  const common = {
+  return {
+    kind: 'published',
+    ...published,
     fileCount: files.size,
-    totalBytes,
+    totalBytes: [...files.values()].reduce((n, b) => n + b.byteLength, 0),
     generatedIndex,
     warnings,
     paths: [...files.keys()],
   }
-  if (res.status !== 'upload') {
-    return {
-      kind: 'published',
-      status: res.status,
-      versionId: res.versionId,
-      site: res.site,
-      ...common,
-    }
-  }
-  const site = await sites.requireSite(deps, user, name)
-  await mapLimit(manifest, 16, async f => {
-    await deps.storage.put(
-      siteObjectKey(site.id, res.versionId, f.path),
-      files.get(f.path) as Uint8Array,
-      { contentType: f.contentType, cacheControl: sites.cacheControlFor(f.path) }
-    )
-  })
-  const fin = await sites.finalize(deps, user, name, res.versionId, { contentScanned: true })
-  return { kind: 'published', status: 'live', versionId: fin.versionId, site: fin.site, ...common }
 }
 
 // --- chunked uploads ----------------------------------------------------------------------------

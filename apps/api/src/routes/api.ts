@@ -2,12 +2,8 @@
 import {
   ApiKeyListSchema,
   ConnectionListSchema,
-  DeployRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
-  MAX_DEPLOY_BYTES,
-  MAX_FILE_BYTES,
-  MAX_FILES,
   type Me,
   NameCheckSchema,
   OAuthDecisionSchema,
@@ -23,10 +19,10 @@ import {
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { requireAuth } from '../auth/middleware.ts'
-import { assertPublishablePaths } from '../guard.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
+import * as publication from '../publication.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
 
@@ -152,30 +148,6 @@ apiRoutes.patch('/sites/:name', async c => {
   return c.json(SiteSchema.parse(site))
 })
 
-/** Size caps are 413s, checked before the schema (whose refinements would make them 400s). */
-function checkDeploySize(raw: unknown) {
-  const files = (raw as { manifest?: { files?: unknown } } | null)?.manifest?.files
-  if (!Array.isArray(files)) return
-  if (files.length > MAX_FILES) {
-    throw new ApiError(413, 'too_large', `Too many files (max ${MAX_FILES})`)
-  }
-  let total = 0
-  for (const f of files) {
-    const size = typeof f?.size === 'number' ? f.size : 0
-    if (size > MAX_FILE_BYTES) {
-      throw new ApiError(
-        413,
-        'too_large',
-        `${String(f.path)} is larger than ${MAX_FILE_BYTES} bytes`
-      )
-    }
-    total += size
-  }
-  if (total > MAX_DEPLOY_BYTES) {
-    throw new ApiError(413, 'too_large', `Deploy is larger than ${MAX_DEPLOY_BYTES} bytes`)
-  }
-}
-
 apiRoutes.post('/sites/:name/deploys', async c => {
   let raw: unknown
   try {
@@ -183,17 +155,12 @@ apiRoutes.post('/sites/:name/deploys', async c => {
   } catch {
     throw new ApiError(400, 'invalid_json', 'Body must be JSON')
   }
-  checkDeploySize(raw)
-  // Specific 400s (`dotfile`, `secret_file`) before the schema's generic ones.
-  const files = (raw as { manifest?: { files?: unknown } } | null)?.manifest?.files
-  if (Array.isArray(files)) assertPublishablePaths(files.map(f => (f as { path?: unknown })?.path))
-  const req = DeployRequestSchema.parse(raw)
-  const res = await sites.deploy(c.get('deps'), c.get('user'), c.req.param('name'), req)
+  const res = await publication.stage(c.get('deps'), c.get('user'), c.req.param('name'), raw)
   return c.json(DeployResponseSchema.parse(res))
 })
 
 apiRoutes.post('/sites/:name/deploys/:versionId/finalize', async c => {
-  const res = await sites.finalize(
+  const res = await publication.publish(
     c.get('deps'),
     c.get('user'),
     c.req.param('name'),

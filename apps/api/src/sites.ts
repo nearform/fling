@@ -1,25 +1,12 @@
 /**
- * Site lifecycle: deploy → (upload) → finalize, rollback, settings, share links, archive,
- * delete. The KVS is a projection of the store: `syncKvs` writes `site:<label>` (and
- * `share:<token>`) for a live site and removes them otherwise.
+ * Site lifecycle around publication (publication.ts makes versions live): name checks, listing,
+ * settings, rollback, share links, archive, delete. The KVS is a projection of the store:
+ * `syncKvs` writes `site:<label>` (and `share:<token>`) for a live site and removes them otherwise.
  *
- * Names are one global namespace (first come, first served): the first deploy to a name claims
- * it (store.createSite); deploying to a name another user owns → 409 `name_taken` with free
- * suggestions. Deleting a site frees its name; archiving keeps it.
- *
- * Deploy semantics (versionId = computeVersionId(manifest)):
- *  - equals the current version → `unchanged`
- *  - a complete version with that id exists for this site → `repointed`
- *  - otherwise → `upload`: a pending version is recorded (manifest kept in storage) and presigned
- *    PUTs are returned; `finalize` verifies every object and makes it live.
- * Deploying (including unchanged/repointed) an archived site unarchives it. `spa`/`visibility`
- * on the request are applied when the deploy takes effect; omitted → keep the site's current
- * setting (new sites: private, non-SPA).
+ * Names are one global namespace (first come, first served). Deleting a site frees its name;
+ * archiving keeps it.
  */
 import {
-  cacheControlFor,
-  type DeployRequest,
-  type DeployResponse,
   initialsFromEmail,
   isGeneratedListing,
   isValidSiteName,
@@ -28,7 +15,6 @@ import {
   type ManifestFile,
   type NameCheck,
   nameSuggestions,
-  SITE_NAME_MAX,
   type Site,
   type SiteDetail,
   shareKvsKey,
@@ -38,22 +24,16 @@ import {
   siteObjectKey,
   sitePrefix,
   siteUrl,
-  siteVersionPrefix,
   slugify,
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
-import { computeVersionId } from '@fling/shared/version-id'
-import { assertPublishablePaths, scanStoredVersion, secretDetected } from './guard.ts'
-import { mapLimit } from './lib/concurrency.ts'
-import { badRequest, conflict, notFound } from './lib/errors.ts'
-import { newId, newShareToken } from './lib/ids.ts'
+import { conflict, notFound } from './lib/errors.ts'
+import { newShareToken } from './lib/ids.ts'
 import { manifestKey } from './storage/types.ts'
-import type { SiteRecord, User, VersionRecord } from './store/types.ts'
+import type { SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
-const HEAD_CONCURRENCY = 16
-const MAX_MISSING_LISTED = 50
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
 const MAX_LISTING_BYTES = 1024 * 1024
 
@@ -61,10 +41,10 @@ const MAX_LISTING_BYTES = 1024 * 1024
  * What's kept at manifestKey(): the deploy manifest plus, once finalized, whether the root
  * index.html is Fling's generated "List HTML files" page (absent on versions finalized earlier).
  */
-type StoredManifest = Manifest & { generatedIndex?: boolean }
+export type StoredManifest = Manifest & { generatedIndex?: boolean }
 
 /** Is the version's root index.html the generated listing page? Reads it (it's small) to check. */
-async function detectGeneratedIndex(
+export async function detectGeneratedIndex(
   deps: Deps,
   siteId: string,
   versionId: string,
@@ -76,12 +56,9 @@ async function detectGeneratedIndex(
   return bytes ? isGeneratedListing(new TextDecoder().decode(bytes)) : false
 }
 
-/** Re-exported for the upload paths (see @fling/shared cache-control.ts for the rule). */
-export { cacheControlFor }
-
 const protocol = (deps: Deps) => `${deps.config.siteScheme}:`
 
-export function toSite(deps: Deps, user: User, site: SiteRecord): Site {
+export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
   const { sitesDomain } = deps.config
   return {
     name: site.name,
@@ -99,7 +76,7 @@ export function toSite(deps: Deps, user: User, site: SiteRecord): Site {
 }
 
 /** Make the KVS reflect the site: live (not archived, has a version) → keys present, else gone. */
-export async function syncKvs(deps: Deps, user: User, site: SiteRecord, oldShareToken?: string) {
+export async function syncKvs(deps: Deps, _user: User, site: SiteRecord, oldShareToken?: string) {
   const { kvs } = deps
   const label = siteLabel(site.name)
   if (oldShareToken && oldShareToken !== site.shareToken) {
@@ -144,7 +121,7 @@ export async function freeNameSuggestions(deps: Deps, user: User, base: string) 
 
 const suggestionBase = (name: string) => slugify(name) || 'site'
 
-async function nameTaken(deps: Deps, user: User, name: string) {
+export async function nameTaken(deps: Deps, user: User, name: string) {
   const suggestions = await freeNameSuggestions(deps, user, name)
   const hint = suggestions.length ? ` Try ${suggestions.join(', ')}.` : ''
   return conflict(`"${name}" is already taken by someone else.${hint}`, 'name_taken', {
@@ -174,159 +151,15 @@ export async function requireSite(deps: Deps, user: User, name: string): Promise
   return site
 }
 
-async function save(deps: Deps, user: User, site: SiteRecord, oldShareToken?: string) {
+export async function save(deps: Deps, user: User, site: SiteRecord, oldShareToken?: string) {
   site.updatedAt = deps.clock.now().toISOString()
   await deps.store.putSite(site)
   await syncKvs(deps, user, site, oldShareToken)
 }
 
-function applySettings(site: SiteRecord, opts: { spa?: boolean; visibility?: Visibility }) {
+export function applySettings(site: SiteRecord, opts: { spa?: boolean; visibility?: Visibility }) {
   if (opts.spa !== undefined) site.spa = opts.spa
   if (opts.visibility !== undefined) site.visibility = opts.visibility
-}
-
-export async function deploy(
-  deps: Deps,
-  user: User,
-  name: string,
-  req: DeployRequest,
-  /** presign: false → no presigned URLs (`uploads: []`); the caller writes objects itself */
-  opts: { presign?: boolean } = {}
-): Promise<DeployResponse> {
-  if (!isValidSiteName(name)) {
-    throw badRequest(
-      `Site names are 1-${SITE_NAME_MAX} chars of a-z, 0-9 and single hyphens, starting and ending alphanumeric, and not reserved`,
-      'invalid_name'
-    )
-  }
-  // Dotfiles and secret files are never published (also refused by ManifestSchema; this covers
-  // callers that build a manifest themselves, like the remote MCP publish).
-  assertPublishablePaths(req.manifest.files.map(f => f.path))
-  const { store, storage, clock } = deps
-  const versionId = computeVersionId(req.manifest.files)
-  const existing = await store.getSite(user.email, name)
-  if (!existing) {
-    const claim = await store.getNameClaim(name)
-    if (claim && claim.email !== user.email) throw await nameTaken(deps, user, name)
-  }
-
-  if (existing && existing.currentVersionId === versionId) {
-    applySettings(existing, req)
-    existing.archived = false
-    await save(deps, user, existing)
-    return { status: 'unchanged', versionId, site: toSite(deps, user, existing) }
-  }
-
-  if (existing) {
-    const version = await store.getVersion(user.email, existing.id, versionId)
-    if (version?.status === 'complete') {
-      existing.currentVersionId = versionId
-      existing.archived = false
-      applySettings(existing, req)
-      await save(deps, user, existing)
-      return { status: 'repointed', versionId, site: toSite(deps, user, existing) }
-    }
-  }
-
-  const now = clock.now().toISOString()
-  // First deploy reserves the siteId; it stays unlisted until a version goes live.
-  const site =
-    existing ??
-    (await store.createSite({
-      id: newId(),
-      email: user.email,
-      name,
-      visibility: 'private',
-      spa: false,
-      archived: false,
-      currentVersionId: null,
-      shareToken: null,
-      createdAt: now,
-      updatedAt: now,
-    }))
-  // Lost a race for the name to another user.
-  if (!site) throw await nameTaken(deps, user, name)
-
-  const files = req.manifest.files
-  const pending: VersionRecord = {
-    siteId: site.id,
-    id: versionId,
-    status: 'pending',
-    fileCount: files.length,
-    totalBytes: files.reduce((n, f) => n + f.size, 0),
-    spa: req.spa,
-    visibility: req.visibility,
-    createdAt: now,
-  }
-  await storage.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
-  await store.putVersion(user.email, pending)
-
-  if (opts.presign === false) return { status: 'upload', versionId, uploads: [] }
-  const uploads = await mapLimit(files, 32, async file => {
-    const signed = await storage.presignPut(siteObjectKey(site.id, versionId, file.path), {
-      contentType: file.contentType,
-      cacheControl: cacheControlFor(file.path),
-    })
-    return { path: file.path, url: signed.url, headers: signed.headers }
-  })
-  return { status: 'upload', versionId, uploads }
-}
-
-export async function finalize(
-  deps: Deps,
-  user: User,
-  name: string,
-  versionId: string,
-  /** The caller already scanned exactly these bytes for secrets (remote MCP publish). */
-  opts: { contentScanned?: boolean } = {}
-) {
-  const { store, storage } = deps
-  const site = await requireSite(deps, user, name)
-  const version = await store.getVersion(user.email, site.id, versionId)
-  if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
-
-  if (version.status === 'pending') {
-    const manifest = await storage.getJson<StoredManifest>(manifestKey(site.id, versionId))
-    if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
-    const checks = await mapLimit(manifest.files, HEAD_CONCURRENCY, async file => {
-      const head = await storage.head(siteObjectKey(site.id, versionId, file.path))
-      return head && head.size === file.size ? null : file.path
-    })
-    const missing = checks.filter((p): p is string => p !== null)
-    if (missing.length > 0) {
-      const listed = missing.slice(0, MAX_MISSING_LISTED)
-      const more =
-        missing.length > listed.length ? ` (+${missing.length - listed.length} more)` : ''
-      throw conflict(
-        `${missing.length} file(s) missing or the wrong size: ${listed.join(', ')}${more}`,
-        'missing_uploads',
-        { missing }
-      )
-    }
-    // THE GUARANTEE for presigned uploads: the server never saw these bytes, so read them back
-    // and scan them before the version can go live. A secret → delete what was uploaded (the
-    // version stays pending with no manifest; deploying again starts over) and refuse.
-    if (!opts.contentScanned) {
-      const findings = await scanStoredVersion(deps, site.id, versionId, manifest.files)
-      if (findings.length > 0) {
-        await storage.deletePrefix(siteVersionPrefix(site.id, versionId))
-        await storage.deletePrefix(manifestKey(site.id, versionId))
-        throw secretDetected(findings)
-      }
-    }
-    const generatedIndex = await detectGeneratedIndex(deps, site.id, versionId, manifest.files)
-    await storage.putJson(manifestKey(site.id, versionId), {
-      files: manifest.files,
-      generatedIndex,
-    } satisfies StoredManifest)
-    await store.putVersion(user.email, { ...version, status: 'complete' })
-  }
-
-  site.currentVersionId = versionId
-  site.archived = false
-  applySettings(site, version)
-  await save(deps, user, site)
-  return { status: 'live' as const, versionId, site: toSite(deps, user, site) }
 }
 
 export async function listSites(deps: Deps, user: User, archived: boolean): Promise<Site[]> {

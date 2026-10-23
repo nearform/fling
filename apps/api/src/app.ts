@@ -38,9 +38,12 @@ export function createApp(deps: Deps) {
         sig: c.req.query('sig'),
         contentType: c.req.header('content-type') ?? '',
         cacheControl: c.req.header('cache-control') ?? '',
+        checksum: c.req.header('x-amz-checksum-sha256') ?? '',
         body: new Uint8Array(await c.req.arrayBuffer()),
       })
-      if (!ok) return c.json({ error: { code: 'forbidden', message: 'Bad signature' } }, 403)
+      if (!ok) {
+        return c.json({ error: { code: 'forbidden', message: 'Bad signature or checksum' } }, 403)
+      }
       return c.body(null, 200)
     })
   }

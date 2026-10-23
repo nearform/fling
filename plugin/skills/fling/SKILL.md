@@ -34,7 +34,9 @@ Not for servers or anything needing a backend at runtime — Fling serves files 
 3. **Fling the output folder**, not the project root. Prefer the MCP tool:
    `fling_deploy { path: "dist", name?: "my-app", spa?: true, public?: false }`
    (`path` is absolute or relative to the working directory). Without the MCP server, use the CLI
-   with `--yes` (it never prompts then): `npx @nearform/fling ./dist --name my-app --yes`.
+   with `--yes` (it never prompts then): `fling ./dist --name my-app --yes`. Use `fling` if it is
+   installed (`command -v fling`); otherwise prefix with `npx @nearform/fling`, and suggest the user
+   installs it once with `npm install -g @nearform/fling`.
    For content you wrote in this conversation, use `fling_publish { name, files: [{ path, content,
    encoding? }] }` instead. It passes the files inline.
 4. **If the name is taken** (someone else owns it), the tool fails and lists free suggestions
@@ -98,8 +100,10 @@ user, then retry. Without `fling_login`, ask the user to run this in Claude Code
 their shell):
 
 ```
-! npx @nearform/fling login
+! fling login
 ```
+
+(If `fling` isn't installed: `! npm install -g @nearform/fling`, or use `! npx @nearform/fling login`.)
 
 `fling_whoami` checks the login.
 

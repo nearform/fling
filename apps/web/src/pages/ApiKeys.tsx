@@ -154,7 +154,8 @@ export default function ApiKeys() {
         empty={
           <>
             <KeyIcon className="mx-auto mb-2 h-6 w-6 text-muted" />
-            No CLI logins yet. Run <code>npx @nearform/fling login</code> to create one.
+            No CLI logins yet. Run <code>fling login</code> (after{' '}
+            <code>npm install -g @nearform/fling</code>) to create one.
           </>
         }
         onRevoke={id => {

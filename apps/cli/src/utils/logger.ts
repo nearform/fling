@@ -3,8 +3,7 @@
  * server's stdout carries only protocol). `debug` lines appear only when `FLING_DEBUG` is set.
  */
 import chalk from 'chalk'
-
-const PREFIX = chalk.cyan('fling')
+import { symbols } from '../ui/theme.ts'
 
 export interface Logger {
   info(message: string): void
@@ -25,10 +24,10 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   const write = options.write ?? ((line: string) => process.stderr.write(`${line}\n`))
   const debugEnabled = options.debug ?? false
   return {
-    info: message => write(`${PREFIX} ${message}`),
-    success: message => write(`${PREFIX} ${chalk.green('✓')} ${message}`),
-    warn: message => write(`${PREFIX} ${chalk.yellow('!')} ${message}`),
-    error: message => write(`${PREFIX} ${chalk.red('✗')} ${message}`),
+    info: message => write(`${symbols.info} ${message}`),
+    success: message => write(`${symbols.success} ${message}`),
+    warn: message => write(`${symbols.warn} ${chalk.yellow(message)}`),
+    error: message => write(`${symbols.error} ${chalk.red(message)}`),
     hint: message => write(chalk.dim(`  ${message}`)),
     debug: message => {
       if (debugEnabled) write(chalk.dim(`[debug] ${message}`))

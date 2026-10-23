@@ -6,6 +6,8 @@ import chalk from 'chalk'
 
 export interface Output {
   readonly json: boolean
+  /** stdout is a terminal (not a pipe): human output may be decorated (boxes, logo). */
+  readonly tty: boolean
   /** Print `raw` as JSON under `--json`, otherwise the result of `human()`. */
   data(raw: unknown, human: () => string): void
   /** Print a human-only line (skipped under `--json`). */
@@ -14,6 +16,7 @@ export interface Output {
 
 export interface OutputOptions {
   json?: boolean
+  tty?: boolean
   write?: (chunk: string) => void
 }
 
@@ -22,6 +25,7 @@ export function createOutput(options: OutputOptions = {}): Output {
   const write = options.write ?? ((chunk: string) => process.stdout.write(chunk))
   return {
     json,
+    tty: options.tty ?? (options.write ? false : Boolean(process.stdout.isTTY)),
     data: (raw, human) => write(`${json ? formatJson(raw) : human()}\n`),
     text: line => {
       if (!json) write(`${line}\n`)

@@ -31,12 +31,13 @@ export function QuickStart() {
           e.g. <code>npx @nearform/fling login</code>.
         </p>
       </Step>
-      <Step n={2} title="Log in">
+      <Step n={2} title="Set up">
         <p className="text-sm text-secondary">
-          Opens a browser to sign in with your Nearform Google account, then stores a key in{' '}
-          <code>~/.fling/config.json</code>.
+          Opens a browser to sign in with your Nearform Google account and stores a key in{' '}
+          <code>~/.fling/config.json</code>. If Claude Code or Claude Desktop is installed, it
+          offers to add Fling to them too.
         </p>
-        <CommandLine command="fling login" />
+        <CommandLine command="fling setup" />
       </Step>
       <Step n={3} title="Fling a folder">
         <p className="text-sm text-secondary">
@@ -44,7 +45,7 @@ export function QuickStart() {
           <code>https://my-app.fling.labs.nearform.com</code>, that only signed-in Nearformers can
           open. Fling it again to update; identical content is a no-op.
         </p>
-        <CommandLine command="fling ./dist --name my-app" />
+        <CommandLine command="fling deploy ./dist --name my-app" />
       </Step>
     </div>
   )
@@ -61,8 +62,9 @@ export default function GetStarted() {
         <QuickStart />
         <Step n={4} title="Or let Claude Code do it">
           <p className="text-sm text-secondary">
-            Add the Fling plugin. It brings a <code>fling</code> skill and an MCP server that reuse
-            your CLI login, so you can just ask Claude to “fling this”.
+            <code>fling setup</code> adds the Fling plugin for you, or add it by hand. It brings a{' '}
+            <code>fling</code> skill and an MCP server that reuse your CLI login, so you can just
+            ask Claude to “fling this”.
           </p>
           <CommandLine command="/plugin marketplace add nearform/fling" />
           <CommandLine command="/plugin install fling@fling" />

@@ -1,9 +1,8 @@
 /**
  * `fling [path] [--name x] [--spa] [--public] [--yes] [--[no-]list-html]` — the default command.
  *
- * `path` is a folder, a single .html file, a .zip or any other file (inputs.ts). When it does not
- * exist as given, it is looked up by name in Downloads, Desktop and Claude's output folders
- * (locate.ts) and the CLI says where it found it.
+ * `path` is a folder, a single .html file, a .zip or any other file (inputs.ts). It must exist as
+ * given: the CLI never goes looking for it elsewhere (the MCP server does, see locate.ts).
  *
  * On a terminal (and without `--yes`) it asks before flinging: it confirms the generated site name
  * (checked against GET /api/names/:name; a taken name defaults to the first free suggestion) and,
@@ -16,15 +15,16 @@
  * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
  * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
  */
+
+import { stat } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { isValidSiteName, SITE_NAME_MAX } from '@fling/shared'
 import chalk from 'chalk'
 import type { ApiClient } from '../api.ts'
-import { systemLocateOptions } from '../config.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { deploy, resolveSiteName } from '../deploy.ts'
 import { CliError } from '../errors.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
-import { FOUND_AS_GIVEN, resolveInput } from '../locate.ts'
 import {
   buildManifest,
   describeSkipped,
@@ -35,6 +35,7 @@ import {
 } from '../manifest.ts'
 import { waitWithSpinner } from '../ready.ts'
 import { checkName, discoverSitesBase, type SitesBase, sitesBaseFor, siteUrlFor } from '../sites.ts'
+import { box, brand } from '../ui/theme.ts'
 import { formatBytes } from '../utils/output.ts'
 
 export interface DeployCommandOptions {
@@ -59,15 +60,12 @@ export async function runDeploy(
   // Where the site will be served, for the prompts (only worth a lookup when we're asking).
   const base = ask ? await discoverSitesBase(client) : sitesBaseFor(client.serverUrl)
 
-  const located = await resolveInput(input ?? '.', ctx.locate ?? systemLocateOptions())
-  if (located.foundIn !== FOUND_AS_GIVEN) {
-    ctx.log.info(`Found in ${located.foundIn}: ${located.path}`)
-    if (located.alternatives.length)
-      ctx.log.hint(
-        `Also found (older): ${located.alternatives.map(a => a.path).join(', ')} — pass the full path to fling another.`
-      )
-  }
-  const prepared = await prepareInput(located.path)
+  const path = resolve(input ?? '.')
+  if (!(await stat(path).catch(() => null)))
+    throw new CliError(`No such file or folder: ${input ?? '.'}`, {
+      hint: `Give the path to a folder, .html, .zip or other file, e.g. \`${ctx.binName} deploy ./dist\`.`,
+    })
+  const prepared = await prepareInput(path)
   try {
     await deployPrepared(ctx, client, base, prepared, opts, ask)
   } finally {
@@ -124,7 +122,7 @@ async function deployPrepared(
         if (p.total === 0) return
         progressShown = true
         ctx.progress(
-          `${chalk.cyan('fling')} uploading ${p.uploaded}/${p.total} files · ${formatBytes(p.bytes)}/${formatBytes(p.totalBytes)}`
+          `${progressBar(p.totalBytes ? p.bytes / p.totalBytes : p.uploaded / p.total)} uploading ${p.uploaded}/${p.total} files · ${formatBytes(p.bytes)}/${formatBytes(p.totalBytes)}`
         )
       },
     }
@@ -156,16 +154,27 @@ async function deployPrepared(
           )
         ).ready
 
+  const privateNote = `Private: Nearform sign-in required. Share publicly with \`${ctx.binName} share ${result.name}\`.`
   ctx.out.data({ status: result.status, site: result.site, ready, skipped: local.skipped }, () => {
-    const lines = [chalk.bold(result.url)]
-    if (result.site.visibility === 'private')
-      lines.push(
-        chalk.dim(
-          `Private: Nearform sign-in required. Share publicly with \`${ctx.binName} share ${result.name}\`.`
-        )
+    const isPrivate = result.site.visibility === 'private'
+    // On a terminal the URL gets a box; piped, it stays a bare line so `fling deploy … | pbcopy` works.
+    if (ctx.out.tty)
+      return box(
+        [brand.url(result.url), ...(isPrivate ? [chalk.dim(privateNote)] : [])],
+        isPrivate ? chalk.bold('flung · private') : chalk.bold('flung · public')
       )
+    const lines = [chalk.bold(result.url)]
+    if (isPrivate) lines.push(chalk.dim(privateNote))
     return lines.join('\n')
   })
+}
+
+const BAR_WIDTH = 20
+
+/** `━━━━━━━━──────` for a fraction 0…1. */
+function progressBar(fraction: number): string {
+  const done = Math.round(Math.min(Math.max(fraction, 0), 1) * BAR_WIDTH)
+  return brand.primary('━'.repeat(done)) + chalk.dim('─'.repeat(BAR_WIDTH - done))
 }
 
 /**

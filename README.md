@@ -4,11 +4,13 @@ Throw a folder of static files at [fling.labs.nearform.com](https://fling.labs.n
 link back: `https://<name>.fling.labs.nearform.com`. Sites are private to signed-in Nearformers by
 default; share links open them to anyone with the link.
 
-- **CLI**: `npm install -g @nearform/fling`, then `fling login` and `fling ./dist` (or run it
-  without installing via `npx @nearform/fling`). See [apps/cli](apps/cli/README.md).
+- **CLI**: `npm install -g @nearform/fling`, then `fling setup` (sign in, plus the Claude Code
+  plugin and Claude Desktop extension) and `fling deploy ./dist`. Or run it without installing via
+  `npx @nearform/fling`. See [apps/cli](apps/cli/README.md).
 - **Claude (Desktop, web, mobile)**: add the connector `https://fling.labs.nearform.com/mcp` under
   Settings → Connectors, or install the Claude Desktop extension from the Get started page.
-- **Claude Code**: `/plugin marketplace add nearform/fling`, then `/plugin install fling@fling`.
+- **Claude Code**: `fling setup`, or `/plugin marketplace add nearform/fling`, then
+  `/plugin install fling@fling`.
 
 ## Layout
 

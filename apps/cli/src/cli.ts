@@ -79,9 +79,21 @@ function report(error: unknown, ctx: CommandContext | undefined): void {
   if (error instanceof CliError && error.hint) log.hint(error.hint)
   if (ctx?.config.debug && error instanceof Error && error.stack) log.hint(error.stack)
   if (ctx?.json) {
-    const code = (error as { code?: unknown }).code
+    const { code, findings, paths } = error as {
+      code?: unknown
+      findings?: unknown
+      paths?: unknown
+    }
     process.stdout.write(
-      `${formatJson({ error: { message, exitCode: exitCodeFor(error), ...(typeof code === 'string' ? { code } : {}) } })}\n`
+      `${formatJson({
+        error: {
+          message,
+          exitCode: exitCodeFor(error),
+          ...(typeof code === 'string' ? { code } : {}),
+          ...(Array.isArray(findings) ? { findings } : {}),
+          ...(Array.isArray(paths) ? { paths } : {}),
+        },
+      })}\n`
     )
   }
 }

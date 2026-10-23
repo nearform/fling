@@ -138,8 +138,13 @@ export default function GetStarted() {
               content.
             </li>
             <li>
+              <strong className="font-medium text-base-content">No secrets, ever:</strong> Fling
+              never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or
+              files that contain secrets; it stops and tells you which file and line.
+            </li>
+            <li>
               <strong className="font-medium text-base-content">Limits:</strong> 100 MB per fling,
-              25 MB per file. Dotfiles are skipped; add a <code>.flingignore</code> to skip more.
+              25 MB per file. Add a <code>.flingignore</code> to skip more files.
             </li>
           </ul>
         </section>

@@ -24,6 +24,7 @@ import {
   siteObjectKey,
   type Visibility,
 } from '@fling/shared'
+import { assertNoSecrets, assertPublishablePaths } from '../guard.ts'
 import { mapLimit } from '../lib/concurrency.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import { newId } from '../lib/ids.ts'
@@ -64,12 +65,17 @@ export type PublishOutcome =
 
 const tooLarge = (message: string) => new ApiError(413, 'too_large', message)
 
-/** `./a/b.html` or `/a/b.html` → `a/b.html`; anything else invalid → 400. */
+/**
+ * `./a/b.html` or `/a/b.html` → `a/b.html`; dotfiles / secret files → 400 `dotfile` /
+ * `secret_file`; anything else invalid → 400.
+ */
 export function normalizePath(raw: string): string {
   const path = raw
     .trim()
     .replace(/^(\.\/)+/, '')
     .replace(/^\/+/, '')
+  if (path && !path.includes('\\') && !path.split('/').some(s => s === '..' || s === '.'))
+    assertPublishablePaths([path])
   if (!isValidSitePath(path)) {
     throw badRequest(
       `Invalid file path "${raw}": use a site-relative path with forward slashes, like "index.html" or "img/logo.png"`,
@@ -109,6 +115,8 @@ export async function publishFiles(
     }
     files.set(path, f.bytes)
   }
+  // Scan exactly the bytes we are about to write, before anything is stored.
+  assertNoSecrets(files)
 
   const warnings: string[] = []
   let generatedIndex = false
@@ -180,7 +188,7 @@ export async function publishFiles(
       { contentType: f.contentType, cacheControl: sites.cacheControlFor(f.path) }
     )
   })
-  const fin = await sites.finalize(deps, user, name, res.versionId)
+  const fin = await sites.finalize(deps, user, name, res.versionId, { contentScanned: true })
   return { kind: 'published', status: 'live', versionId: fin.versionId, site: fin.site, ...common }
 }
 

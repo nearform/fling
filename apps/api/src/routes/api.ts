@@ -23,6 +23,7 @@ import {
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { requireAuth } from '../auth/middleware.ts'
+import { assertPublishablePaths } from '../guard.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
@@ -183,6 +184,9 @@ apiRoutes.post('/sites/:name/deploys', async c => {
     throw new ApiError(400, 'invalid_json', 'Body must be JSON')
   }
   checkDeploySize(raw)
+  // Specific 400s (`dotfile`, `secret_file`) before the schema's generic ones.
+  const files = (raw as { manifest?: { files?: unknown } } | null)?.manifest?.files
+  if (Array.isArray(files)) assertPublishablePaths(files.map(f => (f as { path?: unknown })?.path))
   const req = DeployRequestSchema.parse(raw)
   const res = await sites.deploy(c.get('deps'), c.get('user'), c.req.param('name'), req)
   return c.json(DeployResponseSchema.parse(res))

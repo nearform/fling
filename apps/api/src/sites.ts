@@ -38,11 +38,13 @@ import {
   siteObjectKey,
   sitePrefix,
   siteUrl,
+  siteVersionPrefix,
   slugify,
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
 import { computeVersionId } from '@fling/shared/version-id'
+import { assertPublishablePaths, scanStoredVersion, secretDetected } from './guard.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId, newShareToken } from './lib/ids.ts'
@@ -197,6 +199,9 @@ export async function deploy(
       'invalid_name'
     )
   }
+  // Dotfiles and secret files are never published (also refused by ManifestSchema; this covers
+  // callers that build a manifest themselves, like the remote MCP publish).
+  assertPublishablePaths(req.manifest.files.map(f => f.path))
   const { store, storage, clock } = deps
   const versionId = computeVersionId(req.manifest.files)
   const existing = await store.getSite(user.email, name)
@@ -267,7 +272,14 @@ export async function deploy(
   return { status: 'upload', versionId, uploads }
 }
 
-export async function finalize(deps: Deps, user: User, name: string, versionId: string) {
+export async function finalize(
+  deps: Deps,
+  user: User,
+  name: string,
+  versionId: string,
+  /** The caller already scanned exactly these bytes for secrets (remote MCP publish). */
+  opts: { contentScanned?: boolean } = {}
+) {
   const { store, storage } = deps
   const site = await requireSite(deps, user, name)
   const version = await store.getVersion(user.email, site.id, versionId)
@@ -290,6 +302,17 @@ export async function finalize(deps: Deps, user: User, name: string, versionId: 
         'missing_uploads',
         { missing }
       )
+    }
+    // THE GUARANTEE for presigned uploads: the server never saw these bytes, so read them back
+    // and scan them before the version can go live. A secret → delete what was uploaded (the
+    // version stays pending with no manifest; deploying again starts over) and refuse.
+    if (!opts.contentScanned) {
+      const findings = await scanStoredVersion(deps, site.id, versionId, manifest.files)
+      if (findings.length > 0) {
+        await storage.deletePrefix(siteVersionPrefix(site.id, versionId))
+        await storage.deletePrefix(manifestKey(site.id, versionId))
+        throw secretDetected(findings)
+      }
     }
     const generatedIndex = await detectGeneratedIndex(deps, site.id, versionId, manifest.files)
     await storage.putJson(manifestKey(site.id, versionId), {

@@ -50,7 +50,7 @@ What you can fling:
 - **A folder**, as is.
 - **A single `.html`/`.htm` file**, served as the site's `index.html`.
 - **A `.zip`**: extracted (paths that would escape the folder are refused), `__MACOSX/` and dotfiles
-  skipped, and a single top-level folder unwrapped.
+  skipped (dotfiles such as `.env` are listed), and a single top-level folder unwrapped.
 - **Any other file** (`.pdf`, `.svg`, `.png`, `.md`…), served next to a small generated `index.html`
   that shows it (images, PDF, video, audio) or links to it.
 
@@ -68,7 +68,21 @@ fling Found in Downloads: /Users/me/Downloads/Pitch-Deck.html
 
 - Re-fling to update. Identical content is a no-op, and content you deployed before is restored
   instantly without uploading.
-- Dotfiles, `node_modules` and anything listed in a `.flingignore` (gitignore syntax) are skipped.
+- **Fling never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or
+  files that contain secrets; it stops and tells you which file and line.** There is no flag to
+  override this, and the server enforces it too.
+  - Dotfiles and dot-folders (`.env`, `.dev.vars`, `.npmrc`, `.git/`, `.well-known/`…) are skipped,
+    and the output lists what was skipped (`skipped` in `--json`).
+  - Gitignored files are skipped. When the folder you fling is itself gitignored (the usual
+    `dist/` or `build/`), only the `.gitignore` files inside it apply.
+  - Secret files by name (`*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.keystore`, `id_rsa`…,
+    `credentials(.json)`, `*service-account*.json`, `*.tfstate`, `*.tfvars`, `secrets.json/yml`,
+    `*.kdbx`, `wp-config.php`) stop the fling.
+  - Files that contain a secret (private keys, AWS / GitHub / npm / Slack / Stripe / OpenAI /
+    Anthropic / SendGrid / Azure keys and tokens, Google OAuth client secrets, database URLs with a
+    password) stop the fling with the file, line and kind of secret (never the secret itself).
+    Remove the secret (and rotate it if it was ever shared), or add the file to `.flingignore`.
+- `node_modules` and anything listed in a `.flingignore` (gitignore syntax) are skipped too.
   Symlinks pointing outside the folder are never followed.
 - Limits are 25 MB per file, 100 MB per deploy and 5,000 files.
 - Absolute asset paths (`/assets/x.js`) work because each site has its own subdomain.

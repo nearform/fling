@@ -157,7 +157,7 @@ The Fling plugin gives Claude a `fling` skill plus an MCP server (`fling mcp`), 
 /plugin install fling@fling
 ```
 
-Log in once with `npx @nearform/fling login`. The MCP server reuses that login.
+Log in once with `fling login` (or `npx @nearform/fling login` if it is not installed). The MCP server reuses that login.
 
 The MCP tools:
 

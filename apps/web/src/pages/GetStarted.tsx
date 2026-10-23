@@ -21,20 +21,30 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 export function QuickStart() {
   return (
     <div className="space-y-4">
-      <Step n={1} title="Log in from your terminal">
+      <Step n={1} title="Install the CLI">
+        <p className="text-sm text-secondary">
+          Install it once and you get a <code>fling</code> command everywhere (Node 22 or later).
+        </p>
+        <CommandLine command="npm install -g @nearform/fling" />
+        <p className="text-xs text-muted">
+          Can’t install globally? Every command also works as <code>npx @nearform/fling …</code>,
+          e.g. <code>npx @nearform/fling login</code>.
+        </p>
+      </Step>
+      <Step n={2} title="Log in">
         <p className="text-sm text-secondary">
           Opens a browser to sign in with your Nearform Google account, then stores a key in{' '}
           <code>~/.fling/config.json</code>.
         </p>
-        <CommandLine command="npx @nearform/fling login" />
+        <CommandLine command="fling login" />
       </Step>
-      <Step n={2} title="Fling a folder">
+      <Step n={3} title="Fling a folder">
         <p className="text-sm text-secondary">
           Point it at your build output. You get back a stable URL,{' '}
           <code>https://my-app.fling.labs.nearform.com</code>, that only signed-in Nearformers can
           open. Fling it again to update; identical content is a no-op.
         </p>
-        <CommandLine command="npx @nearform/fling ./dist --name my-app" />
+        <CommandLine command="fling ./dist --name my-app" />
       </Step>
     </div>
   )
@@ -49,7 +59,7 @@ export default function GetStarted() {
       />
       <div className="space-y-4">
         <QuickStart />
-        <Step n={3} title="Or let Claude Code do it">
+        <Step n={4} title="Or let Claude Code do it">
           <p className="text-sm text-secondary">
             Add the Fling plugin. It brings a <code>fling</code> skill and an MCP server that reuse
             your CLI login, so you can just ask Claude to “fling this”.
@@ -57,7 +67,7 @@ export default function GetStarted() {
           <CommandLine command="/plugin marketplace add nearform/fling" />
           <CommandLine command="/plugin install fling@fling" />
         </Step>
-        <Step n={4} title="Add to Claude (Desktop, web, mobile)">
+        <Step n={5} title="Add to Claude (Desktop, web, mobile)">
           <p className="text-sm text-secondary">
             Let Claude publish what it makes for you. In Claude, open{' '}
             <strong className="font-medium text-base-content">
@@ -81,7 +91,7 @@ export default function GetStarted() {
             parts). See or disconnect it under Connections.
           </p>
         </Step>
-        <Step n={5} title="Fling files from your computer (Claude Desktop)">
+        <Step n={6} title="Fling files from your computer (Claude Desktop)">
           <p className="text-sm text-secondary">
             Install the Fling extension so Claude Desktop can fling files you’ve downloaded: just
             say “fling Pitch-Deck.html” and it finds it in Downloads, Desktop or Claude’s outputs.

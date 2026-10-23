@@ -131,6 +131,22 @@ To rotate the generated ones, bump `secrets_version` in `app-fling.tf` and merge
 warm functions pick them up. Rotating `session-secret` signs everyone out. Rotating `site-hmac-key`
 also needs the copy the site router reads from the KeyValueStore updated by the API.
 
+## Deploy security (public repository)
+
+- **No AWS keys in GitHub.** The deploy job assumes the app's deploy role over OIDC. The role trusts
+  only this repository's `production` environment, and that environment only accepts deployments from
+  `main` (a deployment branch policy).
+- **Deploys only run code from `main`.** They run after CI passes on a push to `main`, or by hand with
+  a `ref` that must be on `main` (checked with `git merge-base --is-ancestor`). Pull request runs,
+  including forks', never get the role or any secret.
+- **The deploy role can't read app secrets.** It can update the Lambda code, the UI bucket,
+  `_fling/*` in the sites bucket and the CloudFront functions, and invalidate caches. Google
+  credentials and the signing keys live in SSM, readable only by the Lambda's own role.
+- **Logs are public.** They show resource names and the role ARN, which are identifiers, not
+  credentials. Never `echo` anything secret in a workflow.
+- Anyone who can push to `main` can deploy. Protect `main` (require pull requests) to tighten
+  this.
+
 ## Costs
 
 About $0 when idle. Lambda, CloudFront (PriceClass_100), DynamoDB on demand, the KeyValueStore,

@@ -67,6 +67,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      # Only ever ship code that is on main. A pull request's commits (including a fork's) can be
+      # fetched by SHA, so a hand-run deploy with `ref` must not be able to ship unmerged code.
+      - name: Check the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main ||
+            { echo "::error::$(git rev-parse HEAD) is not on main; only commits on main can be deployed"; exit 1; }
 
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7

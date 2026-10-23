@@ -68,9 +68,12 @@ refresh tokens are opaque and stored hashed). `OAUTH_REDIRECT_ALLOWLIST` (option
    `SITE_ROUTER_FUNCTION`, `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` and `APP_ORIGIN`. Nothing in
    it is secret.
 
-5. **npm publish token.** Repository secret `NPM_PUBLISH_TOKEN`: a token that can publish
-   `@nearform/fling` (only `release-cli.yml` uses it). Every dependency is public, so installs
-   need no token.
+5. **npm trusted publishing (no token).** Publish the very first version by hand
+   (`npm login`, then `npm publish <tarball> --access public` from a `pnpm pack` of `apps/cli`).
+   Then on npmjs.com open `@nearform/fling`, go to **Settings → Trusted publishing**, add GitHub
+   Actions with organization `nearform`, repository `fling` and workflow `release-cli.yml`, and
+   finally set **Publishing access → Require two-factor authentication and disallow tokens**.
+   Every dependency is public, so installs need no token either.
 
 6. **First deploy.** Push to `main`, or run the Deploy workflow by hand. Until then the API answers
    503, the UI bucket is empty and the site router passes requests straight through.
@@ -115,7 +118,7 @@ git tag cli-v0.2.0 && git push origin cli-v0.2.0
 ```
 
 `release-cli.yml` checks the tag matches the version, runs the gate and publishes `@nearform/fling` to
-npm with provenance.
+npm through trusted publishing (OIDC, no stored token), with provenance added automatically.
 
 ## Secrets
 

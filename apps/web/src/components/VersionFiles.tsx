@@ -35,7 +35,7 @@ export function VersionFiles({
 
   return (
     <div className="surface-inset overflow-x-auto">
-      <div className="flex flex-wrap items-center gap-2 px-3 pt-2.5 text-xs text-secondary">
+      <div className="flex flex-wrap items-center gap-2 px-3 pt-2 text-xs text-secondary">
         <span>
           {count} · {formatBytes(totalBytes)}
         </span>
@@ -57,7 +57,7 @@ export function VersionFiles({
           </span>
         )}
       </div>
-      <table className="table table-sm">
+      <table className="table table-xs">
         <thead>
           <tr>
             <th>Path</th>

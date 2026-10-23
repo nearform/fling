@@ -1,15 +1,16 @@
 /**
- * Home: the greeting banner (the login page's thread, contained, in the theme's own tone), then
- * your sites — active or archived — each as a `SiteCard`. No sites yet → the CLI quick start.
+ * Home: a plain header (greeting, count, search), then your sites — active or archived — each as
+ * a compact `SiteCard`, narrowed by a client-side search kept in `?q=`. No sites yet → the CLI
+ * quick start.
  */
-import { PauseIcon, PlayIcon, RocketLaunchIcon } from '@heroicons/react/24/outline'
-import { Link, useSearchParams } from 'react-router-dom'
+import { XMarkIcon } from '@heroicons/react/24/outline'
+import { useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { SiteCard } from '../components/SiteCard'
-import { ThreadBackground } from '../components/ThreadBackground'
+import { SiteSearch } from '../components/SiteSearch'
 import { useMe, useSites } from '../hooks/queries'
-import { useThreadTone } from '../hooks/useDocumentTheme'
-import { useBooleanPreference } from '../hooks/useLocalStoragePreference'
 import { errorMessage } from '../lib/api'
+import { countLabel, filterSites } from '../lib/search'
 import { QuickStart } from './GetStarted'
 
 /** "Good morning" by the reader's local clock. */
@@ -20,45 +21,34 @@ export function greeting(hour: number): string {
   return 'Good evening'
 }
 
-function Banner({ liveCount }: { liveCount: number | undefined }) {
+/** A plain page header: greeting, title, the count (kept in step with the search), the search. */
+function SitesHeader({
+  count,
+  query,
+  onQueryChange,
+}: {
+  count: string
+  query: string
+  onQueryChange: (q: string) => void
+}) {
   const { data: me } = useMe()
-  const [threadPaused, setThreadPaused] = useBooleanPreference('home.thread.paused', false)
-  const threadTone = useThreadTone()
   const firstName = me?.name?.split(/\s+/)[0]
 
   return (
-    <header className="surface-panel relative isolate overflow-hidden">
-      <ThreadBackground contained paused={threadPaused} tone={threadTone} />
-      <button
-        type="button"
-        className="btn btn-ghost btn-xs btn-square absolute top-2 right-2 z-10 opacity-60 hover:opacity-100"
-        onClick={() => setThreadPaused(p => !p)}
-        aria-pressed={threadPaused}
-        aria-label={threadPaused ? 'Play the animation' : 'Pause the animation'}
-        title={threadPaused ? 'Play the animation' : 'Pause the animation'}
-      >
-        {threadPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
-      </button>
-      <div className="relative flex flex-wrap items-end justify-between gap-4 py-2">
-        <div className="min-w-0">
-          <p className="text-sm text-secondary">
-            {greeting(new Date().getHours())}
-            {firstName ? `, ${firstName}` : ''}
-          </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Your sites</h1>
-          <p className="mt-1 text-sm text-secondary">
-            {liveCount === undefined
-              ? 'Everything you have flung, in one list'
-              : liveCount === 0
-                ? 'Nothing flung yet'
-                : `${liveCount} live ${liveCount === 1 ? 'site' : 'sites'}`}
+    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div className="min-w-0">
+        <p className="text-xs text-secondary">
+          {greeting(new Date().getHours())}
+          {firstName ? `, ${firstName}` : ''}
+        </p>
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h1 className="text-xl font-semibold tracking-tight">Your sites</h1>
+          <p className="text-sm text-secondary" aria-live="polite">
+            {count}
           </p>
         </div>
-        <Link to="/get-started" className="btn btn-sm btn-ghost">
-          <RocketLaunchIcon className="h-4 w-4" />
-          How to fling
-        </Link>
       </div>
+      <SiteSearch value={query} onChange={onQueryChange} className="w-full sm:w-72" />
     </header>
   )
 }
@@ -66,15 +56,32 @@ function Banner({ liveCount }: { liveCount: number | undefined }) {
 export default function Sites() {
   const [params, setParams] = useSearchParams()
   const archived = params.get('view') === 'archived'
+  const query = params.get('q') ?? ''
+  const searching = query.trim() !== ''
   const active = useSites(false)
   const list = useSites(archived)
+  const shown = useMemo(() => filterSites(list.data ?? [], query), [list.data, query])
 
-  const setView = (view: 'active' | 'archived') =>
-    setParams(view === 'archived' ? { view } : {}, { replace: true })
+  const update = (key: 'view' | 'q', value: string | null) =>
+    setParams(
+      prev => {
+        const next = new URLSearchParams(prev)
+        if (value) next.set(key, value)
+        else next.delete(key)
+        return next
+      },
+      { replace: true }
+    )
+  const setView = (view: 'active' | 'archived') => update('view', view === 'archived' ? view : null)
+  const setQuery = (q: string) => update('q', q || null)
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <Banner liveCount={active.data?.length} />
+    <div className="mx-auto max-w-5xl space-y-4">
+      <SitesHeader
+        count={countLabel({ total: list.data?.length, shown: shown.length, archived, searching })}
+        query={query}
+        onQueryChange={setQuery}
+      />
 
       <div role="tablist" className="tabs tabs-border" aria-label="Which sites">
         <button
@@ -127,9 +134,20 @@ export default function Sites() {
             <QuickStart />
           </div>
         )
+      ) : shown.length === 0 ? (
+        <div className="surface-panel space-y-3 text-center text-sm text-secondary">
+          <p>
+            No {archived ? 'archived ' : ''}sites match{' '}
+            <span className="font-medium text-base-content">"{query.trim()}"</span>
+          </p>
+          <button type="button" className="btn btn-sm" onClick={() => setQuery('')}>
+            <XMarkIcon className="h-4 w-4" aria-hidden />
+            Clear search
+          </button>
+        </div>
       ) : (
-        <ul className="space-y-4">
-          {list.data.map(site => (
+        <ul className="space-y-2">
+          {shown.map(site => (
             <li key={site.name}>
               <SiteCard site={site} />
             </li>

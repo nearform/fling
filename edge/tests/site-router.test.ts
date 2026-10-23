@@ -168,6 +168,23 @@ describe('unknown hosts', () => {
       expect((await asRequest({ host: PUBLIC, path })).uri).toBe('/_fling/missing')
     }
   })
+
+  it('never serves dotfiles or dot directories', async () => {
+    for (const path of [
+      '/.env',
+      '/.dev.vars',
+      '/.git/config',
+      '/a/.secret',
+      '/%2Eenv',
+      '/.well-known/x',
+    ]) {
+      expect((await asRequest({ host: PUBLIC, path })).uri).toBe('/_fling/missing')
+    }
+    // dots elsewhere in a name are fine
+    expect((await asRequest({ host: PUBLIC, path: '/a.b/c.d.html' })).uri).toBe(
+      '/sites/S2/V2/a.b/c.d.html'
+    )
+  })
 })
 
 describe('path rewriting', () => {

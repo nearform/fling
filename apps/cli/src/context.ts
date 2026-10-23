@@ -3,11 +3,10 @@
  * injectable seams tests use (`fetch`, `open`, `confirm`, TTY). Commands receive a context and
  * return; they never touch `process` directly.
  */
-import { createInterface } from 'node:readline/promises'
+import { confirm, isCancel, text } from '@clack/prompts'
 import { type ApiClient, createApiClient, type FetchLike } from './api.ts'
 import { type ConfigStore, createConfigStore, type Env, type ResolvedConfig } from './config.ts'
-import { NotLoggedInError } from './errors.ts'
-import type { LocateOptions } from './locate.ts'
+import { CliError, NotLoggedInError } from './errors.ts'
 import { BIN_NAME } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import { createLogger, type Logger } from './utils/logger.ts'
@@ -34,8 +33,6 @@ export interface CommandContext {
   /** Rewrites a single status line on stderr (TTY only); `null` clears it. */
   progress: (line: string | null) => void
   binName: string
-  /** Where file names are looked up (default: this machine; tests pass a fake). */
-  locate?: LocateOptions
   /** Waits for a new site / share link to reach the edge; absent → no wait (tests). */
   waitReady?: ReadyWaiter
 }
@@ -74,18 +71,17 @@ export async function createContext(options: ContextOptions = {}): Promise<Comma
   }
 }
 
+// Prompts draw on stderr so stdout stays clean for pipes and --json. Ctrl-C / Esc cancels.
 async function ttyConfirm(question: string): Promise<boolean> {
-  const answer = await ttyPrompt(`${question} [y/N] `)
-  return /^y(es)?$/i.test(answer.trim())
+  const answer = await confirm({ message: question, initialValue: false, output: process.stderr })
+  if (isCancel(answer)) throw new CliError('Cancelled')
+  return answer
 }
 
 async function ttyPrompt(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return await rl.question(question)
-  } finally {
-    rl.close()
-  }
+  const answer = await text({ message: question.trim(), output: process.stderr })
+  if (isCancel(answer)) throw new CliError('Cancelled')
+  return answer ?? ''
 }
 
 function ttyProgress(line: string | null): void {

@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApiClient } from '../src/api.ts'
@@ -276,25 +275,11 @@ describe('fling [dir] command', () => {
     })
   })
 
-  it('a bare file name is found in Downloads, said so, and named from the file', async () => {
-    const home = await realpath(await tempDir())
-    await writeTree(join(home, 'Downloads'), { 'Pitch Deck.html': '<h1>deck</h1>' })
-    const m = mockFetch({
-      'POST /api/sites/pitch-deck/deploys': () =>
-        jsonResponse({
-          status: 'unchanged',
-          versionId: VERSION,
-          site: site({ name: 'pitch-deck' }),
-        }),
-    })
-    const { ctx, log } = await testContext({ store: await loggedInStore(), fetch: m.fetch })
-    ctx.locate = { cwd: '/', home, platform: process.platform, env: {} }
-    await runDeploy(ctx, 'Pitch Deck.html', {})
-    expect(log.lines.join('\n')).toContain(
-      `Found in Downloads: ${join(home, 'Downloads', 'Pitch Deck.html')}`
-    )
-    const body = JSON.parse(String(m.calls[0]?.init.body))
-    expect(body.manifest.files.map((f: { path: string }) => f.path)).toEqual(['index.html'])
+  it('a path that does not exist is an error: the CLI never looks in Downloads', async () => {
+    const { ctx } = await testContext({ store: await loggedInStore() })
+    const e = await captureError(runDeploy(ctx, 'No Such Deck.html', {}))
+    expect(e.message).toBe('No such file or folder: No Such Deck.html')
+    expect(e.exitCode).toBe(1)
   })
 
   it('exits 2 when not logged in', async () => {

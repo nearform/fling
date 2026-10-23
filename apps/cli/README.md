@@ -20,30 +20,44 @@ npm install -g @nearform/fling   # then: fling …
 npx @nearform/fling …
 ```
 
-## Log in
+## Set up
 
 ```sh
-fling login
+fling setup
 ```
 
-This opens your browser for Nearform Google sign-in and stores an API key in
-`~/.fling/config.json` (mode 0600). `fling whoami` shows who you are, and `fling logout` removes the
+This does everything a new machine needs:
+
+1. **Signs you in.** Your browser opens for Nearform Google sign-in and an API key is stored in
+   `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
+2. **Adds Fling to Claude Code.** If `claude` is on your PATH, setup installs the Fling plugin
+   (skill + MCP server) from the `nearform/fling` marketplace, or updates it if it's already
+   installed. `--scope project|local` installs it for this project only (default `user`).
+3. **Adds Fling to Claude Desktop.** If Claude Desktop is installed (macOS, Windows), setup
+   downloads `fling.mcpb` and opens it, and Claude Desktop asks you to confirm.
+
+On a terminal it asks before steps 2 and 3. With `--yes` it does them without asking.
+
+To sign in only, use `fling login`. `fling whoami` shows who you are, and `fling logout` removes the
 key. For CI, set `FLING_API_KEY` instead.
 
 ## Deploy
 
 ```sh
 npm run build
-fling ./dist                        # name generated from the project, e.g. rocketpod-docs; you confirm it
-fling ./dist --name my-app          # → https://my-app.fling.labs.nearform.com
-fling ./dist --name my-app --spa    # client-side routing: unknown paths serve index.html
-fling ./dist --public               # no sign-in needed to view
-fling ./dist --yes                  # never prompt (CI): use the generated name as is
-fling                               # deploys the current folder
-fling "Pitch Deck.html"             # a single page, served as index.html → pitch-deck
-fling site.zip                      # a zip of a site: extracted, a single top folder unwrapped
-fling diagram.svg                   # any other file, next to a generated page that shows it
+fling deploy ./dist                        # name generated from the project, e.g. rocketpod-docs; you confirm it
+fling deploy ./dist --name my-app          # → https://my-app.fling.labs.nearform.com
+fling deploy ./dist --name my-app --spa    # client-side routing: unknown paths serve index.html
+fling deploy ./dist --public               # no sign-in needed to view
+fling deploy ./dist --yes                  # never prompt (CI): use the generated name as is
+fling deploy                               # deploys the current folder
+fling deploy "Pitch Deck.html"             # a single page, served as index.html → pitch-deck
+fling deploy site.zip                      # a zip of a site: extracted, a single top folder unwrapped
+fling deploy diagram.svg                   # any other file, next to a generated page that shows it
 ```
+
+`fling <path>` is short for `fling deploy <path>` when the path exists, so `fling ./dist` works.
+An existing path wins over a command of the same name. Bare `fling` prints help.
 
 What you can fling:
 
@@ -57,14 +71,8 @@ What you can fling:
 A file's default site name comes from its name, without the extension or a browser's ` (1)`
 duplicate suffix: `Pitch Deck (1).html` → `pitch-deck`. Folders use the naming rules below.
 
-**Files by name.** If the path doesn't exist where you are, Fling looks for it by name, newest
-first, in Downloads (`FLING_DOWNLOADS_DIR` if set; on Linux your XDG download folder), Desktop,
-`~/Documents/Claude`, `~/Claude` and Claude Desktop's output folders, and says where it found it:
-
-```
-$ fling Pitch-Deck.html
-fling Found in Downloads: /Users/me/Downloads/Pitch-Deck.html
-```
+The path must exist where you give it. The CLI doesn't look for files elsewhere (the MCP server
+does; see below).
 
 - Re-fling to update. Identical content is a no-op, and content you deployed before is restored
   instantly without uploading.
@@ -158,13 +166,19 @@ Global options: `--json` prints machine-readable output, and `--server <url>` po
 server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
-(where files given by name are looked for first), `FLING_NO_WAIT=1` (after a deploy or a new share
+(where the MCP server looks for files given by name first), `FLING_NO_WAIT=1` (after a deploy or a new share
 link, don't wait the few seconds it takes to reach every edge).
 
 ## Claude Code plugin and MCP
 
 The Fling plugin gives Claude a `fling` skill plus an MCP server (`fling mcp`), so you can say
 "fling the dist folder and give me a share link":
+
+```sh
+fling setup
+```
+
+Or install it by hand in Claude Code:
 
 ```
 /plugin marketplace add nearform/fling

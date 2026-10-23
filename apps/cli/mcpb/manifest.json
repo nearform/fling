@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "fling",
   "display_name": "Fling",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Publish HTML pages, zips and folders from your computer to fling.labs.nearform.com and get a link back.",
   "long_description": "Fling hosts static sites for Nearform staff at https://<name>.fling.labs.nearform.com (private to Nearformers unless you make them public or share a link).\n\nThis extension runs on your computer, so Claude can publish:\n\n- content it created in the conversation (sent inline — no sandbox uploads),\n- a file you downloaded or Claude Desktop saved, by name: it looks in Downloads, Desktop, Documents/Claude and Claude Desktop's output folders,\n- a single .html file, a .zip of a site, or a folder with index.html.\n\nSign in once with your Nearform Google account (Claude can start it with the fling_login tool, or run `fling login` in a terminal after `npm install -g @nearform/fling`). The login is shared with the fling CLI.",
   "author": {

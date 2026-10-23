@@ -4,8 +4,8 @@ name: CI
 # person runs before committing. The workflow adds no check of its own, so what passes here is
 # exactly what passes on a laptop.
 #
-# deploy.yml runs after this workflow succeeds on main. release-cli.yml calls it (workflow_call,
-# with `secrets: inherit` so the install gets NPM_TOKEN) before publishing.
+# deploy.yml runs after this workflow succeeds on main. release-cli.yml calls it (workflow_call)
+# before publishing. Every dependency is public, so no npm token is needed.
 on:
   pull_request:
   push:
@@ -34,12 +34,5 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      # @nearform/labs-ui-components (the web UI's Labs header) is a restricted npmjs package:
-      # NPM_TOKEN (the org's read-only npm token) goes into the runner's ~/.npmrc, which pnpm reads.
-      # Never echoed, never committed. Pull requests from forks get no secrets, so their install fails.
-      - name: Authenticate to npmjs
-        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm gate

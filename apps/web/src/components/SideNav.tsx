@@ -5,10 +5,10 @@ import {
   KeyIcon,
   RocketLaunchIcon,
 } from '@heroicons/react/24/outline'
-import { LabsHeader } from '@nearform/labs-ui-components/labs-header'
 import type { ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { useBooleanPreference } from '../hooks/useLocalStoragePreference'
+import { LogoMark } from './LogoMark'
 
 export interface NavItem {
   to: string
@@ -44,18 +44,18 @@ export default function SideNav() {
         isCollapsed ? 'w-16' : 'w-56'
       }`}
     >
-      {/* The Nearform Labs row (@nearform/labs-ui-components): mark, app name, and the Labs app
-          switcher. h-14 with its own bottom border, so the seam lines up with the top bar's. */}
-      <LabsHeader
-        name="Fling"
-        current="fling"
-        collapsed={isCollapsed}
-        renderHomeLink={({ children, ...props }) => (
-          <Link to="/" {...props}>
-            {children}
-          </Link>
-        )}
-      />
+      {/* Brand row: mark + app name. h-14 with its own bottom border, so the seam lines up with
+          the top bar's. */}
+      <Link
+        to="/"
+        aria-label="Fling home"
+        className={`h-14 flex-none flex items-center gap-2.5 border-b border-[var(--border-default)] ${
+          isCollapsed ? 'justify-center px-3' : 'px-4'
+        }`}
+      >
+        <LogoMark className="w-6 h-6" />
+        {!isCollapsed && <span className="font-semibold tracking-tight">Fling</span>}
+      </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="Main">
         {NAV_ITEMS.map(item => (

@@ -173,22 +173,6 @@
   --tone-error-border: var(--color-error);
 }
 
-/* ------------------------------------------------ Nearform Labs header (SideNav)
-   @nearform/labs-ui-components' brand row and app switcher read --labs-*. The switcher panel is
-   portaled to <body>, so the mapping sits on :root (and any [data-theme] subtree), where the
-   per-theme tokens above resolve — one block serves both themes. */
-:root,
-[data-theme] {
-  --labs-bg: var(--surface-nav);
-  --labs-fg: var(--color-base-content);
-  --labs-muted: var(--text-muted);
-  --labs-border: var(--border-default);
-  --labs-hover: var(--surface-nav-hover);
-  --labs-accent: var(--nf-green); /* the N_ bar and the app tiles' tint — never text */
-  --labs-focus: var(--focus-ring); /* Blue on light, Green on dark, as every other control */
-  --labs-font: var(--nf-font-sans);
-}
-
 /* ------------------------------------------------ Shape / spacing / motion */
 :root {
   --radius-control: var(--nf-radius-control); /* 8px — buttons, fields */

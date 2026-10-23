@@ -145,9 +145,6 @@ importers:
       '@heroicons/react':
         specifier: ^2.2.0
         version: 2.2.0(react@18.3.1)
-      '@nearform/labs-ui-components':
-        specifier: ^0.2.0
-        version: 0.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@tanstack/react-query':
         specifier: ^5.102.8
         version: 5.104.5(@types/react@18.3.31)(react@18.3.1)
@@ -856,13 +853,6 @@ packages:
     engines: {node: ^22.20 || ^24.12 || >=25}
     cpu: [x64]
     os: [linux]
-
-  '@nearform/labs-ui-components@0.2.0':
-    resolution: {integrity: sha512-UFqwubilhamjGcU/1q5uUk8JCWHXa7w5j3ripKRJtjvcB5eZi+SUp/IyOKYSVtJeHaMj0+zm+1kCPB0WYcElsQ==}
-    engines: {node: '>=24'}
-    peerDependencies:
-      react: '>=18'
-      react-dom: '>=18'
 
   '@oslojs/asn1@1.0.0':
     resolution: {integrity: sha512-zw/wn0sj0j0QKbIXfIlnEcTviaCzYOY3V5rAyjR6YtOByFtJiT574+8p9Wlach0lZH9fddD4yb9laEAIl4vXQA==}
@@ -2708,11 +2698,6 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
-
-  '@nearform/labs-ui-components@0.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
-    dependencies:
-      react: 18.3.1
-      react-dom: 18.3.1(react@18.3.1)
 
   '@oslojs/asn1@1.0.0':
     dependencies:

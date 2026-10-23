@@ -49,12 +49,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      # The install needs the org's read-only token (the web UI's restricted package). Publishing
-      # needs a token that can publish @nearform/fling: NPM_PUBLISH_TOKEN if set, else NPM_TOKEN.
-      - name: Authenticate to npmjs
-        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: pnpm install --frozen-lockfile
 
       - name: Build
@@ -76,4 +70,5 @@ jobs:
           npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
           npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
         env:
-          NPM_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN || secrets.NPM_TOKEN }}
+          # A token that can publish @nearform/fling.
+          NPM_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN }}

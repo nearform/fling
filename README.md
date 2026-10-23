@@ -29,7 +29,4 @@ pnpm --filter @fling/web dev   # UI :3000 → open http://fling.lvh.me:3000
 pnpm gate         # lint, typecheck, test, build
 ```
 
-`@nearform/labs-ui-components` is a private package, so installing needs an npm token with access to
-the `@nearform` scope.
-
 Deployment: [docs/DEPLOY.md](docs/DEPLOY.md).

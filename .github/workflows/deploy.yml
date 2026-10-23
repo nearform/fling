@@ -73,10 +73,6 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - name: Authenticate to npmjs
-        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - run: pnpm install --frozen-lockfile
 
       # `...` builds each package's workspace dependencies first.

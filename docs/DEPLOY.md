@@ -68,11 +68,9 @@ refresh tokens are opaque and stored hashed). `OAUTH_REDIRECT_ALLOWLIST` (option
    `SITE_ROUTER_FUNCTION`, `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` and `APP_ORIGIN`. Nothing in
    it is secret.
 
-5. **npm tokens.** Repository secrets:
-   - `NPM_TOKEN`: the org's read-only npm token, to install the restricted
-     `@nearform/labs-ui-components` (CI, deploy, release).
-   - `NPM_PUBLISH_TOKEN` (optional): a token that can publish `@nearform/fling`. Without it,
-     `release-cli.yml` publishes with `NPM_TOKEN`, which then needs publish rights.
+5. **npm publish token.** Repository secret `NPM_PUBLISH_TOKEN`: a token that can publish
+   `@nearform/fling` (only `release-cli.yml` uses it). Every dependency is public, so installs
+   need no token.
 
 6. **First deploy.** Push to `main`, or run the Deploy workflow by hand. Until then the API answers
    503, the UI bucket is empty and the site router passes requests straight through.

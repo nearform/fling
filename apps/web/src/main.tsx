@@ -6,8 +6,6 @@ import '@fontsource/inter/latin-400.css'
 import '@fontsource/inter/latin-500.css'
 import '@fontsource/inter/latin-600.css'
 import '@fontsource/bitter/latin-700.css'
-// The Nearform Labs brand row + app switcher (SideNav); themed by the --labs-* vars in theme.css.
-import '@nearform/labs-ui-components/labs-header/styles.css'
 import './index.css'
 
 const rootElement = document.getElementById('root')

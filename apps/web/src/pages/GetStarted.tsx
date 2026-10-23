@@ -27,8 +27,8 @@ export function QuickStart() {
         </p>
         <CommandLine command="npm install -g @nearform/fling" />
         <p className="text-xs text-muted">
-          Can’t install globally? Every command also works as{' '}
-          <code>npx @nearform/fling …</code>, e.g. <code>npx @nearform/fling login</code>.
+          Can’t install globally? Every command also works as <code>npx @nearform/fling …</code>,
+          e.g. <code>npx @nearform/fling login</code>.
         </p>
       </Step>
       <Step n={2} title="Log in">

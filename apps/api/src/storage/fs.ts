@@ -1,9 +1,10 @@
 /**
  * Filesystem storage for dev and tests: objects are files under `root` (`.fling-dev/` at the repo
  * root in dev). Presigned PUTs point at the API's own `PUT /dev-upload/<key>?exp=&sig=` route,
- * which calls `acceptUpload`. The signature covers key, expiry, Content-Type and Cache-Control.
+ * which calls `acceptUpload`. The signature covers key, expiry, Content-Type, Cache-Control and the
+ * body's SHA-256, which is checked like S3 checks `x-amz-checksum-sha256`.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { PresignedPut, Storage } from './types.ts'
@@ -28,22 +29,27 @@ export class FsStorage implements Storage {
     return full
   }
 
-  private sign(key: string, exp: number, contentType: string, cacheControl: string) {
+  private sign(key: string, exp: number, contentType: string, cacheControl: string, sha: string) {
     return createHmac('sha256', this.secret)
-      .update(`${key}\n${exp}\n${contentType}\n${cacheControl}`)
+      .update(`${key}\n${exp}\n${contentType}\n${cacheControl}\n${sha}`)
       .digest('base64url')
   }
 
   async presignPut(
     key: string,
-    opts: { contentType: string; cacheControl: string; expiresIn?: number }
+    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
   ): Promise<PresignedPut> {
-    const exp = Math.floor(this.now() / 1000) + (opts.expiresIn ?? 3600)
-    const sig = this.sign(key, exp, opts.contentType, opts.cacheControl)
+    const exp = Math.floor(this.now() / 1000) + (opts.expiresIn ?? 900)
+    const checksum = Buffer.from(opts.sha256, 'hex').toString('base64')
+    const sig = this.sign(key, exp, opts.contentType, opts.cacheControl, checksum)
     const path = key.split('/').map(encodeURIComponent).join('/')
     return {
       url: `${this.baseUrl}/dev-upload/${path}?exp=${exp}&sig=${sig}`,
-      headers: { 'content-type': opts.contentType, 'cache-control': opts.cacheControl },
+      headers: {
+        'content-type': opts.contentType,
+        'cache-control': opts.cacheControl,
+        'x-amz-checksum-sha256': checksum,
+      },
     }
   }
 
@@ -54,13 +60,18 @@ export class FsStorage implements Storage {
     sig: string | undefined
     contentType: string
     cacheControl: string
+    /** the `x-amz-checksum-sha256` header (base64) */
+    checksum: string
     body: Uint8Array
   }): Promise<boolean> {
     const exp = Number(input.exp)
     if (!input.sig || !Number.isFinite(exp) || exp < Math.floor(this.now() / 1000)) return false
-    const expected = Buffer.from(this.sign(input.key, exp, input.contentType, input.cacheControl))
+    const expected = Buffer.from(
+      this.sign(input.key, exp, input.contentType, input.cacheControl, input.checksum)
+    )
     const given = Buffer.from(input.sig)
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) return false
+    if (createHash('sha256').update(input.body).digest('base64') !== input.checksum) return false
     const file = this.pathFor(input.key)
     await mkdir(dirname(file), { recursive: true })
     await writeFile(file, input.body)

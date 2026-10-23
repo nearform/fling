@@ -6,9 +6,13 @@ export interface PresignedPut {
 }
 
 export interface Storage {
+  /**
+   * A PUT URL for exactly one body: the object whose SHA-256 is `sha256` (hex). Any other bytes
+   * are rejected, so the URL can never replace what was published with something else.
+   */
   presignPut(
     key: string,
-    opts: { contentType: string; cacheControl: string; expiresIn?: number }
+    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
   ): Promise<PresignedPut>
   /** null when the object doesn't exist */
   head(key: string): Promise<{ size: number } | null>

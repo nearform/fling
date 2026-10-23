@@ -27,8 +27,9 @@ export class S3Storage implements Storage {
 
   async presignPut(
     key: string,
-    opts: { contentType: string; cacheControl: string; expiresIn?: number }
+    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
   ): Promise<PresignedPut> {
+    const checksum = Buffer.from(opts.sha256, 'hex').toString('base64')
     const url = await getSignedUrl(
       this.client,
       new PutObjectCommand({
@@ -36,15 +37,23 @@ export class S3Storage implements Storage {
         Key: key,
         ContentType: opts.contentType,
         CacheControl: opts.cacheControl,
+        ChecksumSHA256: checksum,
       }),
       {
-        expiresIn: opts.expiresIn ?? 3600,
-        signableHeaders: new Set(['content-type', 'cache-control']),
+        expiresIn: opts.expiresIn ?? 900,
+        // Kept as a signed header (not hoisted into the query) so S3 checks the body against it:
+        // a different body → 400 BadDigest; leaving the header off → 403 signature mismatch.
+        unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+        signableHeaders: new Set(['content-type', 'cache-control', 'x-amz-checksum-sha256']),
       }
     )
     return {
       url,
-      headers: { 'content-type': opts.contentType, 'cache-control': opts.cacheControl },
+      headers: {
+        'content-type': opts.contentType,
+        'cache-control': opts.cacheControl,
+        'x-amz-checksum-sha256': checksum,
+      },
     }
   }
 

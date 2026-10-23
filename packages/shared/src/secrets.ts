@@ -15,8 +15,10 @@
  * assignments and high-entropy strings.
  */
 
-/** Files bigger than this are not scanned (the deploy still goes ahead). */
-export const SECRET_SCAN_MAX_FILE_BYTES = 5 * 1024 * 1024
+import { MAX_FILE_BYTES } from './limits.ts'
+
+/** Files bigger than this are not scanned: the per-file deploy limit, so every text file is. */
+export const SECRET_SCAN_MAX_FILE_BYTES = MAX_FILE_BYTES
 /** A NUL byte in the first this-many bytes marks a file as binary (not scanned). */
 export const BINARY_SNIFF_BYTES = 8192
 

@@ -1,0 +1,45 @@
+name: CI
+
+# The quality gate, in one job: `pnpm gate` (lint, typecheck, test, build), the same command a
+# person runs before committing. The workflow adds no check of its own, so what passes here is
+# exactly what passes on a laptop.
+#
+# deploy.yml runs after this workflow succeeds on main. release-cli.yml calls it (workflow_call,
+# with `secrets: inherit` so the install gets NPM_TOKEN) before publishing.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  # Cancel superseded runs on a PR branch, never on main or when called from a release.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # pnpm version comes from `packageManager` in the root package.json. Must precede setup-node
+      # so `cache: pnpm` can find the store.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # @nearform/labs-ui-components (the web UI's Labs header) is a restricted npmjs package:
+      # NPM_TOKEN (the org's read-only npm token) goes into the runner's ~/.npmrc, which pnpm reads.
+      # Never echoed, never committed. Pull requests from forks get no secrets, so their install fails.
+      - name: Authenticate to npmjs
+        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm gate

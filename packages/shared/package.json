@@ -1,0 +1,31 @@
+{
+  "name": "@fling/shared",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Shared contracts for Fling: zod schemas, slug/host rules, manifest hashing, site-cookie format. Consumed as TypeScript source.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "echo 'shared: consumed as source'"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

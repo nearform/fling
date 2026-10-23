@@ -1,0 +1,192 @@
+/**
+ * CLI entry point. Wires commander to the thin command modules; the ONE place that maps errors to
+ * exit codes (0 ok · 1 error · 2 not logged in · 3 forbidden) and prints them. Global `--server`
+ * and `--json` apply to every command. The default command deploys a folder.
+ */
+import { Command } from 'commander'
+import { runLogin, runLogout, runWhoami } from './commands/auth.ts'
+import { runDeploy } from './commands/deploy.ts'
+import {
+  runArchive,
+  runInfo,
+  runList,
+  runRemove,
+  runRollback,
+  runShare,
+  runVersions,
+  runVisibility,
+} from './commands/sites.ts'
+import { DEFAULT_SERVER_URL, ENV } from './config.ts'
+import { type CommandContext, createContext } from './context.ts'
+import { CliError, exitCodeFor } from './errors.ts'
+import { runMcpServer } from './mcp.ts'
+import { BIN_NAME, VERSION } from './package-info.ts'
+import { createLogger } from './utils/logger.ts'
+import { formatJson } from './utils/output.ts'
+
+interface GlobalOptions {
+  server?: string
+  json?: boolean
+}
+
+const program = new Command()
+program
+  .name(BIN_NAME)
+  .description('Fling a folder of static files at Fling and get a link back')
+  .version(VERSION)
+  .option(
+    '--server <url>',
+    `server URL (default: $${ENV.url} or config, else ${DEFAULT_SERVER_URL})`
+  )
+  .option('--json', 'print JSON instead of human output', false)
+  .showHelpAfterError()
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ ${BIN_NAME} login
+  $ ${BIN_NAME} ./dist --name my-app     deploy → https://my-app.fling.labs.nearform.com
+  $ ${BIN_NAME} ./dist --yes             no prompts (CI): use the generated name, fail if it is taken
+  $ ${BIN_NAME} "Pitch Deck.html"        a single page; found in Downloads if it is not here
+  $ ${BIN_NAME} site.zip                 a zip of a site
+  $ ${BIN_NAME} share my-app             public link for people outside Nearform
+
+Exit codes: 0 ok · 1 error · 2 not logged in · 3 forbidden
+Env:        ${ENV.apiKey} · ${ENV.url} · ${ENV.configDir} · ${ENV.debug}`
+  )
+
+/** Run a command with a context built from the global options; print + exit-code any error. */
+function action<A extends unknown[]>(handler: (ctx: CommandContext, ...args: A) => Promise<void>) {
+  return async (...args: unknown[]) => {
+    const command = args.at(-1) as Command
+    const globals = command.optsWithGlobals<GlobalOptions>()
+    let ctx: CommandContext | undefined
+    try {
+      ctx = await createContext({ server: globals.server, json: globals.json })
+      await handler(ctx, ...(args.slice(0, -1) as A))
+    } catch (error) {
+      report(error, ctx)
+      process.exitCode = exitCodeFor(error)
+    }
+  }
+}
+
+function report(error: unknown, ctx: CommandContext | undefined): void {
+  const log = ctx?.log ?? createLogger()
+  const message = error instanceof Error ? error.message : String(error)
+  log.error(message)
+  if (error instanceof CliError && error.hint) log.hint(error.hint)
+  if (ctx?.config.debug && error instanceof Error && error.stack) log.hint(error.stack)
+  if (ctx?.json) {
+    const code = (error as { code?: unknown }).code
+    process.stdout.write(
+      `${formatJson({ error: { message, exitCode: exitCodeFor(error), ...(typeof code === 'string' ? { code } : {}) } })}\n`
+    )
+  }
+}
+
+// ---- deploy (default) ----------------------------------------------------------------------
+
+program
+  .command('deploy [path]', { isDefault: true })
+  .description(
+    'deploy a folder (default: .), a single .html file, a .zip or any file — the default command, so `fling ./dist` works. ' +
+      'A path that does not exist is looked up by name in Downloads, Desktop and Claude output folders'
+  )
+  .option(
+    '-n, --name <name>',
+    'site name — names are global, first come first served (default: generated from the project and folder, e.g. rocketpod-docs; you confirm it on a terminal)'
+  )
+  .option('--spa', 'single-page app: serve index.html for unknown paths')
+  .option('--public', 'make the site public (default: Nearform sign-in required)')
+  .option(
+    '-y, --yes',
+    'never prompt: accept the generated name; without index.html, list the HTML pages (or fling anyway if there are none)'
+  )
+  .option('--list-html', 'no index.html at the root: generate one listing the HTML pages')
+  .option('--no-list-html', 'no index.html at the root: fling anyway (the root will 404)')
+  .action(
+    action(
+      (
+        ctx,
+        path: string | undefined,
+        opts: { name?: string; spa?: boolean; public?: boolean; yes?: boolean; listHtml?: boolean }
+      ) => runDeploy(ctx, path, opts)
+    )
+  )
+
+// ---- auth ----------------------------------------------------------------------------------
+
+program
+  .command('login')
+  .description('sign in through the browser and store an API key')
+  .action(action(ctx => runLogin(ctx)))
+program
+  .command('logout')
+  .description('remove the stored API key')
+  .action(action(ctx => runLogout(ctx)))
+program
+  .command('whoami')
+  .description('show the signed-in user')
+  .action(action(ctx => runWhoami(ctx)))
+
+// ---- sites ---------------------------------------------------------------------------------
+
+program
+  .command('ls')
+  .alias('list')
+  .description('list your sites')
+  .option('--archived', 'list archived sites')
+  .action(action((ctx, opts: { archived?: boolean }) => runList(ctx, opts)))
+program
+  .command('info <name>')
+  .description('show a site')
+  .action(action((ctx, name: string) => runInfo(ctx, name)))
+program
+  .command('versions <name>')
+  .description("list a site's versions (* = live)")
+  .action(action((ctx, name: string) => runVersions(ctx, name)))
+program
+  .command('rollback <name> <versionId>')
+  .description('serve an earlier version again')
+  .action(action((ctx, name: string, versionId: string) => runRollback(ctx, name, versionId)))
+program
+  .command('share <name>')
+  .description('print (or create) a public share link — anyone with it can view the site')
+  .option('--refresh', 'replace the link; the old one stops working')
+  .option('--revoke', 'remove the link')
+  .action(
+    action((ctx, name: string, opts: { refresh?: boolean; revoke?: boolean }) =>
+      runShare(ctx, name, opts)
+    )
+  )
+program
+  .command('visibility <name> <visibility>')
+  .description('private (Nearform sign-in) or public (anyone)')
+  .action(action((ctx, name: string, visibility: string) => runVisibility(ctx, name, visibility)))
+program
+  .command('archive <name>')
+  .description('take a site offline (404) but keep its files; undo with unarchive')
+  .action(action((ctx, name: string) => runArchive(ctx, name)))
+program
+  .command('unarchive <name>')
+  .description('bring an archived site back')
+  .action(action((ctx, name: string) => runArchive(ctx, name, true)))
+program
+  .command('rm <name>')
+  .alias('delete')
+  .description('delete a site and all its versions (asks first unless --yes)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action(action((ctx, name: string, opts: { yes?: boolean }) => runRemove(ctx, name, opts)))
+
+// ---- agents --------------------------------------------------------------------------------
+
+program
+  .command('mcp')
+  .description('run the MCP server on stdio (used by the Claude Code plugin)')
+  .action(async (_opts: unknown, command: Command) => {
+    const globals = command.optsWithGlobals<GlobalOptions>()
+    await runMcpServer({ server: globals.server })
+  })
+
+program.parseAsync(process.argv)

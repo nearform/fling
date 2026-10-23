@@ -1,0 +1,9 @@
+/* The app's stylesheet. `source(none)` turns off Tailwind's repo-wide scan; only src/ is scanned. */
+@import "tailwindcss" source(none);
+@import "./theme.css";
+
+@source "./**/*.{ts,tsx}";
+
+/* Classes assembled from props (toast `alert-*`, confirm `btn-*`) are invisible to the scanner. */
+@source inline("alert-{success,error,warning,info}");
+@source inline("btn-{primary,error,warning}");

@@ -1,0 +1,27 @@
+{
+  "name": "@fling/edge",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "CloudFront Function (cloudfront-js-2.0) that routes *.fling hosts to S3 objects",
+  "type": "module",
+  "main": "./index.mjs",
+  "types": "./index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./index.d.mts",
+      "default": "./index.mjs"
+    },
+    "./site-router.js": "./src/site-router.js"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "echo 'edge: deployed as-is'"
+  },
+  "devDependencies": {
+    "@fling/shared": "workspace:*",
+    "@types/node": "^24.0.0",
+    "vitest": "^3.2.7"
+  }
+}

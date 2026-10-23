@@ -1,0 +1,33 @@
+/* The standalone 404's stylesheet (vite.404.config.ts): the same design system, scanning only the
+   components the page renders so the inlined CSS stays small. */
+@import "tailwindcss" source(none);
+@import "./theme.css";
+
+@source "./components/NotFound.tsx";
+@source "./components/ThreadBackground.tsx";
+@source "./components/ThemeToggle.tsx";
+@source "./components/LogoMark.tsx";
+
+/* Inter, inlined as woff2 only (fontsource's own CSS adds a woff fallback for every weight, which
+   would double the inlined bytes). Every browser that runs this page's JS reads woff2. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("../node_modules/@fontsource/inter/files/inter-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("../node_modules/@fontsource/inter/files/inter-latin-600-normal.woff2") format("woff2");
+}

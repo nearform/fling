@@ -1,0 +1,82 @@
+{
+  "manifest_version": "0.3",
+  "name": "fling",
+  "display_name": "Fling",
+  "version": "0.1.0",
+  "description": "Publish HTML pages, zips and folders from your computer to fling.labs.nearform.com and get a link back.",
+  "long_description": "Fling hosts static sites for Nearform staff at https://<name>.fling.labs.nearform.com (private to Nearformers unless you make them public or share a link).\n\nThis extension runs on your computer, so Claude can publish:\n\n- content it created in the conversation (sent inline — no sandbox uploads),\n- a file you downloaded or Claude Desktop saved, by name: it looks in Downloads, Desktop, Documents/Claude and Claude Desktop's output folders,\n- a single .html file, a .zip of a site, or a folder with index.html.\n\nSign in once with your Nearform Google account (Claude can start it with the fling_login tool, or run `npx @nearform/fling login`). The login is shared with the fling CLI.",
+  "author": {
+    "name": "Nearform",
+    "url": "https://nearform.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nearform/fling.git"
+  },
+  "homepage": "https://fling.labs.nearform.com",
+  "support": "https://github.com/nearform/fling/issues",
+  "icon": "icon.png",
+  "license": "MIT",
+  "keywords": ["publish", "html", "static site", "hosting", "nearform"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"],
+      "env": {
+        "FLING_URL": "${user_config.server_url}",
+        "FLING_DOWNLOADS_DIR": "${user_config.downloads_dir}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "fling_publish",
+      "description": "Publish a site from files passed inline (content Claude created)"
+    },
+    {
+      "name": "fling_deploy",
+      "description": "Publish a file, zip or folder from this computer, found by name in Downloads and other folders"
+    },
+    {
+      "name": "fling_find_files",
+      "description": "List recent HTML files, zips and site folders on this computer"
+    },
+    { "name": "fling_check_name", "description": "Check whether a site name is free" },
+    { "name": "fling_login", "description": "Sign in to Fling in the browser" },
+    { "name": "fling_whoami", "description": "Show the signed-in user" },
+    { "name": "fling_list", "description": "List your sites" },
+    { "name": "fling_info", "description": "Show a site and its versions" },
+    { "name": "fling_share", "description": "Get, rotate or revoke a public share link" },
+    { "name": "fling_set_visibility", "description": "Make a site private or public" },
+    {
+      "name": "fling_archive",
+      "description": "Take a site offline (or restore it), keeping its files"
+    },
+    { "name": "fling_rollback", "description": "Serve an earlier version of a site" },
+    { "name": "fling_delete", "description": "Permanently delete a site" }
+  ],
+  "user_config": {
+    "server_url": {
+      "type": "string",
+      "title": "Fling server",
+      "description": "The Fling server to publish to.",
+      "default": "https://fling.labs.nearform.com",
+      "required": false
+    },
+    "downloads_dir": {
+      "type": "directory",
+      "title": "Downloads folder",
+      "description": "Where to look first for files you ask Claude to fling by name (Desktop, Documents/Claude and Claude Desktop output folders are searched too).",
+      "default": "${HOME}/Downloads",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

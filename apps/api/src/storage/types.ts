@@ -1,0 +1,33 @@
+/** Object storage port (the sites bucket). Implementations: `s3.ts`, `fs.ts` (dev/tests). */
+export interface PresignedPut {
+  url: string
+  /** headers the client must send with the PUT — they are part of the signature */
+  headers: Record<string, string>
+}
+
+export interface Storage {
+  presignPut(
+    key: string,
+    opts: { contentType: string; cacheControl: string; expiresIn?: number }
+  ): Promise<PresignedPut>
+  /** null when the object doesn't exist */
+  head(key: string): Promise<{ size: number } | null>
+  /** Server-side write (remote MCP publishes; chunked-upload staging). */
+  put(
+    key: string,
+    body: Uint8Array,
+    opts?: { contentType?: string; cacheControl?: string }
+  ): Promise<void>
+  /** null when the object doesn't exist */
+  get(key: string): Promise<Uint8Array | null>
+  putJson(key: string, value: unknown): Promise<void>
+  getJson<T>(key: string): Promise<T | null>
+  deletePrefix(prefix: string): Promise<void>
+}
+
+/** Where a pending version's manifest is kept (under the site prefix, never routed by the edge). */
+export const manifestKey = (siteId: string, versionId: string) =>
+  `sites/${siteId}/_manifests/${versionId}.json`
+
+/** Staging area for chunked MCP uploads (never routed by the edge; deleted on finish). */
+export const uploadPrefix = (uploadId: string) => `uploads/${uploadId}/`

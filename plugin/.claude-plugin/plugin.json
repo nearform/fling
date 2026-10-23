@@ -1,0 +1,11 @@
+{
+  "name": "fling",
+  "displayName": "Fling",
+  "version": "0.1.0",
+  "description": "Fling a folder of static files (a build output, an HTML report, a prototype) at fling.labs.nearform.com and get a stable URL back. Skill + MCP server for Nearformers.",
+  "author": { "name": "Nearform", "url": "https://nearform.com" },
+  "homepage": "https://fling.labs.nearform.com",
+  "repository": "https://github.com/nearform/fling",
+  "license": "MIT",
+  "keywords": ["deploy", "static-site", "hosting", "share", "nearform"]
+}

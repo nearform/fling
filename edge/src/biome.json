@@ -1,0 +1,10 @@
+{
+  "root": false,
+  "extends": "//",
+  "linter": {
+    "rules": {
+      "style": { "useNodejsImportProtocol": "off" },
+      "complexity": { "noForEach": "off", "useOptionalChain": "off" }
+    }
+  }
+}

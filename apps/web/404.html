@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="fling-light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+
+    <title>Not found · Fling</title>
+    <meta name="theme-color" content="#000e38" />
+    <!-- Inlined: this page is served on site hosts, where no /favicon.svg exists. -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%2260.17%2060.17%20111.65%2086.48%22%3E%3Ctitle%3ENearform%3C/title%3E%3Cstyle%3E.n%7Bfill:%23000e38%7D%40media%20(prefers-color-scheme:dark)%7B.n%7Bfill:%23ffffff%7D%7D%3C/style%3E%3Cpath%20class=%22n%22%20d=%22m60.18,60.18h11.3l36.71,53.4v-53.4h12.17v75.36h-11.3l-36.71-53.4v53.4h-12.17V60.18Z%22/%3E%3Cpath%20fill=%22%2300e5a4%22%20d=%22m126.51,135.54h45.29v11.09h-45.29v-11.09Z%22/%3E%3C/svg%3E" />
+
+    <!-- Apply the saved theme before React mounts so there is no flash. Only the two known
+         theme names are accepted; anything else falls back to the OS preference so a stale
+         value can never desync the toggle (ThemeToggle.tsx normalises the same way). -->
+    <script>
+      ;(function () {
+        var saved = null
+        try {
+          saved = localStorage.getItem('theme')
+        } catch (e) {}
+        if (saved !== 'fling-light' && saved !== 'fling-dark') {
+          saved =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'fling-dark'
+              : 'fling-light'
+        }
+        document.documentElement.setAttribute('data-theme', saved)
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/not-found-main.tsx"></script>
+  </body>
+</html>

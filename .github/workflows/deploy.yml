@@ -1,0 +1,177 @@
+name: Deploy
+
+# Deploys Fling to AWS (the Labs account, nearform/labs-infra envs/production/app-fling.tf). Runs on
+# every push to main once CI has passed on it, and by hand (workflow_dispatch) to redeploy or roll
+# back to any earlier commit of main.
+#
+# Everything it needs is one repository variable, AWS_DEPLOY_CONFIG: the JSON of the stack's
+# `deploy` output (`terraform -chdir=envs/production output -json fling | jq -c .deploy`). The job
+# assumes the app's deploy role over OIDC, which only trusts this repository's `production`
+# environment, so there is no AWS key in GitHub. See docs/DEPLOY.md.
+#
+# Order, so nothing is ever served that points at something missing:
+#   1. the API (Lambda code), and wait until the new code is live;
+#   2. the UI: hashed assets first and never deleted (open tabs keep loading their chunks), then the
+#      other public files, then index.html last; plus the Claude Desktop extension at
+#      downloads/fling.mcpb (built from apps/cli);
+#   3. the sites' error page (_fling/404.html in the sites bucket);
+#   4. the site router (CloudFront Function): update, then publish to LIVE;
+#   5. invalidate index.html on the app and _fling/* on the sites.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA (or ref) to deploy. Empty = the tip of the selected branch. Rollback = an older SHA of main.'
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    # From workflow_run: only a successful CI run of a push to main (not a pull request's run).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    env:
+      CONFIG: ${{ vars.AWS_DEPLOY_CONFIG }}
+      SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.ref || github.sha }}
+    steps:
+      - name: Read the deploy config
+        id: config
+        run: |
+          set -euo pipefail
+          [ -n "$CONFIG" ] || { echo "::error::AWS_DEPLOY_CONFIG is not set (see docs/DEPLOY.md)"; exit 1; }
+          get() { jq -er ".$1" <<<"$CONFIG"; }
+          {
+            for key in AWS_REGION AWS_DEPLOY_ROLE_ARN LAMBDA_FUNCTION UI_BUCKET SITES_BUCKET \
+              SITE_ROUTER_FUNCTION APP_DISTRIBUTION_ID SITES_DISTRIBUTION_ID APP_ORIGIN; do
+              echo "$key=$(get "$key")"
+            done
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: Authenticate to npmjs
+        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+
+      # `...` builds each package's workspace dependencies first.
+      - name: Build the API, the web UI and the Claude Desktop extension
+        run: |
+          set -euo pipefail
+          pnpm --filter "@fling/api..." build
+          pnpm --filter "@fling/web..." build
+          # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
+          pnpm --filter "@nearform/fling" build:mcpb
+          for f in apps/api/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/src/site-router.js apps/cli/dist/fling.mcpb; do
+            [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
+          done
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ steps.config.outputs.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ steps.config.outputs.AWS_REGION }}
+
+      - name: Deploy the API
+        env:
+          FUNCTION: ${{ steps.config.outputs.LAMBDA_FUNCTION }}
+        run: |
+          set -euo pipefail
+          aws lambda update-function-code --function-name "$FUNCTION" \
+            --zip-file fileb://apps/api/dist/lambda.zip --query CodeSha256 --output text
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION"
+
+      - name: Upload the UI
+        env:
+          BUCKET: ${{ steps.config.outputs.UI_BUCKET }}
+        run: |
+          set -euo pipefail
+          cd apps/web/dist
+          # Content-hashed: cached for a year, never deleted (tabs on the previous release need them).
+          if [ -d assets ]; then
+            aws s3 sync assets "s3://$BUCKET/assets/" --size-only --no-progress \
+              --cache-control "public, max-age=31536000, immutable"
+          fi
+          # Everything else but index.html (favicon, logo...): short cache, removed when gone.
+          # downloads/ is uploaded below, not from the web build, so the sync must not delete it.
+          aws s3 sync . "s3://$BUCKET/" --no-progress --delete \
+            --exclude 'assets/*' --exclude 'downloads/*' --exclude index.html \
+            --cache-control "public, max-age=300"
+          # The Claude Desktop extension: https://<app>/downloads/fling.mcpb (has an extension, so
+          # the SPA function serves it from the bucket as is).
+          aws s3 cp ../../cli/dist/fling.mcpb "s3://$BUCKET/downloads/fling.mcpb" --no-progress \
+            --content-type "application/octet-stream" \
+            --content-disposition 'attachment; filename="fling.mcpb"' \
+            --cache-control "public, max-age=300"
+          # Last, so it only ever points at files that are already there.
+          aws s3 cp index.html "s3://$BUCKET/index.html" --no-progress \
+            --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+
+      - name: Upload the sites' error page
+        env:
+          BUCKET: ${{ steps.config.outputs.SITES_BUCKET }}
+        run: |
+          aws s3 cp apps/web/dist-404/404.html "s3://$BUCKET/_fling/404.html" --no-progress \
+            --content-type "text/html; charset=utf-8" --cache-control "public, max-age=300"
+
+      - name: Publish the site router
+        env:
+          FUNCTION: ${{ steps.config.outputs.SITE_ROUTER_FUNCTION }}
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          code="$RUNNER_TEMP/site-router.js"
+          scheme="${APP_ORIGIN%%://*}"
+          sed -e "s#__APP_ORIGIN__#${APP_ORIGIN}#g" -e "s#__SITE_SCHEME__#${scheme}#g" \
+            edge/src/site-router.js > "$code"
+          if grep -q '__APP_ORIGIN__\|__SITE_SCHEME__' "$code"; then
+            echo "::error::placeholders left in the site router"; exit 1
+          fi
+          # UpdateFunction replaces the whole configuration: send back the current one (comment,
+          # runtime, KeyValueStore association, all owned by Terraform) with only the code changed.
+          described="$(aws cloudfront describe-function --name "$FUNCTION" --stage DEVELOPMENT)"
+          etag="$(jq -er .ETag <<<"$described")"
+          jq '.FunctionSummary.FunctionConfig | {Comment: (.Comment // ""), Runtime, KeyValueStoreAssociations}' \
+            <<<"$described" > "$RUNNER_TEMP/function-config.json"
+          etag="$(aws cloudfront update-function --name "$FUNCTION" --if-match "$etag" \
+            --function-config "file://$RUNNER_TEMP/function-config.json" \
+            --function-code "fileb://$code" --query ETag --output text)"
+          aws cloudfront publish-function --name "$FUNCTION" --if-match "$etag" \
+            --query FunctionSummary.Status --output text
+
+      - name: Invalidate
+        env:
+          APP_DISTRIBUTION: ${{ steps.config.outputs.APP_DISTRIBUTION_ID }}
+          SITES_DISTRIBUTION: ${{ steps.config.outputs.SITES_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          # Every client-side route is served as /index.html (the SPA function), so this is all of them.
+          aws cloudfront create-invalidation --distribution-id "$APP_DISTRIBUTION" \
+            --paths /index.html / --query Invalidation.Id --output text
+          aws cloudfront create-invalidation --distribution-id "$SITES_DISTRIBUTION" \
+            --paths '/_fling/*' --query Invalidation.Id --output text
+          echo "### Deployed \`$SHA\` to ${{ steps.config.outputs.APP_ORIGIN }}" >> "$GITHUB_STEP_SUMMARY"

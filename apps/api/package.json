@@ -1,0 +1,38 @@
+{
+  "name": "@fling/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/dev.ts",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudfront-keyvaluestore": "3.1150.0",
+    "@aws-sdk/client-dynamodb": "3.1150.0",
+    "@aws-sdk/client-s3": "3.1150.0",
+    "@aws-sdk/client-ssm": "3.1150.0",
+    "@aws-sdk/lib-dynamodb": "3.1150.0",
+    "@aws-sdk/s3-request-presigner": "3.1150.0",
+    "@aws-sdk/signature-v4a": "^3.1138.0",
+    "@fling/shared": "workspace:*",
+    "@hono/node-server": "^2.1.4",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "arctic": "^3.7.0",
+    "hono": "^4.13.5",
+    "jose": "^6.2.12",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@fling/edge": "workspace:*",
+    "@types/aws-lambda": "^8.10.152",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

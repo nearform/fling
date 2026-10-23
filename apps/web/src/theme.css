@@ -1,0 +1,462 @@
+/* The Fling design system, trimmed from agentic-mapper's src/ui/index.css: the Nearform brand,
+   two DaisyUI themes (`fling-light` / `fling-dark`), the semantic tokens, base styles and the few
+   component classes Fling uses. Shared by the app (index.css) and the standalone 404
+   (not-found.css); each entry imports Tailwind itself and scans only the files it renders. */
+
+/* Nearform brand: the vendored token sheet. The typefaces are imported in main.tsx. */
+@import "./brand/nearform-brand.css";
+
+@plugin "daisyui";
+
+
+@theme {
+  --font-sans: var(--nf-font-sans);
+  --font-serif: var(--nf-font-serif);
+  --font-mono: var(--nf-font-mono);
+}
+
+/* ------------------------------------------------------------------ Light */
+@plugin "daisyui/theme" {
+  name: "fling-light";
+  default: true;
+  color-scheme: light;
+
+  --color-primary: var(--nf-green); /* a BACKING colour: Midnight text on it, never text itself */
+  --color-primary-content: var(--nf-midnight);
+  --color-secondary: var(--nf-midnight-80); /* = --text-secondary, see the header */
+  --color-secondary-content: var(--nf-white);
+  --color-accent: var(--nf-blue); /* links, interactive text */
+  --color-accent-content: var(--nf-white);
+  --color-neutral: var(--nf-midnight);
+  --color-neutral-content: var(--nf-white);
+
+  --color-base-100: var(--nf-white);
+  --color-base-200: var(--nf-white); /* cards (bg-base-200) render white too */
+  --color-base-300: var(--nf-grey-30); /* borders / hover / lines */
+  --color-base-content: var(--nf-midnight);
+
+  --color-info: var(--nf-blue);
+  --color-info-content: var(--nf-white);
+  --color-success: var(--nf-success);
+  --color-success-content: var(--nf-white);
+  --color-warning: var(--nf-warning);
+  --color-warning-content: var(--nf-white);
+  --color-error: var(--nf-danger);
+  --color-error-content: var(--nf-white);
+
+  --radius-selector: 0.5rem; /* badges, checkboxes, toggles */
+  --radius-field: 0.5rem; /* --nf-radius-control: buttons + fields share 8px */
+  --radius-box: 0.625rem; /* --nf-radius-md: cards, panels */
+  --border: 1px;
+  --depth: 0; /* flat — the brand has no drop shadows */
+  --noise: 0;
+}
+
+/* ------------------------------------------------------------------- Dark */
+@plugin "daisyui/theme" {
+  name: "fling-dark";
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-primary: var(--nf-green); /* unchanged: Midnight on Green in both themes */
+  --color-primary-content: var(--nf-midnight);
+  --color-secondary: var(--nf-grey-10); /* = --text-secondary */
+  --color-secondary-content: var(--nf-dark-bg);
+  --color-accent: var(--nf-blue-50); /* the brand's on-dark link colour */
+  --color-accent-content: var(--nf-midnight);
+  --color-neutral: var(--nf-midnight-30);
+  --color-neutral-content: var(--nf-dark-bg);
+
+  --color-base-100: var(--nf-dark-surface);
+  --color-base-200: var(--nf-dark-surface);
+  --color-base-300: var(--nf-dark-border-strong);
+  --color-base-content: var(--nf-white);
+
+  /* The brand's `-fg` status set — the base status colours do not reach contrast on dark. */
+  --color-info: var(--nf-blue-50);
+  --color-info-content: var(--nf-midnight);
+  --color-success: var(--nf-green-80);
+  --color-success-content: var(--nf-midnight);
+  --color-warning: #f0b429; /* --nf-warning-fg (dark) — the brand sheet only names it inside its inert dark block */
+  --color-warning-content: var(--nf-midnight);
+  --color-error: #ff8177; /* --nf-danger-fg (dark), same reason */
+  --color-error-content: var(--nf-midnight);
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.625rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ------------------------------------------------ Semantic surface tokens */
+[data-theme="fling-light"] {
+  /* White chrome and cards on the brand's Midnight-10 canvas: the page is the quiet layer, the
+     panels on it are the lit ones. Structure comes from hairlines, never shadow. */
+  --surface-app: var(--nf-midnight-10);
+  --surface-nav: var(--nf-white);
+  --surface-header: var(--nf-white);
+  --surface-panel: var(--nf-white);
+  --surface-raised: var(--nf-white); /* popovers / modals */
+  --surface-inset: var(--nf-grey-10); /* inset boxes, neutral tags */
+  --surface-hover: var(--nf-midnight-10);
+  --surface-nav-hover: var(--nf-midnight-10);
+  --surface-active: var(--nf-green-30); /* active nav item, selected row — Green 10 was too faint to find at a glance */
+
+  --border-subtle: var(--nf-grey-10);
+  --border-default: var(--nf-grey-30);
+  --border-strong: var(--nf-midnight-30);
+  /* WCAG 1.4.11: ≥3:1 for the boundary that IDENTIFIES a control (inputs, selects, checkboxes). */
+  --border-control: var(--nf-midnight-50);
+
+  --text-primary: var(--nf-midnight);
+  --text-secondary: var(--nf-midnight-80);
+  --text-muted: var(--nf-midnight-50); /* ≥5:1 on white and on the inset */
+
+  --focus-ring: var(--nf-blue); /* the brand's light-theme focus colour */
+  --overlay: color-mix(in srgb, var(--nf-midnight) 40%, transparent);
+  --shadow-panel: none;
+  --shadow-popover: none; /* the brand bans drop shadows: popovers are a hairline on white */
+
+  /* Status tints = the brand's pastel tier behind, the status colour itself as the border (the
+     brand's alert spec: tint + full 1px border + icon — never a left stripe). */
+  --tone-primary-surface: var(--nf-green-10);
+  --tone-primary-border: var(--nf-green);
+  --tone-info-surface: var(--nf-blue-10);
+  --tone-info-border: var(--nf-blue-50);
+  --tone-success-surface: var(--nf-success-10);
+  --tone-success-border: var(--nf-green-50);
+  --tone-warning-surface: var(--nf-warning-10);
+  --tone-warning-border: var(--nf-warning);
+  --tone-error-surface: var(--nf-danger-10);
+  --tone-error-border: var(--nf-danger);
+}
+
+[data-theme="fling-dark"] {
+  /* The brand's neutral dark tier: bg → surface → raised, the canvas the DARKEST layer. */
+  --surface-app: var(--nf-dark-bg);
+  --surface-nav: var(--nf-dark-surface);
+  --surface-header: var(--nf-dark-surface);
+  --surface-panel: var(--nf-dark-surface);
+  --surface-raised: var(--nf-dark-raised);
+  --surface-inset: var(--nf-dark-bg);
+  --surface-hover: var(--nf-dark-raised);
+  --surface-nav-hover: var(--nf-dark-raised);
+  --surface-active: color-mix(in srgb, var(--nf-green) 14%, var(--nf-dark-surface));
+
+  --border-subtle: var(--nf-dark-border);
+  --border-default: var(--nf-dark-border);
+  --border-strong: var(--nf-dark-border-strong);
+  --border-control: var(--nf-midnight-50); /* 3.1:1 on the dark surface; the tier's own borders are ~2:1 */
+
+  --text-primary: var(--nf-white);
+  --text-secondary: var(--nf-grey-10);
+  --text-muted: var(--nf-midnight-30); /* the brand's on-dark secondary text, ≥7:1 */
+
+  --focus-ring: var(--nf-green); /* the brand flips focus to Green on dark */
+  --overlay: color-mix(in srgb, var(--nf-dark-bg) 70%, transparent);
+  --shadow-panel: none;
+  --shadow-popover: none;
+
+  /* Mixed into the panel rather than lifted from the light pastels — a pastel wash on a dark
+     screen is a light patch. Borders are the on-dark status colours. */
+  --tone-primary-surface: color-mix(in srgb, var(--nf-green) 12%, var(--nf-dark-surface));
+  --tone-primary-border: var(--nf-green);
+  --tone-info-surface: color-mix(in srgb, var(--nf-blue) 16%, var(--nf-dark-surface));
+  --tone-info-border: var(--nf-blue-50);
+  --tone-success-surface: color-mix(in srgb, var(--nf-green) 12%, var(--nf-dark-surface));
+  --tone-success-border: var(--nf-green-80);
+  --tone-warning-surface: color-mix(in srgb, var(--nf-warning) 16%, var(--nf-dark-surface));
+  --tone-warning-border: var(--color-warning);
+  --tone-error-surface: color-mix(in srgb, var(--nf-danger) 16%, var(--nf-dark-surface));
+  --tone-error-border: var(--color-error);
+}
+
+/* ------------------------------------------------ Nearform Labs header (SideNav)
+   @nearform/labs-ui-components' brand row and app switcher read --labs-*. The switcher panel is
+   portaled to <body>, so the mapping sits on :root (and any [data-theme] subtree), where the
+   per-theme tokens above resolve — one block serves both themes. */
+:root,
+[data-theme] {
+  --labs-bg: var(--surface-nav);
+  --labs-fg: var(--color-base-content);
+  --labs-muted: var(--text-muted);
+  --labs-border: var(--border-default);
+  --labs-hover: var(--surface-nav-hover);
+  --labs-accent: var(--nf-green); /* the N_ bar and the app tiles' tint — never text */
+  --labs-focus: var(--focus-ring); /* Blue on light, Green on dark, as every other control */
+  --labs-font: var(--nf-font-sans);
+}
+
+/* ------------------------------------------------ Shape / spacing / motion */
+:root {
+  --radius-control: var(--nf-radius-control); /* 8px — buttons, fields */
+  --radius-panel: var(--nf-radius-md); /* 10px — cards, panels */
+  --radius-popover: var(--nf-radius-md);
+
+  --control-height-sm: 30px;
+  --control-height-md: 36px;
+  --control-height-lg: 42px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --dur-fast: 120ms;
+  --dur-panel: 180ms;
+  --dur-drawer: 240ms;
+
+  /* density-driven */
+  --row-height: 46px;
+  --panel-pad: 20px;
+}
+
+/* ================================================================== Base */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+
+  body {
+    background: var(--surface-app);
+    color: var(--text-primary);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Tabular, aligned numerals for data-heavy surfaces */
+  code, kbd, samp, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+
+  th, td, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Brand: headings are never bold — weight 500 carries hierarchy (600 is buttons and table
+     emphasis). A `font-semibold`/`font-bold` utility on a heading overrides this; don't add one. */
+  h1, h2, h3, h4 {
+    color: var(--text-primary);
+    font-weight: var(--nf-weight-heading);
+    letter-spacing: -0.014em;
+  }
+
+  /* Links are Blue — the colour text is allowed to be. Green is a backing colour. */
+  a.link {
+    color: var(--color-accent);
+  }
+
+  /* One consistent, visible focus ring everywhere */
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-control);
+  }
+
+  /* Quiet, precise scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+    background-clip: content-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .btn:not(
+      .btn-ghost,
+      .btn-link,
+      .btn-outline,
+      .btn-dash,
+      .btn-soft,
+      .btn-primary,
+      .btn-secondary,
+      .btn-accent,
+      .btn-neutral,
+      .btn-info,
+      .btn-success,
+      .btn-warning,
+      .btn-error,
+      .btn-disabled,
+      :disabled,
+      [aria-disabled="true"]
+    ) {
+    --btn-border: var(--border-control);
+  }
+}
+
+@layer components {
+  /* Flat by default — a hairline border on the canvas defines every surface. */
+  .btn {
+    box-shadow: none;
+  }
+
+  /* Cards (DaisyUI .card): defined by border, not shadow */
+  .card {
+    border: 1px solid var(--border-default);
+    box-shadow: none;
+    border-radius: var(--radius-panel);
+  }
+
+  /* Panel: the default container — surface + thin border, flat */
+  .surface-panel {
+    background: var(--surface-panel);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-panel);
+    padding: var(--panel-pad);
+  }
+  .surface-inset {
+    background: var(--surface-inset);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+  }
+
+  /* Control boundaries at ≥3:1 (WCAG 1.4.11). DaisyUI's stock border is base-content at ~20%,
+     which is 1.5:1 on white — a field you cannot see the edge of. */
+  .input,
+  .select,
+  .textarea,
+  .file-input,
+  .checkbox,
+  .radio {
+    border-color: var(--border-control);
+  }
+
+  /* Text ramp helpers. `.text-secondary` collides with the utility DaisyUI generates from
+     `--color-secondary`; the two tokens are kept equal so the collision cannot bite. */
+  .text-secondary {
+    color: var(--text-secondary);
+  }
+  .text-muted {
+    color: var(--text-muted);
+  }
+
+  /* The tone triples as reusable marks (the avatar fallback, the public badge). */
+  .tone-primary {
+    color: var(--text-primary); /* Midnight on the green tint — green TEXT is banned */
+    background: var(--tone-primary-surface);
+    border-color: var(--tone-primary-border);
+  }
+  .tone-info {
+    color: var(--text-primary);
+    background: var(--tone-info-surface);
+    border-color: var(--tone-info-border);
+  }
+
+  /* Application shell — quiet, but each layer visually distinct */
+  .app-canvas {
+    background: var(--surface-app);
+  }
+  .app-nav {
+    background: var(--surface-nav);
+    border-color: var(--border-default);
+  }
+  .app-header {
+    background: var(--surface-header);
+    border-color: var(--border-default);
+  }
+
+  /* Left-nav item: subtle filled active state, accent icon, no bar */
+  .nav-item {
+    color: var(--text-secondary);
+    border-radius: var(--radius-control);
+    font-size: 15px;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+  }
+  .nav-item svg {
+    color: var(--text-muted);
+    transition: color var(--dur-fast) ease;
+  }
+  .nav-item:hover {
+    background: var(--surface-nav-hover);
+    color: var(--text-primary);
+  }
+  .nav-item:hover svg {
+    color: var(--text-secondary);
+  }
+  .nav-item[data-active="true"] {
+    color: var(--text-primary);
+    background: var(--surface-active);
+    font-weight: 600;
+  }
+  /* Light: a Midnight glyph on the green tint (the brand's pastel-tile pairing — a green icon on a
+     green wash disappears). Dark: the icon itself is Green, which reads on the dark tier. */
+  .nav-item[data-active="true"] svg {
+    color: var(--text-primary);
+  }
+  [data-theme="fling-dark"] .nav-item[data-active="true"] svg {
+    color: var(--color-primary);
+  }
+
+  /* Section labels: the brand's Label size, sentence case — no tracked uppercase eyebrows. */
+  .nav-group-label {
+    font-size: var(--nf-text-label);
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  /* Popover surface (dropdown menus, user menu) — raised, bordered, one shadow token */
+  .popover-surface {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
+  }
+}
+
+/* Auth / error pages: the brand's "backing A" wash (Green + Blue, diffused, top-right) on light;
+   on dark, a faint Green glow from the transition family. The only gradient in the app. */
+.main-gradient {
+  background:
+    radial-gradient(60% 50% at 100% 0%, color-mix(in srgb, var(--nf-green) 18%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 45% at 75% 0%, color-mix(in srgb, var(--nf-blue) 12%, transparent) 0%, transparent 70%),
+    var(--surface-app);
+}
+[data-theme="fling-dark"] .main-gradient {
+  background:
+    radial-gradient(70% 50% at 50% 110%, color-mix(in srgb, var(--nf-green) 14%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 40% at 100% 0%, color-mix(in srgb, var(--nf-purple) 12%, transparent) 0%, transparent 70%),
+    var(--surface-app);
+}
+
+/* Toast entrance (no animation plugin — one keyframe is enough) */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.toast-in {
+  animation: toast-in var(--dur-panel) ease-out;
+}

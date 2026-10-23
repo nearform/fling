@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="fling-light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>Fling</title>
+    <meta name="description" content="Fling a static site at fling.labs.nearform.com" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="theme-color" content="#000e38" />
+
+    <!-- Apply the saved theme before React mounts so there is no flash. Only the two known
+         theme names are accepted; anything else falls back to the OS preference so a stale
+         value can never desync the toggle (ThemeToggle.tsx normalises the same way). -->
+    <script>
+      ;(function () {
+        var saved = null
+        try {
+          saved = localStorage.getItem('theme')
+        } catch (e) {}
+        if (saved !== 'fling-light' && saved !== 'fling-dark') {
+          saved =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'fling-dark'
+              : 'fling-light'
+        }
+        document.documentElement.setAttribute('data-theme', saved)
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

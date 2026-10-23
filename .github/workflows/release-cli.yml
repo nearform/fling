@@ -1,0 +1,79 @@
+name: Release CLI
+
+# Publishes the CLI, @nearform/fling, to public npm when a `cli-v<version>` tag is pushed:
+#
+#   # bump apps/cli/package.json, merge, then on that commit:
+#   git tag cli-v0.2.0 && git push origin cli-v0.2.0
+#
+# The tag must match apps/cli/package.json's version. The gate (ci.yml) runs on the tagged commit
+# first. The package is published with npm provenance (id-token: write), linking it to this run.
+# `pnpm pack` writes the tarball (it rewrites any workspace: ranges), `npm publish` uploads it.
+on:
+  push:
+    tags: ['cli-v*']
+
+concurrency:
+  group: release-cli-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  publish:
+    name: Publish @nearform/fling
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the tag matches the package version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#cli-v}"
+          version="$(jq -er .version apps/cli/package.json)"
+          [ "$tag" = "$version" ] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match apps/cli/package.json version $version"; exit 1; }
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # The install needs the org's read-only token (the web UI's restricted package). Publishing
+      # needs a token that can publish @nearform/fling: NPM_PUBLISH_TOKEN if set, else NPM_TOKEN.
+      - name: Authenticate to npmjs
+        run: npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter "@nearform/fling..." build
+
+      - name: Pack
+        id: pack
+        working-directory: apps/cli
+        run: |
+          set -euo pipefail
+          pnpm pack --pack-destination "$RUNNER_TEMP"
+          tarball="$(ls "$RUNNER_TEMP"/nearform-fling-*.tgz)"
+          tar -tzf "$tarball" | grep -q '^package/dist/cli.js$' || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        run: |
+          set -euo pipefail
+          npm config set "//registry.npmjs.org/:_authToken=${NPM_TOKEN}"
+          npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_PUBLISH_TOKEN || secrets.NPM_TOKEN }}

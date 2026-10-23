@@ -1,0 +1,27 @@
+{
+  "name": "fling",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Fling — throw a folder of static files at fling.labs.nearform.com and get a link back",
+  "type": "module",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @fling/api dev",
+    "lint": "biome check . --diagnostic-level=error",
+    "lint:fix": "biome check --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "cli": "tsx apps/cli/src/cli.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.11",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

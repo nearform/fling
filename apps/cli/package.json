@@ -1,6 +1,6 @@
 {
   "name": "@nearform/fling",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "description": "Fling a folder of static files at fling.labs.nearform.com and get a link back. CLI + MCP server.",
   "type": "module",

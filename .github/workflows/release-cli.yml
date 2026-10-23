@@ -64,7 +64,9 @@ jobs:
           set -euo pipefail
           pnpm pack --pack-destination "$RUNNER_TEMP"
           tarball="$(ls "$RUNNER_TEMP"/nearform-fling-*.tgz)"
-          tar -tzf "$tarball" | grep -q '^package/dist/cli.js$' || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }
+          # List to a file first: `tar | grep -q` fails under pipefail (grep exits early, tar gets SIGPIPE).
+          tar -tzf "$tarball" > "$RUNNER_TEMP/pack-contents.txt"
+          grep -qx 'package/dist/cli.js' "$RUNNER_TEMP/pack-contents.txt" || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
       # Trusted publishing needs npm >= 11.5.1; don't depend on the version bundled with Node.

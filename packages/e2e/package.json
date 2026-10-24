@@ -1,0 +1,23 @@
+{
+  "name": "@fling/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "The end-to-end scenario every platform must pass (log in, deploy with the CLI, view, private redirect, share link, rollback, MCP publish, a conditional-write race), against a base URL: on each platform's local runtime (`pnpm e2e`) and as the post-deploy smoke test (`smoke`).",
+  "type": "module",
+  "scripts": {
+    "e2e": "tsx src/local.ts",
+    "smoke": "tsx src/smoke.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'e2e: run by pnpm e2e (after pnpm build)'",
+    "build": "echo 'e2e: run from source'"
+  },
+  "dependencies": {
+    "@fling/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3"
+  }
+}

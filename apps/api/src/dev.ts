@@ -1,10 +1,11 @@
 /**
- * Local dev: the API on :47101 (Records on a memory table, fs blobs under `.fling-dev/`, memory
- * route table; pending data migrations run first, as a deploy runs them) and
- * the sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real CloudFront Function
- * (edge/build.mjs, via the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
- * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404 (its
- * `__APP_ORIGIN__` filled in, as the deploy does).
+ * Local dev: the API on :47101 (Records on a memory table, fs blobs under `.fling-dev/` or
+ * FS_ROOT, memory route table; pending data migrations run first, as a deploy runs them) and the
+ * sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real CloudFront Function
+ * (edge/build.mjs, via the @fling/edge harness) against the same in-memory route table, then
+ * serves the rewritten object from the blobs. Missing objects get apps/web/dist-404/404.html with
+ * a 404 (its `__APP_ORIGIN__` filled in, as the deploy does). The e2e (packages/e2e) runs it as
+ * the AWS-flavoured local runtime.
  */
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -26,7 +27,7 @@ import { MemoryTable } from './table/memory.ts'
 const API_PORT = Number(process.env.PORT ?? 47101)
 const SITES_PORT = Number(process.env.SITES_PORT ?? 47102)
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
-const fsRoot = resolve(repoRoot, '.fling-dev')
+const fsRoot = resolve(repoRoot, process.env.FS_ROOT ?? '.fling-dev')
 const notFoundPage = resolve(repoRoot, 'apps/web/dist-404/404.html')
 
 const devSecret = () => randomBytes(32).toString('base64url')

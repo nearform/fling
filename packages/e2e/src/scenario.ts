@@ -5,7 +5,7 @@
  *
  *   metadata → whoami → deploy v1 (public) → view → 404 / trailing-slash → deploy v2 → view →
  *   rollback to v1 → private: anonymous redirect to sign-in, member view (with a site cookie) →
- *   share link → conditional-write race (concurrent first deploys of one name) → MCP publish →
+ *   share link → comments (owner and member; anonymous refused) → conditional-write race (concurrent first deploys of one name) → MCP publish →
  *   clean up (every site it made is removed).
  *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
@@ -23,6 +23,11 @@ import type { Session } from './sign-in.ts'
 export interface ScenarioOptions {
   appOrigin: string
   session: Session
+  /**
+   * A second user of the instance, for what a member may do to someone else's site (comments);
+   * without one those checks are skipped.
+   */
+  member?: Session
   /** how long a changed route may take to show (default 5 s locally; smoke tests pass more) */
   propagationMs?: number
   log?: (line: string) => void
@@ -166,6 +171,12 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `content-type ${home.headers.get('content-type')}`
     )
     step(`deployed ${name} and viewed it at ${siteUrl}`)
+    // Review mode iframes sites from the app origin: nothing on the way may forbid framing them.
+    const csp = home.headers.get('content-security-policy') ?? ''
+    check(
+      !home.headers.get('x-frame-options') && !/frame-ancestors/i.test(csp),
+      `site responses refuse framing: x-frame-options ${home.headers.get('x-frame-options')}, csp ${csp}`
+    )
 
     const css = await get(`${siteUrl}style.css`)
     check(css.status === 200 && css.text.includes('rebeccapurple'), `style.css: ${css.status}`)
@@ -228,6 +239,14 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `share link ${shared.shareUrl}: ${viaShare.status}`
     )
     step(`share link ${shared.shareUrl} serves it without signing in`)
+
+    // Comments (review mode's data): the owner through the CLI, a member through the API, the
+    // remote MCP tools; anonymous callers refused. Only where the instance has them.
+    if (meta.capabilities.comments === true) {
+      await commentsStep({ appOrigin, name, v1Id, fling, opts, step })
+    } else {
+      step('comments: turned off on this instance (skipped)')
+    }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
     // the name claim, the site and its index item in one conditional transaction; exactly one
@@ -320,6 +339,126 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     rmSync(work, { recursive: true, force: true })
   }
   step(`removed ${made.join(', ')}`)
+}
+
+interface CommentJson {
+  id: string
+  parentId: string | null
+  path: string
+  versionId: string | null
+  resolvedAt: string | null
+  canDelete: boolean
+  author: { kind: string; email?: string }
+}
+
+async function commentsStep(ctx: {
+  appOrigin: string
+  name: string
+  v1Id: string
+  fling: (...args: string[]) => Promise<unknown>
+  opts: ScenarioOptions
+  step: (line: string) => void
+}) {
+  const { appOrigin, name, v1Id, fling, opts, step } = ctx
+  const call = (session: Session | null, method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}/api/sites/${name}/comments${path}`, {
+      method,
+      headers: {
+        accept: 'application/json',
+        ...(session ? { authorization: `Bearer ${session.apiKey}` } : {}),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+
+  const thread = (await fling(
+    'comment',
+    name,
+    'The heading is too big',
+    '--path',
+    'docs/index.html'
+  )) as CommentJson
+  check(
+    thread.path === '/docs/' && thread.versionId === v1Id && thread.parentId === null,
+    `fling comment: ${JSON.stringify(thread)}`
+  )
+  step(`comment on ${name} /docs/ (on version ${v1Id})`)
+
+  const anonymous = await call(null, 'GET', '')
+  check(anonymous.status === 401, `anonymous comments list: ${anonymous.status}`)
+
+  let replyId: string | null = null
+  if (opts.member) {
+    const listed = await call(opts.member, 'GET', '?path=/docs/')
+    check(listed.status === 200, `member comments list: ${listed.status}`)
+    const view = (await listed.json()) as {
+      comments: CommentJson[]
+      can: { create: boolean; resolve: boolean; deleteAny: boolean }
+    }
+    check(
+      view.comments.length === 1 &&
+        view.comments[0]?.id === thread.id &&
+        !view.comments[0]?.canDelete,
+      `member's view: ${JSON.stringify(view.comments)}`
+    )
+    check(
+      view.can.create && view.can.resolve && !view.can.deleteAny,
+      `member may: ${JSON.stringify(view.can)}`
+    )
+    const replied = await call(opts.member, 'POST', '', { body: 'Agreed', parentId: thread.id })
+    check(replied.status === 201, `member reply: ${replied.status}`)
+    const reply = (await replied.json()) as CommentJson
+    replyId = reply.id
+    check(
+      reply.author.email === opts.member.email && reply.path === '/docs/',
+      `member reply: ${JSON.stringify(reply)}`
+    )
+    const refused = await call(opts.member, 'DELETE', `/${thread.id}`)
+    check(refused.status === 403, `member deleting the owner's comment: ${refused.status}`)
+    step("member: reads, replies, may not delete the owner's comment; anonymous: 401")
+  } else {
+    step('anonymous: 401 (no second user, so no member checks)')
+  }
+
+  await fling('resolve', name, thread.id)
+  const all = (await fling('comments', name, '--all')) as { comments: CommentJson[] }
+  const resolved = all.comments.find(c => c.id === thread.id)
+  check(resolved?.resolvedAt, `resolved thread: ${JSON.stringify(resolved)}`)
+  check(
+    all.comments.length === (replyId ? 2 : 1),
+    `comments after the reply: ${all.comments.length}`
+  )
+
+  // The remote MCP connector has the tools on this instance too.
+  const mcp = await fetch(`${appOrigin}/mcp`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${opts.session.apiKey}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-06-18',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'fling_comments_list', arguments: { name, includeResolved: true } },
+    }),
+  })
+  const listed = (
+    (await mcp.json()) as {
+      result?: { isError?: boolean; structuredContent?: { comments?: unknown[] } }
+    }
+  ).result
+  check(
+    listed && !listed.isError && listed.structuredContent?.comments?.length === all.comments.length,
+    `MCP fling_comments_list: ${JSON.stringify(listed)}`
+  )
+
+  await fling('uncomment', name, thread.id, '--yes')
+  const after = (await fling('comments', name, '--all')) as { comments: CommentJson[] }
+  check(after.comments.length === 0, `after deleting the thread: ${JSON.stringify(after.comments)}`)
+  step('resolved (CLI), listed (CLI and MCP), deleted with its reply (CLI)')
 }
 
 export { ScenarioError }

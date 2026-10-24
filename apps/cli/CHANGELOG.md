@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Comments: `fling comments`, `fling comment` (and `--reply`), `fling resolve`, `fling uncomment`;
+  the local MCP server gains `fling_comments_list`, `fling_comment_add`, `fling_comment_resolve`
+  and `fling_comment_delete` on an instance with the `comments` capability.
+
 ## 0.3.0
 
 **Breaking: no default server.** The CLI works with any Fling deployment, so it no longer has one

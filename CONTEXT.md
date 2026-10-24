@@ -35,8 +35,22 @@ verified email in `ALLOWED_EMAIL_DOMAINS`. A user is their email; the issuer's `
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **member** (any other signed-in user), **share** (holds its current share
-link), **anonymous**. Today only `site.view` reaches beyond the owner. A refusal looks like a
+link), **anonymous**. `site.view` and the comment actions reach beyond the owner. A refusal looks like a
 missing site (404).
+
+**Comment** — a note on one page of a site (`COMMENT#<id>` in the site's partition, ids sortable by
+time): a **thread** or a one-level **reply** to one. It records the page **path** and the version
+being served when it was written, so it outlives new versions; an optional **pin** is a point in
+the frame's viewport (percentages), not in the document. Owners and members read, write and
+resolve; authors delete their own, owners any. The author is a user (`{ kind: 'user', email }`) or,
+later, a **guest** (`{ kind: 'guest', name }`, a share-link viewer with a signed per-site cookie).
+
+**Review mode** — `/review/<name>` on the app origin: the site in an iframe, untouched (the edge
+only rewrites), beside its comments. The frame is another origin, so the page owns the path the
+comments attach to (its path bar) and cannot follow the frame's navigation or scroll. It needs
+the sites domain under the app's registrable domain: the `fling_site` cookie is on that parent, a
+same-site frame sends it, and nothing in front of the sites may forbid framing (the e2e checks).
+`COMMENTS=false` turns comments off (the `comments` capability).
 
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three

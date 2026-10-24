@@ -6,7 +6,8 @@
  *
  * The key belongs to a test user of the instance (create it in the web UI, API keys page) and is a
  * secret of the deploy workflow. Without a browser session there is no `fling_site` cookie, so the
- * private-site check is the sign-in redirect only.
+ * private-site check is the sign-in redirect only. FLING_E2E_MEMBER_API_KEY, a key of a second test
+ * user, adds what a member may do on the first one's site (comments); without it that is skipped.
  */
 import { parseArgs } from 'node:util'
 import { runScenario } from './scenario.ts'
@@ -27,10 +28,13 @@ if (!appOrigin || !apiKey) {
 console.log(`Smoke test: ${appOrigin}`)
 try {
   const session = await apiKeySession(appOrigin, apiKey)
+  const memberKey = process.env.FLING_E2E_MEMBER_API_KEY
+  const member = memberKey ? await apiKeySession(appOrigin, memberKey) : undefined
   const t0 = Date.now()
   await runScenario({
     appOrigin,
     session,
+    member,
     propagationMs: Number(args['propagation-seconds']) * 1000,
   })
   console.log(`  passed in ${((Date.now() - t0) / 1000).toFixed(1)} s`)

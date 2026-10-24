@@ -169,6 +169,20 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
+## Comments
+
+People review a site on its review page (`<your Fling>/review/<name>`, the **Review** button on the
+sites page): the site beside its comments. Anyone signed in who can open the site can comment; the
+CLI reads and writes the same threads.
+
+| Command | |
+|---|---|
+| `fling comments <name> [--path <page>] [--all]` | open threads (with replies) by page; `--all` adds resolved ones |
+| `fling comment <name> "text" [--path <page>]` | comment on a page (default `/`) |
+| `fling comment <name> "text" --reply <id>` | reply to a thread |
+| `fling resolve <name> <id> [--reopen]` | resolve a thread, or reopen it |
+| `fling uncomment <name> <id> [--yes]` | delete a comment (a thread with its replies): your own, or any on your site |
+
 Global options: `--json` prints machine-readable output, and `--server <url>` points one command at
 another server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 

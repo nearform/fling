@@ -58,7 +58,20 @@ const loginError = (c: Context<AppEnv>, code: string) =>
   c.redirect(`/login?error=${encodeURIComponent(code)}`, 302)
 
 const warn = (msg: string, err: unknown) =>
-  console.warn(JSON.stringify({ level: 'warn', msg, err: String(err) }))
+  console.warn(JSON.stringify({ level: 'warn', msg, err: String(err), ...oauthDetails(err) }))
+
+/** What the issuer said (oauth4webapi's ResponseBodyError and friends): never tokens or secrets. */
+function oauthDetails(err: unknown) {
+  if (!err || typeof err !== 'object') return {}
+  const e = err as Record<string, unknown>
+  const pick = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? v : undefined)
+  return {
+    code: pick(e.code),
+    status: pick(e.status),
+    error: pick(e.error),
+    error_description: pick(e.error_description),
+  }
+}
 
 async function sessionUser(c: Context<AppEnv>): Promise<User | null> {
   const { config, clock, store } = c.get('deps')

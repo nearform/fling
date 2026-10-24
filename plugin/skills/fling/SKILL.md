@@ -132,6 +132,18 @@ what to do. (If `fling` isn't installed, use `! npx @nearform/fling login <url>`
 - `fling_delete { name, confirm: true }` permanently removes the site and all versions. Only call
   it after the user has explicitly confirmed deleting that site.
 
+## Comments
+
+People review a site on its review page (`<their Fling>/review/<name>`) and leave comments on its
+pages. When the Fling has comments, these tools exist:
+
+- `fling_comments_list { name, path?, includeResolved? }` — open threads with replies, the page and
+  the version each was written on. Use it to act on feedback.
+- `fling_comment_resolve { name, id, reopen? }` — after fixing what a thread asks for (and
+  republishing), resolve it.
+- `fling_comment_add { name, body, path?, replyTo? }` and `fling_comment_delete { name, id }` —
+  only when the user asks: comments are signed with their name.
+
 ## Other tools
 
 - `fling_check_name { name }` or `{ path }` — is a name available / the user's / taken (with

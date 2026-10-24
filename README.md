@@ -8,6 +8,12 @@ the web UI read it from there, so none of them is tied to one instance. People s
 instance's OpenID Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its
 email domains.
 
+Anyone signed in can **review** a site they can open: `<app>/review/<name>` shows the site in a
+frame beside its comments, threads per page that can be replied to, resolved and deleted. The
+CLI (`fling comments`, `fling comment`), the MCP tools (`fling_comments_list`, …) and the web all
+use the same API. An instance turns comments off with `COMMENTS=false`; its metadata then lacks
+the `comments` capability and every client hides them.
+
 - **CLI**: `npm install -g @nearform/fling`, then `fling setup <your Fling's address>` (sign in, plus
   the Claude Code plugin and Claude Desktop extension) and `fling deploy ./dist`. Or run it without
   installing via `npx @nearform/fling`. See [apps/cli](apps/cli/README.md).

@@ -139,8 +139,9 @@ async function run(runtime: Runtime): Promise<boolean> {
     await waitForHealth(runtime.appOrigin, child, () => output.slice(-4000))
     console.log(`  started in ${((Date.now() - started) / 1000).toFixed(1)} s`)
     const session = await devLogin(runtime.appOrigin, 'e2e@example.test')
+    const member = await devLogin(runtime.appOrigin, 'e2e-member@example.test')
     const t0 = Date.now()
-    await runScenario({ appOrigin: runtime.appOrigin, session })
+    await runScenario({ appOrigin: runtime.appOrigin, session, member })
     console.log(`  passed in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
     return true
   } catch (err) {

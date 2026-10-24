@@ -1,6 +1,9 @@
+import { emailDomainsPhrase, type InstanceMetadata } from '@fling/shared'
 import { AuthCard } from '../components/AuthCard'
 import { ThreadBackground } from '../components/ThreadBackground'
+import { useInstance } from '../hooks/instance'
 import { loginUrl } from '../lib/api'
+import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 
 /** Google's G, in currentColor (from agentic-mapper ProviderIcons). */
 function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
@@ -20,19 +23,35 @@ function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
   )
 }
 
-// The API redirects failed Google sign-ins to /login?error=<code>.
-const LOGIN_ERRORS: Record<string, string> = {
-  domain_not_allowed: 'Fling is only for Nearform Google accounts (@nearform.com).',
-  email_unverified: 'Your Google account email is not verified.',
-  oauth_state_mismatch: 'Sign-in took too long or was started in another tab. Please try again.',
-  oauth_failed: 'Google sign-in failed. Please try again.',
+/** The message for a failed sign-in: the API redirects to /login?error=<code>. */
+export function loginErrorMessage(code: string, instance: InstanceMetadata | null): string {
+  const name = instance?.name ?? DEFAULT_INSTANCE_NAME
+  const provider = instance?.auth.displayName
+  const domains = instance ? emailDomainsPhrase(instance.auth) : null
+  switch (code) {
+    case 'domain_not_allowed':
+      return domains
+        ? `Only ${domains} accounts can sign in to ${name}.`
+        : `That account can't sign in to ${name}.`
+    case 'email_unverified':
+      return provider
+        ? `Your ${provider} account email is not verified.`
+        : 'Your account email is not verified.'
+    case 'oauth_state_mismatch':
+      return 'Sign-in took too long or was started in another tab. Please try again.'
+    default:
+      return `${provider ? `${provider} sign-in` : 'Sign-in'} failed. Please try again.`
+  }
 }
 
-/** Sign in: Google, Nearform accounts only. The API sends the browser back to this page. */
+/** Sign in with the instance's method; the API sends the browser back to this page. */
 export default function Login() {
+  const instance = useInstance()
+  const name = instance?.name ?? DEFAULT_INSTANCE_NAME
+  const domains = instance ? emailDomainsPhrase(instance.auth) : null
   const params = new URLSearchParams(window.location.search)
   const errorCode = params.get('error')
-  const error = errorCode ? (LOGIN_ERRORS[errorCode] ?? LOGIN_ERRORS.oauth_failed) : null
+  const error = errorCode ? loginErrorMessage(errorCode, instance) : null
   const signIn = () => {
     // From the /login error page, come back to the app home rather than to /login again.
     const back =
@@ -44,7 +63,7 @@ export default function Login() {
     <AuthCard backdrop={<ThreadBackground />}>
       <h1 className="text-lg font-semibold mb-1">Sign in</h1>
       <p className="text-sm text-secondary mb-5">
-        Fling puts a folder of static files online in one command. Sign in to see and manage your
+        {name} puts a folder of static files online in one command. Sign in to see and manage your
         links.
       </p>
       {error && (
@@ -57,10 +76,10 @@ export default function Login() {
         className="btn btn-outline w-full justify-start gap-3 font-normal"
         onClick={signIn}
       >
-        <GoogleIcon className="w-5 h-5" />
-        Sign in with Google
+        {instance?.auth.kind === 'google' && <GoogleIcon className="w-5 h-5" />}
+        Sign in{instance ? ` with ${instance.auth.displayName}` : ''}
       </button>
-      <p className="mt-4 text-xs text-muted">Nearform accounts only (@nearform.com).</p>
+      {domains && <p className="mt-4 text-xs text-muted">{domains} accounts only.</p>}
     </AuthCard>
   )
 }

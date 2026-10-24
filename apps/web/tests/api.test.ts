@@ -10,7 +10,7 @@ function respond(status: number, body?: unknown) {
   return fetchMock
 }
 
-const me = { email: 'a@nearform.com', name: 'A B', picture: null, userSlug: 'a' }
+const me = { email: 'a@example.test', name: 'A B', picture: null, userSlug: 'a' }
 
 afterEach(() => {
   vi.unstubAllGlobals()

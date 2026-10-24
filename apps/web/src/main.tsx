@@ -1,11 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-// Nearform typefaces, self-hosted: Inter carries all UI; Bitter ships one weight.
+// Inter, self-hosted, carries all UI.
 import '@fontsource/inter/latin-400.css'
 import '@fontsource/inter/latin-500.css'
 import '@fontsource/inter/latin-600.css'
-import '@fontsource/bitter/latin-700.css'
 import './index.css'
 
 const rootElement = document.getElementById('root')

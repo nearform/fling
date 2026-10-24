@@ -3,13 +3,13 @@ import { countLabel, filterSites, matchesQuery, queryTerms } from '../src/lib/se
 
 const site = (name: string, shareUrl: string | null = null) => ({
   name,
-  url: `https://${name}.fling.labs.nearform.com/`,
+  url: `https://${name}.sites.example.test/`,
   shareUrl,
 })
 
 const sites = [
   site('marketing-landing'),
-  site('q3-report', 'https://s--abc123.fling.labs.nearform.com/'),
+  site('q3-report', 'https://s--abc123.sites.example.test/'),
   site('design-system-docs'),
 ]
 
@@ -29,7 +29,7 @@ describe('site search', () => {
   })
 
   it('matches the URL and the share URL', () => {
-    expect(matchesQuery(sites[0], 'labs.nearform')).toBe(true)
+    expect(matchesQuery(sites[0], 'sites.example')).toBe(true)
     expect(filterSites(sites, 's--abc').map(s => s.name)).toEqual(['q3-report'])
   })
 
@@ -41,7 +41,7 @@ describe('site search', () => {
 
   it('keeps the original order and does not mutate the input', () => {
     const copy = [...sites]
-    expect(filterSites(sites, 'fling').map(s => s.name)).toEqual(copy.map(s => s.name))
+    expect(filterSites(sites, 'example').map(s => s.name)).toEqual(copy.map(s => s.name))
     expect(sites).toEqual(copy)
   })
 })

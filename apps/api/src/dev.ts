@@ -3,7 +3,8 @@
  * route table; pending data migrations run first, as a deploy runs them) and
  * the sites on :3002 — `http://<label>.fling.lvh.me:3002/…` runs the real edge/site-router.js (via
  * the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
- * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404.
+ * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404 (its
+ * `__APP_ORIGIN__` filled in, as the deploy does).
  */
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -101,7 +102,8 @@ sites.all('*', async c => {
   // Like the deployed 404 page: never cached, so it doesn't outlive a site that appears later.
   c.header('cache-control', 'no-store')
   try {
-    return c.html(await readFile(notFoundPage, 'utf8'), 404)
+    const page = await readFile(notFoundPage, 'utf8')
+    return c.html(page.replaceAll('__APP_ORIGIN__', config.appOrigin), 404)
   } catch {
     return c.text('Not found (build apps/web for the real 404 page)', 404)
   }

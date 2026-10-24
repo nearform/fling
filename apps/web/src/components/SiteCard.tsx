@@ -20,9 +20,11 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/outline'
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { useInstance } from '../hooks/instance'
 import { useSiteActions, useSiteDetail } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../lib/format'
+import { audienceFor, DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import { showToast } from '../lib/toast'
 import { ConfirmModal } from './ConfirmModal'
 import { CopyButton } from './CopyButton'
@@ -33,18 +35,20 @@ type Dialog = 'refresh-share' | 'revoke-share' | 'archive' | 'delete' | null
 type Panel = 'sharing' | 'files' | 'versions'
 
 export function VisibilityBadge({ visibility }: { visibility: Site['visibility'] }) {
+  const audience = audienceFor(useInstance())
   return visibility === 'public' ? (
     <span className="badge badge-sm tone-info gap-1" title="Anyone with the URL can open it">
       <GlobeAltIcon className="h-3 w-3" /> Public
     </span>
   ) : (
-    <span className="badge badge-sm tone-primary gap-1" title="Signed-in Nearformers only">
-      <LockClosedIcon className="h-3 w-3" /> Nearformers only
+    <span className="badge badge-sm tone-primary gap-1" title={`Private: open to ${audience}`}>
+      <LockClosedIcon className="h-3 w-3" /> Sign-in required
     </span>
   )
 }
 
 export function SiteCard({ site }: { site: Site }) {
+  const instance = useInstance()
   const actions = useSiteActions(site.name)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [open, setOpen] = useState<Record<Panel, boolean>>({
@@ -167,7 +171,7 @@ export function SiteCard({ site }: { site: Site }) {
                         )
                       }}
                     >
-                      {site.visibility === 'public' ? 'Make Nearformers only' : 'Make public'}
+                      {site.visibility === 'public' ? 'Make private' : 'Make public'}
                     </MenuItem>
                     {site.shareUrl ? (
                       <MenuItem
@@ -255,7 +259,7 @@ export function SiteCard({ site }: { site: Site }) {
             <p className="text-xs text-muted">
               {site.visibility === 'public'
                 ? 'Anyone with the URL can open it.'
-                : 'Only signed-in Nearformers can open it.'}
+                : `Private: open to ${audienceFor(instance)}.`}
             </p>
           </div>
 
@@ -308,7 +312,8 @@ export function SiteCard({ site }: { site: Site }) {
               </a>
             ) : (
               <p className="text-xs text-muted">
-                Lets anyone open the site without signing in — for people outside Nearform.
+                Lets anyone with the link open the site without signing in — for people who can’t
+                sign in.
               </p>
             )}
           </div>
@@ -342,7 +347,7 @@ export function SiteCard({ site }: { site: Site }) {
       <ConfirmModal
         isOpen={dialog === 'revoke-share'}
         title="Revoke the share link?"
-        message="The link stops working straight away. Nearformers can still open the site if it is private."
+        message={`The link stops working straight away. People signed in to ${instance?.name ?? DEFAULT_INSTANCE_NAME} can still open the site if it is private.`}
         confirmText="Revoke"
         confirmButtonClass="btn-error"
         isLoading={actions.revokeShare.isPending}

@@ -1,9 +1,10 @@
-import type { Connection } from '@fling/shared'
+import { type Connection, DEFAULT_INSTALL_COMMAND } from '@fling/shared'
 import { KeyIcon, LinkIcon, TrashIcon } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PageHeader } from '../components/PageHeader'
+import { useInstance } from '../hooks/instance'
 import { useApiKeys, useConnections, useRevokeConnection, useRevokeKey } from '../hooks/queries'
 import type { ApiKey } from '../lib/api'
 import { errorMessage } from '../lib/api'
@@ -101,6 +102,7 @@ type Pending = { kind: 'key'; item: ApiKey } | { kind: 'app'; item: Connection }
  * Claude connector). Revoking either signs it out at once.
  */
 export default function ApiKeys() {
+  const installCommand = useInstance()?.installCommand ?? DEFAULT_INSTALL_COMMAND
   const keys = useApiKeys()
   const apps = useConnections()
   const revokeKey = useRevokeKey()
@@ -154,8 +156,8 @@ export default function ApiKeys() {
         empty={
           <>
             <KeyIcon className="mx-auto mb-2 h-6 w-6 text-muted" />
-            No CLI logins yet. Run <code>fling login</code> (after{' '}
-            <code>npm install -g @nearform/fling</code>) to create one.
+            No CLI logins yet. Run <code>fling login</code> (after <code>{installCommand}</code>) to
+            create one.
           </>
         }
         onRevoke={id => {

@@ -1,7 +1,10 @@
+import { DEFAULT_INSTALL_COMMAND, instanceSiteUrl, REPO_SLUG } from '@fling/shared'
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import { CommandLine } from '../components/CopyButton'
 import { PageHeader } from '../components/PageHeader'
+import { useInstance } from '../hooks/instance'
+import { audienceFor, npxCommandFor } from '../lib/instance'
 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
@@ -19,31 +22,42 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 /** The CLI quick start — also rendered by the Sites page when there are no sites yet. */
 export function QuickStart() {
+  const instance = useInstance()
+  const installCommand = instance?.installCommand ?? DEFAULT_INSTALL_COMMAND
+  const npx = npxCommandFor(installCommand)
+  // The CLI has no default server: setup (and login) take this instance's address.
+  const setup = `fling setup ${instance?.appOrigin ?? window.location.origin}`
+  const signIn = instance ? `your ${instance.auth.displayName} account` : 'your account'
+  const example = instance
+    ? instanceSiteUrl(instance, 'my-app').replace(/\/$/, '')
+    : 'https://my-app.<sites domain>'
   return (
     <div className="space-y-4">
       <Step n={1} title="Install the CLI">
         <p className="text-sm text-secondary">
           Install it once and you get a <code>fling</code> command everywhere (Node 22 or later).
         </p>
-        <CommandLine command="npm install -g @nearform/fling" />
-        <p className="text-xs text-muted">
-          Can’t install globally? Every command also works as <code>npx @nearform/fling …</code>,
-          e.g. <code>npx @nearform/fling login</code>.
-        </p>
+        <CommandLine command={installCommand} />
+        {npx && (
+          <p className="text-xs text-muted">
+            Can’t install globally? Every command also works as <code>{npx} …</code>, e.g.{' '}
+            <code>{setup.replace(/^fling/, npx)}</code>.
+          </p>
+        )}
       </Step>
       <Step n={2} title="Set up">
         <p className="text-sm text-secondary">
-          Opens a browser to sign in with your Nearform Google account and stores a key in{' '}
+          Opens a browser to sign in with {signIn} and stores a key in{' '}
           <code>~/.fling/config.json</code>. If Claude Code or Claude Desktop is installed, it
           offers to add Fling to them too.
         </p>
-        <CommandLine command="fling setup" />
+        <CommandLine command={setup} />
       </Step>
       <Step n={3} title="Fling a folder">
         <p className="text-sm text-secondary">
-          Point it at your build output. You get back a stable URL,{' '}
-          <code>https://my-app.fling.labs.nearform.com</code>, that only signed-in Nearformers can
-          open. Fling it again to update; identical content is a no-op.
+          Point it at your build output. You get back a stable URL, <code>{example}</code>, that
+          only {audienceFor(instance)} can open. Fling it again to update; identical content is a
+          no-op.
         </p>
         <CommandLine command="fling deploy ./dist --name my-app" />
       </Step>
@@ -52,6 +66,7 @@ export function QuickStart() {
 }
 
 export default function GetStarted() {
+  const instance = useInstance()
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
@@ -66,7 +81,7 @@ export default function GetStarted() {
             <code>fling</code> skill and an MCP server that reuse your CLI login, so you can just
             ask Claude to “fling this”.
           </p>
-          <CommandLine command="/plugin marketplace add nearform/fling" />
+          <CommandLine command={`/plugin marketplace add ${REPO_SLUG}`} />
           <CommandLine command="/plugin install fling@fling" />
         </Step>
         <Step n={5} title="Add to Claude (Desktop, web, mobile)">
@@ -75,7 +90,8 @@ export default function GetStarted() {
             <strong className="font-medium text-base-content">
               Settings → Connectors → Add custom connector
             </strong>
-            , paste this URL, then click Connect and sign in with your Nearform Google account.
+            , paste this URL, then click Connect and sign in
+            {instance ? ` with your ${instance.auth.displayName} account` : ''}.
           </p>
           <CommandLine command={`${window.location.origin}/mcp`} />
           <p className="text-sm text-secondary">
@@ -114,10 +130,10 @@ export default function GetStarted() {
           <ul className="list-disc space-y-2 pl-5 text-secondary">
             <li>
               <strong className="font-medium text-base-content">Names:</strong> each site lives at{' '}
-              <code>&lt;name&gt;.fling.labs.nearform.com</code>. Names are shared across everyone
-              and first come, first served. If yours is taken, Fling suggests a free one with your
-              initials, like <code>my-app-cc</code>. Deleting a site frees its name; archiving keeps
-              it.
+              <code>&lt;name&gt;.{instance?.sitesDomain ?? '<sites domain>'}</code>. Names are
+              shared across everyone and first come, first served. If yours is taken, Fling suggests
+              a free one with your initials, like <code>my-app-cc</code>. Deleting a site frees its
+              name; archiving keeps it.
             </li>
             <li>
               <strong className="font-medium text-base-content">Single-page apps:</strong> add{' '}
@@ -126,13 +142,13 @@ export default function GetStarted() {
             </li>
             <li>
               <strong className="font-medium text-base-content">Private by default:</strong> sites
-              are visible to signed-in Nearformers only. Make one public with <code>--public</code>{' '}
-              or from the Sites page.
+              are visible to {audienceFor(instance)} only. Make one public with{' '}
+              <code>--public</code> or from the Sites page.
             </li>
             <li>
               <strong className="font-medium text-base-content">Share links:</strong> to show a
-              private site to someone outside Nearform, create a share link. Anyone with it can open
-              the site. Refresh it to rotate (the old link stops working) or revoke it.
+              private site to someone who can’t sign in, create a share link. Anyone with it can
+              open the site. Refresh it to rotate (the old link stops working) or revoke it.
             </li>
             <li>
               <strong className="font-medium text-base-content">Rollback:</strong> every fling is

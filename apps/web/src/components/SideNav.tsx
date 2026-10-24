@@ -7,7 +7,9 @@ import {
 } from '@heroicons/react/24/outline'
 import type { ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
+import { useInstance } from '../hooks/instance'
 import { useBooleanPreference } from '../hooks/useLocalStoragePreference'
+import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import { LogoMark } from './LogoMark'
 
 export interface NavItem {
@@ -37,6 +39,7 @@ function closeMobileDrawer() {
 export default function SideNav() {
   const { pathname } = useLocation()
   const [isCollapsed, setIsCollapsed] = useBooleanPreference('sideNavCollapsed', false)
+  const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
 
   return (
     <aside
@@ -48,13 +51,13 @@ export default function SideNav() {
           the top bar's. */}
       <Link
         to="/"
-        aria-label="Fling home"
+        aria-label={`${name} home`}
         className={`h-14 flex-none flex items-center gap-2.5 border-b border-[var(--border-default)] ${
           isCollapsed ? 'justify-center px-3' : 'px-4'
         }`}
       >
         <LogoMark className="w-6 h-6" />
-        {!isCollapsed && <span className="font-semibold tracking-tight">Fling</span>}
+        {!isCollapsed && <span className="font-semibold tracking-tight">{name}</span>}
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="Main">

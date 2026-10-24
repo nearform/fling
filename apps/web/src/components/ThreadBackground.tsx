@@ -5,19 +5,21 @@
  * every coil the head draws stays laid down behind it. A pointer near the head scares it off, and a
  * pointer near any strand parts it.
  *
- * Always dark (Midnight), whatever the theme; the thread runs Green → Blue → Purple and fades to the
- * tail. Colours are read from the `--nf-*` tokens at mount (no literals, `brand-tokens.test.ts`).
+ * Always dark (the ink), whatever the theme; the thread runs primary → accent → highlight and fades
+ * to the tail. Colours are resolved from the brand tokens in theme.css at mount (fallbacks only if
+ * the browser can't resolve them).
  * `prefers-reduced-motion` gets one settled, still frame. Purely decorative: `aria-hidden`, no
  * pointer events of its own (it listens on `window`).
  *
  * `contained` fits it to its positioned parent instead of the viewport (Home's greeting banner): a
  * shorter, slower thread, sized by a ResizeObserver, with pointer positions taken relative to the
  * parent. `paused` freezes it on its current frame without resetting it. `tone="light"` lays it on a
- * pale Midnight-10 ground instead: the thread is painted rather than added as light (which vanishes
- * on white), a touch stronger, with Blue for the middle so it holds against the ground. Switching
+ * pale ink-10 ground instead: the thread is painted rather than added as light (which vanishes
+ * on white), a touch stronger, with the full accent for the middle so it holds against the ground. Switching
  * tone repaints the current frame without restarting the thread.
  */
 import { useEffect, useRef } from 'react'
+import { useInstance } from '../hooks/instance'
 
 type Rgb = [number, number, number]
 
@@ -30,15 +32,32 @@ const SPEED = 2.4
 const FLEE_RADIUS = 200
 const PART_RADIUS = 90
 
+/**
+ * A theme token as RGB. Tokens may be any CSS colour (oklch, color-mix of others), so let the
+ * browser resolve it on a probe element, then paint it onto a 1×1 canvas and read the pixel back.
+ */
 function tokenRgb(name: string, fallback: Rgb): Rgb {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(raw)
-  return m
-    ? [Number.parseInt(m[1], 16), Number.parseInt(m[2], 16), Number.parseInt(m[3], 16)]
-    : fallback
+  try {
+    const probe = document.createElement('span')
+    probe.style.color = `var(${name})`
+    probe.style.display = 'none'
+    document.body.appendChild(probe)
+    const resolved = getComputedStyle(probe).color
+    probe.remove()
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    if (!ctx || !resolved) return fallback
+    ctx.fillStyle = resolved
+    ctx.fillRect(0, 0, 1, 1)
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data
+    return [r, g, b]
+  } catch {
+    return fallback
+  }
 }
 
-/** Green at the head, Blue through the middle, Purple at the tail. */
+/** Primary at the head, the accent through the middle, the highlight at the tail. */
 function threadColour(t: number, stops: Rgb[]): Rgb {
   const scaled = t * (stops.length - 1)
   const i = Math.min(Math.floor(scaled), stops.length - 2)
@@ -55,9 +74,9 @@ function angleDelta(from: number, to: number) {
 export type ThreadTone = 'dark' | 'light'
 
 const GROUNDS: Record<ThreadTone, string> = {
-  dark: 'radial-gradient(ellipse at 50% 40%, var(--nf-midnight) 0%, var(--nf-dark-bg) 75%)',
+  dark: 'radial-gradient(ellipse at 50% 40%, var(--ink) 0%, var(--dark-bg) 75%)',
   light:
-    'radial-gradient(ellipse at 20% 0%, var(--nf-green-10) 0%, transparent 60%), radial-gradient(ellipse at 90% 100%, var(--nf-purple-10) 0%, transparent 60%), var(--nf-midnight-10)',
+    'radial-gradient(ellipse at 20% 0%, var(--primary-10) 0%, transparent 60%), radial-gradient(ellipse at 90% 100%, var(--highlight-10) 0%, transparent 60%), var(--ink-10)',
 }
 
 export function ThreadBackground({
@@ -74,17 +93,20 @@ export function ThreadBackground({
   pausedRef.current = paused
   const toneRef = useRef(tone)
   const repaintRef = useRef<() => void>(() => {})
+  // The colours are resolved at mount: start again when the instance's brand changes them.
+  const brandKey = JSON.stringify(useInstance()?.brand.colors ?? null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: brandKey only signals a re-read
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
     if (!canvas || !ctx) return
 
-    const green = tokenRgb('--nf-green', [0, 229, 164])
-    const purple = tokenRgb('--nf-purple', [137, 80, 255])
+    const primary = tokenRgb('--primary', [91, 91, 214])
+    const highlight = tokenRgb('--highlight', [160, 90, 230])
     const palettes: Record<ThreadTone, Rgb[]> = {
-      dark: [green, tokenRgb('--nf-blue-80', [69, 137, 255]), purple],
-      light: [green, tokenRgb('--nf-blue', [22, 107, 255]), purple],
+      dark: [primary, tokenRgb('--accent-80', [90, 130, 240]), highlight],
+      light: [primary, tokenRgb('--accent', [50, 100, 230]), highlight],
     }
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
@@ -189,7 +211,7 @@ export function ThreadBackground({
       ctx.clearRect(0, 0, width, height)
       const light = toneRef.current === 'light'
       const stops = palettes[toneRef.current]
-      // Added light glows on Midnight but vanishes on white: on a light ground paint it, stronger.
+      // Added light glows on the ink but vanishes on white: on a light ground paint it, stronger.
       const strength = light ? 1.5 : 1
       ctx.globalCompositeOperation = light ? 'source-over' : 'lighter'
       ctx.lineCap = 'round'
@@ -272,7 +294,7 @@ export function ThreadBackground({
       window.removeEventListener('pointermove', onMove)
       document.documentElement.removeEventListener('pointerleave', onLeave)
     }
-  }, [contained])
+  }, [contained, brandKey])
 
   // A theme switch repaints the current frame in the new tone, a paused thread included.
   useEffect(() => {

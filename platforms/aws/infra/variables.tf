@@ -82,10 +82,10 @@ variable "environment" {
 
 variable "instance" {
   description = <<-EOT
-    The instance's own values (ALLOWED_EMAIL_DOMAINS, OIDC_ISSUER, OIDC_CLIENT_ID, INSTANCE_NAME,
-    BRAND_*...; see platforms/aws/DEPLOY.md, Instance configuration), passed through as INSTANCE in the deploy
-    output. The deploy workflow writes them into the function's bundle, so they need no apply to
-    reach it, only a redeploy. Empty: the deploy output has no INSTANCE (add it yourself).
+    The instance's own values (ALLOWED_EMAIL_DOMAINS and/or ALLOWED_EMAILS, OIDC_ISSUER,
+    OIDC_CLIENT_ID, INSTANCE_NAME, BRAND_*...; see platforms/aws/DEPLOY.md, Instance configuration),
+    passed through as INSTANCE in the deploy output. The deploy workflow writes them into the
+    function's bundle, so they need no apply to reach it, only a redeploy. Empty: the deploy output has no INSTANCE (add it yourself).
   EOT
   type        = map(string)
   default     = {}

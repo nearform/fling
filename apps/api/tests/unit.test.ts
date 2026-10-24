@@ -33,6 +33,39 @@ describe('admitIdentity', () => {
     const several = { allowedDomains: ['x.test', 'b.test'] }
     expect(admitIdentity(id({ email: 'a@b.test', emailVerified: true }), several).ok).toBe(true)
   })
+  describe('with ALLOWED_EMAILS', () => {
+    const invited = { allowedDomains: ['example.test'], allowedEmails: ['me@gmail.test'] }
+    const personal = { allowedDomains: [], allowedEmails: ['me@gmail.test'] }
+    it('admits a listed address on an unlisted domain, case-insensitively', () => {
+      for (const p of [invited, personal]) {
+        expect(admitIdentity(id({ email: 'Me@Gmail.TEST', emailVerified: true }), p)).toEqual({
+          ok: true,
+          email: 'me@gmail.test',
+          name: 'me',
+          picture: null,
+        })
+      }
+      const upper = { allowedDomains: [], allowedEmails: ['ME@GMAIL.TEST'] }
+      expect(admitIdentity(id({ email: 'me@gmail.test', emailVerified: true }), upper).ok).toBe(
+        true
+      )
+    })
+    it('still admits the allowed domains', () => {
+      expect(admitIdentity(id({ email: 'a@example.test', emailVerified: true }), invited).ok).toBe(
+        true
+      )
+    })
+    it.each([
+      [{ email: 'you@gmail.test', emailVerified: true }, 'domain_not_allowed'],
+      [{ email: 'a@example.test', emailVerified: true }, 'domain_not_allowed'],
+      [{ email: 'me@gmail.test.evil.io', emailVerified: true }, 'domain_not_allowed'],
+      [{ email: 'me@gmail.test', emailVerified: false }, 'email_unverified'],
+      [{ email: 'me@gmail.test' }, 'email_unverified'],
+      [{ email: 'me@gmail.test', emailVerified: true, hd: 'example.test' }, 'domain_not_allowed'],
+    ])('a personal instance rejects %j', (claims, reason) => {
+      expect(admitIdentity(id(claims), personal)).toEqual({ ok: false, reason })
+    })
+  })
   it('assumeEmailVerified covers a missing claim only', () => {
     const trusting = { ...policy, assumeEmailVerified: true }
     expect(admitIdentity(id({ email: 'a@example.test' }), trusting).ok).toBe(true)

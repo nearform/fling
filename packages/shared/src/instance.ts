@@ -21,13 +21,16 @@ const color = z.string().regex(HEX_COLOR_RE)
 /**
  * How people sign in. `kind` names the method: `oidc` (the instance's OpenID Connect `issuer`) or
  * `dev` (local dev login); clients show `displayName` ("Sign in with …") and must tolerate kinds
- * they don't know. `emailDomains` is the allowlist a verified email must match.
+ * they don't know. A verified email gets in if its domain is in `emailDomains`, or if it is one of
+ * the instance's invited addresses (`invitedEmails`: there are some; the addresses themselves are
+ * never published).
  */
 export const InstanceAuthSchema = z.looseObject({
   kind: z.string().min(1),
   displayName: z.string().min(1),
   issuer: z.string().optional(),
   emailDomains: z.array(z.string()).default([]),
+  invitedEmails: z.boolean().optional(),
 })
 export type InstanceAuth = z.infer<typeof InstanceAuthSchema>
 
@@ -112,11 +115,23 @@ export function emailDomainsPhrase(auth: Pick<InstanceAuth, 'emailDomains'>): st
 }
 
 /**
+ * The accounts that may sign in, for copy: `@example.test accounts`, `invited accounts`,
+ * `@example.test accounts and invited accounts`, or null when any verified email may sign in.
+ */
+export function allowedAccountsPhrase(
+  auth: Pick<InstanceAuth, 'emailDomains' | 'invitedEmails'>
+): string | null {
+  const domains = emailDomainsPhrase(auth)
+  const parts = [domains && `${domains} accounts`, auth.invitedEmails && 'invited accounts']
+  return parts.filter(Boolean).join(' and ') || null
+}
+
+/**
  * Who may open a private site, for copy: "anyone signed in to Fling (@example.test accounts)".
  */
 export function privateAudience(instance: Pick<InstanceMetadata, 'name' | 'auth'>): string {
-  const domains = emailDomainsPhrase(instance.auth)
-  return `anyone signed in to ${instance.name}${domains ? ` (${domains} accounts)` : ''}`
+  const accounts = allowedAccountsPhrase(instance.auth)
+  return `anyone signed in to ${instance.name}${accounts ? ` (${accounts})` : ''}`
 }
 
 /** The metadata URL of the instance at `serverUrl`. */

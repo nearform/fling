@@ -30,7 +30,9 @@ Publication is the guarantee.
 **Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
 `IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
 **email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from it, decides who gets in: a
-verified email in `ALLOWED_EMAIL_DOMAINS`. A user is their email; the issuer's `sub` is not stored.
+verified email listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS` (production
+needs at least one; the public metadata names the domains, never the addresses). A user is their
+email; the issuer's `sub` is not stored.
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:

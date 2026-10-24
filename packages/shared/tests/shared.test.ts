@@ -9,6 +9,7 @@ import {
   slugify,
   userSlugFromEmail,
 } from '../src/hosts.ts'
+import { allowedAccountsPhrase, InstanceAuthSchema, privateAudience } from '../src/instance.ts'
 import { isValidSitePath } from '../src/manifest.ts'
 import { signSiteCookie, verifySiteCookie } from '../src/site-cookie.ts'
 import { computeVersionId } from '../src/version-id.ts'
@@ -110,5 +111,31 @@ describe('cacheControlFor', () => {
       expect([p, isHashedFileName(p)]).toEqual([p, false])
       expect(cacheControlFor(p)).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
     }
+  })
+})
+
+describe('who may sign in, for copy', () => {
+  const auth = (emailDomains: string[], invitedEmails?: boolean) => ({
+    kind: 'oidc',
+    displayName: 'Google',
+    emailDomains,
+    ...(invitedEmails !== undefined && { invitedEmails }),
+  })
+  it.each([
+    [auth(['example.test']), '@example.test accounts'],
+    [auth(['a.test', 'b.test']), '@a.test or @b.test accounts'],
+    [auth([], true), 'invited accounts'],
+    [auth(['example.test'], true), '@example.test accounts and invited accounts'],
+    [auth([], false), null],
+    [auth([]), null],
+  ])('%j → %s', (a, phrase) => {
+    expect(allowedAccountsPhrase(a)).toBe(phrase)
+    expect(privateAudience({ name: 'Fling', auth: a })).toBe(
+      `anyone signed in to Fling${phrase ? ` (${phrase})` : ''}`
+    )
+  })
+  it('reads metadata with or without invitedEmails', () => {
+    expect(InstanceAuthSchema.parse(auth(['example.test'])).invitedEmails).toBeUndefined()
+    expect(InstanceAuthSchema.parse(auth([], true)).invitedEmails).toBe(true)
   })
 })

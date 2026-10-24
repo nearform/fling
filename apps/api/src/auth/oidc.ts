@@ -45,12 +45,19 @@ export interface OidcSettings {
 }
 
 /** What a few well-known issuers are called, and what their sign-in page wants. */
-function issuerDefaults(issuer: string, allowedDomains: string[]) {
+function issuerDefaults(
+  issuer: string,
+  allowed: Pick<Config, 'allowedEmailDomains' | 'allowedEmails'>
+) {
   const host = new URL(issuer).hostname
   if (issuer === GOOGLE_ISSUER) {
     const authParams: Record<string, string> = { prompt: 'select_account' }
-    // A UI hint only: admitIdentity is what enforces the domain.
-    if (allowedDomains.length === 1) authParams.hd = allowedDomains[0] as string
+    // A UI hint only: admitIdentity is what enforces the domain. Not with ALLOWED_EMAILS: Google
+    // would then refuse a listed address on another domain (e.g. @gmail.com).
+    const domains = allowed.allowedEmailDomains
+    if (domains.length === 1 && allowed.allowedEmails.length === 0) {
+      authParams.hd = domains[0] as string
+    }
     return { displayName: 'Google', authParams }
   }
   if (host === 'login.microsoftonline.com') {
@@ -67,7 +74,7 @@ function issuerDefaults(issuer: string, allowedDomains: string[]) {
  * map to https://accounts.google.com on the callback their OAuth client already allows.
  */
 export function oidcSettings(config: Config): OidcSettings | null {
-  const { oidc, secrets, appOrigin, allowedEmailDomains } = config
+  const { oidc, secrets, appOrigin } = config
   let base: Pick<OidcSettings, 'issuer' | 'clientId' | 'clientSecret' | 'redirectUri' | 'legacy'>
   if (oidc.issuer && oidc.clientId) {
     if (!secrets.oidcClientSecret) {
@@ -94,7 +101,7 @@ export function oidcSettings(config: Config): OidcSettings | null {
     }
     return null
   }
-  const defaults = issuerDefaults(base.issuer, allowedEmailDomains)
+  const defaults = issuerDefaults(base.issuer, config)
   return {
     ...base,
     displayName: oidc.displayName ?? defaults.displayName,

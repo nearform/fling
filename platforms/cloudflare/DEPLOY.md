@@ -70,6 +70,9 @@ version's file, a sign-in redirect or the 404 page.
      --oidc-issuer https://accounts.google.com --oidc-client-id <client id> --location weur
    ```
 
+   For a personal instance, admit individual addresses with `--allowed-emails you@gmail.com`
+   instead of (or as well as) `--email-domains`.
+
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
    namespace unless they exist, writes the deploy config to
    `platforms/cloudflare/deploy-config.json` (gitignored; nothing in it is secret) and the
@@ -119,7 +122,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` (required), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars |
 
 The rendered config replaces the template's local-development vars wholesale: production gets
 `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME=https`, `SITE_COOKIE_DOMAIN` (the
@@ -187,7 +190,7 @@ make it private (anonymous visitors are sent to sign in), a share link, four con
 deploys of one name (conditional writes: exactly one site), an MCP publish, then it removes the
 three sites it made (`e2e-<random>…`).
 
-It signs in with an API key: as a test user that `ALLOWED_EMAIL_DOMAINS` admits, run
+It signs in with an API key: as a test user that `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` admits, run
 `FLING_CONFIG_DIR=$(mktemp -d) fling login https://$APP_HOST` and take `apiKey` from the
 `config.json` in that directory (revoke it any time on the web UI's API keys page), and store it as
 the `FLING_E2E_API_KEY` secret. Without it the deploy warns and skips the test. By hand:

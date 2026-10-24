@@ -1,4 +1,4 @@
-import { emailDomainsPhrase, type InstanceMetadata } from '@fling/shared'
+import { allowedAccountsPhrase, type InstanceMetadata } from '@fling/shared'
 import { AuthCard } from '../components/AuthCard'
 import { ThreadBackground } from '../components/ThreadBackground'
 import { useInstance } from '../hooks/instance'
@@ -30,11 +30,11 @@ function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
 export function loginErrorMessage(code: string, instance: InstanceMetadata | null): string {
   const name = instance?.name ?? DEFAULT_INSTANCE_NAME
   const provider = instance?.auth.displayName
-  const domains = instance ? emailDomainsPhrase(instance.auth) : null
+  const accounts = instance ? allowedAccountsPhrase(instance.auth) : null
   switch (code) {
     case 'domain_not_allowed':
-      return domains
-        ? `Only ${domains} accounts can sign in to ${name}.`
+      return accounts
+        ? `Only ${accounts} can sign in to ${name}.`
         : `That account can't sign in to ${name}.`
     case 'email_unverified':
       return provider
@@ -51,7 +51,7 @@ export function loginErrorMessage(code: string, instance: InstanceMetadata | nul
 export default function Login() {
   const instance = useInstance()
   const name = instance?.name ?? DEFAULT_INSTANCE_NAME
-  const domains = instance ? emailDomainsPhrase(instance.auth) : null
+  const accounts = instance ? allowedAccountsPhrase(instance.auth) : null
   const params = new URLSearchParams(window.location.search)
   const errorCode = params.get('error')
   const error = errorCode ? loginErrorMessage(errorCode, instance) : null
@@ -82,7 +82,11 @@ export default function Login() {
         {instance?.auth.issuer === GOOGLE_ISSUER && <GoogleIcon className="w-5 h-5" />}
         Sign in{instance ? ` with ${instance.auth.displayName}` : ''}
       </button>
-      {domains && <p className="mt-4 text-xs text-muted">{domains} accounts only.</p>}
+      {accounts && (
+        <p className="mt-4 text-xs text-muted">
+          {accounts.charAt(0).toUpperCase() + accounts.slice(1)} only.
+        </p>
+      )}
     </AuthCard>
   )
 }

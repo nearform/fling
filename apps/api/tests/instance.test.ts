@@ -37,6 +37,24 @@ describe('GET /.well-known/fling', () => {
     })
   })
 
+  it('says there are invited addresses, never which', async () => {
+    const base = loadBaseConfig({
+      ALLOWED_EMAIL_DOMAINS: 'example.test',
+      ALLOWED_EMAILS: 'Me@Gmail.test, other@elsewhere.test',
+    })
+    const env = setup({ allowedEmails: base.allowedEmails })
+    const text = await (await env.app.request(INSTANCE_METADATA_PATH)).text()
+    expect(text).not.toMatch(/gmail|elsewhere/i)
+    expect(JSON.parse(text).auth).toEqual({
+      kind: 'oidc',
+      issuer: 'https://idp.example.test',
+      displayName: 'idp.example.test',
+      emailDomains: ['example.test'],
+      invitedEmails: true,
+    })
+    expect(InstanceMetadataSchema.parse(JSON.parse(text)).auth.invitedEmails).toBe(true)
+  })
+
   it('carries the configured name, brand and install command', async () => {
     const base = loadBaseConfig({
       APP_ENV: 'development',
@@ -75,11 +93,34 @@ describe('instance config', () => {
   }
 
   it('requires the email allowlist in production (never a built-in default)', () => {
-    expect(() => loadBaseConfig(prod)).toThrow(/ALLOWED_EMAIL_DOMAINS is required/)
+    expect(() => loadBaseConfig(prod)).toThrow(
+      /ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS is required/
+    )
+    expect(() => loadBaseConfig({ ...prod, ALLOWED_EMAILS: ' , ' })).toThrow()
     expect(loadBaseConfig({ ...prod, ALLOWED_EMAIL_DOMAINS: 'A.test, b.test' })).toMatchObject({
       allowedEmailDomains: ['a.test', 'b.test'],
+      allowedEmails: [],
     })
     expect(loadBaseConfig({}).allowedEmailDomains).toEqual(['example.test'])
+    expect(loadBaseConfig({}).allowedEmails).toEqual([])
+  })
+
+  it('takes individual addresses instead of, or as well as, domains', () => {
+    expect(
+      loadBaseConfig({ ...prod, ALLOWED_EMAILS: ' Me@Gmail.test ,you@gmail.test' })
+    ).toMatchObject({ allowedEmailDomains: [], allowedEmails: ['me@gmail.test', 'you@gmail.test'] })
+    expect(
+      loadBaseConfig({
+        ...prod,
+        ALLOWED_EMAIL_DOMAINS: 'example.test',
+        ALLOWED_EMAILS: 'me@gmail.test',
+      })
+    ).toMatchObject({ allowedEmailDomains: ['example.test'], allowedEmails: ['me@gmail.test'] })
+    // In dev too: listing addresses doesn't also let in the dev default domain.
+    expect(loadBaseConfig({ ALLOWED_EMAILS: 'me@gmail.test' }).allowedEmailDomains).toEqual([])
+    for (const bad of ['gmail.test', 'me@', '@gmail.test', 'a b@gmail.test', 'me@gmail.test,x']) {
+      expect(() => loadBaseConfig({ ...prod, ALLOWED_EMAILS: bad }), bad).toThrow()
+    }
   })
 
   it('accepts only hex brand colours and http(s)/data:image asset URLs', () => {

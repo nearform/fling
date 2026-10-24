@@ -1,7 +1,7 @@
 import { SITE_COOKIE_NAME, verifySiteCookie } from '@fling/shared/site-cookie'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GOOGLE_ISSUER, oidcSettings } from '../src/auth/oidc.ts'
-import { loadBaseConfig } from '../src/config.ts'
+import { type Config, loadBaseConfig } from '../src/config.ts'
 import { instanceMetadata } from '../src/instance.ts'
 import { APP_ORIGIN, cookiesOf, type Env, json, setup, testConfig } from './helpers.ts'
 import { type Tamper, testIdp } from './idp.ts'
@@ -170,6 +170,15 @@ describe('OIDC sign-in', () => {
     expect(await env.store.getUser('eve@elsewhere.test')).toBeNull()
   })
 
+  it('admits an address listed in ALLOWED_EMAILS on a domain that is not allowed', async () => {
+    env = setup({ allowedEmails: ['me@gmail.test'] })
+    const res = await signIn(env, { tamper: { claims: { email: 'Me@gmail.test' } } })
+    expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
+    expect(await env.store.getUser('me@gmail.test')).not.toBeNull()
+    const other = await signIn(env, { tamper: { claims: { email: 'you@gmail.test' } } })
+    expect(errorOf(other)).toBe('/login?error=domain_not_allowed')
+  })
+
   it('OIDC_ASSUME_EMAIL_VERIFIED trusts a missing email_verified, never an explicit false', async () => {
     const config = testConfig()
     env = setup({ oidc: { ...config.oidc, assumeEmailVerified: true } })
@@ -228,6 +237,20 @@ describe('legacy Google config', () => {
       issuer: GOOGLE_ISSUER,
       displayName: 'Google',
       emailDomains: ['example.test'],
+    })
+  })
+
+  it("drops Google's hd hint when it would turn away an invited address", () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const params = (overrides: Partial<Config>) =>
+      oidcSettings(setup({ ...legacy(), ...overrides }, googleIdp()).config)?.authParams
+    expect(params({})).toEqual({ prompt: 'select_account', hd: 'example.test' })
+    expect(params({ allowedEmails: ['me@gmail.test'] })).toEqual({ prompt: 'select_account' })
+    expect(params({ allowedEmailDomains: [], allowedEmails: ['me@gmail.test'] })).toEqual({
+      prompt: 'select_account',
+    })
+    expect(params({ allowedEmailDomains: ['a.test', 'b.test'] })).toEqual({
+      prompt: 'select_account',
     })
   })
 

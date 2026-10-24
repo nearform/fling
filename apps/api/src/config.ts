@@ -24,6 +24,9 @@ const csvLower = z.preprocess(
   z.array(z.string().min(1)).min(1)
 )
 
+/** A full email address, as ALLOWED_EMAILS lists them. */
+const EMAIL_RE = /^[^@\s]+@[^@\s]+$/
+
 const hexColor = z.preprocess(blank, z.string().regex(HEX_COLOR_RE).optional())
 
 /** A logo/favicon: https: (or http: for local dev), or an inline data: image. */
@@ -55,8 +58,15 @@ const envSchema = z.object({
   SITES_DOMAIN: z.preprocess(blank, z.string().min(1).default('localhost:47102')),
   SITE_SCHEME: z.preprocess(blank, z.enum(['http', 'https']).optional()),
   SITE_COOKIE_DOMAIN: z.preprocess(blank, z.string().min(1).default('localhost')),
-  /** Required in production: who may sign in. Dev/tests fall back to DEV_EMAIL_DOMAINS. */
+  /**
+   * Who may sign in: whole domains and/or individual addresses. Production needs at least one;
+   * with neither, dev/tests fall back to DEV_EMAIL_DOMAINS.
+   */
   ALLOWED_EMAIL_DOMAINS: z.preprocess(blank, csvLower.optional()),
+  ALLOWED_EMAILS: z.preprocess(
+    blank,
+    csvLower.pipe(z.array(z.string().regex(EMAIL_RE, 'must be an email address'))).optional()
+  ),
   INSTANCE_NAME: z.preprocess(blank, z.string().min(1).max(60).default('Fling')),
   INSTALL_COMMAND: z.preprocess(blank, z.string().min(1).default(DEFAULT_INSTALL_COMMAND)),
   BRAND_LOGO_URL: assetUrl,
@@ -95,7 +105,7 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   'loopback',
 ]
 
-/** Who may sign in to a dev/test instance when ALLOWED_EMAIL_DOMAINS is unset. */
+/** Who may sign in to a dev/test instance when no ALLOWED_EMAIL_DOMAINS/ALLOWED_EMAILS is set. */
 export const DEV_EMAIL_DOMAINS = ['example.test']
 
 export interface Secrets {
@@ -138,6 +148,8 @@ export interface Config {
   siteScheme: 'http' | 'https'
   siteCookieDomain: string
   allowedEmailDomains: string[]
+  /** Individual addresses admitted whatever their domain (`ALLOWED_EMAILS`). Never published. */
+  allowedEmails: string[]
   /** Logo, favicon and colours the web applies (`BRAND_*`); empty → the neutral default. */
   brand: InstanceBrand
   /** How the instance tells people to install the CLI (`INSTALL_COMMAND`). */
@@ -177,8 +189,10 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
   const production = e.APP_ENV === 'production'
   const appOrigin = new URL(e.APP_ORIGIN).origin
   const siteScheme = e.SITE_SCHEME ?? (production ? 'https' : 'http')
-  if (production && !e.ALLOWED_EMAIL_DOMAINS) {
-    throw new Error('ALLOWED_EMAIL_DOMAINS is required in production (e.g. example.test)')
+  if (production && !e.ALLOWED_EMAIL_DOMAINS && !e.ALLOWED_EMAILS) {
+    throw new Error(
+      'ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS is required in production (e.g. example.test or you@example.test)'
+    )
   }
   if (Boolean(e.OIDC_ISSUER) !== Boolean(e.OIDC_CLIENT_ID)) {
     throw new Error('OIDC_ISSUER and OIDC_CLIENT_ID go together')
@@ -200,7 +214,8 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     sitesDomain: e.SITES_DOMAIN.toLowerCase(),
     siteScheme,
     siteCookieDomain: e.SITE_COOKIE_DOMAIN,
-    allowedEmailDomains: e.ALLOWED_EMAIL_DOMAINS ?? DEV_EMAIL_DOMAINS,
+    allowedEmailDomains: e.ALLOWED_EMAIL_DOMAINS ?? (e.ALLOWED_EMAILS ? [] : DEV_EMAIL_DOMAINS),
+    allowedEmails: e.ALLOWED_EMAILS ?? [],
     brand: definedOnly({
       logoUrl: e.BRAND_LOGO_URL,
       logoDarkUrl: e.BRAND_LOGO_DARK_URL,

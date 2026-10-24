@@ -1,8 +1,8 @@
 {
   "name": "@nearform/fling",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
-  "description": "Fling a folder of static files at fling.labs.nearform.com and get a link back. CLI + MCP server.",
+  "description": "Fling a folder of static files at a Fling server and get a link back. CLI + MCP server.",
   "type": "module",
   "bin": {
     "fling": "./dist/cli.js"
@@ -10,7 +10,8 @@
   "files": [
     "dist/cli.js",
     "dist/cli.js.map",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22"

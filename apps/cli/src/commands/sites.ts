@@ -160,7 +160,7 @@ export async function runVisibility(
   ctx.log.success(
     site.visibility === 'public'
       ? `${name} is public — no sign-in needed`
-      : `${name} is private — Nearform sign-in required`
+      : `${name} is private — sign-in required`
   )
   ctx.out.data(site, () => site.url)
 }

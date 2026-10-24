@@ -7,10 +7,11 @@ import { execFile } from 'node:child_process'
 import { access, mkdtemp, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { REPO_SLUG } from '@fling/shared'
 import type { FetchLike } from './api.ts'
 
 /** The marketplace (this repo) and the plugin in it. */
-export const MARKETPLACE_SOURCE = 'nearform/fling'
+export const MARKETPLACE_SOURCE = REPO_SLUG
 export const MARKETPLACE_NAME = 'fling'
 export const PLUGIN_NAME = 'fling'
 export const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`

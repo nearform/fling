@@ -1,3 +1,4 @@
+import { REPO_SLUG } from '@fling/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ClaudeResult } from '../src/claude.ts'
 import { runSetup } from '../src/commands/setup.ts'
@@ -8,7 +9,7 @@ afterEach(async () => {
   process.exitCode = undefined
 })
 
-const me = { email: 'ada@nearform.com', name: 'Ada', picture: null, userSlug: 'ada' }
+const me = { email: 'ada@example.test', name: 'Ada', picture: null, userSlug: 'ada' }
 
 /** A fake `claude` that answers by subcommand and records every call. */
 function fakeClaude(answers: Record<string, Partial<ClaudeResult>>) {
@@ -27,7 +28,7 @@ async function setupCtx() {
 }
 
 describe('fling setup', () => {
-  it('installs the Claude Code plugin from the nearform/fling marketplace', async () => {
+  it('installs the Claude Code plugin from the repository marketplace', async () => {
     const claude = fakeClaude({
       '--version': { stdout: '2.1.0 (Claude Code)' },
       'plugin list': { stdout: '[]' },
@@ -43,7 +44,7 @@ describe('fling setup', () => {
       'install',
       'fling',
       '--marketplace',
-      'nearform/fling',
+      REPO_SLUG,
       '-s',
       'user',
     ])
@@ -81,7 +82,7 @@ describe('fling setup', () => {
       { runClaude: missing.run, findClaudeDesktop: async () => null }
     )
     expect(JSON.parse(a.out.content()).claudeCode).toBe('missing')
-    expect(a.log.lines.join('\n')).toMatch(/\/plugin marketplace add nearform\/fling/)
+    expect(a.log.lines.join('\n')).toContain(`/plugin marketplace add ${REPO_SLUG}`)
     expect(process.exitCode).toBeUndefined()
 
     const broken = fakeClaude({

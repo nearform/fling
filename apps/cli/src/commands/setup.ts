@@ -1,7 +1,8 @@
 /**
- * `fling setup [--yes] [--scope user|project|local]` — get a machine ready in one go:
+ * `fling setup [url] [--yes] [--scope user|project|local]` — get a machine ready in one go:
  *
- *   1. Sign in (skipped when the stored key still works).
+ *   1. Sign in, to the Fling at `url` (needed the first time: there is no default server); skipped
+ *      when the stored key for that server still works.
  *   2. Claude Code: install the Fling plugin (skill + MCP server) through the `claude` CLI, or
  *      update it when it is already installed. Skipped, with a hint, when `claude` is missing.
  *   3. Claude Desktop (macOS / Windows, when it is installed): download fling.mcpb and open it;
@@ -25,7 +26,8 @@ import {
   runClaude,
   updatePlugin,
 } from '../claude.ts'
-import { type CommandContext, requireClient } from '../context.ts'
+import { normalizeServerUrl } from '../config.ts'
+import { type CommandContext, requireClient, requireServer } from '../context.ts'
 import { CliError, exitCodeFor } from '../errors.ts'
 import { whoami } from '../sites.ts'
 import { logo } from '../ui/theme.ts'
@@ -35,6 +37,8 @@ import { runLogin } from './auth.ts'
 export interface SetupOptions {
   yes?: boolean
   scope?: string
+  /** The Fling to sign in to; default: the one logged in to before. */
+  url?: string
 }
 
 export interface SetupDeps {
@@ -75,12 +79,15 @@ export async function runSetup(
   }
 
   const results: Record<'login' | 'claudeCode' | 'claudeDesktop', StepResult> = {
-    login: await stepLogin(ctx),
+    login: await stepLogin(ctx, opts.url),
     claudeCode: 'skipped',
     claudeDesktop: 'skipped',
   }
-  results.claudeCode = await stepClaudeCode(ctx, run, scope, ask, fancy)
-  results.claudeDesktop = await stepClaudeDesktop(ctx, deps, ask, fancy)
+  // A login stores the server (and may have changed it): read the config again.
+  const after: CommandContext =
+    results.login === 'done' ? { ...ctx, config: await ctx.store.resolve() } : ctx
+  results.claudeCode = await stepClaudeCode(after, run, scope, ask, fancy)
+  results.claudeDesktop = await stepClaudeDesktop(after, deps, ask, fancy)
 
   const failed = Object.values(results).includes('failed')
   if (fancy)
@@ -94,8 +101,10 @@ export async function runSetup(
   if (failed) process.exitCode = 1
 }
 
-async function stepLogin(ctx: CommandContext): Promise<StepResult> {
-  if (ctx.config.apiKey) {
+async function stepLogin(ctx: CommandContext, url: string | undefined): Promise<StepResult> {
+  // A different server than the stored one: always sign in to it.
+  const sameServer = url === undefined || safeNormalize(url) === ctx.config.serverUrl
+  if (ctx.config.apiKey && sameServer) {
     try {
       const me = await whoami(requireClient(ctx))
       ctx.log.success(`Signed in as ${chalk.bold(me.name)} ${chalk.dim(`<${me.email}>`)}`)
@@ -110,11 +119,19 @@ async function stepLogin(ctx: CommandContext): Promise<StepResult> {
   }
   try {
     // runLogin prints JSON under --json; setup prints one summary instead.
-    await runLogin({ ...ctx, json: false })
+    await runLogin({ ...ctx, json: false }, url)
     return 'done'
   } catch (error) {
     ctx.log.error(error instanceof Error ? error.message : String(error))
     return 'failed'
+  }
+}
+
+function safeNormalize(url: string): string | undefined {
+  try {
+    return normalizeServerUrl(url)
+  } catch {
+    return undefined
   }
 }
 
@@ -180,7 +197,7 @@ async function stepClaudeDesktop(
   try {
     const file = await (
       deps.downloadExtension ?? (serverUrl => downloadExtension(serverUrl, ctx.fetch))
-    )(ctx.config.serverUrl)
+    )(requireServer(ctx))
     await ctx.open(file)
     const done = 'Opened fling.mcpb in Claude Desktop — click Install there to finish'
     if (s) s.stop(done)

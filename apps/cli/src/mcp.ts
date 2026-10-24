@@ -5,7 +5,9 @@
  * without a restart; `fling_login` runs the same browser sign-in itself.
  *
  * Tools shared with the remote connector (fling_publish, fling_list, …) take their names,
- * descriptions and schemas from `@fling/shared` mcp-tools. Local extras: fling_deploy (a file,
+ * descriptions and schemas from `@fling/shared` mcp-tools. Descriptions name the instance the CLI is
+ * logged in to (its stored `/.well-known/fling`), read when the server starts; before any login
+ * they stay generic. Local extras: fling_deploy (a file,
  * zip or folder on this computer, found by name in Downloads etc. — see locate.ts / inputs.ts),
  * fling_find_files and fling_login. Never relies on Claude's sandbox paths or network.
  *
@@ -16,11 +18,14 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   describeVersionFiles,
+  type InstanceMetadata,
   isSecretPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
   type McpToolDef,
-  mcpTools,
+  type McpWording,
+  mcpToolsFor,
+  mcpWording,
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
 } from '@fling/shared'
@@ -33,8 +38,9 @@ import { type LoginResult, loginFlow } from './auth.ts'
 import { type ConfigStore, createConfigStore, systemLocateOptions } from './config.ts'
 import type { OpenLike } from './context.ts'
 import { deploy, NameTakenError, resolveSiteName } from './deploy.ts'
-import { CliError, EXIT_NOT_LOGGED_IN } from './errors.ts'
+import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
+import { loadInstance } from './instance.ts'
 import {
   FOUND_AS_GIVEN,
   findFiles,
@@ -56,12 +62,12 @@ import {
   archiveSite,
   checkName,
   deleteSite,
-  discoverSitesBase,
   getSite,
   listSites,
   rollback,
   setVisibility,
   share,
+  sitesBaseOf,
   sitesPattern,
   siteUrlFor,
   versionFiles,
@@ -87,23 +93,29 @@ export interface McpDeps {
   loginTimeoutMs?: number
   /** Waits for a new site / share link to reach the edge (default: real polling, skipped by FLING_NO_WAIT and in tests). */
   waitReady?: ReadyWaiter
+  /** The instance the descriptions name (runMcpServer reads the stored one); none → generic. */
+  instance?: InstanceMetadata | null
 }
 
-export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens the browser to sign in with Nearform Google), or ask the user to run \`${NPX_COMMAND} login\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login\`), then try again.`
+export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens the browser to sign in), or ask the user to run \`${NPX_COMMAND} login\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login\`), then try again.`
+
+/** No server configured: only the user knows their Fling's address. */
+export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask the user for their Fling's address and to run \`${NPX_COMMAND} login <url>\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login <url>\`), then try again.`
 
 /** Sent at `initialize`: how to use this (local) server. */
-export const MCP_LOCAL_INSTRUCTIONS = [
-  "Fling publishes static sites (HTML/CSS/JS, images, documents) for Nearform staff at https://<name>.fling.labs.nearform.com. This server runs on the user's computer.",
-  'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
-    'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
-  'A file or folder the user has on this computer (a downloaded .html, a .zip, a build folder): call fling_deploy with its path, or just its file name (e.g. "Pitch Deck.html") — ' +
-    'it is looked up in Downloads, Desktop, Documents/Claude and Claude Desktop output folders. Use fling_find_files to see recent candidates when unsure which file the user means.',
-  'Confirm the site name with the user before publishing (fling_check_name shows whether it is free and, for a path, the generated name). Names are global, first come first served; when one is taken, offer the suggestions.',
-  'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
-  NEVER_PUBLISHED,
-  'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
-  'Sites are private (Nearformers only) by default; only make one public if asked. Use fling_share for a link people outside Nearform can open. Always give the user the URL that comes back.',
-].join('\n\n')
+export const mcpLocalInstructions = (w: McpWording) =>
+  [
+    `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
+    'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
+      'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
+    'A file or folder the user has on this computer (a downloaded .html, a .zip, a build folder): call fling_deploy with its path, or just its file name (e.g. "Pitch Deck.html") — ' +
+      'it is looked up in Downloads, Desktop, Documents/Claude and Claude Desktop output folders. Use fling_find_files to see recent candidates when unsure which file the user means.',
+    'Confirm the site name with the user before publishing (fling_check_name shows whether it is free and, for a path, the generated name). Names are global, first come first served; when one is taken, offer the suggestions.',
+    'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
+    NEVER_PUBLISHED,
+    'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
+    `Sites are private (only ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. Always give the user the URL that comes back.`,
+  ].join('\n\n')
 
 const toolDef = <S extends z.ZodRawShape>(def: McpToolDef<S>) => ({
   title: def.title,
@@ -122,6 +134,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   const cwd = deps.cwd ?? process.cwd()
   const locate: LocateOptions = deps.locate ?? { ...systemLocateOptions(), cwd }
   const waitReady: ReadyWaiter = deps.waitReady ?? createReadyWaiter()
+  const wording = mcpWording(deps.instance)
+  const mcpTools = mcpToolsFor(wording)
 
   /** Wait for the edge; never throws. `ready: false` → append the "reload" note. */
   async function edgeReady(url: string, paths: readonly string[]) {
@@ -134,8 +148,15 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
   async function client(): Promise<ApiClient> {
     const config = await store.resolve({ serverUrl: deps.server })
+    if (!config.serverUrl) throw new NoServerError('fling')
     if (!config.apiKey) throw new CliError('Not logged in', { exitCode: EXIT_NOT_LOGGED_IN })
     return createApiClient({ serverUrl: config.serverUrl, apiKey: config.apiKey, fetch: fetchImpl })
+  }
+
+  /** Where sites are served, from the instance logged in to (stored; fetched once if missing). */
+  async function sitesBase() {
+    const config = await store.resolve({ serverUrl: deps.server })
+    return sitesBaseOf(await loadInstance(store, config, fetchImpl))
   }
 
   /** Run an operation and shape its outcome as a tool result. */
@@ -245,7 +266,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
   const server = new McpServer(
     { name: 'fling', version: VERSION },
-    { instructions: MCP_LOCAL_INSTRUCTIONS }
+    { instructions: mcpLocalInstructions(wording) }
   )
   const { listHtml, spa, public: isPublic } = mcpTools.publish.inputSchema
 
@@ -254,7 +275,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     {
       title: 'Deploy a file or folder from this computer',
       description:
-        "Fling something that is on the user's computer and return its stable URL (https://<name>.fling.labs.nearform.com): " +
+        `Fling something that is on the user's computer and return its stable URL (${wording.sitesPattern}): ` +
         "a folder of static files (e.g. a build output like dist/), a single .html file (served as the site's index.html), " +
         'a .zip of a site (extracted; a single top-level folder is unwrapped), or any other single file (.pdf, .svg, .png…, ' +
         'served next to a generated page that shows it). `path` can be absolute, relative to the working directory, or just ' +
@@ -267,7 +288,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If the name is taken it fails with free suggestions — ask the user to pick one, then retry with `name`. ' +
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
-        'Re-deploying identical content is a no-op. Sites are private to signed-in Nearformers unless `public` is set. ' +
+        `Re-deploying identical content is a no-op. Sites are private (only ${wording.privateAudience}) unless \`public\` is set. ` +
         NEVER_PUBLISHED,
       inputSchema: {
         path: z
@@ -437,7 +458,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           name = defaultNameFor(source.path, source.isDirectory)
         }
         const check = await checkName(c, name)
-        const base = check.status === 'invalid' ? null : await discoverSitesBase(c)
+        const base = check.status === 'invalid' ? null : await sitesBase()
         const url = base ? siteUrlFor(name, base) : null
         const suggestions = check.suggestions.length
           ? ` Suggestions: ${check.suggestions.join(', ')}.`
@@ -468,7 +489,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     {
       title: 'Sign in to Fling',
       description:
-        'Sign the user in to Fling: opens their browser at the Fling sign-in page (Nearform Google account) and stores ' +
+        `Sign the user in to ${wording.name}: opens their browser to sign in with ${wording.signIn} and stores ` +
         'the key on this computer (shared with the fling CLI). Waits up to ~30 seconds; if sign-in is not finished by ' +
         'then, it keeps waiting in the background for up to 5 minutes — tell the user to finish signing in in the ' +
         'browser, then retry what you were doing. Call it when another tool says the user is not logged in.',
@@ -478,10 +499,12 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     async () => {
       try {
         const config = await store.resolve({ serverUrl: deps.server })
+        const serverUrl = config.serverUrl
+        if (!serverUrl) throw new NoServerError('fling')
         if (config.apiKey && !pendingLogin) {
           const me = await whoami(
             createApiClient({
-              serverUrl: config.serverUrl,
+              serverUrl,
               apiKey: config.apiKey,
               fetch: fetchImpl,
             })
@@ -493,7 +516,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             done: Promise.resolve() as unknown as Promise<LoginResult>,
           }
           login.done = loginFlow({
-            serverUrl: config.serverUrl,
+            serverUrl,
             store,
             log: silentLogger,
             open: deps.open ?? (async url => (await import('open')).default(url)),
@@ -611,7 +634,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   server.registerTool(t.whoami.name, toolDef(t.whoami), () =>
     run(async c => {
       const me = await whoami(c)
-      const base = await discoverSitesBase(c)
+      const base = await sitesBase()
       return {
         summary: `Signed in as ${me.email} (sites are served at ${sitesPattern(base)})`,
         data: me,
@@ -669,6 +692,7 @@ export async function writeInlineFiles(
 }
 
 function describeError(error: unknown): string {
+  if (error instanceof NoServerError) return NO_SERVER_HINT
   if (error instanceof CliError && error.exitCode === EXIT_NOT_LOGGED_IN) return LOGIN_HINT
   if (error instanceof CliApiError && error.status === 401) return LOGIN_HINT
   if (error instanceof CliError)
@@ -677,6 +701,14 @@ function describeError(error: unknown): string {
 }
 
 export async function runMcpServer(deps: McpDeps = {}): Promise<void> {
-  const server = createMcpServer(deps)
+  const store = deps.store ?? createConfigStore()
+  // The descriptions name the stored instance; never fail to start over it.
+  const instance =
+    deps.instance ??
+    (await store
+      .resolve({ serverUrl: deps.server })
+      .then(config => loadInstance(store, config, deps.fetch ?? ((i, init) => fetch(i, init))))
+      .catch(() => null))
+  const server = createMcpServer({ ...deps, store, instance })
   await server.connect(new StdioServerTransport())
 }

@@ -2,7 +2,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { Site } from '@fling/shared'
+import type { InstanceMetadata, Site } from '@fling/shared'
 import type { FetchLike } from '../src/api.ts'
 import { type ConfigStore, createConfigStore } from '../src/config.ts'
 import type { CommandContext } from '../src/context.ts'
@@ -11,6 +11,22 @@ import { createMemoryOutput } from '../src/utils/output.ts'
 
 export const SERVER = 'http://server.test'
 export const TEST_KEY = 'fling_test_0123456789abcdefghijklmnopqrstuvwxyz'
+
+/** What SERVER says at /.well-known/fling: sites on their own domain, one allowed email domain. */
+export const INSTANCE: InstanceMetadata = {
+  version: 1,
+  name: 'Example Fling',
+  appOrigin: SERVER,
+  sitesDomain: 'sites.example.test',
+  siteScheme: 'https',
+  auth: { kind: 'google', displayName: 'Google', emailDomains: ['example.test'] },
+  brand: { colors: {} },
+  capabilities: { remoteMcp: true },
+  installCommand: 'npm install -g fling-cli',
+}
+
+/** A mockFetch route answering /.well-known/fling with INSTANCE. */
+export const instanceRoute = { 'GET /.well-known/fling': () => jsonResponse(INSTANCE) }
 
 const cleanups: (() => Promise<void>)[] = []
 export async function runCleanups() {
@@ -39,7 +55,7 @@ export async function tempStore(env: Record<string, string | undefined> = {}) {
 
 export async function loggedInStore() {
   const { store } = await tempStore()
-  await store.save({ serverUrl: SERVER, apiKey: TEST_KEY })
+  await store.save({ serverUrl: SERVER, instance: INSTANCE, apiKey: TEST_KEY })
   return store
 }
 
@@ -69,7 +85,7 @@ export function mockFetch(routes: Record<string, Route>) {
 export function site(overrides: Partial<Site> = {}): Site {
   return {
     name: 'my-app',
-    url: 'https://my-app.fling.labs.nearform.com/',
+    url: 'https://my-app.sites.example.test/',
     visibility: 'private',
     spa: false,
     archived: false,

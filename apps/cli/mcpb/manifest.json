@@ -2,22 +2,22 @@
   "manifest_version": "0.3",
   "name": "fling",
   "display_name": "Fling",
-  "version": "0.2.0",
-  "description": "Publish HTML pages, zips and folders from your computer to fling.labs.nearform.com and get a link back.",
-  "long_description": "Fling hosts static sites for Nearform staff at https://<name>.fling.labs.nearform.com (private to Nearformers unless you make them public or share a link).\n\nThis extension runs on your computer, so Claude can publish:\n\n- content it created in the conversation (sent inline — no sandbox uploads),\n- a file you downloaded or Claude Desktop saved, by name: it looks in Downloads, Desktop, Documents/Claude and Claude Desktop's output folders,\n- a single .html file, a .zip of a site, or a folder with index.html.\n\nSign in once with your Nearform Google account (Claude can start it with the fling_login tool, or run `fling login` in a terminal after `npm install -g @nearform/fling`). The login is shared with the fling CLI.",
+  "version": "0.3.0",
+  "description": "Publish HTML pages, zips and folders from your computer to Fling and get a link back.",
+  "long_description": "Fling hosts static sites at https://<name>.<your sites domain> (private to people signed in to your Fling unless you make them public or share a link).\n\nThis extension runs on your computer, so Claude can publish:\n\n- content it created in the conversation (sent inline — no sandbox uploads),\n- a file you downloaded or Claude Desktop saved, by name: it looks in Downloads, Desktop, Documents/Claude and Claude Desktop's output folders,\n- a single .html file, a .zip of a site, or a folder with index.html.\n\nSign in once (Claude can start it with the fling_login tool, or run `fling login <your Fling's address>` in a terminal after installing the fling CLI). The login is shared with the fling CLI.",
   "author": {
-    "name": "Nearform",
-    "url": "https://nearform.com"
+    "name": "Fling contributors",
+    "url": "https://github.com/nearform/fling"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/nearform/fling.git"
   },
-  "homepage": "https://fling.labs.nearform.com",
+  "homepage": "https://github.com/nearform/fling",
   "support": "https://github.com/nearform/fling/issues",
   "icon": "icon.png",
   "license": "MIT",
-  "keywords": ["publish", "html", "static site", "hosting", "nearform"],
+  "keywords": ["publish", "html", "static site", "hosting"],
   "server": {
     "type": "node",
     "entry_point": "server/index.mjs",
@@ -61,8 +61,7 @@
     "server_url": {
       "type": "string",
       "title": "Fling server",
-      "description": "The Fling server to publish to.",
-      "default": "https://fling.labs.nearform.com",
+      "description": "Your Fling's address, e.g. https://fling.example.com. Leave empty to use the one the fling CLI is logged in to. The extension a Fling serves for download has it filled in.",
       "required": false
     },
     "downloads_dir": {

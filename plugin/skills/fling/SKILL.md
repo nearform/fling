@@ -1,15 +1,16 @@
 ---
 name: fling
-description: Deploy, host, publish or share a static site, HTML file (including one in Downloads), zip, report, prototype or build folder (dist/, build/, out/) on fling.labs.nearform.com so Nearformers get a stable URL. Use when the user wants to put something online, get a link to a page or app they built, share a static build with colleagues or a client, or manage (list, share, archive, delete, roll back) their Fling sites.
+description: Deploy, host, publish or share a static site, HTML file (including one in Downloads), zip, report, prototype or build folder (dist/, build/, out/) on the user's Fling server so they get a stable URL. Use when the user wants to put something online, get a link to a page or app they built, share a static build with colleagues or a client, or manage (list, share, archive, delete, roll back) their Fling sites.
 ---
 
 # Fling
 
-Fling puts a folder of static files online at a stable URL:
-`https://<name>.fling.labs.nearform.com`. Site names are one global namespace — **first come,
-first served** across all Nearformers. Sites are **private by default** — only
-people signed in with a Nearform Google account can view them. Re-flinging the same name updates
-the site in place; identical content is a no-op; older content is restored instantly.
+Fling puts a folder of static files online at a stable URL: `https://<name>.<sites domain>` on the
+Fling server the user is logged in to (`fling_whoami` shows where sites are served; the tool
+descriptions name it too). Site names are one global namespace on that server — **first come,
+first served** across everyone who uses it. Sites are **private by default** — only people signed
+in to that Fling can view them. Re-flinging the same name updates the site in place; identical
+content is a no-op; older content is restored instantly.
 
 ## When to use
 
@@ -36,7 +37,7 @@ Not for servers or anything needing a backend at runtime — Fling serves files 
    (`path` is absolute or relative to the working directory). Without the MCP server, use the CLI
    with `--yes` (it never prompts then): `fling deploy ./dist --name my-app --yes`. Use `fling` if it is
    installed (`command -v fling`); otherwise prefix with `npx @nearform/fling`, and suggest the user
-   installs it once with `npm install -g @nearform/fling`.
+   installs it once (the Get started page of their Fling shows the command).
    For content you wrote in this conversation, use `fling_publish { name, files: [{ path, content,
    encoding? }] }` instead. It passes the files inline.
 4. **If the name is taken** (someone else owns it), the tool fails and lists free suggestions
@@ -92,34 +93,37 @@ Notes:
 - **Never pass paths from your own sandbox** (`/mnt/user-data/outputs/…`, `/sessions/…`), and never
   curl or upload from it. That machine can't reach Fling. Publish what you wrote with
   `fling_publish`. For a file the user downloaded, use its name with `fling_deploy`.
-- **Claude Desktop (including Cowork)** gets these tools from the Fling extension. Download
-  https://fling.labs.nearform.com/downloads/fling.mcpb, then double-click it, drag it into Claude,
-  or go to Settings → Extensions → Advanced settings → Install Extension.
+- **Claude Desktop (including Cowork)** gets these tools from the Fling extension. Download it from
+  the Get started page of the user's Fling (`https://<their Fling>/downloads/fling.mcpb`), then
+  double-click it, drag it into Claude, or go to Settings → Extensions → Advanced settings →
+  Install Extension.
 
 ## Not logged in
 
-If a tool says the user is not logged in, call `fling_login`. It opens the user's browser at the
-Nearform sign-in page. If they haven't finished after about 30 seconds, it returns "Finish signing in
+If a tool says the user is not logged in, call `fling_login`. It opens the user's browser at their
+Fling's sign-in page. If they haven't finished after about 30 seconds, it returns "Finish signing in
 in your browser, then try again" and keeps waiting in the background for up to 5 minutes. Tell the
 user, then retry. Without `fling_login`, ask the user to run this in Claude Code (the `!` runs it in
 their shell):
 
 ```
-! fling login
+! fling login <url>
 ```
 
-(If `fling` isn't installed: `! npm install -g @nearform/fling`, or use `! npx @nearform/fling login`.)
+`<url>` is the address of their Fling (ask them if you don't know it); after the first login,
+`fling login` alone signs in to the same one. If a tool says no Fling server is set up, this is
+what to do. (If `fling` isn't installed, use `! npx @nearform/fling login <url>`.)
 
 `fling_whoami` checks the login.
 
 ## Sharing and visibility
 
-- `fling_share { name }` returns a public share link (`https://s--<token>.fling.labs.nearform.com`).
+- `fling_share { name }` returns a public share link (`https://s--<token>.<sites domain>`).
   **Anyone with a share link can view the site without signing in** — say so when you hand it over,
-  and only create one when the user wants to share outside Nearform.
+  and only create one when the user wants to share with people who can't sign in.
 - `refresh: true` replaces the link (the old one stops working); `revoke: true` removes it.
 - `fling_set_visibility { name, visibility: "public" }` makes the main URL public; `"private"`
-  puts it back behind Nearform sign-in. Prefer a share link over making a site public.
+  puts it back behind sign-in. Prefer a share link over making a site public.
 
 ## Archive vs delete
 

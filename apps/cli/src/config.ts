@@ -1,17 +1,18 @@
 /**
- * CLI config: `~/.fling/config.json` (dir 0700, file 0600) holding the server URL, API key and the
- * signed-in user. Env overrides (for CI): `FLING_API_KEY`, `FLING_URL`, and `FLING_CONFIG_DIR` to
- * relocate the directory. `FLING_DEBUG` enables debug lines. This is the only module that reads
- * `process.env`.
+ * CLI config: `~/.fling/config.json` (dir 0700, file 0600) holding the server URL, the instance's
+ * metadata (`/.well-known/fling`, stored at login), the API key and the signed-in user. There is no
+ * default server: `fling login <url>` picks one. Env overrides (for CI): `FLING_API_KEY`,
+ * `FLING_URL`, and `FLING_CONFIG_DIR` to relocate the directory. `FLING_DEBUG` enables debug lines.
+ * This is the only module that reads `process.env`.
  */
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { type InstanceMetadata, InstanceMetadataSchema } from '@fling/shared'
 import { z } from 'zod'
 
 export const CONFIG_DIR_NAME = '.fling'
 export const CONFIG_FILE_NAME = 'config.json'
-export const DEFAULT_SERVER_URL = 'https://fling.labs.nearform.com'
 
 export const ENV = {
   apiKey: 'FLING_API_KEY',
@@ -24,6 +25,8 @@ export const ENV = {
 
 export const cliConfigSchema = z.object({
   serverUrl: z.string().url().optional(),
+  /** What `serverUrl` said about itself at login. A copy a newer CLI can't read is just refetched. */
+  instance: InstanceMetadataSchema.optional().catch(undefined),
   apiKey: z.string().min(1).optional(),
   user: z
     .object({
@@ -53,8 +56,11 @@ export function resolveConfigDir(env: Env = process.env): string {
 }
 
 export interface ResolvedConfig {
-  serverUrl: string
-  serverUrlSource: 'flag' | 'env' | 'config' | 'default'
+  /** Unset until `fling login <url>` (or FLING_URL / --server). */
+  serverUrl?: string
+  serverUrlSource: 'flag' | 'env' | 'config' | 'none'
+  /** The stored metadata, when it belongs to `serverUrl`. */
+  instance?: InstanceMetadata
   apiKey?: string
   apiKeySource: 'env' | 'config' | 'none'
   user?: CliConfig['user']
@@ -67,7 +73,7 @@ export interface ConfigStore {
   load(): Promise<CliConfig>
   save(config: CliConfig): Promise<void>
   update(patch: Partial<CliConfig>): Promise<CliConfig>
-  /** Remove the key and user, keep `serverUrl`. */
+  /** Remove the key and user, keep `serverUrl` and `instance`. */
   clearCredentials(): Promise<void>
   /** Merge file + env + an optional `--server` flag into what a command should use. */
   resolve(overrides?: { serverUrl?: string }): Promise<ResolvedConfig>
@@ -118,29 +124,32 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
       return next
     },
     async clearCredentials() {
-      const { serverUrl } = await load()
-      await save(serverUrl ? { serverUrl } : {})
+      const { serverUrl, instance } = await load()
+      await save({ serverUrl, instance })
     },
     async resolve(overrides = {}) {
       const config = await load()
       const envUrl = fromEnv(env[ENV.url])
       const envKey = fromEnv(env[ENV.apiKey])
-      const [serverUrl, serverUrlSource]: [string, ResolvedConfig['serverUrlSource']] =
+      const [rawUrl, serverUrlSource]: [string | undefined, ResolvedConfig['serverUrlSource']] =
         overrides.serverUrl
           ? [overrides.serverUrl, 'flag']
           : envUrl
             ? [envUrl, 'env']
             : config.serverUrl
               ? [config.serverUrl, 'config']
-              : [DEFAULT_SERVER_URL, 'default']
+              : [undefined, 'none']
+      const serverUrl = rawUrl === undefined ? undefined : normalizeServerUrl(rawUrl)
       const [apiKey, apiKeySource]: [string | undefined, ResolvedConfig['apiKeySource']] = envKey
         ? [envKey, 'env']
         : config.apiKey
           ? [config.apiKey, 'config']
           : [undefined, 'none']
+      const stored = config.serverUrl && normalizeServerUrl(config.serverUrl)
       return {
-        serverUrl: serverUrl.replace(/\/+$/, ''),
+        serverUrl,
         serverUrlSource,
+        instance: serverUrl && stored === serverUrl ? config.instance : undefined,
         apiKey,
         apiKeySource,
         user: config.user,
@@ -148,6 +157,20 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
       }
     },
   }
+}
+
+/**
+ * `fling.example.test` → `https://fling.example.test`; trailing slashes go. Anything after the host
+ * is kept (a server may live under a path). Throws on something that isn't a URL.
+ */
+export function normalizeServerUrl(input: string): string {
+  const trimmed = input.trim()
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  const url = new URL(withScheme)
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`Not an http(s) URL: ${input}`)
+  }
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '')
 }
 
 /** File mode bits (e.g. `0o600`) or null when the path does not exist. */

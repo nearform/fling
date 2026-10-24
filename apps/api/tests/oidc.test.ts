@@ -45,6 +45,18 @@ async function signIn(
 
 const errorOf = (res: Response) => res.headers.get('location')
 
+/** Shaped like a real Google client id: `-` and `.` are what form-encoded Basic auth mangles. */
+const GOOGLE_CLIENT_ID = '123456789012-abcdef.apps.googleusercontent.com'
+/** Google's discovery (post listed first) and its literal reading of Basic credentials. */
+const googleIdp = () =>
+  testIdp({
+    issuer: GOOGLE_ISSUER,
+    clientId: GOOGLE_CLIENT_ID,
+    clientSecret: 'google-secret',
+    authMethods: ['client_secret_post', 'client_secret_basic'],
+    literalBasic: true,
+  })
+
 describe('OIDC sign-in', () => {
   it('signs in a verified, allowed user: session + site cookie, redirect to return', async () => {
     const res = await signIn(env)
@@ -130,6 +142,16 @@ describe('OIDC sign-in', () => {
     expect(errorOf(denied)).toBe('/login?error=oauth_failed')
   })
 
+  it('authenticates with client_secret_post when offered, else client_secret_basic', async () => {
+    expect((await signIn(env)).headers.get('location')).toBe('https://hello.fling.test/page')
+    expect(env.idp.lastClientAuth).toBe('post')
+
+    const basicOnly = setup({}, testIdp({ authMethods: ['client_secret_basic'] }))
+    const res = await signIn(basicOnly)
+    expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
+    expect(basicOnly.idp.lastClientAuth).toBe('basic')
+  })
+
   it('refuses a code the IdP will not redeem (e.g. replayed)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const res = await signIn(env, { editCallback: q => q.set('code', 'code-unknown') })
@@ -182,7 +204,7 @@ describe('legacy Google config', () => {
       secrets: {
         ...config.secrets,
         oidcClientSecret: undefined,
-        googleClientId: 'google-id',
+        googleClientId: GOOGLE_CLIENT_ID,
         googleClientSecret: 'google-secret',
       },
     }
@@ -190,13 +212,10 @@ describe('legacy Google config', () => {
 
   it('maps the old Google secrets to accounts.google.com on the old callback', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const e = setup(
-      legacy(),
-      testIdp({ issuer: GOOGLE_ISSUER, clientId: 'google-id', clientSecret: 'google-secret' })
-    )
+    const e = setup(legacy(), googleIdp())
     expect(oidcSettings(e.config)).toMatchObject({
       issuer: GOOGLE_ISSUER,
-      clientId: 'google-id',
+      clientId: GOOGLE_CLIENT_ID,
       clientSecret: 'google-secret',
       displayName: 'Google',
       redirectUri: `${APP_ORIGIN}/auth/google/callback`,
@@ -214,16 +233,15 @@ describe('legacy Google config', () => {
 
   it('signs in through the legacy /auth/google routes', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const e = setup(
-      legacy(),
-      testIdp({ issuer: GOOGLE_ISSUER, clientId: 'google-id', clientSecret: 'google-secret' })
-    )
+    const e = setup(legacy(), googleIdp())
     e.idp.claims.hd = 'example.test'
     const res = await signIn(e, { start: '/auth/google' })
     expect(e.idp.lastAuthorization?.get('redirect_uri')).toBe(`${APP_ORIGIN}/auth/google/callback`)
     expect(e.idp.lastAuthorization?.get('prompt')).toBe('select_account')
     expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
     expect(cookiesOf(res)[SESSION]).toBeDefined()
+    // Basic would send 123456789012%2Dabcdef%2Eapps…, which Google answers with invalid_client.
+    expect(e.idp.lastClientAuth).toBe('post')
   })
 
   it('the generic callback serves the generic config; OIDC_* wins over the old secrets', () => {

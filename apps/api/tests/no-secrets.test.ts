@@ -4,7 +4,7 @@
  */
 import { siteKvsKey, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { manifestKey } from '../src/storage/types.ts'
+import { manifestKey } from '../src/blobs/types.ts'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
 
@@ -80,11 +80,11 @@ describe('finalize scans presigned uploads', () => {
 
     const site = await env.store.getSite('alice@nearform.com', 'hello')
     expect(site?.currentVersionId).toBeNull()
-    expect(env.kvs.data.get(siteKvsKey('hello'))).toBeUndefined()
+    expect(env.routeTable.data.get(siteKvsKey('hello'))).toBeUndefined()
     const id = site?.id as string
     for (const f of files)
-      expect(await env.storage.get(siteObjectKey(id, body.versionId, f.meta.path))).toBeNull()
-    expect(await env.storage.get(manifestKey(id, body.versionId))).toBeNull()
+      expect(await env.blobs.get(siteObjectKey(id, body.versionId, f.meta.path))).toBeNull()
+    expect(await env.blobs.get(manifestKey(id, body.versionId))).toBeNull()
 
     // Finalizing again can't sneak it live.
     const again = await api(env, key, 'POST', `/api/sites/hello/deploys/${body.versionId}/finalize`)

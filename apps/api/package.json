@@ -3,21 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "description": "The cloud-agnostic API core: the Hono app, its ports (Store, Blobs, RouteTable) and the dev/test adapters. Platforms (platforms/*) bundle it with their own entry point and adapters. Consumed as TypeScript source.",
   "type": "module",
+  "exports": {
+    "./app": "./src/app.ts",
+    "./config": "./src/config.ts",
+    "./deps": "./src/deps.ts",
+    "./types": "./src/types.ts",
+    "./blobs": "./src/blobs/types.ts",
+    "./blobs/fs": "./src/blobs/fs.ts",
+    "./route-table": "./src/route-table/types.ts",
+    "./route-table/memory": "./src/route-table/memory.ts",
+    "./store": "./src/store/types.ts",
+    "./store/memory": "./src/store/memory.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/dev.ts",
-    "build": "node scripts/build.mjs",
+    "build": "echo 'api: consumed as source (platforms/* bundle it)'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-cloudfront-keyvaluestore": "3.1150.0",
-    "@aws-sdk/client-dynamodb": "3.1150.0",
-    "@aws-sdk/client-s3": "3.1150.0",
-    "@aws-sdk/client-ssm": "3.1150.0",
-    "@aws-sdk/lib-dynamodb": "3.1150.0",
-    "@aws-sdk/s3-request-presigner": "3.1150.0",
-    "@aws-sdk/signature-v4a": "^3.1138.0",
     "@fling/shared": "workspace:*",
     "@hono/node-server": "^2.1.4",
     "@modelcontextprotocol/sdk": "^1.32.1",
@@ -28,9 +34,7 @@
   },
   "devDependencies": {
     "@fling/edge": "workspace:*",
-    "@types/aws-lambda": "^8.10.152",
     "@types/node": "^24.0.0",
-    "esbuild": "^0.25.12",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"

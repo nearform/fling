@@ -1,11 +1,11 @@
 /**
- * Publication through its own interface (stage / publish / publishBytes) on MemoryStore + FsStorage.
- * FsStorage enforces the same rules as S3: upload URLs are bound to the manifest's sha256 and expire.
+ * Publication through its own interface (stage / publish / publishBytes) on MemoryStore + FsBlobs.
+ * FsBlobs enforces the same rules as S3: upload URLs are bound to the manifest's sha256 and expire.
  */
 import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { FsBlobs } from '../src/blobs/fs.ts'
 import { publish, publishBytes, stage, UPLOAD_URL_TTL_SECONDS } from '../src/publication.ts'
-import { FsStorage } from '../src/storage/fs.ts'
 import type { User } from '../src/store/types.ts'
 import { APP_ORIGIN, createUser, type Env, file, setup, upload } from './helpers.ts'
 
@@ -33,7 +33,7 @@ async function stageUploads(files: ReturnType<typeof file>[], name = 'hello') {
 
 async function stored(versionId: string, path: string, name = 'hello') {
   const site = await env.store.getSite(user.email, name)
-  const bytes = await env.storage.get(siteObjectKey(site?.id as string, versionId, path))
+  const bytes = await env.blobs.get(siteObjectKey(site?.id as string, versionId, path))
   return bytes ? Buffer.from(bytes).toString('utf8') : null
 }
 
@@ -76,9 +76,9 @@ describe('upload URLs only accept the manifest bytes', () => {
 
   it(`expire after ${UPLOAD_URL_TTL_SECONDS / 60} minutes`, async () => {
     let now = Date.parse('2026-01-01T00:00:00Z')
-    const storage = new FsStorage(env.root, APP_ORIGIN, 'k'.repeat(40), () => now)
+    const blobs = new FsBlobs(env.root, APP_ORIGIN, 'k'.repeat(40), () => now)
     const f = file('index.html', '<h1>clean</h1>')
-    const signed = await storage.presignPut('sites/x/v/index.html', {
+    const signed = await blobs.presignPut('sites/x/v/index.html', {
       contentType: 'text/html',
       cacheControl: 'no-cache',
       sha256: f.meta.sha256,
@@ -86,7 +86,7 @@ describe('upload URLs only accept the manifest bytes', () => {
     })
     const q = new URL(signed.url).searchParams
     const accept = () =>
-      storage.acceptUpload({
+      blobs.acceptUpload({
         key: 'sites/x/v/index.html',
         exp: q.get('exp') ?? undefined,
         sig: q.get('sig') ?? undefined,

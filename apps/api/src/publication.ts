@@ -50,6 +50,7 @@ import {
   type Visibility,
 } from '@fling/shared'
 import { computeVersionId } from '@fling/shared/version-id'
+import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
@@ -63,7 +64,6 @@ import {
   save,
   toSite,
 } from './sites.ts'
-import { manifestKey } from './storage/types.ts'
 import type { SiteRecord, User, VersionRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -178,7 +178,7 @@ async function scanStoredVersion(
     f => isScannablePath(f.path) && f.size > 0 && f.size <= SECRET_SCAN_MAX_FILE_BYTES
   )
   const results = await mapLimit(toScan, SCAN_CONCURRENCY, async f => {
-    const bytes = await deps.storage.get(siteObjectKey(siteId, versionId, f.path))
+    const bytes = await deps.blobs.get(siteObjectKey(siteId, versionId, f.path))
     return bytes ? scanBytesForSecrets(bytes, f.path) : []
   })
   return results.flat()
@@ -203,7 +203,7 @@ async function prepare(
       'invalid_name'
     )
   }
-  const { store, storage, clock } = deps
+  const { store, blobs, clock } = deps
   const versionId = computeVersionId(req.manifest.files)
   const existing = await store.getSite(user.email, name)
   if (!existing) {
@@ -265,7 +265,7 @@ async function prepare(
     visibility: req.visibility,
     createdAt: now,
   }
-  await storage.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
+  await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
   await store.putVersion(user.email, version)
   return { kind: 'pending', site, version, files }
 }
@@ -280,7 +280,7 @@ async function goLive(
 ): Promise<Published> {
   if (version.status === 'pending') {
     const generatedIndex = await detectGeneratedIndex(deps, site.id, version.id, files)
-    await deps.storage.putJson(manifestKey(site.id, version.id), {
+    await deps.blobs.putJson(manifestKey(site.id, version.id), {
       files: [...files],
       generatedIndex,
     } satisfies StoredManifest)
@@ -309,7 +309,7 @@ export async function stage(
   if (prepared.kind === 'done') return prepared.result
   const { site, version, files } = prepared
   const uploads = await mapLimit(files, PRESIGN_CONCURRENCY, async file => {
-    const signed = await deps.storage.presignPut(siteObjectKey(site.id, version.id, file.path), {
+    const signed = await deps.blobs.presignPut(siteObjectKey(site.id, version.id, file.path), {
       contentType: file.contentType,
       cacheControl: cacheControlFor(file.path),
       sha256: file.sha256,
@@ -327,16 +327,16 @@ export async function publish(
   name: string,
   versionId: string
 ): Promise<Published> {
-  const { store, storage } = deps
+  const { store, blobs } = deps
   const site = await requireSite(deps, user, name)
   const version = await store.getVersion(user.email, site.id, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
   if (version.status === 'complete') return goLive(deps, user, site, version, [])
 
-  const manifest = await storage.getJson<StoredManifest>(manifestKey(site.id, versionId))
+  const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
   const checks = await mapLimit(manifest.files, HEAD_CONCURRENCY, async file => {
-    const head = await storage.head(siteObjectKey(site.id, versionId, file.path))
+    const head = await blobs.head(siteObjectKey(site.id, versionId, file.path))
     return head && head.size === file.size ? null : file.path
   })
   const missing = checks.filter((p): p is string => p !== null)
@@ -355,8 +355,8 @@ export async function publish(
   // again starts over) and refuse.
   const findings = await scanStoredVersion(deps, site.id, versionId, manifest.files)
   if (findings.length > 0) {
-    await storage.deletePrefix(siteVersionPrefix(site.id, versionId))
-    await storage.deletePrefix(manifestKey(site.id, versionId))
+    await blobs.deletePrefix(siteVersionPrefix(site.id, versionId))
+    await blobs.deletePrefix(manifestKey(site.id, versionId))
     throw secretDetected(findings)
   }
   return goLive(deps, user, site, version, manifest.files)
@@ -389,7 +389,7 @@ export async function publishBytes(
   if (prepared.kind === 'done') return prepared.result
   const { site, version } = prepared
   await mapLimit(prepared.files, PUT_CONCURRENCY, async f => {
-    await deps.storage.put(
+    await deps.blobs.put(
       siteObjectKey(site.id, version.id, f.path),
       bytesByPath.get(f.path) as Uint8Array,
       { contentType: f.contentType, cacheControl: cacheControlFor(f.path) }

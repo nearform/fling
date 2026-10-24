@@ -6,9 +6,9 @@ import type { ManifestFile } from '@fling/shared'
 import { createApp } from '../src/app.ts'
 import { mintApiKey } from '../src/auth/api-keys.ts'
 import { signSession } from '../src/auth/session.ts'
+import { FsBlobs } from '../src/blobs/fs.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
-import { MemoryKvs } from '../src/kvs/memory.ts'
-import { FsStorage } from '../src/storage/fs.ts'
+import { MemoryRouteTable } from '../src/route-table/memory.ts'
 import { MemoryStore } from '../src/store/memory.ts'
 import type { Deps, GoogleClaims } from '../src/types.ts'
 
@@ -41,9 +41,9 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 export function setup(overrides: Partial<Config> = {}) {
   const config = testConfig(overrides)
   const store = new MemoryStore()
-  const kvs = new MemoryKvs()
+  const routeTable = new MemoryRouteTable()
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
-  const storage = new FsStorage(root, APP_ORIGIN, config.secrets.sessionSecret)
+  const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
   let now = new Date('2026-01-01T00:00:00Z')
   const clock = { now: () => now }
   const google: { claims: GoogleClaims; lastState?: string } = {
@@ -52,8 +52,8 @@ export function setup(overrides: Partial<Config> = {}) {
   const deps: Deps = {
     config,
     store,
-    storage,
-    kvs,
+    blobs,
+    routeTable,
     clock,
     oauth: {
       authorizationUrl(state) {
@@ -72,8 +72,8 @@ export function setup(overrides: Partial<Config> = {}) {
     deps,
     config,
     store,
-    kvs,
-    storage,
+    routeTable,
+    blobs,
     root,
     google,
     advance(ms: number) {

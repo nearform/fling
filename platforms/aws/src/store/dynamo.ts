@@ -64,7 +64,7 @@ import {
   type UploadRecord,
   type User,
   type VersionRecord,
-} from './types.ts'
+} from '@fling/api/store'
 
 const userPk = (email: string) => `USER#${email}`
 const namePk = (name: string) => `NAME#${name}`

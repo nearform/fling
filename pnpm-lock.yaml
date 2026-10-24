@@ -20,27 +20,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@aws-sdk/client-cloudfront-keyvaluestore':
-        specifier: 3.1150.0
-        version: 3.1150.0
-      '@aws-sdk/client-dynamodb':
-        specifier: 3.1150.0
-        version: 3.1150.0
-      '@aws-sdk/client-s3':
-        specifier: 3.1150.0
-        version: 3.1150.0
-      '@aws-sdk/client-ssm':
-        specifier: 3.1150.0
-        version: 3.1150.0
-      '@aws-sdk/lib-dynamodb':
-        specifier: 3.1150.0
-        version: 3.1150.0(@aws-sdk/client-dynamodb@3.1150.0)
-      '@aws-sdk/s3-request-presigner':
-        specifier: 3.1150.0
-        version: 3.1150.0
-      '@aws-sdk/signature-v4a':
-        specifier: ^3.1138.0
-        version: 3.1138.0
       '@fling/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -66,15 +45,9 @@ importers:
       '@fling/edge':
         specifier: workspace:*
         version: link:../../edge
-      '@types/aws-lambda':
-        specifier: ^8.10.152
-        version: 8.10.164
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
-      esbuild:
-        specifier: ^0.25.12
-        version: 0.25.12
       tsx:
         specifier: ^4.23.13
         version: 4.23.15
@@ -219,6 +192,55 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
+  platforms/aws:
+    dependencies:
+      '@aws-sdk/client-cloudfront-keyvaluestore':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/client-dynamodb':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/client-s3':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/client-ssm':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/lib-dynamodb':
+        specifier: 3.1150.0
+        version: 3.1150.0(@aws-sdk/client-dynamodb@3.1150.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/signature-v4a':
+        specifier: ^3.1138.0
+        version: 3.1138.0
+      '@fling/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+      '@fling/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      hono:
+        specifier: ^4.13.5
+        version: 4.13.13
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.152
+        version: 8.10.164
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

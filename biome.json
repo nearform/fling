@@ -89,11 +89,41 @@
   },
   "overrides": [
     {
-      "includes": ["apps/*/scripts/**/*.ts", "apps/*/tests/**/*.ts", "apps/*/tests/**/*.tsx"],
+      "includes": [
+        "apps/*/scripts/**/*.ts",
+        "apps/*/tests/**/*.ts",
+        "apps/*/tests/**/*.tsx",
+        "platforms/*/tests/**/*.ts",
+        "packages/*/tests/**/*.ts"
+      ],
       "linter": {
         "rules": {
           "suspicious": {
             "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/api/src/**", "packages/shared/src/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@aws-sdk/*", "@smithy/*"],
+                    "message": "The core is cloud-agnostic: AWS SDK code belongs in platforms/aws."
+                  },
+                  {
+                    "group": ["cloudflare:*"],
+                    "message": "The core is cloud-agnostic: Workers runtime code belongs in platforms/cloudflare."
+                  }
+                ]
+              }
+            }
           }
         }
       }

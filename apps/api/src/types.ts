@@ -1,6 +1,6 @@
+import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
-import type { Kvs } from './kvs/types.ts'
-import type { Storage } from './storage/types.ts'
+import type { RouteTable } from './route-table/types.ts'
 import type { Store, User } from './store/types.ts'
 
 export interface Clock {
@@ -26,8 +26,8 @@ export interface OAuthClient {
 export interface Deps {
   config: Config
   store: Store
-  storage: Storage
-  kvs: Kvs
+  blobs: Blobs
+  routeTable: RouteTable
   clock: Clock
   /** defaults to the arctic Google client built from config */
   oauth?: OAuthClient

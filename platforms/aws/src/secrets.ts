@@ -4,7 +4,7 @@
  * Loaded once per cold start with GetParametersByPath(WithDecryption).
  */
 import { GetParametersByPathCommand, SSMClient } from '@aws-sdk/client-ssm'
-import type { Secrets } from './config.ts'
+import type { Secrets } from '@fling/api/config'
 
 const NAMES = {
   'google-client-id': 'googleClientId',

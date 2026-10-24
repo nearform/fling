@@ -7,7 +7,13 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import type { PresignedPut, Storage } from './types.ts'
+import type { Blobs, PresignedPut } from '@fling/api/blobs'
+
+// WHEN_REQUIRED: otherwise the SDK signs a CRC32 of the (empty) presign body into the URL.
+export const S3_CLIENT_CONFIG = {
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
+} as const
 
 const isNotFound = (err: unknown) =>
   err instanceof Error &&
@@ -15,14 +21,10 @@ const isNotFound = (err: unknown) =>
     err.name === 'NoSuchKey' ||
     (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404)
 
-export class S3Storage implements Storage {
+export class S3Blobs implements Blobs {
   constructor(
     private bucket: string,
-    // WHEN_REQUIRED: otherwise the SDK signs a CRC32 of the (empty) presign body into the URL.
-    private client = new S3Client({
-      requestChecksumCalculation: 'WHEN_REQUIRED',
-      responseChecksumValidation: 'WHEN_REQUIRED',
-    })
+    private client = new S3Client(S3_CLIENT_CONFIG)
   ) {}
 
   async presignPut(

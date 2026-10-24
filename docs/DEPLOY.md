@@ -83,7 +83,8 @@ refresh tokens are opaque and stored hashed). `OAUTH_REDIRECT_ALLOWLIST` (option
 Every push to `main` runs `ci.yml` (`pnpm gate`). When it passes, `deploy.yml` builds the same commit
 and, with the deploy role over OIDC:
 
-1. Uploads `apps/api/dist/lambda.zip` to the function and waits until it is live.
+1. Uploads `platforms/aws/dist/lambda.zip` (the `apps/api` core bundled with the AWS adapters by
+   `pnpm --filter @fling/platform-aws build`) to the function and waits until it is live.
 2. Syncs `apps/web/dist` to the UI bucket: `assets/` first (hashed, cached for a year, never deleted,
    so open tabs keep working), then the other files, then `index.html` (`no-cache`) last.
    It also uploads the Claude Desktop extension, built by `pnpm --filter @nearform/fling build:mcpb`,

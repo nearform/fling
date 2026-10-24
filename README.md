@@ -16,7 +16,8 @@ default; share links open them to anyone with the link.
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API on AWS Lambda: Google sign-in, CLI keys, deploys, the remote MCP server and its OAuth server |
+| `apps/api` | The cloud-agnostic Hono API: Google sign-in, CLI keys, deploys, the remote MCP server and its OAuth server |
+| `platforms/aws` | The API on AWS: Lambda entry point and the DynamoDB, S3, CloudFront KeyValueStore and SSM adapters; builds `lambda.zip` |
 | `apps/web` | React UI (sites, connections, get started) and the 404 page |
 | `apps/cli` | `@nearform/fling` CLI, local MCP server and the `.mcpb` Claude Desktop extension |
 | `edge` | CloudFront Function that routes `*.fling.labs.nearform.com` to the right site version |

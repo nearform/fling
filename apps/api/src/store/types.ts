@@ -1,4 +1,4 @@
-/** Persistence port. Implementations: `memory.ts` (dev/tests) and `dynamo.ts` (production). */
+/** Persistence port. Implementations: `memory.ts` (dev/tests) here, DynamoDB in platforms/aws. */
 import type { Visibility } from '@fling/shared'
 
 export interface User {

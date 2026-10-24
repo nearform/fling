@@ -28,7 +28,7 @@ async function deployLive(files: typeof v1, name = 'hello', extra: object = {}) 
 }
 
 const kvsSite = (label = 'hello') => {
-  const raw = env.kvs.data.get(siteKvsKey(label))
+  const raw = env.routeTable.data.get(siteKvsKey(label))
   return raw ? JSON.parse(raw) : undefined
 }
 
@@ -213,20 +213,22 @@ describe('site operations', () => {
     const s1 = await json(await api(env, key, 'POST', '/api/sites/hello/share'))
     const t1 = /^https:\/\/s--([a-z0-9]{20})\.fling\.test\/$/.exec(s1.shareUrl)?.[1]
     expect(t1).toBeDefined()
-    expect(JSON.parse(env.kvs.data.get(shareKvsKey(t1 as string)) as string).v).toBe(kvsSite().v)
+    expect(JSON.parse(env.routeTable.data.get(shareKvsKey(t1 as string)) as string).v).toBe(
+      kvsSite().v
+    )
 
     const s2 = await json(await api(env, key, 'POST', '/api/sites/hello/share'))
     const t2 = /s--([a-z0-9]{20})\./.exec(s2.shareUrl)?.[1] as string
     expect(t2).not.toBe(t1)
-    expect(env.kvs.data.has(shareKvsKey(t1 as string))).toBe(false)
-    expect(env.kvs.data.has(shareKvsKey(t2))).toBe(true)
+    expect(env.routeTable.data.has(shareKvsKey(t1 as string))).toBe(false)
+    expect(env.routeTable.data.has(shareKvsKey(t2))).toBe(true)
     const site = await json(await api(env, key, 'GET', '/api/sites/hello'))
     expect(site.shareUrl).toBe(s2.shareUrl)
 
     const revoked = await api(env, key, 'DELETE', '/api/sites/hello/share')
     expect(revoked.status).toBe(204)
     expect((await json(await api(env, key, 'GET', '/api/sites/hello'))).shareUrl).toBeNull()
-    expect(env.kvs.data.has(shareKvsKey(t2))).toBe(false)
+    expect(env.routeTable.data.has(shareKvsKey(t2))).toBe(false)
   })
 
   it('archive removes KVS keys and hides from list; unarchive and deploy restore', async () => {
@@ -237,14 +239,14 @@ describe('site operations', () => {
     const archived = await api(env, key, 'POST', '/api/sites/hello/archive')
     expect((await json(archived)).archived).toBe(true)
     expect(kvsSite()).toBeUndefined()
-    expect(env.kvs.data.has(shareKvsKey(token))).toBe(false)
+    expect(env.routeTable.data.has(shareKvsKey(token))).toBe(false)
     expect((await json(await api(env, key, 'GET', '/api/sites'))).sites).toEqual([])
     const list = await json(await api(env, key, 'GET', '/api/sites?archived=1'))
     expect(list.sites.map((s: any) => s.name)).toEqual(['hello'])
 
     await api(env, key, 'POST', '/api/sites/hello/unarchive')
     expect(kvsSite()).toBeDefined()
-    expect(env.kvs.data.has(shareKvsKey(token))).toBe(true)
+    expect(env.routeTable.data.has(shareKvsKey(token))).toBe(true)
 
     await api(env, key, 'POST', '/api/sites/hello/archive')
     const redeploy = await json(
@@ -259,11 +261,11 @@ describe('site operations', () => {
     const live = await deployLive(v1)
     await api(env, key, 'POST', '/api/sites/hello/share')
     const siteId = kvsSite().id
-    expect(await env.storage.head(`sites/${siteId}/${live.versionId}/index.html`)).not.toBeNull()
+    expect(await env.blobs.head(`sites/${siteId}/${live.versionId}/index.html`)).not.toBeNull()
     const res = await api(env, key, 'DELETE', '/api/sites/hello')
     expect(res.status).toBe(204)
-    expect(env.kvs.data.size).toBe(0)
-    expect(await env.storage.head(`sites/${siteId}/${live.versionId}/index.html`)).toBeNull()
+    expect(env.routeTable.data.size).toBe(0)
+    expect(await env.blobs.head(`sites/${siteId}/${live.versionId}/index.html`)).toBeNull()
     expect((await api(env, key, 'GET', '/api/sites/hello')).status).toBe(404)
     // a fresh deploy starts over
     const again = await json(
@@ -318,9 +320,9 @@ describe('version files', () => {
     // a manifest written before the flag existed: detected from the object itself
     const siteId = kvsSite().id
     const key_ = `sites/${siteId}/_manifests/${live.versionId}.json`
-    const stored = await env.storage.getJson<any>(key_)
+    const stored = await env.blobs.getJson<any>(key_)
     expect(stored.generatedIndex).toBe(true)
-    await env.storage.putJson(key_, { files: stored.files })
+    await env.blobs.putJson(key_, { files: stored.files })
     expect((await json(await filesOf('hello', live.versionId))).generatedIndex).toBe(true)
   })
 

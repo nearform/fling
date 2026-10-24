@@ -1,11 +1,11 @@
 /** Builds the Hono app from injected deps — no AWS here, so tests run on memory/fs fakes. */
 import { Hono } from 'hono'
+import { FsBlobs } from './blobs/fs.ts'
 import { errorHandler, notFoundHandler, originVerify, securityHeaders } from './middleware.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { mcpRoutes } from './routes/mcp.ts'
 import { oauthRoutes } from './routes/oauth.ts'
-import { FsStorage } from './storage/fs.ts'
 import type { AppEnv, Deps } from './types.ts'
 
 export function createApp(deps: Deps) {
@@ -27,12 +27,12 @@ export function createApp(deps: Deps) {
   app.route('/', oauthRoutes)
   app.route('/mcp', mcpRoutes)
 
-  // Dev/tests only: the target of FsStorage's "presigned" PUT URLs.
-  const storage = deps.storage
-  if (storage instanceof FsStorage) {
+  // Dev/tests only: the target of FsBlobs' "presigned" PUT URLs.
+  const blobs = deps.blobs
+  if (blobs instanceof FsBlobs) {
     app.put('/dev-upload/*', async c => {
       const key = decodeURIComponent(c.req.path.slice('/dev-upload/'.length))
-      const ok = await storage.acceptUpload({
+      const ok = await blobs.acceptUpload({
         key,
         exp: c.req.query('exp'),
         sig: c.req.query('sig'),

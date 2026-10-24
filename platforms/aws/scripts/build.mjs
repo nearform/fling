@@ -1,4 +1,5 @@
-// Bundle the Lambda: src/lambda.ts → dist/lambda/index.mjs (handler `index.handler`) → dist/lambda.zip
+// Bundle the Lambda (the @fling/api core with the AWS adapters):
+// src/lambda.ts → dist/lambda/index.mjs (handler `index.handler`) → dist/lambda.zip
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

@@ -26,3 +26,11 @@ Publication is the guarantee.
 **Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link.
 
 **Private** — visible to any signed-in Nearformer (not only the owner). **Public** — anyone.
+
+**Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*` and
+`cloudflare:*` there and in `packages/shared`). It talks to storage through three ports:
+**Store** (records), **Blobs** (site files and manifests, including upload URLs bound to a sha256)
+and **RouteTable** (the keys the edge routes site hosts by).
+
+**Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
+(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM).

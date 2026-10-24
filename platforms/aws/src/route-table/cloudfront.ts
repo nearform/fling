@@ -12,13 +12,13 @@ import {
   GetKeyCommand,
   PutKeyCommand,
 } from '@aws-sdk/client-cloudfront-keyvaluestore'
-import type { Kvs } from './types.ts'
+import type { RouteTable } from '@fling/api/route-table'
 
 const MAX_ATTEMPTS = 6
 
 const named = (err: unknown, ...names: string[]) => err instanceof Error && names.includes(err.name)
 
-export class CloudFrontKvs implements Kvs {
+export class CloudFrontRouteTable implements RouteTable {
   private etag: string | undefined
 
   constructor(

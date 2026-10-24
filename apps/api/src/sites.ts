@@ -5,6 +5,10 @@
  *
  * Names are one global namespace (first come, first served). Deleting a site frees its name;
  * archiving keeps it.
+ *
+ * Access: a site is found by its name (through the name claim, whoever owns it), then policy.ts
+ * decides whether the user may do the action. Refusals look exactly like a missing site (404), so
+ * the API never confirms that someone else's site exists beyond what `checkName` says.
  */
 import {
   initialsFromEmail,
@@ -31,6 +35,7 @@ import {
 import { manifestKey } from './blobs/types.ts'
 import { conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
+import { type Action, can, userActor } from './policy.ts'
 import type { SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -143,16 +148,34 @@ export async function checkName(deps: Deps, user: User, name: string): Promise<N
       suggestions: await freeNameSuggestions(deps, user, suggestionBase(name)),
     }
   }
-  if (await deps.store.getSite(user.email, name)) return { name, status: 'yours', suggestions: [] }
+  const yours: NameCheck = { name, status: 'yours', suggestions: [] }
+  const taken = async (): Promise<NameCheck> => ({
+    name,
+    status: 'taken',
+    suggestions: await freeNameSuggestions(deps, user, name),
+  })
+  const site = await deps.store.findSite(name)
+  if (site) return can(userActor(user), 'site.deploy', site) ? yours : taken()
+  // A claim without a site (only ever transient): it is the claimant's.
   const claim = await deps.store.getNameClaim(name)
   if (!claim) return { name, status: 'available', suggestions: [] }
-  if (claim.email === user.email) return { name, status: 'yours', suggestions: [] }
-  return { name, status: 'taken', suggestions: await freeNameSuggestions(deps, user, name) }
+  return claim.email === user.email ? yours : taken()
 }
 
-export async function requireSite(deps: Deps, user: User, name: string): Promise<SiteRecord> {
-  const site = isValidSiteName(name) ? await deps.store.getSite(user.email, name) : null
-  if (!site) throw notFound(`No site named "${name}"`)
+/**
+ * The site named `name`, if the user may do every one of `actions` to it; else 404, the same
+ * answer as for a name nobody holds.
+ */
+export async function requireSite(
+  deps: Deps,
+  user: User,
+  name: string,
+  ...actions: [Action, ...Action[]]
+): Promise<SiteRecord> {
+  const site = isValidSiteName(name) ? await deps.store.findSite(name) : null
+  if (!site || !actions.every(a => can(userActor(user), a, site))) {
+    throw notFound(`No site named "${name}"`)
+  }
   return site
 }
 
@@ -175,8 +198,8 @@ export async function listSites(deps: Deps, user: User, archived: boolean): Prom
 }
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
-  const site = await requireSite(deps, user, name)
-  const versions = await deps.store.listVersions(user.email, site.id)
+  const site = await requireSite(deps, user, name, 'site.read', 'version.list')
+  const versions = await deps.store.listVersions(site.email, site.id)
   return {
     ...toSite(deps, user, site),
     versions: versions
@@ -198,8 +221,8 @@ export async function versionFiles(
   name: string,
   versionId: string
 ): Promise<VersionFiles> {
-  const site = await requireSite(deps, user, name)
-  const version = await deps.store.getVersion(user.email, site.id, versionId)
+  const site = await requireSite(deps, user, name, 'version.read')
+  const version = await deps.store.getVersion(site.email, site.id, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for version ${versionId} of "${name}" is gone`)
@@ -222,15 +245,21 @@ export async function updateSite(
   name: string,
   patch: { spa?: boolean; visibility?: Visibility }
 ) {
-  const site = await requireSite(deps, user, name)
+  const site = await requireSite(
+    deps,
+    user,
+    name,
+    patch.visibility === undefined ? 'site.settings' : 'site.visibility',
+    ...(patch.spa === undefined ? [] : (['site.settings'] as const))
+  )
   applySettings(site, patch)
   await save(deps, user, site)
   return toSite(deps, user, site)
 }
 
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
-  const site = await requireSite(deps, user, name)
-  const version = await deps.store.getVersion(user.email, site.id, versionId)
+  const site = await requireSite(deps, user, name, 'site.rollback')
+  const version = await deps.store.getVersion(site.email, site.id, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
   await save(deps, user, site)
@@ -238,7 +267,7 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
 }
 
 export async function rotateShare(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name)
+  const site = await requireSite(deps, user, name, 'share.create')
   const old = site.shareToken ?? undefined
   site.shareToken = newShareToken()
   await save(deps, user, site, old)
@@ -248,7 +277,7 @@ export async function rotateShare(deps: Deps, user: User, name: string) {
 }
 
 export async function revokeShare(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name)
+  const site = await requireSite(deps, user, name, 'share.revoke')
   const old = site.shareToken ?? undefined
   site.shareToken = null
   await save(deps, user, site, old)
@@ -256,17 +285,22 @@ export async function revokeShare(deps: Deps, user: User, name: string) {
 }
 
 export async function setArchived(deps: Deps, user: User, name: string, archived: boolean) {
-  const site = await requireSite(deps, user, name)
+  const site = await requireSite(deps, user, name, 'site.archive')
   site.archived = archived
   await save(deps, user, site)
   return toSite(deps, user, site)
 }
 
+/**
+ * Delete a site: its route-table keys, files, versions, record and name claim. The site comes from
+ * the name claim (requireSite → findSite), so the `site:<name>` key removed here is always this
+ * site's; a stale record of another user's for the same name can never reach it.
+ */
 export async function deleteSite(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name)
+  const site = await requireSite(deps, user, name, 'site.delete')
   await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
   if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
   await deps.blobs.deletePrefix(sitePrefix(site.id))
-  await deps.store.deleteVersions(user.email, site.id)
-  await deps.store.deleteSite(user.email, site.name)
+  await deps.store.deleteVersions(site.email, site.id)
+  await deps.store.deleteSite(site.email, site.name)
 }

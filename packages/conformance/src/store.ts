@@ -210,6 +210,16 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         })
       })
 
+      it('findSite finds the site holding a name, whoever asks; null once it is free', async () => {
+        const store = await factory()
+        const s = site(email())
+        expect(await store.findSite(s.name)).toBeNull()
+        await store.createSite(s)
+        expect(await store.findSite(s.name)).toEqual(s)
+        await store.deleteSite(s.email, s.name)
+        expect(await store.findSite(s.name)).toBeNull()
+      })
+
       it('createSite again by the owner returns the existing site unchanged', async () => {
         const store = await factory()
         const e = email()

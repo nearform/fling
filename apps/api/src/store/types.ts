@@ -165,6 +165,11 @@ export interface Store {
   touchApiKey(email: string, id: string, at: string): Promise<void>
 
   getSite(email: string, name: string): Promise<SiteRecord | null>
+  /**
+   * The site holding the name claim for `name`, whoever owns it (null → no claim, or no site
+   * record for it). Access is policy's decision, not the lookup's.
+   */
+  findSite(name: string): Promise<SiteRecord | null>
   listSites(email: string): Promise<SiteRecord[]>
   /** Who owns `name` globally (null → free). */
   getNameClaim(name: string): Promise<NameClaim | null>

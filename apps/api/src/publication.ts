@@ -55,6 +55,7 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
+import { can, userActor } from './policy.ts'
 import {
   applySettings,
   detectGeneratedIndex,
@@ -205,7 +206,10 @@ async function prepare(
   }
   const { store, blobs, clock } = deps
   const versionId = computeVersionId(req.manifest.files)
-  const existing = await store.getSite(user.email, name)
+  const existing = await store.findSite(name)
+  if (existing && !can(userActor(user), 'site.deploy', existing)) {
+    throw await nameTaken(deps, user, name)
+  }
   if (!existing) {
     const claim = await store.getNameClaim(name)
     if (claim && claim.email !== user.email) throw await nameTaken(deps, user, name)
@@ -222,7 +226,7 @@ async function prepare(
   }
 
   if (existing) {
-    const version = await store.getVersion(user.email, existing.id, versionId)
+    const version = await store.getVersion(existing.email, existing.id, versionId)
     if (version?.status === 'complete') {
       existing.currentVersionId = versionId
       existing.archived = false
@@ -266,7 +270,7 @@ async function prepare(
     createdAt: now,
   }
   await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
-  await store.putVersion(user.email, version)
+  await store.putVersion(site.email, version)
   return { kind: 'pending', site, version, files }
 }
 
@@ -284,7 +288,7 @@ async function goLive(
       files: [...files],
       generatedIndex,
     } satisfies StoredManifest)
-    await deps.store.putVersion(user.email, { ...version, status: 'complete' })
+    await deps.store.putVersion(site.email, { ...version, status: 'complete' })
   }
   site.currentVersionId = version.id
   site.archived = false
@@ -328,8 +332,8 @@ export async function publish(
   versionId: string
 ): Promise<Published> {
   const { store, blobs } = deps
-  const site = await requireSite(deps, user, name)
-  const version = await store.getVersion(user.email, site.id, versionId)
+  const site = await requireSite(deps, user, name, 'site.deploy')
+  const version = await store.getVersion(site.email, site.id, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
   if (version.status === 'complete') return goLive(deps, user, site, version, [])
 

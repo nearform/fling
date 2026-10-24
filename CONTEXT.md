@@ -27,6 +27,12 @@ Publication is the guarantee.
 
 **Private** — visible to any signed-in Nearformer (not only the owner). **Public** — anyone.
 
+**Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
+pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
+**owner** (holds it), **member** (any other signed-in user), **share** (holds its current share
+link), **anonymous**. Today only `site.view` reaches beyond the owner. A refusal looks like a
+missing site (404).
+
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*` and
 `cloudflare:*` there and in `packages/shared`). It talks to storage through three ports:
 **Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),

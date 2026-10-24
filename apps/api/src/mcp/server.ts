@@ -211,7 +211,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   })
 
   register(mcpTools.files, async args => {
-    const site = await sites.requireSite(deps, user, args.name)
+    const site = await sites.requireSite(deps, user, args.name, 'version.read')
     const versionId = args.versionId ?? site.currentVersionId
     if (!versionId)
       throw new ApiError(404, 'not_found', `${args.name} has no published version yet`)
@@ -305,7 +305,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
       const site = await sites.revokeShare(deps, user, args.name)
       return { text: `Share link for ${site.name} revoked.`, data: { action: 'revoked', site } }
     }
-    const current = await sites.requireSite(deps, user, args.name)
+    const current = await sites.requireSite(deps, user, args.name, 'share.read')
     if (current.shareToken && !args.refresh) {
       const site = sites.toSite(deps, user, current)
       return {

@@ -140,8 +140,10 @@ async function run(runtime: Runtime): Promise<boolean> {
     console.log(`  started in ${((Date.now() - started) / 1000).toFixed(1)} s`)
     const session = await devLogin(runtime.appOrigin, 'e2e@example.test')
     const member = await devLogin(runtime.appOrigin, 'e2e-member@example.test')
+    // With dev login on and no ADMIN_EMAILS, this is the instance's admin (DEV_ADMIN_EMAILS).
+    const admin = await devLogin(runtime.appOrigin, 'admin@example.test')
     const t0 = Date.now()
-    await runScenario({ appOrigin: runtime.appOrigin, session, member })
+    await runScenario({ appOrigin: runtime.appOrigin, session, member, admin })
     console.log(`  passed in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
     return true
   } catch (err) {

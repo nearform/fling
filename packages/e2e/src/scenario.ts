@@ -5,8 +5,9 @@
  *
  *   metadata → whoami → deploy v1 (public) → view → 404 / trailing-slash → deploy v2 → view →
  *   rollback to v1 → private: anonymous redirect to sign-in, member view (with a site cookie) →
- *   share link → comments (owner and member; anonymous refused) → conditional-write race (concurrent first deploys of one name) → MCP publish →
- *   clean up (every site it made is removed).
+ *   share link → comments (owner and member; anonymous refused) → admin (the users list;
+ *   impersonating the owner: their sites, no API key, stop) → conditional-write race (concurrent
+ *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
  * to reach the edge location the check lands on. New sites must not need it: the CLI's readiness
@@ -18,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type InstanceMetadata, InstanceMetadataSchema, instanceMetadataUrl } from '@fling/shared'
 import { runCli } from './cli.ts'
-import type { Session } from './sign-in.ts'
+import { cookiePairs, type Session } from './sign-in.ts'
 
 export interface ScenarioOptions {
   appOrigin: string
@@ -28,6 +29,12 @@ export interface ScenarioOptions {
    * without one those checks are skipped.
    */
   member?: Session
+  /**
+   * An admin of the instance (ADMIN_EMAILS): with a browser session (`cookie`, local runs) the
+   * users list and an impersonation of `session`; with only an API key (smoke tests) the list,
+   * and impersonation refused. Without one, skipped.
+   */
+  admin?: Session
   /** how long a changed route may take to show (default 5 s locally; smoke tests pass more) */
   propagationMs?: number
   log?: (line: string) => void
@@ -248,6 +255,13 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       step('comments: turned off on this instance (skipped)')
     }
 
+    // Admins: the users list, and acting as the owner (who isn't an admin) through impersonation.
+    if (opts.admin) {
+      await adminStep({ appOrigin, name, opts, step })
+    } else {
+      step('admin: no admin session (skipped)')
+    }
+
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
     // the name claim, the site and its index item in one conditional transaction; exactly one
     // wins, the others' conditions fail (rolled back) and they find the winner's site.
@@ -459,6 +473,132 @@ async function commentsStep(ctx: {
   const after = (await fling('comments', name, '--all')) as { comments: CommentJson[] }
   check(after.comments.length === 0, `after deleting the thread: ${JSON.stringify(after.comments)}`)
   step('resolved (CLI), listed (CLI and MCP), deleted with its reply (CLI)')
+}
+
+/** Replace a Cookie header's pairs with the ones a response set (an emptied one is dropped). */
+function withCookies(cookie: string, res: Response): string {
+  const jar = new Map(
+    cookie
+      .split(/;\s*/)
+      .filter(Boolean)
+      .map(p => [p.slice(0, p.indexOf('=')), p] as const)
+  )
+  for (const pair of cookiePairs(res)) {
+    const key = pair.slice(0, pair.indexOf('='))
+    if (pair.endsWith('=')) jar.delete(key)
+    else jar.set(key, pair)
+  }
+  return [...jar.values()].join('; ')
+}
+
+async function adminStep(ctx: {
+  appOrigin: string
+  name: string
+  opts: ScenarioOptions
+  step: (line: string) => void
+}) {
+  const { appOrigin, name, opts, step } = ctx
+  const admin = opts.admin as Session
+  const owner = opts.session.email
+  /** As the admin's browser (cookie, with the app's Origin) or their API key. */
+  const call = (
+    how: { cookie: string } | { key: string },
+    method: string,
+    path: string,
+    body?: unknown
+  ) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      redirect: 'manual',
+      headers: {
+        accept: 'application/json',
+        ...('cookie' in how
+          ? { cookie: how.cookie, origin: appOrigin }
+          : { authorization: `Bearer ${how.key}` }),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const listed = async (how: { cookie: string } | { key: string }) => {
+    const res = await call(how, 'GET', `/api/admin/users?q=${encodeURIComponent(owner)}`)
+    check(res.status === 200, `admin users list: ${res.status}`)
+    const body = (await res.json()) as { users: { email: string; siteCount: number }[] }
+    const row = body.users.find(u => u.email === owner)
+    check(row && row.siteCount >= 1, `users list: ${JSON.stringify(body.users)}`)
+  }
+
+  // Not admins: nothing there.
+  const refused = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/users')
+  check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
+
+  await listed({ key: admin.apiKey })
+  const viaKey = await call({ key: admin.apiKey }, 'POST', '/api/admin/impersonate', {
+    email: owner,
+  })
+  check(viaKey.status === 403, `impersonating with an API key: ${viaKey.status}`)
+  if (!admin.cookie) {
+    step(`admin (API key): lists users (${owner} included); may not impersonate with a key`)
+    return
+  }
+  const own = { cookie: admin.cookie }
+  await listed(own)
+
+  const started = await call(own, 'POST', '/api/admin/impersonate', { email: owner })
+  check(started.status === 200, `impersonate ${owner}: ${started.status} ${await started.text()}`)
+  const as = { cookie: withCookies(admin.cookie, started) }
+  const me = (await (await call(as, 'GET', '/api/me')).json()) as {
+    email?: string
+    impersonator?: string
+  }
+  check(
+    me.email === owner && me.impersonator === admin.email,
+    `/api/me while impersonating: ${JSON.stringify(me)}`
+  )
+  const sites = (await (await call(as, 'GET', '/api/sites')).json()) as {
+    sites?: { name: string }[]
+  }
+  check(
+    sites.sites?.some(s => s.name === name),
+    `the owner's sites, impersonated: ${JSON.stringify(sites)}`
+  )
+
+  // No API key for them (`fling login`'s browser half).
+  const cli = await call(
+    as,
+    'GET',
+    `/auth/cli?redirect_uri=${encodeURIComponent('http://127.0.0.1:9/callback')}&hostname=e2e&state=e2e`
+  )
+  const back = new URL(cli.headers.get('location') ?? 'http://invalid/')
+  check(
+    back.searchParams.get('error') === 'impersonating' && !back.searchParams.get('key'),
+    `fling login while impersonating: ${cli.status} ${cli.headers.get('location')}`
+  )
+
+  const stopped = await call(as, 'POST', '/api/admin/impersonate/stop')
+  check(stopped.status === 200, `stop impersonating: ${stopped.status}`)
+  const after = { cookie: withCookies(as.cookie, stopped) }
+  const self = (await (await call(after, 'GET', '/api/me')).json()) as {
+    email?: string
+    admin?: boolean
+    impersonator?: string
+  }
+  check(
+    self.email === admin.email && self.admin === true && !self.impersonator,
+    `/api/me after stopping: ${JSON.stringify(self)}`
+  )
+  const audit = (await (await call(after, 'GET', '/api/admin/audit')).json()) as {
+    entries: { action: string; actor: string; target: string }[]
+  }
+  const [latest, before] = audit.entries
+  check(
+    latest?.action === 'impersonation.stop' &&
+      before?.action === 'impersonation.start' &&
+      [latest, before].every(e => e.actor === admin.email && e.target === owner),
+    `audit: ${JSON.stringify(audit.entries.slice(0, 2))}`
+  )
+  step(
+    `admin: lists users; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
+  )
 }
 
 export { ScenarioError }

@@ -9,10 +9,12 @@ export interface Session {
   apiKey: string
   /** `fling_site=…` for private sites, when the sign-in gives one */
   siteCookie?: string
+  /** the browser session's cookies (`name=value; …`), when the sign-in gives one */
+  cookie?: string
 }
 
 /** `name=value` pairs of a response's Set-Cookie headers. */
-function cookiePairs(res: Response): string[] {
+export function cookiePairs(res: Response): string[] {
   return res.headers.getSetCookie().map(c => c.split(';')[0] as string)
 }
 
@@ -32,7 +34,7 @@ export async function devLogin(appOrigin: string, email: string): Promise<Sessio
   const location = cli.headers.get('location')
   const apiKey = location ? new URL(location).searchParams.get('key') : null
   if (!apiKey) throw new Error(`CLI login: ${cli.status} ${location}`)
-  return { email, apiKey, siteCookie }
+  return { email, apiKey, siteCookie, cookie: cookies.join('; ') }
 }
 
 export async function apiKeySession(appOrigin: string, apiKey: string): Promise<Session> {

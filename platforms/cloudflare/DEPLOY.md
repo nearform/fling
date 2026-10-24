@@ -71,7 +71,8 @@ version's file, a sign-in redirect or the 404 page.
    ```
 
    For a personal instance, admit individual addresses with `--allowed-emails you@gmail.com`
-   instead of (or as well as) `--email-domains`.
+   instead of (or as well as) `--email-domains`. `--admin-emails you@example.com` (optional, not
+   asked for; `''` removes them) makes those users the instance's admins (`ADMIN_EMAILS`).
 
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
    namespace unless they exist, writes the deploy config to
@@ -122,7 +123,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars |
 
 The rendered config replaces the template's local-development vars wholesale: production gets
 `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME=https`, `SITE_COOKIE_DOMAIN` (the
@@ -198,6 +199,10 @@ the `FLING_E2E_API_KEY` secret. Without it the deploy warns and skips the test. 
 ```bash
 FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
 ```
+
+`FLING_E2E_ADMIN_API_KEY`, a key of a user in `ADMIN_EMAILS`, adds the admin checks an API key
+can make (the users list; impersonation refused, as it is for any API key). Without it they are
+skipped; impersonation itself is covered by the local e2e, which has browser sessions.
 
 ## Routes, consistency and the KV fallback
 

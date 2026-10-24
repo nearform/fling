@@ -1,5 +1,6 @@
 import type { CommentAnchor, Visibility } from '@fling/shared'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ADMIN_USERS_PATH } from '../lib/admin'
 import { api, errorMessage } from '../lib/api'
 import { showToast } from '../lib/toast'
 
@@ -12,6 +13,8 @@ export const queryKeys = {
   comments: (name: string) => ['comments', name] as const,
   keys: ['keys'] as const,
   connections: ['connections'] as const,
+  adminUsers: (q: string) => ['admin', 'users', q] as const,
+  adminAudit: ['admin', 'audit'] as const,
 }
 
 export function useMe() {
@@ -145,6 +148,42 @@ export function useRevokeConnection() {
     },
     onError: error => showToast(errorMessage(error), 'error'),
   })
+}
+
+/** Admins: users under an email prefix, a page at a time ("Load more"). */
+export function useAdminUsers(q: string, enabled: boolean) {
+  return useInfiniteQuery({
+    enabled,
+    queryKey: queryKeys.adminUsers(q),
+    queryFn: ({ pageParam }) => api.adminUsers(q, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor ?? undefined,
+  })
+}
+
+export function useAdminAudit() {
+  return useQuery({
+    queryKey: queryKeys.adminAudit,
+    queryFn: api.adminAudit,
+    refetchInterval: 60_000,
+  })
+}
+
+/**
+ * Start or stop an impersonation, then load `to` afresh: every cached answer was someone else's.
+ */
+export function useImpersonation() {
+  const go = (to: string) => () => window.location.assign(to)
+  const onError = (error: unknown) => showToast(errorMessage(error), 'error')
+  return {
+    start: useMutation({ mutationFn: api.impersonate, onSuccess: go('/'), onError }),
+    stop: useMutation({
+      mutationFn: api.stopImpersonating,
+      onSuccess: go(ADMIN_USERS_PATH),
+      // Lapsed or signed out meanwhile: reloading shows whichever session is left.
+      onError: () => window.location.assign('/'),
+    }),
+  }
 }
 
 export function useLogout() {

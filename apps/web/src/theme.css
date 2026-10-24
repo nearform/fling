@@ -631,3 +631,77 @@
 .toast-in {
   animation: toast-in var(--dur-panel) ease-out;
 }
+
+/* Impersonation (components/ImpersonationBanner.tsx): a bar fixed along the bottom of every
+   signed-in page, in the warning colour, so an admin acting as someone else always knows. Fixed
+   rather than sticky so it doesn't fight the sticky header or the review page's own layout; the
+   page and the side nav keep room for it. */
+@layer components {
+  :root {
+    --impersonation-bar: 3rem;
+  }
+
+  .impersonation-banner {
+    position: fixed;
+    inset-inline: 0;
+    inset-block-end: 0;
+    z-index: 60;
+    container-type: inline-size;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-block-size: var(--impersonation-bar);
+    padding-block: var(--space-2);
+    padding-inline: var(--space-4);
+    background: var(--color-warning);
+    color: var(--color-warning-content);
+    box-shadow: 0 -1px 0 color-mix(in oklch, var(--color-warning-content) 25%, transparent);
+    font-size: 0.875rem;
+  }
+
+  .impersonation-banner > p {
+    flex: 1;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .impersonation-who {
+    font-weight: 600;
+  }
+
+  /* The detail goes first when space runs out; the name and Stop never do. */
+  @container (inline-size < 32rem) {
+    .impersonation-detail {
+      display: none;
+    }
+  }
+
+  .impersonation-banner .impersonation-stop {
+    background: var(--color-warning-content);
+    color: var(--color-warning);
+    border-color: transparent;
+  }
+
+  .impersonation-banner .impersonation-stop:focus-visible {
+    outline-color: var(--color-warning-content);
+  }
+
+  .impersonation-banner .impersonation-stop:active {
+    translate: 0 1px;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .impersonation-banner .impersonation-stop:hover {
+      background: color-mix(in oklch, var(--color-warning-content) 85%, var(--color-warning));
+    }
+  }
+
+  body:has(.impersonation-banner) {
+    padding-block-end: var(--impersonation-bar);
+  }
+
+  body:has(.impersonation-banner) .app-nav {
+    padding-block-end: var(--impersonation-bar);
+  }
+}

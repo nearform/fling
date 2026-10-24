@@ -4,8 +4,12 @@
  * `{ error: { code, message } }` (or a synthetic code when the body is not that envelope).
  */
 import {
+  type AdminUserList,
+  AdminUserListSchema,
   ApiKeyListSchema,
   type ApiKeySchema,
+  type AuditEntry,
+  AuditListSchema,
   type Comment,
   type CommentAnchor,
   type CommentList,
@@ -186,6 +190,22 @@ export const api = {
     return redirectUrl
   },
   logout: () => request('/auth/logout', ignoreBody, { method: 'POST' }),
+  /** Admins only: a page of users, by email, optionally under an email prefix. */
+  adminUsers(q: string, cursor?: string): Promise<AdminUserList> {
+    const params = new URLSearchParams()
+    if (q.trim()) params.set('q', q.trim())
+    if (cursor) params.set('cursor', cursor)
+    return request(`/api/admin/users${params.size ? `?${params}` : ''}`, AdminUserListSchema)
+  },
+  async adminAudit(): Promise<AuditEntry[]> {
+    const { entries } = await request('/api/admin/audit', AuditListSchema)
+    return entries
+  },
+  /** Start acting as `email` (this browser session only); returns who you now are. */
+  impersonate: (email: string): Promise<Me> =>
+    request('/api/admin/impersonate', MeSchema, { method: 'POST', body: { email } }),
+  stopImpersonating: (): Promise<Me> =>
+    request('/api/admin/impersonate/stop', MeSchema, { method: 'POST' }),
 }
 
 /** Full-page redirect into the instance's sign-in; the API sends the browser back to `returnTo`. */

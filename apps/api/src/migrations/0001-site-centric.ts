@@ -33,11 +33,11 @@
  * both places' versions, so whatever the old code did shows, and the next write puts the site
  * partition back in step. This migration is done and doesn't run again; it doesn't need to.
  *
- * CONTRACT. Once nobody will roll back to code from before this release, 0002 deletes the old
- * version keys (copying any version first that only exists there). Ship it enabled in the same
- * release that removes the expand-phase reads and writes (LEGACY in records.ts), so nothing
- * writes old keys after it runs. After 0002 a rollback to pre-0001 code would show sites with no
- * versions: that's the point of no return.
+ * CONTRACT. Once nobody will roll back to code from before this release, 0002 (opt-in, run by
+ * hand) brings site records up to date with any newer index item and deletes the old version keys
+ * (copying first any version found only there). After it, a rollback to pre-0001 code would show
+ * sites with no versions: that's the point of no return. The release after removes the
+ * expand-phase reads and writes (LEGACY in records.ts); see 0002's header for the order.
  *
  * `verifySiteCentric` checks the result (the rehearsal script runs it on a restored copy of
  * production): see below.

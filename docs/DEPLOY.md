@@ -20,6 +20,18 @@ DynamoDB labs-production-fling, SSM parameters /labs/production/fling/*
 | This repo, `deploy.yml` | The Lambda code, the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` in the sites bucket, the site router's code |
 | The API at runtime | Table items, KeyValueStore keys, site files under `sites/`, chunked MCP upload staging under `uploads/` |
 
+> **Required IAM changes for data migrations (labs-infra, not yet in place).** Deploys now run
+> data migrations by invoking the function (see [Data migrations](#data-migrations)). Two grants
+> are needed, both in labs-infra until the infrastructure moves into this repository:
+>
+> - the **deploy role**: `lambda:InvokeFunction` on the API function
+>   (`arn:aws:lambda:eu-west-1:<account>:function:labs-production-fling-api`);
+> - the **function's own role**: `dynamodb:Scan` on the table (`labs-production-fling`), next to
+>   the item permissions it already has. Only migrations scan.
+>
+> Until both exist the deploy's migrate step warns ("Data migrations NOT run") and carries on. That
+> is safe: every migration is written so the code serves correctly before it has run.
+
 The remote MCP connector (`/mcp`, OAuth under `/oauth/*` and `/.well-known/oauth-*`) needs, beyond
 the routes above: DynamoDB TTL enabled on the attribute `ttl` (OAuth codes, requests, refresh
 tokens, grants, DCR clients and uploads carry it), the function role allowed to `s3:PutObject`,
@@ -85,6 +97,9 @@ and, with the deploy role over OIDC:
 
 1. Uploads `platforms/aws/dist/lambda.zip` (the `apps/api` core bundled with the AWS adapters by
    `pnpm --filter @fling/platform-aws build`) to the function and waits until it is live.
+   Then runs the pending [data migrations](#data-migrations): it invokes the function with
+   `{"fling":"migrate"}` until the report says `done`. A failing migration stops the deploy here
+   (the API keeps working); missing permissions only warn.
 2. Syncs `apps/web/dist` to the UI bucket: `assets/` first (hashed, cached for a year, never deleted,
    so open tabs keep working), then the other files, then `index.html` (`no-cache`) last.
    It also uploads the Claude Desktop extension, built by `pnpm --filter @nearform/fling build:mcpb`,
@@ -108,7 +123,125 @@ SHA of `main`. It rebuilds and redeploys that commit: API, UI, error page and si
 Old UI assets are still in the bucket, so nothing breaks while it runs.
 
 Table items and KeyValueStore keys are not rolled back. Keep the data model backwards compatible, or
-roll forward. A single site rolls back with `fling rollback <name> <versionId>`.
+roll forward. Data migrations are written expand/contract so a rollback across one is survivable
+(see [Data migrations](#data-migrations)); the one exception is a contract step, which is run by
+hand and says so. A single site rolls back with `fling rollback <name> <versionId>`.
+
+## Data migrations
+
+Stored data is changed by migrations in `apps/api/src/migrations/NNNN-*.ts`, written once against
+the Table port, idempotent and resumable (the runner keeps a checkpoint and a lock with a lease in
+`MIGRATION#NNNN` items). The deploy runs the pending ones right after the new code is live, by
+invoking the function with a non-HTTP event that only IAM principals with `lambda:InvokeFunction`
+can send (a function URL request is always an HTTP event):
+
+| Payload | Does |
+| --- | --- |
+| `{"fling":"migrate"}` | Runs pending migrations until shortly before the invocation times out; returns the report. Call again until `"done": true`. |
+| `{"fling":"migrate","dryRun":true}` | The same, reading only: reports what it would write. |
+| `{"fling":"migrate","only":["0002"]}` | Runs just those, including opt-in ones. |
+
+By hand, with your own SSO credentials:
+
+```bash
+aws lambda invoke --region eu-west-1 --function-name labs-production-fling-api \
+  --cli-binary-format raw-in-base64-out --cli-read-timeout 0 \
+  --payload '{"fling":"migrate","dryRun":true}' /dev/stdout
+```
+
+A report lists each migration with `status`: `up-to-date`, `completed`, `partial` (out of time,
+call again), `busy` (another run holds its lock; a crashed run's lease runs out within 2 minutes),
+`skipped` (opt-in) or `pending` (an earlier one didn't finish). Progress is also logged.
+
+**Required permissions** (labs-infra): `lambda:InvokeFunction` on the function for the deploy role,
+and `dynamodb:Scan` on the table for the function role. Without them the deploy warns and skips
+the step.
+
+### 0001: site-centric keys, and its rollback story
+
+0001 copies every site to `SITE#<id>/SITE` and every version to `SITE#<id>/VERSION#<versionId>`,
+deleting nothing; `USER#<email>/SITE#<name>` stays as the user's index item. The release that
+ships it writes both layouts and reads both, so:
+
+- **Before and during the migration** (the minutes between the code going live and the migrate step
+  finishing) everything is visible: reads fall back on the old keys.
+- **Rolling back** (Deploy with an older `ref`) is survivable: the old code reads only the old keys,
+  and they stay complete. It ignores the new items.
+- **Rolling forward** again needs nothing: reads take the newer copy of a site and the union of
+  both places' versions, so whatever the old code did while rolled back shows.
+
+**Contract (0002, opt-in, run by hand).** Once nobody will redeploy code from before 0001, run
+`{"fling":"migrate","only":["0002"]}`: it brings site records up to date and deletes the old
+version keys. After it, rolling back to pre-0001 code would show sites without versions. The
+header of `apps/api/src/migrations/0002-*.ts` has the full order.
+
+## Rehearsing a data migration (point-in-time copy)
+
+Before a migration first runs in production, rehearse it on a copy of the production table restored
+to a point in time. Production is never touched: the copy is a separate table and nothing points at
+it. Use your own SSO credentials (the deploy role can't do this), from a checkout of the commit that
+will be deployed, after `pnpm install`.
+
+1. **Check point-in-time recovery is on** (`ENABLED`):
+
+   ```bash
+   aws dynamodb describe-continuous-backups --region eu-west-1 --table-name labs-production-fling \
+     --query ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus
+   ```
+
+   If it is off, take an on-demand backup instead (`aws dynamodb create-backup --table-name
+   labs-production-fling --backup-name fling-rehearsal`) and restore it with
+   `aws dynamodb restore-table-from-backup --target-table-name "$COPY" --backup-arn <arn>`.
+
+2. **Restore a copy** (minutes to tens of minutes; it starts empty of TTL settings, which doesn't
+   matter here):
+
+   ```bash
+   COPY="labs-production-fling-rehearsal-$(date -u +%Y%m%d%H%M)"
+   aws dynamodb restore-table-to-point-in-time --region eu-west-1 \
+     --source-table-name labs-production-fling --target-table-name "$COPY" \
+     --use-latest-restorable-time --billing-mode-override PAY_PER_REQUEST
+   until [ "$(aws dynamodb describe-table --region eu-west-1 --table-name "$COPY" \
+     --query Table.TableStatus --output text)" = ACTIVE ]; do sleep 30; done
+   ```
+
+3. **Dry run** (reads only: counts per kind, anomalies already in the data, what would be written):
+
+   ```bash
+   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --region eu-west-1 --dry-run
+   ```
+
+4. **Rehearse** (runs the migrations on the copy, then verifies):
+
+   ```bash
+   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --region eu-west-1
+   ```
+
+   It refuses a table that isn't a restored copy. It must end `Verification: PASSED`, after
+   checking:
+   - counts per kind before and after: nothing of the old layout lost or changed, one site record
+     per old site and one copy per old version;
+   - every user's sites resolve through the new layout (claim → `SITE#<id>`), every site's versions
+     and current version are in its partition, and every name claim points at a matching site
+     record;
+   - the API (Records) serves every user's site list and every claimed site exactly as before.
+
+   Warnings list anomalies already in the data (copied as they are), such as a site record no
+   claim points at. Read them: such a site is not reachable by name after 0001.
+
+5. **Check idempotence and resuming**: run step 4 again (`up-to-date`, `PASSED`); optionally
+   restore a second copy, interrupt step 4 with Ctrl-C mid-way, and run it again: it waits out the
+   lease (`--lease-seconds`, default 120) and resumes from the last checkpoint.
+
+6. **Delete the copy**:
+
+   ```bash
+   aws dynamodb delete-table --region eu-west-1 --table-name "$COPY"
+   aws dynamodb wait table-not-exists --region eu-west-1 --table-name "$COPY"
+   ```
+
+7. **Run it for real**: merge and let the deploy run it, then confirm with a dry run (see Data
+   migrations above), which should report `up-to-date`.
 
 ## Releasing the CLI
 
@@ -144,7 +277,8 @@ also needs the copy the site router reads from the KeyValueStore updated by the 
   a `ref` that must be on `main` (checked with `git merge-base --is-ancestor`). Pull request runs,
   including forks', never get the role or any secret.
 - **The deploy role can't read app secrets.** It can update the Lambda code, the UI bucket,
-  `_fling/*` in the sites bucket and the CloudFront functions, and invalidate caches. Google
+  `_fling/*` in the sites bucket and the CloudFront functions, invalidate caches, and invoke the
+  function (to run data migrations; the function does nothing else for a non-HTTP event). Google
   credentials and the signing keys live in SSM, readable only by the Lambda's own role.
 - **Logs are public.** They show resource names and the role ARN, which are identifiers, not
   credentials. Never `echo` anything secret in a workflow.

@@ -263,30 +263,36 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       expect((await verifySiteCentric(table)).ok).toBe(true)
     })
 
-    it('0002 (opt-in) drops the old version keys; the API still serves the same', async () => {
+    it('0002 (opt-in) syncs site records and drops the old version keys; the API serves the same', async () => {
       const table = await seeded()
       await runMigrations(table, { migrations: MIGRATIONS })
-      const view = await served(table)
-      // Something only at an old key (a rolled-back Lambda's deploy) is copied before it goes.
+      // What a Lambda rolled back to the old code wrote after 0001: a new version (only at its
+      // old key) and newer settings (only in the index item). 0002 copies both before it deletes.
       await table.put(oldVersion('alice@example.test', 'S1', 'v4', 'complete', 4))
+      const archived = oldSite('alice@example.test', 'draft', 'S3', {
+        archived: true,
+        updatedAt: T(5),
+      })
+      await table.put(archived)
+      const view = await served(table)
+
       const run = await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })
       expect(run.migrations.map(m => [m.id, m.status])).toEqual([
         ['0001', 'skipped'],
         ['0002', 'completed'],
       ])
-      expect(run.migrations[1]?.counts).toEqual({ 'version copied': 1, 'version dropped': 8 })
+      expect(run.migrations[1]?.counts).toEqual({
+        'site refreshed': 1,
+        'version copied': 1,
+        'version dropped': 8,
+      })
       const left = await scanAll(table)
       expect(left.filter(i => i.pk.startsWith('USER#') && i.sk.startsWith('VERSION#'))).toEqual([])
-      const records = new Records(table)
-      const hello = await records.findSite('hello')
-      if (!hello) throw new Error('hello is gone')
-      expect((await records.listVersions(hello)).map(v => v.id)).toEqual(['v1', 'v2', 'v3', 'v4'])
-      await table.delete('SITE#S1', 'VERSION#v4')
+      expect(await table.get('SITE#S3', 'SITE')).toEqual({ ...archived, pk: 'SITE#S3', sk: 'SITE' })
+      expect(await table.get('SITE#S1', 'VERSION#v4')).not.toBeNull()
       expect(await served(table)).toEqual(view)
-      expect(
-        (await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })).migrations[1]
-          ?.status
-      ).toBe('up-to-date')
+      const again = await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })
+      expect(again.migrations[1]?.status).toBe('up-to-date')
     })
   })
 }

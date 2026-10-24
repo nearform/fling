@@ -5,13 +5,15 @@ import { join } from 'node:path'
 import type { ManifestFile } from '@fling/shared'
 import { createApp } from '../src/app.ts'
 import { mintApiKey } from '../src/auth/api-keys.ts'
+import { identityProviderFor } from '../src/auth/oidc.ts'
 import { signSession } from '../src/auth/session.ts'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
 import { MemoryRouteTable } from '../src/route-table/memory.ts'
 import { Records } from '../src/store/records.ts'
 import { MemoryTable } from '../src/table/memory.ts'
-import type { Deps, GoogleClaims } from '../src/types.ts'
+import type { Deps } from '../src/types.ts'
+import { IDP_CLIENT_ID, IDP_CLIENT_SECRET, IDP_ISSUER, type TestIdp, testIdp } from './idp.ts'
 
 export const APP_ORIGIN = 'https://fling.test'
 
@@ -26,12 +28,13 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     STORE_DRIVER: 'memory',
     STORAGE_DRIVER: 'fs',
     KVS_DRIVER: 'memory',
+    OIDC_ISSUER: IDP_ISSUER,
+    OIDC_CLIENT_ID: IDP_CLIENT_ID,
   })
   return {
     ...base,
     secrets: {
-      googleClientId: 'cid',
-      googleClientSecret: 'csecret',
+      oidcClientSecret: IDP_CLIENT_SECRET,
       sessionSecret: 's'.repeat(40),
       siteHmacKey: 'h'.repeat(40),
     },
@@ -39,7 +42,11 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
   }
 }
 
-export function setup(overrides: Partial<Config> = {}) {
+/**
+ * An app on memory adapters, signing in through an in-process OIDC provider (`idp`; pass one to
+ * act as another issuer, e.g. Google for the legacy config).
+ */
+export function setup(overrides: Partial<Config> = {}, idp: TestIdp = testIdp()) {
   const config = testConfig(overrides)
   let now = new Date('2026-01-01T00:00:00Z')
   const clock = { now: () => now }
@@ -49,25 +56,13 @@ export function setup(overrides: Partial<Config> = {}) {
   const routeTable = new MemoryRouteTable()
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
-  const google: { claims: GoogleClaims; lastState?: string } = {
-    claims: { email: 'alice@example.test', email_verified: true, hd: 'example.test' },
-  }
   const deps: Deps = {
     config,
     store,
     blobs,
     routeTable,
     clock,
-    oauth: {
-      authorizationUrl(state) {
-        google.lastState = state
-        return new URL(`https://accounts.google.test/auth?state=${state}`)
-      },
-      async exchange(code) {
-        if (code !== 'good-code') throw new Error('bad code')
-        return google.claims
-      },
-    },
+    identity: identityProviderFor(config, { fetch: idp.fetch, jwksCooldownMs: 0 }),
   }
   const app = createApp(deps)
   return {
@@ -79,7 +74,7 @@ export function setup(overrides: Partial<Config> = {}) {
     routeTable,
     blobs,
     root,
-    google,
+    idp,
     advance(ms: number) {
       now = new Date(now.getTime() + ms)
     },
@@ -145,4 +140,15 @@ export async function upload(
 
 export async function json<T = any>(res: Response): Promise<T> {
   return (await res.json()) as T
+}
+
+/** Set-Cookie headers by name: the value and the whole header. */
+export function cookiesOf(res: Response): Record<string, { value: string; raw: string }> {
+  const out: Record<string, { value: string; raw: string }> = {}
+  for (const raw of res.headers.getSetCookie()) {
+    const [pair = ''] = raw.split(';')
+    const i = pair.indexOf('=')
+    out[pair.slice(0, i)] = { value: pair.slice(i + 1), raw }
+  }
+  return out
 }

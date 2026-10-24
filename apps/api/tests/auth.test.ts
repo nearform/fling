@@ -1,6 +1,6 @@
-import { SITE_COOKIE_NAME, verifySiteCookie } from '@fling/shared/site-cookie'
+import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { APP_ORIGIN, createUser, type Env, json, setup } from './helpers.ts'
+import { APP_ORIGIN, cookiesOf, createUser, type Env, json, setup } from './helpers.ts'
 
 let env: Env
 beforeEach(() => {
@@ -8,16 +8,6 @@ beforeEach(() => {
 })
 
 const SESSION = '__Host-fling_session'
-
-function cookiesOf(res: Response): Record<string, { value: string; raw: string }> {
-  const out: Record<string, { value: string; raw: string }> = {}
-  for (const raw of res.headers.getSetCookie()) {
-    const [pair = ''] = raw.split(';')
-    const i = pair.indexOf('=')
-    out[pair.slice(0, i)] = { value: pair.slice(i + 1), raw }
-  }
-  return out
-}
 
 describe('API authentication', () => {
   it('401 without credentials, 401 with a bad key', async () => {
@@ -103,65 +93,16 @@ describe('API authentication', () => {
   })
 })
 
-describe('Google OAuth', () => {
-  async function start(ret = 'https://hello.fling.test/page') {
-    const res = await env.app.request(`/auth/google?return=${encodeURIComponent(ret)}`)
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toContain('accounts.google.test')
-    const flow = cookiesOf(res).fling_oauth?.value as string
-    return { flow, state: env.google.lastState as string }
-  }
-
-  it('signs in a verified user on the allowlist: session + site cookie, redirect to return', async () => {
-    const { flow, state } = await start()
-    const res = await env.app.request(`/auth/google/callback?code=good-code&state=${state}`, {
-      headers: { cookie: `fling_oauth=${flow}` },
-    })
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
-    const cookies = cookiesOf(res)
-    expect(cookies[SESSION]?.raw).toMatch(/HttpOnly/)
-    expect(cookies[SESSION]?.raw).toMatch(/Secure/)
-    expect(cookies[SESSION]?.raw).not.toMatch(/Domain/)
-    const site = cookies[SITE_COOKIE_NAME]
-    expect(site?.raw).toMatch(/Domain=\.fling\.test/)
-    expect(site?.raw).toMatch(/HttpOnly/)
-    expect(site?.raw).toMatch(/SameSite=Lax/)
-    const payload = verifySiteCookie(
-      site?.value as string,
-      env.config.secrets.siteHmacKey,
-      Math.floor(env.deps.clock.now().getTime() / 1000)
-    )
-    expect(payload?.e).toBe('alice@example.test')
-
-    const me = await env.app.request('/api/me', {
-      headers: { cookie: `${SESSION}=${cookies[SESSION]?.value}` },
-    })
-    expect((await json(me)).userSlug).toBe('alice')
-  })
-
-  it('rejects a state mismatch and a account outside the allowlist', async () => {
-    const { flow } = await start()
-    const mismatch = await env.app.request('/auth/google/callback?code=good-code&state=other', {
-      headers: { cookie: `fling_oauth=${flow}` },
-    })
-    expect(mismatch.headers.get('location')).toBe('/login?error=oauth_state_mismatch')
-
-    env.google.claims = { email: 'eve@gmail.com', email_verified: true }
-    const s = await start()
-    const res = await env.app.request(`/auth/google/callback?code=good-code&state=${s.state}`, {
-      headers: { cookie: `fling_oauth=${s.flow}` },
-    })
-    expect(res.headers.get('location')).toBe('/login?error=domain_not_allowed')
-    expect(cookiesOf(res)[SESSION]).toBeUndefined()
-  })
-})
-
 describe('/auth/login, logout, cli', () => {
-  it('/auth/login without a session goes to Google with a validated return', async () => {
+  it('/auth/login without a session goes to the issuer with a validated return', async () => {
     const ret = encodeURIComponent('https://evil.example/x')
     const res = await env.app.request(`/auth/login?return=${ret}`)
-    expect(res.headers.get('location')).toBe('/auth/google?return=%2F')
+    expect(res.headers.get('location')).toMatch(/^https:\/\/idp\.example\.test\/authorize\?/)
+    expect(cookiesOf(res).fling_oauth?.raw).toMatch(/Path=\/auth/)
+    const flow = JSON.parse(
+      Buffer.from(cookiesOf(res).fling_oauth?.value as string, 'base64url').toString()
+    )
+    expect(flow.ret).toBe('/')
   })
 
   it('/auth/login with a session refreshes fling_site and redirects back', async () => {
@@ -195,9 +136,9 @@ describe('/auth/login, logout, cli', () => {
     const redirect = 'http://127.0.0.1:53123/callback'
     const path = `/auth/cli?redirect_uri=${encodeURIComponent(redirect)}&hostname=My-Laptop&state=st4te`
     const anon = await env.app.request(path)
-    const loc = anon.headers.get('location') as string
-    expect(loc.startsWith('/auth/google?return=')).toBe(true)
-    const ret = new URL(loc, APP_ORIGIN).searchParams.get('return') as string
+    expect(anon.headers.get('location')).toMatch(/^https:\/\/idp\.example\.test\/authorize\?/)
+    const flow = cookiesOf(anon).fling_oauth?.value as string
+    const ret = JSON.parse(Buffer.from(flow, 'base64url').toString()).ret as string
     expect(ret.startsWith(`${APP_ORIGIN}/auth/cli?`)).toBe(true)
     expect(new URL(ret).searchParams.get('state')).toBe('st4te')
 
@@ -214,6 +155,18 @@ describe('/auth/login, logout, cli', () => {
       await env.app.request('/api/keys', { headers: { authorization: `Bearer ${key}` } })
     )
     expect(keys.keys.map((k: any) => k.name)).toContain('cli:my-laptop')
+  })
+
+  it('without an issuer, sign-in is the dev form in dev and 404 otherwise', async () => {
+    const dev = setup({ devLogin: true, secureCookies: false })
+    dev.deps.identity = null
+    const res = await dev.app.request('/auth/login?return=/sites')
+    expect(res.headers.get('location')).toBe(
+      `/auth/dev-login?return=${encodeURIComponent(`${APP_ORIGIN}/sites`)}`
+    )
+    env.deps.identity = null
+    expect((await env.app.request('/auth/login')).status).toBe(404)
+    expect((await env.app.request('/auth/callback?code=x&state=y')).status).toBe(404)
   })
 
   it('dev-login is 404 unless enabled', async () => {

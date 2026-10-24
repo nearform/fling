@@ -1,15 +1,19 @@
 /**
- * `/auth/*`: Google OAuth (rocketpod's arctic + PKCE flow; state, verifier and the return URL
- * travel in a short-lived `fling_oauth` cookie), `/auth/login` (used by the edge for private
- * sites), logout, the CLI loopback login and the dev-only login.
+ * `/auth/*`: sign-in with the instance's OpenID Connect issuer (auth/oidc.ts). `/auth/login`
+ * starts it (or, already signed in, refreshes `fling_site` and goes straight back: the edge sends
+ * private-site visitors here) and the issuer returns to `/auth/callback`. State, nonce, the PKCE
+ * verifier and the return URL travel in a short-lived `fling_oauth` cookie. `/auth/google` and
+ * `/auth/google/callback` are the pre-OIDC paths, kept because existing Google OAuth clients
+ * allow only that callback. Also logout, the CLI loopback login and the dev-only login.
  */
 import { userSlugFromEmail } from '@fling/shared'
-import { generateCodeVerifier, generateState } from 'arctic'
 import { type Context, Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { base64url } from 'jose'
+import * as oauth from 'oauth4webapi'
 import { mintApiKey } from '../auth/api-keys.ts'
 import { cliKeyName, validateCliRedirectUri } from '../auth/cli.ts'
-import { admitGoogleClaims, googleClient } from '../auth/google.ts'
+import { admitIdentity, type Identity, type SignInRequest } from '../auth/identity.ts'
 import { safeReturnUrl } from '../auth/return-url.ts'
 import {
   endSession,
@@ -22,39 +26,39 @@ import { badRequest, forbidden, notFound } from '../lib/errors.ts'
 import type { User } from '../store/types.ts'
 import type { AppEnv } from '../types.ts'
 
-const OAUTH_COOKIE = 'fling_oauth'
+const FLOW_COOKIE = 'fling_oauth'
 
-interface OAuthFlow {
-  state: string
-  verifier: string
+interface SignInFlow extends SignInRequest {
   ret: string
 }
 
-const encodeFlow = (flow: OAuthFlow) => Buffer.from(JSON.stringify(flow)).toString('base64url')
+const encodeFlow = (flow: SignInFlow) => base64url.encode(JSON.stringify(flow))
 
-function decodeFlow(value: string | undefined): OAuthFlow | null {
+function decodeFlow(value: string | undefined): SignInFlow | null {
   if (!value) return null
   try {
-    const f = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<OAuthFlow>
-    if (typeof f.state !== 'string' || typeof f.verifier !== 'string') return null
-    return { state: f.state, verifier: f.verifier, ret: typeof f.ret === 'string' ? f.ret : '/' }
+    const f = JSON.parse(new TextDecoder().decode(base64url.decode(value))) as Partial<SignInFlow>
+    if (
+      typeof f.state !== 'string' ||
+      typeof f.nonce !== 'string' ||
+      typeof f.codeVerifier !== 'string'
+    ) {
+      return null
+    }
+    const ret = typeof f.ret === 'string' ? f.ret : '/'
+    return { state: f.state, nonce: f.nonce, codeVerifier: f.codeVerifier, ret }
   } catch {
     return null
   }
 }
 
-const googleConfigured = (c: Context<AppEnv>) => {
-  const { secrets } = c.get('deps').config
-  return Boolean(c.get('deps').oauth || (secrets.googleClientId && secrets.googleClientSecret))
-}
-
-const oauthClient = (c: Context<AppEnv>) =>
-  c.get('deps').oauth ?? googleClient(c.get('deps').config)
-
 const returnOf = (c: Context<AppEnv>) => safeReturnUrl(c.req.query('return'), c.get('deps').config)
 
 const loginError = (c: Context<AppEnv>, code: string) =>
   c.redirect(`/login?error=${encodeURIComponent(code)}`, 302)
+
+const warn = (msg: string, err: unknown) =>
+  console.warn(JSON.stringify({ level: 'warn', msg, err: String(err) }))
 
 async function sessionUser(c: Context<AppEnv>): Promise<User | null> {
   const { config, clock, store } = c.get('deps')
@@ -70,26 +74,26 @@ async function upsertUser(c: Context<AppEnv>, email: string, name: string, pictu
   )
 }
 
-/** Where to send someone who needs to sign in. */
-function signInUrl(c: Context<AppEnv>, ret: string) {
-  const q = `?return=${encodeURIComponent(ret)}`
-  if (!googleConfigured(c) && c.get('deps').config.devLogin) return `/auth/dev-login${q}`
-  return `/auth/google${q}`
-}
-
-export const authRoutes = new Hono<AppEnv>()
-
-authRoutes.get('/google', c => {
-  const { config } = c.get('deps')
-  if (!googleConfigured(c)) {
-    // Local dev without Google credentials: the UI's sign-in button lands on the dev form.
-    if (config.devLogin) return c.redirect(signInUrl(c, returnOf(c)), 302)
-    throw notFound('Google sign-in is not configured')
+/** Send the browser to the issuer (or, in local dev without one, to the dev-login form). */
+async function beginSignIn(c: Context<AppEnv>, ret: string) {
+  const { config, identity } = c.get('deps')
+  if (!identity) {
+    if (config.devLogin) return c.redirect(`/auth/dev-login?return=${encodeURIComponent(ret)}`, 302)
+    throw notFound('Sign-in is not configured')
   }
-  const state = generateState()
-  const verifier = generateCodeVerifier()
-  const url = oauthClient(c).authorizationUrl(state, verifier)
-  setCookie(c, OAUTH_COOKIE, encodeFlow({ state, verifier, ret: returnOf(c) }), {
+  const request: SignInRequest = {
+    state: oauth.generateRandomState(),
+    nonce: oauth.generateRandomNonce(),
+    codeVerifier: oauth.generateRandomCodeVerifier(),
+  }
+  let url: URL
+  try {
+    url = await identity.authorizationUrl(request)
+  } catch (err) {
+    warn('oidc discovery failed', err)
+    return loginError(c, 'oauth_failed')
+  }
+  setCookie(c, FLOW_COOKIE, encodeFlow({ ...request, ret }), {
     path: '/auth',
     httpOnly: true,
     secure: config.secureCookies,
@@ -97,41 +101,55 @@ authRoutes.get('/google', c => {
     maxAge: 600,
   })
   return c.redirect(url.toString(), 302)
-})
+}
 
-authRoutes.get('/google/callback', async c => {
-  const { config } = c.get('deps')
-  if (!googleConfigured(c)) throw notFound('Google sign-in is not configured')
-  const flow = decodeFlow(getCookie(c, OAUTH_COOKIE))
-  deleteCookie(c, OAUTH_COOKIE, { path: '/auth', secure: config.secureCookies })
-  if (c.req.query('error')) return loginError(c, 'oauth_failed')
-  const code = c.req.query('code')
-  const state = c.req.query('state')
-  if (!flow || !code || !state || state !== flow.state) return loginError(c, 'oauth_state_mismatch')
+export const authRoutes = new Hono<AppEnv>()
 
-  let claims: Awaited<ReturnType<ReturnType<typeof oauthClient>['exchange']>>
+/** Signed in → refresh `fling_site` and go back; else sign in first. */
+async function login(c: Context<AppEnv>) {
+  const ret = returnOf(c)
+  const user = await sessionUser(c)
+  if (!user) return beginSignIn(c, ret)
+  setSiteCookie(c, user.email)
+  return c.redirect(ret, 302)
+}
+
+/** The issuer's redirect back: check the flow, verify the identity, apply the email policy. */
+async function callback(c: Context<AppEnv>) {
+  const { config, identity } = c.get('deps')
+  if (!identity) throw notFound('Sign-in is not configured')
+  const flow = decodeFlow(getCookie(c, FLOW_COOKIE))
+  deleteCookie(c, FLOW_COOKIE, { path: '/auth', secure: config.secureCookies })
+  const query = new URL(c.req.url).searchParams
+  if (query.get('error')) return loginError(c, 'oauth_failed')
+  const state = query.get('state')
+  if (!flow || !query.get('code') || !state || state !== flow.state) {
+    return loginError(c, 'oauth_state_mismatch')
+  }
+
+  let who: Identity
   try {
-    claims = await oauthClient(c).exchange(code, flow.verifier)
+    who = await identity.exchange(query, flow)
   } catch (err) {
-    console.warn(JSON.stringify({ level: 'warn', msg: 'oauth exchange failed', err: String(err) }))
+    warn('oidc exchange failed', err)
     return loginError(c, 'oauth_failed')
   }
-  const admitted = admitGoogleClaims(claims, config.allowedEmailDomains)
+  const admitted = admitIdentity(who, {
+    allowedDomains: config.allowedEmailDomains,
+    assumeEmailVerified: config.oidc.assumeEmailVerified,
+  })
   if (!admitted.ok) return loginError(c, admitted.reason)
 
   const user = await upsertUser(c, admitted.email, admitted.name, admitted.picture)
   await startSession(c, user.email)
   return c.redirect(safeReturnUrl(flow.ret, config), 302)
-})
+}
 
-/** Signed in → refresh `fling_site` and go back; else sign in first. */
-authRoutes.get('/login', async c => {
-  const ret = returnOf(c)
-  const user = await sessionUser(c)
-  if (!user) return c.redirect(signInUrl(c, ret), 302)
-  setSiteCookie(c, user.email)
-  return c.redirect(ret, 302)
-})
+authRoutes.get('/login', login)
+authRoutes.get('/callback', callback)
+// The pre-OIDC paths: old links, and the callback existing Google OAuth clients allow.
+authRoutes.get('/google', login)
+authRoutes.get('/google/callback', callback)
 
 authRoutes.post('/logout', c => {
   const origin = c.req.header('origin')
@@ -173,7 +191,7 @@ authRoutes.get('/cli', async c => {
     const hostname = c.req.query('hostname')
     if (hostname) self.searchParams.set('hostname', hostname)
     if (state) self.searchParams.set('state', state)
-    return c.redirect(signInUrl(c, self.toString()), 302)
+    return beginSignIn(c, self.toString())
   }
   try {
     const { plaintext } = await mintApiKey(

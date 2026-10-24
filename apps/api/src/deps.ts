@@ -4,6 +4,8 @@
  * drivers config selects. A cloud driver with no adapter supplied is an error, never a silent
  * fall back to memory.
  */
+import type { IdentityProvider } from './auth/identity.ts'
+import { identityProviderFor } from './auth/oidc.ts'
 import { FsBlobs } from './blobs/fs.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
@@ -18,6 +20,7 @@ export interface Adapters {
   store?: Store
   blobs?: Blobs
   routeTable?: RouteTable
+  identity?: IdentityProvider | null
 }
 
 const missing = (driver: string): never => {
@@ -43,5 +46,6 @@ export function buildDeps(
   const routeTable: RouteTable =
     opts.routeTable ??
     (config.kvsDriver === 'memory' ? new MemoryRouteTable() : missing(config.kvsDriver))
-  return { config, store, blobs, routeTable, clock: systemClock }
+  const identity = opts.identity !== undefined ? opts.identity : identityProviderFor(config)
+  return { config, store, blobs, routeTable, identity, clock: systemClock }
 }

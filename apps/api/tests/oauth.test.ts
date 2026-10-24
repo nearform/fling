@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { clearCimdCache } from '../src/oauth/clients.ts'
-import { APP_ORIGIN, createUser, type Env, json, setup } from './helpers.ts'
+import { APP_ORIGIN, cookiesOf, createUser, type Env, json, setup } from './helpers.ts'
 import {
   authorizeAndApprove,
   authorizeUrl,
@@ -137,7 +137,9 @@ describe('authorize', () => {
     const login = await env.app.request(
       `/auth/login?return=${encodeURIComponent(`${APP_ORIGIN}${url}`)}`
     )
-    expect(login.headers.get('location')).toContain(encodeURIComponent('/oauth/authorize'))
+    expect(login.headers.get('location')).toMatch(/^https:\/\/idp\.example\.test\//)
+    const flow = cookiesOf(login).fling_oauth?.value as string
+    expect(JSON.parse(Buffer.from(flow, 'base64url').toString()).ret).toBe(`${APP_ORIGIN}${url}`)
   })
 
   it('shows errors for unknown clients and bad redirect URIs on our own page', async () => {

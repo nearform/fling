@@ -8,8 +8,6 @@ import { buildAwsDeps } from '../src/deps.ts'
 import { CloudFrontRouteTable } from '../src/route-table/cloudfront.ts'
 
 const secrets = {
-  googleClientId: '',
-  googleClientSecret: '',
   sessionSecret: 's'.repeat(40),
   siteHmacKey: 'h'.repeat(40),
 }
@@ -22,11 +20,14 @@ describe('buildAwsDeps', () => {
       TABLE_NAME: 'table',
       SITES_BUCKET: 'bucket',
       KVS_ARN: 'arn:aws:cloudfront::123456789012:key-value-store/x',
+      OIDC_ISSUER: 'https://idp.example.test',
+      OIDC_CLIENT_ID: 'client',
     })
-    const deps = buildAwsDeps({ ...base, secrets })
+    const deps = buildAwsDeps({ ...base, secrets: { ...secrets, oidcClientSecret: 'x' } })
     expect(deps.store).toBeInstanceOf(Records)
     expect(deps.blobs).toBeInstanceOf(S3Blobs)
     expect(deps.routeTable).toBeInstanceOf(CloudFrontRouteTable)
+    expect(deps.identity?.issuer).toBe('https://idp.example.test')
   })
 
   it('memory/fs drivers are the core adapters', () => {

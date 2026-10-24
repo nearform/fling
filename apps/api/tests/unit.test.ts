@@ -1,36 +1,44 @@
 import { describe, expect, it } from 'vitest'
 import { validateCliRedirectUri } from '../src/auth/cli.ts'
-import { admitGoogleClaims } from '../src/auth/google.ts'
+import { admitIdentity, type Identity } from '../src/auth/identity.ts'
 import { safeReturnUrl } from '../src/auth/return-url.ts'
 import { Records } from '../src/store/records.ts'
 import { slugCandidate } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
 
-describe('admitGoogleClaims', () => {
-  const allowed = ['example.test']
+describe('admitIdentity', () => {
+  const policy = { allowedDomains: ['example.test'] }
+  const id = (claims: Omit<Identity, 'subject'>): Identity => ({ subject: 'sub', ...claims })
   it('admits a verified allowed-domain email', () => {
     expect(
-      admitGoogleClaims(
-        { email: 'Alice@Example.test', email_verified: true, hd: 'example.test', name: 'Alice' },
-        allowed
+      admitIdentity(
+        id({ email: 'Alice@Example.test', emailVerified: true, hd: 'example.test', name: 'Alice' }),
+        policy
       )
     ).toEqual({ ok: true, email: 'alice@example.test', name: 'Alice', picture: null })
   })
   it.each([
-    [{ email: 'a@example.test', email_verified: false }, 'email_unverified'],
+    [{ email: 'a@example.test', emailVerified: false }, 'email_unverified'],
     [{ email: 'a@example.test' }, 'email_unverified'],
-    [{ email_verified: true }, 'email_unverified'],
-    [{ email: 'a@gmail.com', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@evil.example.test', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@example.test.evil.io', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@example.test', email_verified: true, hd: 'other.com' }, 'domain_not_allowed'],
+    [{ emailVerified: true }, 'email_unverified'],
+    [{ email: 'a@elsewhere.test', emailVerified: true }, 'domain_not_allowed'],
+    [{ email: 'a@evil.example.test', emailVerified: true }, 'domain_not_allowed'],
+    [{ email: 'a@example.test.evil.io', emailVerified: true }, 'domain_not_allowed'],
+    [{ email: 'a@example.test', emailVerified: true, hd: 'other.test' }, 'domain_not_allowed'],
   ])('rejects %j', (claims, reason) => {
-    expect(admitGoogleClaims(claims, allowed)).toEqual({ ok: false, reason })
+    expect(admitIdentity(id(claims), policy)).toEqual({ ok: false, reason })
   })
   it('supports several domains', () => {
-    expect(admitGoogleClaims({ email: 'a@b.io', email_verified: true }, ['x.com', 'b.io']).ok).toBe(
-      true
-    )
+    const several = { allowedDomains: ['x.test', 'b.test'] }
+    expect(admitIdentity(id({ email: 'a@b.test', emailVerified: true }), several).ok).toBe(true)
+  })
+  it('assumeEmailVerified covers a missing claim only', () => {
+    const trusting = { ...policy, assumeEmailVerified: true }
+    expect(admitIdentity(id({ email: 'a@example.test' }), trusting).ok).toBe(true)
+    expect(admitIdentity(id({ email: 'a@example.test', emailVerified: false }), trusting)).toEqual({
+      ok: false,
+      reason: 'email_unverified',
+    })
   })
 })
 

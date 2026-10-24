@@ -1,12 +1,14 @@
 /**
  * Secrets from SSM SecureString parameters under `SSM_PREFIX` (e.g. `/example/fling/`):
- * google-client-id, google-client-secret, session-secret, site-hmac-key, origin-verify-secret.
- * Loaded once per cold start with GetParametersByPath(WithDecryption).
+ * oidc-client-secret, session-secret, site-hmac-key, origin-verify-secret, and the deprecated
+ * google-client-id + google-client-secret (read as the Google issuer when OIDC_ISSUER is unset;
+ * see @fling/api auth/oidc.ts). Loaded once per cold start with GetParametersByPath(WithDecryption).
  */
 import { GetParametersByPathCommand, SSMClient } from '@aws-sdk/client-ssm'
 import type { Secrets } from '@fling/api/config'
 
 const NAMES = {
+  'oidc-client-secret': 'oidcClientSecret',
   'google-client-id': 'googleClientId',
   'google-client-secret': 'googleClientSecret',
   'session-secret': 'sessionSecret',
@@ -35,13 +37,11 @@ export async function loadSecretsFromSsm(prefix: string, client = new SSMClient(
     nextToken = res.NextToken
   } while (nextToken)
 
-  for (const required of [
-    'googleClientId',
-    'googleClientSecret',
-    'sessionSecret',
-    'siteHmacKey',
-  ] as const) {
+  for (const required of ['sessionSecret', 'siteHmacKey'] as const) {
     if (!found[required]) throw new Error(`SSM parameter missing under ${path}: ${required}`)
+  }
+  if (!found.oidcClientSecret && !(found.googleClientId && found.googleClientSecret)) {
+    throw new Error(`SSM parameter missing under ${path}: oidc-client-secret`)
   }
   return found as Secrets
 }

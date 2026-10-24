@@ -37,8 +37,6 @@ blobsConformance('FsBlobs', () => {
   const config = {
     ...loadBaseConfig({ APP_ORIGIN }),
     secrets: {
-      googleClientId: '',
-      googleClientSecret: '',
       sessionSecret: 's'.repeat(40),
       siteHmacKey: 'h'.repeat(40),
     },

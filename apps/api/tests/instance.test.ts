@@ -18,7 +18,12 @@ describe('GET /.well-known/fling', () => {
       appOrigin: 'https://fling.test',
       sitesDomain: 'fling.test',
       siteScheme: 'https',
-      auth: { kind: 'google', displayName: 'Google', emailDomains: ['example.test'] },
+      auth: {
+        kind: 'oidc',
+        issuer: 'https://idp.example.test',
+        displayName: 'idp.example.test',
+        emailDomains: ['example.test'],
+      },
       brand: { colors: {} },
       capabilities: {
         remoteMcp: true,

@@ -68,6 +68,26 @@ export function blobsConformance(
       expect(text(await blobs.get(`${p}sit/index.html`))).toBe('4')
     })
 
+    it('deletePrefix refuses a prefix that does not end in `/`', async () => {
+      const { blobs, p } = await setup()
+      await blobs.put(`${p}m.json`, bytes('1'))
+      await expect(blobs.deletePrefix(`${p}m.json`)).rejects.toThrow()
+      expect(text(await blobs.get(`${p}m.json`))).toBe('1')
+    })
+
+    it('delete removes one object and nothing beside it; a missing object is fine', async () => {
+      const { blobs, p } = await setup()
+      await blobs.putJson(`${p}_manifests/v1.json`, { files: [] })
+      await blobs.put(`${p}_manifests/v1.json.bak`, bytes('2'))
+      await blobs.put(`${p}_manifests/v10.json`, bytes('3'))
+      await blobs.delete(`${p}_manifests/v1.json`)
+      expect(await blobs.getJson(`${p}_manifests/v1.json`)).toBeNull()
+      expect(text(await blobs.get(`${p}_manifests/v1.json.bak`))).toBe('2')
+      expect(text(await blobs.get(`${p}_manifests/v10.json`))).toBe('3')
+      await expect(blobs.delete(`${p}_manifests/v1.json`)).resolves.toBeUndefined()
+      await expect(blobs.delete(`${p}never/was.txt`)).resolves.toBeUndefined()
+    })
+
     it('deletePrefix on a prefix with nothing under it is a no-op', async () => {
       const { blobs, p } = await setup()
       await expect(blobs.deletePrefix(`${p}nothing-here/`)).resolves.toBeUndefined()

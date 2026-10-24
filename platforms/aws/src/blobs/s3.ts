@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -115,6 +116,10 @@ export class S3Blobs implements Blobs {
       if (isNotFound(err)) return null
       throw err
     }
+  }
+
+  async delete(key: string) {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }))
   }
 
   async deletePrefix(prefix: string) {

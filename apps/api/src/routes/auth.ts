@@ -200,7 +200,7 @@ authRoutes.get('/dev-login', async c => {
     return c.html(
       `<!doctype html><title>Fling dev login</title><form method="get" action="/auth/dev-login">` +
         `<input type="hidden" name="return" value="${esc}">` +
-        `<input name="email" type="email" placeholder="you@nearform.com" autofocus required>` +
+        `<input name="email" type="email" placeholder="you@${config.allowedEmailDomains[0]}" autofocus required>` +
         '<button>Sign in</button></form>'
     )
   }

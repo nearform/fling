@@ -29,7 +29,7 @@ describe('hosts', () => {
     expect(isValidSiteName('api')).toBe(false)
   })
   it('derives user slug from email', () => {
-    expect(userSlugFromEmail('Clifton.Cunningham@nearform.com')).toBe('clifton-cunningham')
+    expect(userSlugFromEmail('Clifton.Cunningham@example.test')).toBe('clifton-cunningham')
   })
   it('parses labels', () => {
     expect(parseLabel(siteLabel('my-app'))).toEqual({ kind: 'site', name: 'my-app' })
@@ -39,9 +39,9 @@ describe('hosts', () => {
     expect(parseLabel('a--b')).toBeNull()
   })
   it('derives initials and clash suggestions', () => {
-    expect(initialsFromEmail('clifton.cunningham@nearform.com')).toBe('cc')
-    expect(initialsFromEmail('mary-jane_watson@nearform.com')).toBe('mjw')
-    expect(initialsFromEmail('bob@nearform.com')).toBe('bo')
+    expect(initialsFromEmail('clifton.cunningham@example.test')).toBe('cc')
+    expect(initialsFromEmail('mary-jane_watson@example.test')).toBe('mjw')
+    expect(initialsFromEmail('bob@example.test')).toBe('bo')
     expect(nameSuggestions('rocketpod-docs', 'cc', 3)).toEqual([
       'rocketpod-docs-cc',
       'rocketpod-docs-cc2',
@@ -73,8 +73,8 @@ describe('manifest', () => {
 
 describe('site cookie', () => {
   it('round-trips and rejects tampering/expiry', () => {
-    const c = signSiteCookie({ e: 'a@nearform.com', x: 2000 }, 'k')
-    expect(verifySiteCookie(c, 'k', 1000)).toEqual({ e: 'a@nearform.com', x: 2000 })
+    const c = signSiteCookie({ e: 'a@example.test', x: 2000 }, 'k')
+    expect(verifySiteCookie(c, 'k', 1000)).toEqual({ e: 'a@example.test', x: 2000 })
     expect(verifySiteCookie(c, 'other', 1000)).toBeNull()
     expect(verifySiteCookie(c, 'k', 3000)).toBeNull()
     expect(verifySiteCookie(`${c}x`, 'k', 1000)).toBeNull()

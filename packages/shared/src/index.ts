@@ -1,7 +1,9 @@
 // Browser-safe exports. Node-only helpers: `@fling/shared/version-id`, `@fling/shared/site-cookie`.
 export * from './api.ts'
 export * from './cache-control.ts'
+export * from './distribution.ts'
 export * from './hosts.ts'
+export * from './instance.ts'
 export * from './kvs.ts'
 export * from './limits.ts'
 export * from './listing.ts'

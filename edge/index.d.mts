@@ -25,7 +25,7 @@ export type SiteRouterKvs = { get(key: string): Promise<string | undefined> }
 
 export type SiteRouterOptions = {
   kvs: SiteRouterKvs
-  /** e.g. `https://fling.labs.nearform.com` (no trailing slash) */
+  /** e.g. `https://fling.example.test` (no trailing slash) */
   appOrigin: string
   siteScheme?: 'http' | 'https'
   /** Current time in milliseconds (like Date.now). */

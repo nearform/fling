@@ -22,7 +22,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     SITES_DOMAIN: 'fling.test',
     SITE_SCHEME: 'https',
     SITE_COOKIE_DOMAIN: '.fling.test',
-    ALLOWED_EMAIL_DOMAINS: 'nearform.com',
+    ALLOWED_EMAIL_DOMAINS: 'example.test',
     STORE_DRIVER: 'memory',
     STORAGE_DRIVER: 'fs',
     KVS_DRIVER: 'memory',
@@ -50,7 +50,7 @@ export function setup(overrides: Partial<Config> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
   const google: { claims: GoogleClaims; lastState?: string } = {
-    claims: { email: 'alice@nearform.com', email_verified: true, hd: 'nearform.com' },
+    claims: { email: 'alice@example.test', email_verified: true, hd: 'example.test' },
   }
   const deps: Deps = {
     config,
@@ -88,7 +88,7 @@ export function setup(overrides: Partial<Config> = {}) {
 
 export type Env = ReturnType<typeof setup>
 
-export async function createUser(env: Env, email = 'alice@nearform.com') {
+export async function createUser(env: Env, email = 'alice@example.test') {
   const user = await env.store.upsertUser(
     { email, name: 'Alice', picture: null, preferredSlug: email.split('@')[0] ?? 'u' },
     env.deps.clock.now().toISOString()

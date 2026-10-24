@@ -9,7 +9,13 @@
  * runs those migrations (opt-in ones included), `dryRun: true` writes nothing. Only callers with
  * lambda:InvokeFunction can send it: a function URL request is always an HTTP event whose body is
  * a string, so no visitor can.
+ *
+ * Instance values (INSTANCE_NAME, ALLOWED_EMAIL_DOMAINS, BRAND_*, …) can also ship inside the zip as
+ * `instance.json` (a flat object of env-style keys, written by scripts/build.mjs from
+ * FLING_INSTANCE_CONFIG): the deploy supplies them without touching the function's configuration.
+ * The function's own environment wins over the file.
  */
+import { readFileSync } from 'node:fs'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
@@ -20,11 +26,30 @@ import { buildAwsDeps } from './deps.ts'
 import { loadSecretsFromSsm } from './secrets.ts'
 import { DynamoTable } from './table/dynamo.ts'
 
+type Env = Record<string, string | undefined>
+
+/** `instance.json` next to the bundle, if the build wrote one. */
+export function instanceFileEnv(url = new URL('./instance.json', import.meta.url)): Env {
+  let raw: string
+  try {
+    raw = readFileSync(url, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    throw err
+  }
+  const parsed: unknown = JSON.parse(raw)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('instance.json must be a JSON object')
+  }
+  return Object.fromEntries(Object.entries(parsed).map(([k, v]) => [k, String(v)]))
+}
+
+const runtimeEnv = (): Env => ({ ...instanceFileEnv(), ...process.env })
+
 async function init() {
-  const base = loadBaseConfig(process.env)
-  const secrets = base.ssmPrefix
-    ? await loadSecretsFromSsm(base.ssmPrefix)
-    : secretsFromEnv(process.env)
+  const env = runtimeEnv()
+  const base = loadBaseConfig(env)
+  const secrets = base.ssmPrefix ? await loadSecretsFromSsm(base.ssmPrefix) : secretsFromEnv(env)
   const config: Config = { ...base, secrets }
   const deps = buildAwsDeps(config)
   if ((await deps.routeTable.get(SITE_HMAC_KVS_KEY)) !== secrets.siteHmacKey) {
@@ -49,7 +74,7 @@ const isMigrate = (event: unknown): event is MigrateEvent =>
 const MIGRATE_MARGIN_MS = 20_000
 
 export async function migrate(event: MigrateEvent, context: LambdaContext): Promise<RunReport> {
-  const base = loadBaseConfig(process.env)
+  const base = loadBaseConfig(runtimeEnv())
   if (base.storeDriver !== 'dynamo' || !base.tableName) {
     throw new Error('Migrations need the dynamo store driver and TABLE_NAME')
   }

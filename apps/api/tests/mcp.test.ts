@@ -40,7 +40,7 @@ describe('/mcp auth', () => {
   })
 
   it('accepts a CLI API key', async () => {
-    const { key } = await createUser(env, 'bob@nearform.com')
+    const { key } = await createUser(env, 'bob@example.test')
     const res = await rpc(env, key, 'tools/list')
     expect(res.status).toBe(200)
   })
@@ -64,6 +64,11 @@ describe('/mcp tools', () => {
     const body = await json(init)
     expect(body.result.serverInfo.name).toBe('fling')
     expect(body.result.instructions).toMatch(/fling_publish/)
+    // Rendered from this instance's config: its name, sites domain and allowlist.
+    expect(body.result.instructions).toMatch(
+      /^Fling publishes static sites .* at https:\/\/<name>\.fling\.test\./
+    )
+    expect(body.result.instructions).toContain('anyone signed in to Fling (@example.test accounts)')
 
     const list = await json(await rpc(env, bearer, 'tools/list'))
     const names = list.result.tools.map((t: { name: string }) => t.name).sort()
@@ -92,7 +97,7 @@ describe('/mcp tools', () => {
 
   it('whoami', async () => {
     const r = await callTool(env, bearer, 'fling_whoami', {})
-    expect(r.structuredContent.email).toBe('alice@nearform.com')
+    expect(r.structuredContent.email).toBe('alice@example.test')
   })
 
   it('publishes inline content; republishing is unchanged', async () => {
@@ -194,7 +199,7 @@ describe('/mcp tools', () => {
   })
 
   it('name_taken comes back as a tool error with suggestions', async () => {
-    const { key } = await createUser(env, 'bob@nearform.com')
+    const { key } = await createUser(env, 'bob@example.test')
     await callTool(env, key, 'fling_publish', {
       name: 'taken',
       files: [{ path: 'index.html', content: 'bob' }],
@@ -387,7 +392,7 @@ describe('/mcp tools', () => {
   })
 
   it('chunked upload: name checks up front, other users and expiry are refused', async () => {
-    const { key } = await createUser(env, 'bob@nearform.com')
+    const { key } = await createUser(env, 'bob@example.test')
     await callTool(env, key, 'fling_publish', {
       name: 'bobs',
       files: [{ path: 'index.html', content: 'b' }],

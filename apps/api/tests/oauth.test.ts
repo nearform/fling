@@ -230,7 +230,7 @@ describe('authorize', () => {
       redirectHost: 'claude.ai',
       loopback: false,
       scopes: ['fling'],
-      email: 'alice@nearform.com',
+      email: 'alice@example.test',
     })
     // CSRF: approve without Origin is refused
     const csrf = await env.app.request(`/api/oauth/requests/${id}/approve`, {
@@ -239,7 +239,7 @@ describe('authorize', () => {
     })
     expect(csrf.status).toBe(403)
     // another user can't see it
-    const bob = await createUser(env, 'bob@nearform.com')
+    const bob = await createUser(env, 'bob@example.test')
     const other = await env.app.request(`/api/oauth/requests/${id}`, {
       headers: { cookie: `${SESSION}=${bob.session}` },
     })

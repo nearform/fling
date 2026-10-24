@@ -15,15 +15,15 @@ import {
   toCloudFrontEvent,
 } from '../index.mjs'
 
-const APP = 'https://fling.labs.nearform.com'
+const APP = 'https://fling.example.test'
 const HMAC = 'test-hmac-key'
 const NOW_MS = 1_800_000_000_000
 const NOW_S = NOW_MS / 1000
 const TOKEN = 'abcdefghij0123456789'
-const PRIVATE = 'my-app.fling.labs.nearform.com'
-const PUBLIC = 'pub.fling.labs.nearform.com'
-const SPA = 'spa.fling.labs.nearform.com'
-const SHARE = `s--${TOKEN}.fling.labs.nearform.com`
+const PRIVATE = 'my-app.fling.example.test'
+const PUBLIC = 'pub.fling.example.test'
+const SPA = 'spa.fling.example.test'
+const SHARE = `s--${TOKEN}.fling.example.test`
 
 const store = new Map<string, string>([
   [SITE_HMAC_KVS_KEY, HMAC],
@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 
 const validCookie = () =>
-  `fling_site=${signSiteCookie({ e: 'alice@nearform.com', x: NOW_S + 60 }, HMAC)}`
+  `fling_site=${signSiteCookie({ e: 'alice@example.test', x: NOW_S + 60 }, HMAC)}`
 
 async function asRequest(
   ...args: Parameters<typeof toCloudFrontEvent>
@@ -94,16 +94,16 @@ describe('auth for private sites', () => {
   })
 
   it('rejects expired cookies', async () => {
-    const c = signSiteCookie({ e: 'alice@nearform.com', x: NOW_S }, HMAC)
+    const c = signSiteCookie({ e: 'alice@example.test', x: NOW_S }, HMAC)
     const res = await asResponse({ host: PRIVATE, cookieHeader: `fling_site=${c}` })
     expect(res.statusCode).toBe(302)
   })
 
   it('rejects tampered and wrong-key cookies', async () => {
-    const good = signSiteCookie({ e: 'alice@nearform.com', x: NOW_S + 60 }, HMAC)
+    const good = signSiteCookie({ e: 'alice@example.test', x: NOW_S + 60 }, HMAC)
     const [, mac] = good.split('.')
     const forged = `${Buffer.from(JSON.stringify({ e: 'eve@x.com', x: NOW_S + 9999 })).toString('base64url')}.${mac}`
-    const wrongKey = signSiteCookie({ e: 'alice@nearform.com', x: NOW_S + 60 }, 'other')
+    const wrongKey = signSiteCookie({ e: 'alice@example.test', x: NOW_S + 60 }, 'other')
     for (const c of [forged, wrongKey, `${good}.extra`, 'garbage', '']) {
       const res = await asResponse({ host: PRIVATE, cookieHeader: `fling_site=${c}` })
       expect(res.statusCode).toBe(302)
@@ -133,17 +133,17 @@ describe('auth for private sites', () => {
 
 describe('unknown hosts', () => {
   it.each([
-    ['unknown label', 'nope.fling.labs.nearform.com'],
-    ['bare domain', 'fling.labs.nearform.com'],
-    ['old name--user label', 'my-app--alice.fling.labs.nearform.com'],
-    ['malformed label', 'a--b--c.fling.labs.nearform.com'],
-    ['bad share token', 's--short.fling.labs.nearform.com'],
-    ['old single-dash share', `s-${TOKEN}.fling.labs.nearform.com`],
-    ['unknown share', 's--zzzzzzzzzzzzzzzzzzzz.fling.labs.nearform.com'],
-    ['invalid characters', '_x_.fling.labs.nearform.com'],
-    ['reserved name (even if in KVS)', 'www.fling.labs.nearform.com'],
-    ['name over 50 chars', `${'a'.repeat(51)}.fling.labs.nearform.com`],
-    ['trailing hyphen', 'my-app-.fling.labs.nearform.com'],
+    ['unknown label', 'nope.fling.example.test'],
+    ['bare domain', 'fling.example.test'],
+    ['old name--user label', 'my-app--alice.fling.example.test'],
+    ['malformed label', 'a--b--c.fling.example.test'],
+    ['bad share token', 's--short.fling.example.test'],
+    ['old single-dash share', `s-${TOKEN}.fling.example.test`],
+    ['unknown share', 's--zzzzzzzzzzzzzzzzzzzz.fling.example.test'],
+    ['invalid characters', '_x_.fling.example.test'],
+    ['reserved name (even if in KVS)', 'www.fling.example.test'],
+    ['name over 50 chars', `${'a'.repeat(51)}.fling.example.test`],
+    ['trailing hyphen', 'my-app-.fling.example.test'],
   ])('%s → /_fling/missing', async (_, host) => {
     expect((await asRequest({ host, path: '/index.html' })).uri).toBe('/_fling/missing')
   })
@@ -155,9 +155,9 @@ describe('unknown hosts', () => {
   })
 
   it('passes /_fling/404.html through unchanged', async () => {
-    expect(
-      (await asRequest({ host: 'x.fling.labs.nearform.com', path: '/_fling/404.html' })).uri
-    ).toBe('/_fling/404.html')
+    expect((await asRequest({ host: 'x.fling.example.test', path: '/_fling/404.html' })).uri).toBe(
+      '/_fling/404.html'
+    )
     expect((await asRequest({ host: PRIVATE, path: '/_fling/404.html' })).uri).toBe(
       '/_fling/404.html'
     )
@@ -263,7 +263,7 @@ describe('label parsing parity with shared/hosts.ts', () => {
       appOrigin: APP,
     })
     const req = (await r(
-      toCloudFrontEvent({ host: `${label}.fling.labs.nearform.com`, path: '/a.html' })
+      toCloudFrontEvent({ host: `${label}.fling.example.test`, path: '/a.html' })
     )) as CloudFrontRequest
     const expected = !parsed
       ? '/_fling/missing'

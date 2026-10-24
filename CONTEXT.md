@@ -25,7 +25,7 @@ Publication is the guarantee.
 
 **Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link.
 
-**Private** — visible to any signed-in Nearformer (not only the owner). **Public** — anyone.
+**Private** — visible to any signed-in member of the instance (not only the owner). **Public** — anyone.
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:

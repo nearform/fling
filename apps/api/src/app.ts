@@ -1,6 +1,8 @@
 /** Builds the Hono app from injected deps — no AWS here, so tests run on memory/fs fakes. */
+import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH } from '@fling/shared'
 import { Hono } from 'hono'
 import { FsBlobs } from './blobs/fs.ts'
+import { instanceMetadata } from './instance.ts'
 import { errorHandler, notFoundHandler, originVerify, securityHeaders } from './middleware.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
@@ -21,6 +23,13 @@ export function createApp(deps: Deps) {
   app.get('/healthz', c => c.json({ ok: true }))
 
   app.use('*', originVerify)
+  // Public and the same for everyone: cacheable, and readable cross-origin (the sites' 404 page
+  // brands itself from it).
+  app.get(INSTANCE_METADATA_PATH, c => {
+    c.header('Cache-Control', `public, max-age=${INSTANCE_METADATA_MAX_AGE}`)
+    c.header('Access-Control-Allow-Origin', '*')
+    return c.json(instanceMetadata(c.get('deps').config))
+  })
   app.route('/auth', authRoutes)
   app.route('/api', apiRoutes)
   // Remote MCP connector: OAuth AS metadata + endpoints, and the MCP endpoint itself.

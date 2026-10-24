@@ -1,7 +1,7 @@
 // Node-only. The `fling_site` cookie that lets signed-in members view private
-// sites. Minted by the API at login, verified by the CloudFront Function
-// (edge/site-router.js re-implements `verify` with the cloudfront `crypto` module —
-// keep the two in step; edge tests check them against each other).
+// sites. Minted by the API at login, verified at the edge by
+// validSiteCookie in site-routing.ts (which takes the HMAC as a function, for the CloudFront
+// runtime's `crypto` module — keep the two in step; edge tests check them against each other).
 //
 // Format: `<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, payloadPart))>`
 // Payload: { e: email, x: expiry (unix seconds) }

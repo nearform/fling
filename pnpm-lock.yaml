@@ -169,10 +169,14 @@ importers:
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
   edge:
-    devDependencies:
+    dependencies:
       '@fling/shared':
         specifier: workspace:*
         version: link:../packages/shared
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
+    devDependencies:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2

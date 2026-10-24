@@ -22,7 +22,8 @@ name: Deploy
 #      other public files, then index.html last; plus the Claude Desktop extension at
 #      downloads/fling.mcpb (built from apps/cli);
 #   3. the sites' error page (_fling/404.html in the sites bucket, its __APP_ORIGIN__ filled in);
-#   4. the site router (CloudFront Function): update, then publish to LIVE;
+#   4. the site router (CloudFront Function, built by edge/build.mjs around the shared routing
+#      decision in packages/shared/src/site-routing.ts): update, then publish to LIVE;
 #   5. invalidate index.html on the app and _fling/* on the sites.
 on:
   workflow_run:
@@ -107,9 +108,11 @@ jobs:
           set -euo pipefail
           pnpm --filter "@fling/platform-aws..." build
           pnpm --filter "@fling/web..." build
+          # dist/site-router.js: the CloudFront Function, the shared routing decision bundled.
+          pnpm --filter @fling/edge build
           # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
           pnpm --filter ./apps/cli build:mcpb
-          for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/src/site-router.js apps/cli/dist/fling.mcpb; do
+          for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/dist/site-router.js apps/cli/dist/fling.mcpb; do
             [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
           done
 
@@ -232,7 +235,7 @@ jobs:
           code="$RUNNER_TEMP/site-router.js"
           scheme="${APP_ORIGIN%%://*}"
           sed -e "s#__APP_ORIGIN__#${APP_ORIGIN}#g" -e "s#__SITE_SCHEME__#${scheme}#g" \
-            edge/src/site-router.js > "$code"
+            edge/dist/site-router.js > "$code"
           if grep -q '__APP_ORIGIN__\|__SITE_SCHEME__' "$code"; then
             echo "::error::placeholders left in the site router"; exit 1
           fi

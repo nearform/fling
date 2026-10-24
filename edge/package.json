@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "CloudFront Function (cloudfront-js-2.0) that routes *.fling hosts to S3 objects",
+  "description": "The CloudFront Function (cloudfront-js-2.0) that routes sites hosts to S3 objects: a thin shell around the shared routing decision (@fling/shared/site-routing), bundled by build.mjs. index.mjs runs the bundle in Node for tests and local dev.",
   "type": "module",
   "main": "./index.mjs",
   "types": "./index.d.mts",
@@ -11,16 +11,18 @@
     ".": {
       "types": "./index.d.mts",
       "default": "./index.mjs"
-    },
-    "./site-router.js": "./src/site-router.js"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "echo 'edge: deployed as-is'"
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@fling/shared": "workspace:*",
+    "esbuild": "^0.25.12"
   },
   "devDependencies": {
-    "@fling/shared": "workspace:*",
     "@types/node": "^24.0.0",
     "vitest": "^3.2.7"
   }

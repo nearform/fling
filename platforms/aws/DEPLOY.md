@@ -117,7 +117,7 @@ the grants, then turn it on). If your own resources sit at other addresses, add 
 | `AWS_DEPLOY_ROLE_ARN` | `aws_iam_role.deploy` | Assumed over GitHub OIDC by the deploy job |
 | `LAMBDA_FUNCTION` | `aws_lambda_function.api` | Updated with `lambda.zip`, invoked for migrations |
 | `UI_BUCKET`, `SITES_BUCKET` | the buckets | The UI is synced to the first; the error page goes in the second |
-| `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/src/site-router.js` |
+| `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/dist/site-router.js` (built by `edge/build.mjs`) |
 | `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` | the distributions | Invalidated after a deploy |
 | `APP_ORIGIN` | `https://<hostname>` | The smoke test's target and the Claude Desktop extension's default server |
 | `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` |
@@ -288,8 +288,9 @@ and, with the deploy role over OIDC:
 3. Fills `__APP_ORIGIN__` in `apps/web/dist-404/404.html` and uploads it to
    `s3://<sites bucket>/_fling/404.html`. The sites distribution answers every S3 403 or 404 with it,
    as a 404; the page links home and brands itself from the app's `/.well-known/fling`.
-4. Fills `__APP_ORIGIN__` and `__SITE_SCHEME__` in `edge/src/site-router.js`, updates the CloudFront
-   Function (keeping its KeyValueStore association) and publishes it to LIVE.
+4. Builds the site router (`edge/dist/site-router.js`: the shared routing decision,
+   `packages/shared/src/site-routing.ts`, in a CloudFront Function shell), fills its
+   `__APP_ORIGIN__` and `__SITE_SCHEME__`, updates the CloudFront Function (keeping its KeyValueStore association) and publishes it to LIVE.
 5. Invalidates `/index.html` on the app distribution and `/_fling/*` on the sites distribution.
 
 Site content is never touched by a deploy. Terraform ignores the code, so a plan after a deploy

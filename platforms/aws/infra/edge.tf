@@ -65,9 +65,9 @@ resource "aws_cloudfront_key_value_store" "sites" {
   comment = "${var.name} (${var.env}): site hosts and share tokens → current version. Written by the API."
 }
 
-# The site router. Its real code is edge/src/site-router.js in the Fling repository, published by the
-# deploy workflow (update-function + publish-function). Terraform creates it with a placeholder and
-# ignores the code from then on.
+# The site router. Its real code is edge/dist/site-router.js (built by edge/build.mjs) in the Fling
+# repository, published by the deploy workflow (update-function + publish-function). Terraform
+# creates it with a placeholder and ignores the code from then on.
 resource "aws_cloudfront_function" "site_router" {
   name                         = "${local.name}-site-router"
   comment                      = "${var.name} (${var.env}) site router. Code deployed by ${var.github.owner}/${var.github.repo}."

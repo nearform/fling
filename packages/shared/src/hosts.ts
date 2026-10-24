@@ -4,30 +4,18 @@
 // `<name>.<sitesDomain>`. A share link lives at `s--<token>.<sitesDomain>`. Site
 // names may not contain `--`, so the two can never collide.
 
-export const SITE_NAME_MAX = 50
+export {
+  isValidSiteName,
+  type ParsedLabel,
+  parseLabel,
+  RESERVED_SITE_NAMES,
+  SHARE_TOKEN_LENGTH,
+  SITE_NAME_MAX,
+} from './site-labels.ts'
+
+import { SITE_NAME_MAX } from './site-labels.ts'
+
 export const USER_SLUG_MAX = 20
-export const SHARE_TOKEN_LENGTH = 20
-
-/** Names that would be confusing or that we may want for ourselves. */
-export const RESERVED_SITE_NAMES: readonly string[] = [
-  'admin',
-  'api',
-  'app',
-  'assets',
-  'auth',
-  'cdn',
-  'docs-fling',
-  'fling',
-  'help',
-  'login',
-  'mail',
-  'static',
-  'status',
-  'www',
-]
-
-const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
-const SHARE_TOKEN_RE = new RegExp(`^[a-z0-9]{${SHARE_TOKEN_LENGTH}}$`)
 
 export function slugify(input: string, max = SITE_NAME_MAX): string {
   return input
@@ -38,15 +26,6 @@ export function slugify(input: string, max = SITE_NAME_MAX): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, max)
     .replace(/-+$/g, '')
-}
-
-export function isValidSiteName(name: string): boolean {
-  return (
-    name.length <= SITE_NAME_MAX &&
-    SLUG_RE.test(name) &&
-    !name.includes('--') &&
-    !RESERVED_SITE_NAMES.includes(name)
-  )
 }
 
 export function userSlugFromEmail(email: string): string {
@@ -88,18 +67,6 @@ export function siteLabel(name: string): string {
 
 export function shareLabel(token: string): string {
   return `s--${token}`
-}
-
-export type ParsedLabel = { kind: 'site'; name: string } | { kind: 'share'; token: string }
-
-/** Parse the first DNS label of a sites-domain host. Returns null for anything malformed. */
-export function parseLabel(label: string): ParsedLabel | null {
-  const parts = label.split('--')
-  if (parts.length === 1) return isValidSiteName(label) ? { kind: 'site', name: label } : null
-  if (parts.length === 2 && parts[0] === 's' && SHARE_TOKEN_RE.test(parts[1] ?? '')) {
-    return { kind: 'share', token: parts[1] as string }
-  }
-  return null
 }
 
 export function siteUrl(label: string, sitesDomain: string, protocol = 'https:'): string {

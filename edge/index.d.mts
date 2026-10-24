@@ -34,7 +34,7 @@ export type SiteRouterOptions = {
 
 export type SiteRouter = (event: CloudFrontEvent) => Promise<CloudFrontRequest | CloudFrontResponse>
 
-export declare const SITE_ROUTER_PATH: URL
+/** The deployable CloudFront Function (build.mjs), placeholders still in. */
 export declare const SITE_ROUTER_SOURCE: string
 
 export declare function renderSiteRouter(

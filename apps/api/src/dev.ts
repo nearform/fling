@@ -1,8 +1,8 @@
 /**
  * Local dev: the API on :47101 (Records on a memory table, fs blobs under `.fling-dev/`, memory
  * route table; pending data migrations run first, as a deploy runs them) and
- * the sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real edge/site-router.js (via
- * the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
+ * the sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real CloudFront Function
+ * (edge/build.mjs, via the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
  * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404 (its
  * `__APP_ORIGIN__` filled in, as the deploy does).
  */

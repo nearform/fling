@@ -5,3 +5,4 @@
 export { type BlobsHarness, blobsConformance } from './blobs.ts'
 export { routeTableConformance } from './route-table.ts'
 export { storeConformance } from './store.ts'
+export { tableConformance } from './table.ts'

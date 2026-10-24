@@ -15,7 +15,9 @@
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
     "./store": "./src/store/types.ts",
-    "./store/memory": "./src/store/memory.ts"
+    "./store/memory": "./src/store/memory.ts",
+    "./table": "./src/table/types.ts",
+    "./table/memory": "./src/table/memory.ts"
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",

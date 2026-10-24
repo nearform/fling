@@ -2,6 +2,7 @@
 // `@fling/shared/site-routing` (the edge's routing decision).
 export * from './api.ts'
 export * from './cache-control.ts'
+export * from './comments.ts'
 export * from './distribution.ts'
 export * from './hosts.ts'
 export * from './instance.ts'

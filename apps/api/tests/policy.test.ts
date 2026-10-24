@@ -14,6 +14,7 @@ import {
   type Action,
   type Actor,
   can,
+  canDeleteComment,
   type PolicySite,
   ROLES,
   type Role,
@@ -53,6 +54,11 @@ const EXPECTED: Record<Action, { public: string; private: string }> = {
   'share.read': { public: 'o', private: 'o' },
   'share.create': { public: 'o', private: 'o' },
   'share.revoke': { public: 'o', private: 'o' },
+  'comment.read': { public: 'om', private: 'om' },
+  'comment.create': { public: 'om', private: 'om' },
+  'comment.resolve': { public: 'om', private: 'om' },
+  'comment.delete': { public: 'o', private: 'o' },
+  'comment.delete.own': { public: 'om', private: 'om' },
 }
 
 describe('can', () => {
@@ -70,6 +76,29 @@ describe('can', () => {
       }
     }
   }
+})
+
+describe('canDeleteComment', () => {
+  const site = siteWith('private')
+  const by = (email: string) => ({ author: { kind: 'user' as const, email } })
+  const guest = { author: { kind: 'guest' as const, name: 'Pat' } }
+
+  it("the owner deletes anyone's; a member only their own; share and anonymous nothing", () => {
+    const memberEmail = 'member@example.test'
+    const expected: Record<Role, [boolean, boolean, boolean]> = {
+      // [the owner's comment, the member's comment, a guest's comment]
+      owner: [true, true, true],
+      member: [false, true, false],
+      share: [false, false, false],
+      anonymous: [false, false, false],
+    }
+    for (const role of ROLES) {
+      const got = [by(OWNER), by(memberEmail), guest].map(c =>
+        canDeleteComment(actorFor[role], site, c)
+      )
+      expect({ role, got }).toEqual({ role, got: expected[role] })
+    }
+  })
 })
 
 describe('roleOf', () => {

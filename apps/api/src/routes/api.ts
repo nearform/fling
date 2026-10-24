@@ -1,7 +1,10 @@
 /** `/api/*` — JSON, authenticated (session cookie + Origin check, or Bearer API key). */
 import {
   ApiKeyListSchema,
+  CommentListSchema,
+  CommentSchema,
   ConnectionListSchema,
+  CreateCommentRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
   type Me,
@@ -13,15 +16,18 @@ import {
   SiteDetailSchema,
   SiteListSchema,
   SiteSchema,
+  UpdateCommentRequestSchema,
   UpdateSiteRequestSchema,
   VersionFilesSchema,
 } from '@fling/shared'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { requireAuth } from '../auth/middleware.ts'
+import * as comments from '../comments.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
+import { userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
@@ -197,5 +203,50 @@ apiRoutes.post('/sites/:name/unarchive', async c => {
 
 apiRoutes.delete('/sites/:name', async c => {
   await sites.deleteSite(c.get('deps'), c.get('user'), c.req.param('name'))
+  return c.body(null, 204)
+})
+
+// --- comments (review mode). Policy decides per site: members of the instance take part too. ---
+
+apiRoutes.get('/sites/:name/comments', async c => {
+  const list = await comments.listComments(
+    c.get('deps'),
+    userActor(c.get('user')),
+    c.req.param('name'),
+    { path: c.req.query('path') }
+  )
+  return c.json(CommentListSchema.parse(list))
+})
+
+apiRoutes.post('/sites/:name/comments', async c => {
+  const input = await jsonBody(c, CreateCommentRequestSchema)
+  const comment = await comments.addComment(
+    c.get('deps'),
+    userActor(c.get('user')),
+    c.req.param('name'),
+    input
+  )
+  return c.json(CommentSchema.parse(comment), 201)
+})
+
+apiRoutes.patch('/sites/:name/comments/:id', async c => {
+  const { resolved } = await jsonBody(c, UpdateCommentRequestSchema)
+  const comment = await comments.resolveComment(
+    c.get('deps'),
+    userActor(c.get('user')),
+    c.req.param('name'),
+    c.req.param('id'),
+    resolved
+  )
+  return c.json(CommentSchema.parse(comment))
+})
+
+apiRoutes.delete('/sites/:name/comments/:id', async c => {
+  await comments.deleteComment(
+    c.get('deps'),
+    userActor(c.get('user')),
+    c.req.param('name'),
+    c.req.param('id')
+  )
   return c.body(null, 204)
 })

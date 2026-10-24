@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import type {
   ApiKeyRecord,
+  CommentRecord,
   GrantRecord,
   RefreshTokenRecord,
   SiteRecord,
@@ -47,6 +48,24 @@ function site(owner: string, name = siteName(), overrides: Partial<SiteRecord> =
 
 function version(siteId: string, id = uid()): VersionRecord {
   return { siteId, id, status: 'pending', fileCount: 1, totalBytes: 10, createdAt: NOW }
+}
+
+/** Ids as newCommentId makes them (time-sortable), but chosen: `c<n>` padded to sort as numbers. */
+function comment(siteId: string, n: number, overrides: Partial<CommentRecord> = {}): CommentRecord {
+  return {
+    siteId,
+    id: `c${String(n).padStart(4, '0')}-${uid()}`,
+    parentId: null,
+    path: '/',
+    versionId: 'v1',
+    anchor: null,
+    body: `comment ${n}`,
+    author: { kind: 'user', email: 'author@example.test' },
+    createdAt: NOW,
+    resolvedAt: null,
+    resolvedBy: null,
+    ...overrides,
+  }
 }
 
 function apiKey(owner: string, overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
@@ -364,6 +383,74 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.listVersions(s)).toEqual([])
         expect(await store.listVersions(neighbour)).toEqual([kept])
         expect(await store.findSite(neighbour.name)).toEqual(neighbour)
+      })
+    })
+
+    describe('comments', () => {
+      it('create, get, list oldest first, only the site’s own; an id is created once', async () => {
+        const store = await factory()
+        const s = site(email())
+        const other = site(s.email)
+        await store.createSite(s)
+        await store.createSite(other)
+        const first = comment(s.id, 1, {
+          anchor: { x: 12.5, y: 80 },
+          author: { kind: 'guest', name: 'Pat' },
+        })
+        const second = comment(s.id, 2, { path: '/docs/', versionId: null })
+        const reply = comment(s.id, 3, { parentId: first.id })
+        // Written out of order: the list is by id.
+        for (const c of [reply, second, first]) expect(await store.createComment(c)).toBe(true)
+        await store.createComment(comment(other.id, 1))
+        expect(await store.createComment({ ...first, body: 'again' })).toBe(false)
+        expect(await store.getComment(s.id, first.id)).toEqual(first)
+        expect(await store.getComment(other.id, first.id)).toBeNull()
+        expect(await store.listComments(s.id)).toEqual([first, second, reply])
+      })
+
+      it('resolveComment sets and clears the resolution; null for a missing comment', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const c = comment(s.id, 1)
+        await store.createComment(c)
+        const resolution = {
+          resolvedAt: LATER,
+          resolvedBy: { kind: 'user' as const, email: s.email },
+        }
+        const resolved = { ...c, ...resolution }
+        expect(await store.resolveComment(s.id, c.id, resolution)).toEqual(resolved)
+        expect(await store.getComment(s.id, c.id)).toEqual(resolved)
+        const open = { resolvedAt: null, resolvedBy: null }
+        expect(await store.resolveComment(s.id, c.id, open)).toEqual(c)
+        expect(await store.resolveComment(s.id, 'missing', resolution)).toBeNull()
+        expect(await store.getComment(s.id, 'missing')).toBeNull()
+      })
+
+      it('deleteComment removes a thread with its replies, a reply alone; false when gone', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const thread = comment(s.id, 1)
+        const kept = comment(s.id, 2)
+        const replies = [3, 4, 5].map(n => comment(s.id, n, { parentId: thread.id }))
+        const keptReply = comment(s.id, 6, { parentId: kept.id })
+        for (const c of [thread, kept, ...replies, keptReply]) await store.createComment(c)
+        expect(await store.deleteComment(s.id, keptReply.id)).toBe(true)
+        expect(await store.deleteComment(s.id, thread.id)).toBe(true)
+        expect(await store.listComments(s.id)).toEqual([kept])
+        expect(await store.deleteComment(s.id, thread.id)).toBe(false)
+      })
+
+      it('deleteSite deletes its comments', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        await store.putVersion(s, version(s.id))
+        for (let n = 0; n < 30; n++) await store.createComment(comment(s.id, n))
+        await store.deleteSite(s)
+        expect(await store.listComments(s.id)).toEqual([])
+        expect(await store.findSite(s.name)).toBeNull()
       })
     })
 

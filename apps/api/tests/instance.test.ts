@@ -31,6 +31,7 @@ describe('GET /.well-known/fling', () => {
         publicSites: true,
         archive: true,
         rollback: true,
+        comments: true,
       },
       installCommand: expect.stringMatching(/^npm install -g \S+$/),
     })

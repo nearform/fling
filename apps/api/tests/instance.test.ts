@@ -55,6 +55,12 @@ describe('GET /.well-known/fling', () => {
     expect(InstanceMetadataSchema.parse(JSON.parse(text)).auth.invitedEmails).toBe(true)
   })
 
+  it('never names the admins', async () => {
+    const env = setup({ adminEmails: ['boss@example.test'] })
+    const text = await (await env.app.request(INSTANCE_METADATA_PATH)).text()
+    expect(text).not.toMatch(/boss|admin/i)
+  })
+
   it('carries the configured name, brand and install command', async () => {
     const base = loadBaseConfig({
       APP_ENV: 'development',
@@ -121,6 +127,36 @@ describe('instance config', () => {
     for (const bad of ['gmail.test', 'me@', '@gmail.test', 'a b@gmail.test', 'me@gmail.test,x']) {
       expect(() => loadBaseConfig({ ...prod, ALLOWED_EMAILS: bad }), bad).toThrow()
     }
+  })
+
+  it('takes admins who may sign in, lowercased; none by default in production', () => {
+    const ok = { ...prod, ALLOWED_EMAIL_DOMAINS: 'example.test', ALLOWED_EMAILS: 'me@gmail.test' }
+    expect(loadBaseConfig(ok).adminEmails).toEqual([])
+    expect(
+      loadBaseConfig({ ...ok, ADMIN_EMAILS: ' Boss@Example.test, ME@gmail.test ' }).adminEmails
+    ).toEqual(['boss@example.test', 'me@gmail.test'])
+    expect(loadBaseConfig({ ...ok, ADMIN_EMAILS: ' ' }).adminEmails).toEqual([])
+    // An admin still has to get in: an address the allowlists don't admit is a config error.
+    expect(() => loadBaseConfig({ ...ok, ADMIN_EMAILS: 'you@gmail.test' })).toThrow(
+      /ADMIN_EMAILS: you@gmail.test may not sign in/
+    )
+    for (const bad of ['example.test', 'boss@', 'a b@example.test', 'boss@example.test,x']) {
+      expect(() => loadBaseConfig({ ...ok, ADMIN_EMAILS: bad }), bad).toThrow()
+    }
+  })
+
+  it('has a dev admin only with dev login on, and only one the dev allowlist admits', () => {
+    expect(loadBaseConfig({ DEV_LOGIN: '1' }).adminEmails).toEqual(['admin@example.test'])
+    expect(loadBaseConfig({}).adminEmails).toEqual([])
+    expect(
+      loadBaseConfig({ DEV_LOGIN: '1', ADMIN_EMAILS: 'boss@example.test' }).adminEmails
+    ).toEqual(['boss@example.test'])
+    expect(loadBaseConfig({ DEV_LOGIN: '1', ALLOWED_EMAILS: 'me@gmail.test' }).adminEmails).toEqual(
+      []
+    )
+    // Dev login never runs in production, so neither does its admin.
+    const p = { ...prod, ALLOWED_EMAIL_DOMAINS: 'example.test', DEV_LOGIN: '1' }
+    expect(loadBaseConfig(p).adminEmails).toEqual([])
   })
 
   it('accepts only hex brand colours and http(s)/data:image asset URLs', () => {

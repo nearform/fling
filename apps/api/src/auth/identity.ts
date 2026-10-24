@@ -61,11 +61,7 @@ export function admitIdentity(identity: Identity, policy: EmailPolicy): Admissio
   if (!email || verified !== true) return { ok: false, reason: 'email_unverified' }
   const at = email.lastIndexOf('@')
   const domain = at > 0 ? email.slice(at + 1) : ''
-  const listed = (policy.allowedEmails ?? []).some(e => e.toLowerCase() === email)
-  const allowed = policy.allowedDomains.map(d => d.toLowerCase())
-  if (!domain || !(listed || allowed.includes(domain))) {
-    return { ok: false, reason: 'domain_not_allowed' }
-  }
+  if (!emailAllowed(email, policy)) return { ok: false, reason: 'domain_not_allowed' }
   if (identity.hd !== undefined && identity.hd.toLowerCase() !== domain) {
     return { ok: false, reason: 'domain_not_allowed' }
   }
@@ -75,4 +71,16 @@ export function admitIdentity(identity: Identity, policy: EmailPolicy): Admissio
     name: identity.name?.trim() || email.slice(0, at),
     picture: identity.picture ?? null,
   }
+}
+
+/** Whether the allowlists name this (lowercase) address or its domain; verification aside. */
+export function emailAllowed(
+  email: string,
+  policy: Pick<EmailPolicy, 'allowedDomains' | 'allowedEmails'>
+): boolean {
+  const at = email.lastIndexOf('@')
+  const domain = at > 0 ? email.slice(at + 1) : ''
+  if (!domain) return false
+  const listed = (policy.allowedEmails ?? []).some(e => e.toLowerCase() === email)
+  return listed || policy.allowedDomains.map(d => d.toLowerCase()).includes(domain)
 }

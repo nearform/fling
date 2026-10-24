@@ -527,9 +527,12 @@ async function adminStep(ctx: {
     check(row && row.siteCount >= 1, `users list: ${JSON.stringify(body.users)}`)
   }
 
-  // Not admins: nothing there.
-  const refused = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/users')
-  check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
+  // Not admins: nothing there. A smoke run may sign in as one admin for both roles (a personal
+  // instance has no second account), and then there is no non-admin to ask.
+  if (admin.email !== owner) {
+    const refused = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/users')
+    check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
+  }
 
   await listed({ key: admin.apiKey })
   const viaKey = await call({ key: admin.apiKey }, 'POST', '/api/admin/impersonate', {

@@ -1,0 +1,82 @@
+name: Deploy (Cloudflare)
+
+# Deploys Fling to Cloudflare: one Worker with its D1 database, R2 bucket and KV namespace, set up
+# once with platforms/cloudflare/scripts/setup.mjs. By hand only (workflow_dispatch) for now; to
+# roll back, run it with an earlier commit of main.
+#
+# Everything instance-specific is one repository variable, CF_DEPLOY_CONFIG (the JSON setup.mjs
+# writes: account, Worker, zone, hostnames, resource ids and an INSTANCE object of the instance's
+# own values), plus two secrets: CLOUDFLARE_API_TOKEN, and FLING_E2E_API_KEY for the smoke test (an
+# API key of a test user; without it the smoke test is skipped with a warning). See
+# platforms/cloudflare/DEPLOY.md.
+#
+# The steps are the repository's own script, the same one a person runs (scripts/deploy.mjs):
+#   1. the D1 schema (`wrangler d1 migrations apply --remote`), additive, before the code;
+#   2. the Worker with its assets (the web UI, the sites' 404 page, the Claude Desktop extension);
+#   3. the data migrations, through a remote D1 binding (no admin endpoint on the Worker);
+#   4. /.well-known/fling answers for this instance, then the e2e scenario as a smoke test.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA (or ref) to deploy. Empty = the tip of the selected branch. Rollback = an older SHA of main.'
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare
+    runs-on: ubuntu-24.04
+    environment: cloudflare
+    timeout-minutes: 20
+    env:
+      CF_DEPLOY_CONFIG: ${{ vars.CF_DEPLOY_CONFIG }}
+      SHA: ${{ inputs.ref || github.sha }}
+    steps:
+      - name: Check the deploy config is set
+        run: |
+          [ -n "$CF_DEPLOY_CONFIG" ] || { echo "::error::CF_DEPLOY_CONFIG is not set (see platforms/cloudflare/DEPLOY.md)"; exit 1; }
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      # Only ever ship code that is on main (a pull request's commits can be fetched by SHA).
+      - name: Check the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main ||
+            { echo "::error::$(git rev-parse HEAD) is not on main; only commits on main can be deployed"; exit 1; }
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web UI and the Claude Desktop extension
+        env:
+          FLING_MCPB_SERVER_URL: ${{ fromJSON(vars.CF_DEPLOY_CONFIG).APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          pnpm --filter "@fling/web..." build
+          pnpm --filter ./apps/cli build:mcpb
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
+        run: pnpm --filter @fling/platform-cloudflare run deploy
+
+      - name: Summary
+        run: echo "### Deployed \`$SHA\` to $(jq -r .APP_ORIGIN <<<"$CF_DEPLOY_CONFIG")" >> "$GITHUB_STEP_SUMMARY"

@@ -56,7 +56,13 @@ site's partition (`SITE#<id>`) holds its record and versions; a user's sites are
 `MIGRATION#NNNN` items. Deploys run the pending ones (`runMigrations`); they are the only code that
 scans the table.
 
+**Site routing** — how a request to a sites host becomes a site version's file, a sign-in redirect
+or the 404 page: one pure decision, `routeSiteRequest` (`packages/shared/src/site-routing.ts`).
+The edge only rewrites: the CloudFront Function (`edge/`, generated around it) and the Cloudflare
+Worker's sites host are thin shells that do the lookups and map the decision to their runtime.
+
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
-(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: D1,
-R2, Workers KV). Every adapter, including the core's memory/fs ones, passes the same suites from
-`packages/conformance`.
+(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one
+Worker, D1, R2, Workers KV with D1 behind it). Every adapter, including the core's memory/fs ones,
+passes the same suites from `packages/conformance`, and every platform passes the same e2e
+scenario (`packages/e2e`) locally and as its post-deploy smoke test.

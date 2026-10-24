@@ -12,6 +12,7 @@ import { FsBlobs } from '@fling/api/blobs/fs'
 import { loadBaseConfig } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
 import { MemoryRouteTable } from '@fling/api/route-table/memory'
+import { TableRouteTable } from '@fling/api/route-table/table'
 import { Records } from '@fling/api/store/records'
 import { MemoryTable } from '@fling/api/table/memory'
 import {
@@ -31,6 +32,11 @@ storeConformance('Records on MemoryTable', () => new Records(new MemoryTable()))
 migrationsConformance('MemoryTable', async () => new MemoryTable())
 
 routeTableConformance('MemoryRouteTable', () => new MemoryRouteTable())
+
+routeTableConformance(
+  'TableRouteTable on MemoryTable',
+  () => new TableRouteTable(new MemoryTable())
+)
 
 blobsConformance('FsBlobs', () => {
   const root = mkdtempSync(join(tmpdir(), 'fling-conformance-'))

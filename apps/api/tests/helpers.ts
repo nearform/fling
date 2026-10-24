@@ -44,7 +44,8 @@ export function setup(overrides: Partial<Config> = {}) {
   let now = new Date('2026-01-01T00:00:00Z')
   const clock = { now: () => now }
   // Expiry in the table follows the test clock, as it follows real time in production.
-  const store = new Records(new MemoryTable(() => clock.now().getTime()))
+  const table = new MemoryTable(() => clock.now().getTime())
+  const store = new Records(table)
   const routeTable = new MemoryRouteTable()
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
@@ -74,6 +75,7 @@ export function setup(overrides: Partial<Config> = {}) {
     deps,
     config,
     store,
+    table,
     routeTable,
     blobs,
     root,

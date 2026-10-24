@@ -214,6 +214,14 @@ export class Records implements Store {
     return this.read<SiteRecord>('site', key.site(email, name))
   }
 
+  async findSite(name: string) {
+    const claim = await this.getNameClaim(name)
+    if (!claim) return null
+    const site = await this.getSite(claim.email, name)
+    // A record that is not the claim's site is stale; it holds nothing.
+    return site?.id === claim.siteId ? site : null
+  }
+
   async listSites(email: string) {
     const sites = await this.list<SiteRecord>('site', userPk(email), 'SITE#')
     return sites.sort((a, b) => a.name.localeCompare(b.name))

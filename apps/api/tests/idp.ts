@@ -43,7 +43,17 @@ async function newKey(): Promise<SigningKey> {
   }
 }
 
-export function testIdp(opts: { issuer?: string; clientId?: string; clientSecret?: string } = {}) {
+export function testIdp(
+  opts: {
+    issuer?: string
+    clientId?: string
+    clientSecret?: string
+    /** Discovery's token_endpoint_auth_methods_supported. */
+    authMethods?: string[]
+    /** Take Basic credentials without form-decoding them, as Google does. */
+    literalBasic?: boolean
+  } = {}
+) {
   const issuer = opts.issuer ?? IDP_ISSUER
   const clientId = opts.clientId ?? IDP_CLIENT_ID
   const clientSecret = opts.clientSecret ?? IDP_CLIENT_SECRET
@@ -61,6 +71,8 @@ export function testIdp(opts: { issuer?: string; clientId?: string; clientSecret
       email_verified: true,
       name: 'Alice',
     } as Record<string, unknown>,
+    /** How the client authenticated at the token endpoint last time. */
+    lastClientAuth: undefined as 'basic' | 'post' | undefined,
     /** The last authorization request's parameters. */
     lastAuthorization: undefined as URLSearchParams | undefined,
     tamperNext(t: Tamper) {
@@ -107,7 +119,10 @@ export function testIdp(opts: { issuer?: string; clientId?: string; clientSecret
       response_types_supported: ['code'],
       subject_types_supported: ['public'],
       id_token_signing_alg_values_supported: ['RS256'],
-      token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+      token_endpoint_auth_methods_supported: opts.authMethods ?? [
+        'client_secret_basic',
+        'client_secret_post',
+      ],
       code_challenge_methods_supported: ['S256'],
     })
   })
@@ -119,8 +134,11 @@ export function testIdp(opts: { issuer?: string; clientId?: string; clientSecret
     hits.token++
     const form = await c.req.parseBody<Record<string, string>>()
     const basic = c.req.header('authorization')?.replace(/^Basic /, '')
+    idp.lastClientAuth = basic ? 'basic' : 'post'
     const [id, secret] = basic
-      ? atob(basic).split(':').map(decodeURIComponent)
+      ? atob(basic)
+          .split(':')
+          .map(v => (opts.literalBasic ? v : decodeURIComponent(v)))
       : [form.client_id, form.client_secret]
     if (id !== clientId || secret !== clientSecret) return c.json({ error: 'invalid_client' }, 401)
     const grant = grants.get(form.code ?? '')

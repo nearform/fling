@@ -154,12 +154,14 @@ export function oidcProvider(settings: OidcSettings, opts: OidcOptions = {}): Id
     return cached.value
   }
 
-  /** client_secret_basic, the default, unless the issuer only offers client_secret_post. */
+  /**
+   * client_secret_post whenever the issuer offers it, else client_secret_basic (the spec's default
+   * when discovery lists none). Basic credentials are form-encoded first (RFC 6749 §2.3.1), so
+   * `-` and `.` travel as `%2D`/`%2E`, and Google doesn't decode them: it answers invalid_client,
+   * "The OAuth client was not found", for every `….apps.googleusercontent.com` client id.
+   */
   function clientAuth(as: oauth.AuthorizationServer): oauth.ClientAuth {
-    const methods = as.token_endpoint_auth_methods_supported
-    return methods &&
-      !methods.includes('client_secret_basic') &&
-      methods.includes('client_secret_post')
+    return as.token_endpoint_auth_methods_supported?.includes('client_secret_post')
       ? oauth.ClientSecretPost(settings.clientSecret)
       : oauth.ClientSecretBasic(settings.clientSecret)
   }

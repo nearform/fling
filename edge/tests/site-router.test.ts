@@ -76,15 +76,15 @@ describe('auth for private sites', () => {
   it('uses the configured site scheme and keeps the port in the return URL', async () => {
     const dev = createSiteRouter({
       kvs: { get: async key => store.get(key) },
-      appOrigin: 'http://localhost:3001',
+      appOrigin: 'http://localhost:47101',
       siteScheme: 'http',
       now: () => NOW_MS,
     })
     const res = (await dev(
-      toCloudFrontEvent({ host: 'my-app.localhost:3001', path: '/' })
+      toCloudFrontEvent({ host: 'my-app.localhost:47101', path: '/' })
     )) as CloudFrontResponse
     expect(res.headers?.location?.value).toBe(
-      `http://localhost:3001/auth/login?return=${encodeURIComponent('http://my-app.localhost:3001/')}`
+      `http://localhost:47101/auth/login?return=${encodeURIComponent('http://my-app.localhost:47101/')}`
     )
   })
 

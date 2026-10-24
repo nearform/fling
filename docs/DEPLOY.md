@@ -116,7 +116,7 @@ Example `INSTANCE` object:
 
 3. **Google redirect URIs.** On that OAuth client, add these authorised redirect URIs:
    - `https://$APP_DOMAIN/auth/google/callback`
-   - `http://localhost:3001/auth/google/callback` (local development)
+   - `http://localhost:47101/auth/google/callback` (local development)
 
 4. **GitHub environment and config.** In the repository, create the environment `production`
    (Settings, Environments; deployment branches: `main` only). Then set the deploy config: the

@@ -64,8 +64,8 @@ describe('notFoundAppOrigin', () => {
 
   it("falls back to the site host's parent when the placeholder is still there", () => {
     expect(notFoundAppOrigin('__APP_ORIGIN__', at)).toBe('https://sites.example.test')
-    expect(notFoundAppOrigin(null, new URL('http://x.fling.lvh.me:3002/'))).toBe(
-      'http://fling.lvh.me:3002'
+    expect(notFoundAppOrigin(null, new URL('http://x.fling.lvh.me:47102/'))).toBe(
+      'http://fling.lvh.me:47102'
     )
     expect(notFoundAppOrigin('not a url', at)).toBe('https://sites.example.test')
   })

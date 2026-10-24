@@ -72,11 +72,13 @@ describe('safeReturnUrl', () => {
   })
   it('handles dev hosts with ports', () => {
     const dev = {
-      appOrigin: 'http://localhost:3001',
-      sitesDomain: 'localhost:3002',
+      appOrigin: 'http://localhost:47101',
+      sitesDomain: 'localhost:47102',
       siteScheme: 'http' as const,
     }
-    expect(safeReturnUrl('http://hello.localhost:3002/', dev)).toBe('http://hello.localhost:3002/')
+    expect(safeReturnUrl('http://hello.localhost:47102/', dev)).toBe(
+      'http://hello.localhost:47102/'
+    )
     expect(safeReturnUrl('http://hello.localhost:9999/', dev)).toBe('/')
   })
 })

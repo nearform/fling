@@ -14,7 +14,7 @@ export class FsBlobs implements Blobs {
 
   constructor(
     root: string,
-    /** origin the API is reachable on, e.g. http://localhost:3001 */
+    /** origin the API is reachable on, e.g. http://localhost:47101 */
     private baseUrl: string,
     private secret: string,
     private now: () => number = Date.now

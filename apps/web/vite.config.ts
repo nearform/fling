@@ -18,8 +18,8 @@ const devDownloads = (): Plugin => ({
   },
 })
 
-// `FLING_API_URL` points the dev proxy at another API (default: `pnpm dev`'s on :3001).
-const API = process.env.FLING_API_URL ?? 'http://localhost:3001'
+// `FLING_API_URL` points the dev proxy at another API (default: `pnpm dev`'s on :47101).
+const API = process.env.FLING_API_URL ?? 'http://localhost:47101'
 
 // The app: served from object storage at the root of the instance's app origin (the CDN does the
 // SPA fallback). It reads everything instance-specific at runtime from /.well-known/fling.
@@ -31,7 +31,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    port: 3000,
+    // UI_PORT moves it (the API dev server reads the same variable for APP_ORIGIN).
+    port: Number(process.env.UI_PORT ?? 47100),
     // lvh.me resolves to 127.0.0.1 (IPv4); vite's default localhost bind can be IPv6-only.
     host: '127.0.0.1',
     strictPort: true,

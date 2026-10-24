@@ -31,8 +31,8 @@ the web UI read it from there, so none of them is tied to one instance.
 
 ```sh
 pnpm install
-pnpm dev          # API :3001, sites :3002 at http://<name>.fling.lvh.me:3002
-pnpm --filter @fling/web dev   # UI :3000 → open http://fling.lvh.me:3000
+pnpm dev          # API :47101, sites :47102 at http://<name>.fling.lvh.me:47102
+pnpm --filter @fling/web dev   # UI :47100 → open http://fling.lvh.me:47100
 pnpm gate         # lint, typecheck, test, build
 ```
 

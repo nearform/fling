@@ -1,7 +1,7 @@
 /**
- * Local dev: the API on :3001 (Records on a memory table, fs blobs under `.fling-dev/`, memory
+ * Local dev: the API on :47101 (Records on a memory table, fs blobs under `.fling-dev/`, memory
  * route table; pending data migrations run first, as a deploy runs them) and
- * the sites on :3002 — `http://<label>.fling.lvh.me:3002/…` runs the real edge/site-router.js (via
+ * the sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real edge/site-router.js (via
  * the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
  * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404 (its
  * `__APP_ORIGIN__` filled in, as the deploy does).
@@ -23,8 +23,8 @@ import { MemoryRouteTable } from './route-table/memory.ts'
 import { Records } from './store/records.ts'
 import { MemoryTable } from './table/memory.ts'
 
-const API_PORT = Number(process.env.PORT ?? 3001)
-const SITES_PORT = Number(process.env.SITES_PORT ?? 3002)
+const API_PORT = Number(process.env.PORT ?? 47101)
+const SITES_PORT = Number(process.env.SITES_PORT ?? 47102)
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const fsRoot = resolve(repoRoot, '.fling-dev')
 const notFoundPage = resolve(repoRoot, 'apps/web/dist-404/404.html')
@@ -35,8 +35,8 @@ const env = {
   DEV_LOGIN: '1',
   // lvh.me (and every subdomain) resolves to 127.0.0.1. Browsers won't share a
   // `Domain=localhost` cookie with `*.localhost`, so private sites need a real-looking domain.
-  // The UI dev server (vite, :3000 by default) proxies /api, /auth, /mcp, /oauth to this API.
-  APP_ORIGIN: `http://fling.lvh.me:${process.env.UI_PORT ?? 3000}`,
+  // The UI dev server (vite, :47100 by default) proxies /api, /auth, /mcp, /oauth to this API.
+  APP_ORIGIN: `http://fling.lvh.me:${process.env.UI_PORT ?? 47100}`,
   SITES_DOMAIN: `fling.lvh.me:${SITES_PORT}`,
   SITE_SCHEME: 'http',
   SITE_COOKIE_DOMAIN: 'fling.lvh.me',

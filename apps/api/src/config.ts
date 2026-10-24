@@ -41,8 +41,8 @@ const flag = z.preprocess(
 
 const envSchema = z.object({
   APP_ENV: z.preprocess(blank, z.enum(['production', 'development']).default('development')),
-  APP_ORIGIN: z.preprocess(blank, z.url().default('http://localhost:3001')),
-  SITES_DOMAIN: z.preprocess(blank, z.string().min(1).default('localhost:3002')),
+  APP_ORIGIN: z.preprocess(blank, z.url().default('http://localhost:47101')),
+  SITES_DOMAIN: z.preprocess(blank, z.string().min(1).default('localhost:47102')),
   SITE_SCHEME: z.preprocess(blank, z.enum(['http', 'https']).optional()),
   SITE_COOKIE_DOMAIN: z.preprocess(blank, z.string().min(1).default('localhost')),
   /** Required in production: who may sign in. Dev/tests fall back to DEV_EMAIL_DOMAINS. */
@@ -97,7 +97,7 @@ export interface Config {
   instanceName: string
   /** e.g. https://fling.example.test (no trailing slash) */
   appOrigin: string
-  /** host[:port] the site labels hang off, e.g. sites.example.test or localhost:3002 */
+  /** host[:port] the site labels hang off, e.g. sites.example.test or localhost:47102 */
   sitesDomain: string
   siteScheme: 'http' | 'https'
   siteCookieDomain: string

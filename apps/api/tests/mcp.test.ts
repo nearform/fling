@@ -76,6 +76,10 @@ describe('/mcp tools', () => {
       [
         'fling_archive',
         'fling_check_name',
+        'fling_comment_add',
+        'fling_comment_delete',
+        'fling_comment_resolve',
+        'fling_comments_list',
         'fling_delete',
         'fling_files',
         'fling_info',
@@ -462,5 +466,95 @@ describe('/mcp tools', () => {
     await callTool(env, bearer, 'fling_delete', { name: 'm', confirm: true })
     const gone = await callTool(env, bearer, 'fling_info', { name: 'm' })
     expect(gone.isError).toBe(true)
+  })
+})
+
+describe('/mcp comment tools', () => {
+  const publish = (bearer: string, name: string) =>
+    callTool(env, bearer, 'fling_publish', {
+      name,
+      files: [{ path: 'index.html', content: page('Hi') }],
+    })
+
+  it('a member comments, the owner lists, replies, resolves and deletes', async () => {
+    await publish(bearer, 'deck')
+    const bob = (await connect(env, 'bob@example.test')).accessToken
+    const added = await callTool(env, bob, 'fling_comment_add', {
+      name: 'deck',
+      body: 'Slide 2 has a typo',
+      path: '/slides/index.html',
+    })
+    expect(added.isError).toBeFalsy()
+    const id = added.structuredContent.id
+    expect(added.structuredContent).toMatchObject({ path: '/slides/', parentId: null })
+    expect(added.content[0]?.text).toContain('https://fling.test/review/deck')
+
+    const reply = await callTool(env, bearer, 'fling_comment_add', {
+      name: 'deck',
+      body: 'Thanks, fixed',
+      replyTo: id,
+    })
+    expect(reply.structuredContent.parentId).toBe(id)
+
+    const listed = await callTool(env, bearer, 'fling_comments_list', { name: 'deck' })
+    const text = listed.content[0]?.text ?? ''
+    expect(text).toMatch(
+      /^1 open thread on deck\. Review page: https:\/\/fling\.test\/review\/deck/
+    )
+    expect(text).toContain(`[${id}] /slides/, current version — bob@example.test`)
+    expect(text).toContain('Slide 2 has a typo')
+    expect(text).toContain('alice@example.test')
+    expect(listed.structuredContent.comments).toHaveLength(2)
+
+    const resolved = await callTool(env, bearer, 'fling_comment_resolve', { name: 'deck', id })
+    expect(resolved.structuredContent.resolvedBy).toEqual({
+      kind: 'user',
+      email: 'alice@example.test',
+    })
+    const open = await callTool(env, bearer, 'fling_comments_list', { name: 'deck' })
+    expect(open.structuredContent.comments).toEqual([])
+    expect(open.content[0]?.text).toMatch(/^0 open threads on deck \(1 resolved not shown\)/)
+    const all = await callTool(env, bearer, 'fling_comments_list', {
+      name: 'deck',
+      includeResolved: true,
+    })
+    expect(all.content[0]?.text).toContain(`[${id}] RESOLVED /slides/`)
+
+    // Bob can't delete the owner's reply; the owner deletes Bob's thread (and the reply).
+    const refused = await callTool(env, bob, 'fling_comment_delete', {
+      name: 'deck',
+      id: reply.structuredContent.id,
+    })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toMatch(/author or the site owner/)
+    const deleted = await callTool(env, bearer, 'fling_comment_delete', { name: 'deck', id })
+    expect(deleted.isError).toBeFalsy()
+    const after = await callTool(env, bob, 'fling_comments_list', {
+      name: 'deck',
+      includeResolved: true,
+    })
+    expect(after.structuredContent.comments).toEqual([])
+  })
+
+  it('an unknown site reads as missing', async () => {
+    const r = await callTool(env, bearer, 'fling_comments_list', { name: 'nope' })
+    expect(r.isError).toBe(true)
+    expect(r.content[0]?.text).toBe('No site named "nope"')
+  })
+
+  it('with comments turned off the tools are not offered', async () => {
+    env = setup({ comments: false })
+    const off = (await connect(env)).accessToken
+    const list = await json(await rpc(env, off, 'tools/list'))
+    const names: string[] = list.result.tools.map((t: { name: string }) => t.name)
+    expect(names.filter(n => n.includes('comment'))).toEqual([])
+    const init = await json(
+      await rpc(env, off, 'initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '1' },
+      })
+    )
+    expect(init.result.instructions).not.toContain('fling_comments_list')
   })
 })

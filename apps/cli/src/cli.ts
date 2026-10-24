@@ -7,6 +7,7 @@
 import chalk from 'chalk'
 import { Command } from 'commander'
 import { runLogin, runLogout, runWhoami } from './commands/auth.ts'
+import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
 import { runSetup } from './commands/setup.ts'
 import {
@@ -247,6 +248,52 @@ program
   .description('delete a site and all its versions (asks first unless --yes)')
   .option('-y, --yes', 'do not ask for confirmation')
   .action(action((ctx, name: string, opts: { yes?: boolean }) => runRemove(ctx, name, opts)))
+
+// ---- comments ------------------------------------------------------------------------------
+
+program
+  .command('comments <name>')
+  .helpGroup('Comments:')
+  .description("list a site's open comment threads (people leave them on its review page)")
+  .option('-p, --path <path>', 'only this page, e.g. / or /docs/')
+  .option('-a, --all', 'include resolved threads')
+  .action(
+    action((ctx, name: string, opts: { path?: string; all?: boolean }) =>
+      runComments(ctx, name, opts)
+    )
+  )
+program
+  .command('comment <name> <text>')
+  .helpGroup('Comments:')
+  .description('comment on a page of a site (default: its home page), or reply to a thread')
+  .option('-p, --path <path>', 'the page, e.g. /docs/ or about.html')
+  .option('-r, --reply <id>', 'reply to this thread')
+  .action(
+    action((ctx, name: string, text: string, opts: { path?: string; reply?: string }) =>
+      runComment(ctx, name, text, opts)
+    )
+  )
+program
+  .command('resolve <name> <id>')
+  .helpGroup('Comments:')
+  .description('mark a comment thread resolved')
+  .option('--reopen', 'reopen it instead')
+  .action(
+    action((ctx, name: string, id: string, opts: { reopen?: boolean }) =>
+      runResolve(ctx, name, id, opts)
+    )
+  )
+program
+  .command('uncomment <name> <id>')
+  .helpGroup('Comments:')
+  .alias('delete-comment')
+  .description('delete a comment (a thread goes with its replies; asks first unless --yes)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action(
+    action((ctx, name: string, id: string, opts: { yes?: boolean }) =>
+      runUncomment(ctx, name, id, opts)
+    )
+  )
 
 // ---- agents --------------------------------------------------------------------------------
 

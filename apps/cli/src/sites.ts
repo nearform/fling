@@ -3,6 +3,10 @@
  * print what these return; the MCP tools serialise it. Nothing here prints.
  */
 import {
+  type Comment,
+  type CommentList,
+  CommentListSchema,
+  CommentSchema,
   type InstanceMetadata,
   type Me,
   MeSchema,
@@ -175,4 +179,64 @@ export async function share(
     schema: ShareResponseSchema,
   })
   return { name, action: hadLink ? 'refreshed' : 'created', shareUrl: res.shareUrl }
+}
+
+// --- comments ---
+
+/** GET …/comments — the site's comments (oldest first), optionally one page's. */
+export function listComments(
+  client: ApiClient,
+  name: string,
+  opts: { path?: string } = {}
+): Promise<CommentList> {
+  return client.request('GET', `${sitePath(name)}/comments`, {
+    schema: CommentListSchema,
+    query: { path: opts.path },
+  })
+}
+
+/** Start a thread on a page, or reply to one. */
+export function addComment(
+  client: ApiClient,
+  name: string,
+  input: { body: string; path?: string; parentId?: string }
+): Promise<Comment> {
+  return client.request('POST', `${sitePath(name)}/comments`, {
+    schema: CommentSchema,
+    body: input,
+  })
+}
+
+/** Resolve a thread, or reopen it. */
+export function resolveComment(
+  client: ApiClient,
+  name: string,
+  id: string,
+  resolved: boolean
+): Promise<Comment> {
+  return client.request('PATCH', `${sitePath(name)}/comments/${encodeURIComponent(id)}`, {
+    schema: CommentSchema,
+    body: { resolved },
+  })
+}
+
+export async function deleteComment(
+  client: ApiClient,
+  name: string,
+  id: string
+): Promise<{ name: string; id: string; deleted: true }> {
+  await client.request('DELETE', `${sitePath(name)}/comments/${encodeURIComponent(id)}`)
+  return { name, id, deleted: true }
+}
+
+/**
+ * Whether the instance has comments, by its stored metadata: its `comments` capability, or — when
+ * the stored copy predates the flag (fetched by an older login) — yes, and the server decides.
+ * No instance at all: no.
+ */
+export function commentsEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  if (!instance) return false
+  return instance.capabilities.comments ?? true
 }

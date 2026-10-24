@@ -137,3 +137,9 @@ export function commentThreads(comments: readonly Comment[]): CommentThread[] {
 export function authorLabel(author: CommentAuthor): string {
   return author.kind === 'user' ? author.email : `${author.name} (guest)`
 }
+
+/** The review page of a site on the app: `https://fling.example.test/review/<name>[?path=…]`. */
+export function reviewUrl(appOrigin: string, name: string, path?: string): string {
+  const base = `${appOrigin.replace(/\/+$/, '')}/review/${name === '<name>' ? name : encodeURIComponent(name)}`
+  return path && path !== '/' ? `${base}?path=${encodeURIComponent(path)}` : base
+}

@@ -5,6 +5,7 @@
 //   node scripts/setup.mjs [--account-id …] [--worker fling] [--zone example.com]
 //     [--app-host fling.example.com] [--sites-domain fling.example.com]
 //     [--email-domains example.com] [--allowed-emails you@example.com]
+//     [--admin-emails you@example.com]   (optional, never asked for; '' removes them)
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
@@ -34,6 +35,7 @@ const { values: args } = parseArgs({
     'sites-domain': { type: 'string' },
     'email-domains': { type: 'string' },
     'allowed-emails': { type: 'string' },
+    'admin-emails': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'oidc-client-secret-file': { type: 'string' },
@@ -137,6 +139,12 @@ for (const [key, v] of [
 ]) {
   if (v) instance[key] = v
   else delete instance[key]
+}
+// The instance's admins (users list, impersonation): only from the flag, so runs without a
+// terminal don't stop to ask. Each must be admitted by the two above (the Worker checks).
+if (args['admin-emails'] !== undefined) {
+  if (args['admin-emails'].trim()) instance.ADMIN_EMAILS = args['admin-emails'].trim()
+  else delete instance.ADMIN_EMAILS
 }
 instance.INSTANCE_NAME = await value(
   'instance-name',

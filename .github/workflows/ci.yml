@@ -1,8 +1,9 @@
 name: CI
 
-# The quality gate, in one job: `pnpm gate` (lint, typecheck, test, build), the same command a
-# person runs before committing. The workflow adds no check of its own, so what passes here is
-# exactly what passes on a laptop.
+# The quality gate, in one job: `pnpm gate` (lint, terraform, typecheck, test, build), the same
+# command a person runs before committing. The workflow adds no check of its own, so what passes
+# here is exactly what passes on a laptop. It also installs terraform, which the gate's Terraform
+# check only skips when it is missing outside CI.
 #
 # The one addition is local stand-ins for the cloud services: DynamoDB Local and MinIO as service
 # containers, and the env vars that point the adapter conformance suites in platforms/aws at them.
@@ -61,4 +62,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # For the Terraform part of the gate (scripts/check-terraform.mjs): ubuntu-24.04 runners don't
+      # ship terraform. No wrapper: the script reads terraform's own output and exit code.
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
       - run: pnpm gate

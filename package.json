@@ -16,7 +16,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "gate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "infra": "node scripts/check-terraform.mjs",
+    "gate": "pnpm lint && pnpm infra && pnpm typecheck && pnpm test && pnpm build",
     "cli": "tsx apps/cli/src/cli.ts"
   },
   "devDependencies": {

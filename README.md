@@ -22,6 +22,7 @@ default; share links open them to anyone with the link.
 | `apps/cli` | `@nearform/fling` CLI, local MCP server and the `.mcpb` Claude Desktop extension |
 | `edge` | CloudFront Function that routes `*.fling.labs.nearform.com` to the right site version |
 | `packages/shared` | Contracts shared by all of the above |
+| `packages/conformance` | Test suites every storage adapter must pass (the core's memory/fs adapters; DynamoDB Local and MinIO in CI) |
 | `plugin` | Claude Code plugin (skill + MCP) |
 
 ## Develop

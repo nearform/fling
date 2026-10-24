@@ -1,0 +1,27 @@
+{
+  "name": "@fling/conformance",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Adapter conformance suites for the API's ports (Store, Blobs, RouteTable): vitest suite functions every adapter runs, so the core's memory/fs adapters (tested here) and each platform's adapters (tested in platforms/*) keep the same semantics. Consumed as TypeScript source.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "echo 'conformance: consumed as source'"
+  },
+  "dependencies": {
+    "@fling/api": "workspace:*"
+  },
+  "peerDependencies": {
+    "vitest": "^3.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

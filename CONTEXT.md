@@ -33,4 +33,5 @@ Publication is the guarantee.
 and **RouteTable** (the keys the edge routes site hosts by).
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
-(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM).
+(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM). Every adapter, including
+the core's memory/fs ones, passes the same suites from `packages/conformance`.

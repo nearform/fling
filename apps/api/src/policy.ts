@@ -16,7 +16,7 @@
  * visibility in the route table: tests/policy.test.ts runs the real site router against this table
  * so the two cannot drift.
  */
-import type { Visibility } from '@fling/shared'
+import type { CommentAuthor, Visibility } from '@fling/shared'
 import type { SiteRecord } from './store/types.ts'
 
 export type Actor =
@@ -48,9 +48,18 @@ export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken'>
  *   share.read       fling_share returning the existing link
  *   share.create     POST …/share (create or rotate), fling_share (refresh)
  *   share.revoke     DELETE …/share, fling_share (revoke)
+ *   comment.read        GET …/comments, fling_comments_list (and the review page)
+ *   comment.create      POST …/comments, fling_comment_add (a thread or a reply)
+ *   comment.resolve     PATCH …/comments/:id { resolved }, fling_comment_resolve (any thread)
+ *   comment.delete      DELETE …/comments/:id, fling_comment_delete: anyone's comment
+ *   comment.delete.own  the same, for a comment the actor wrote (`canDeleteComment`)
  *
- * Reserved for comments (Phase 7; not actions yet): comment.read, comment.create,
- * comment.resolve, comment.delete. Share-link viewers will be able to read and create.
+ * Comments are the conversation around a site, so everyone who can see a site by signing in
+ * takes part: members read, write and resolve (resolving is reversible, and review threads are
+ * closed by whoever addressed them), and delete what they wrote; only the owner deletes anyone's.
+ * Share-link holders get nothing yet. Guest commenting (a name, kept in a signed per-site
+ * cookie, as a `{ kind: 'guest' }` author) will turn on `comment.read` and `comment.create`
+ * for `share`, and `comment.delete.own` once a guest can be recognised again.
  */
 export const ACTIONS = [
   'site.view',
@@ -66,11 +75,18 @@ export const ACTIONS = [
   'share.read',
   'share.create',
   'share.revoke',
+  'comment.read',
+  'comment.create',
+  'comment.resolve',
+  'comment.delete',
+  'comment.delete.own',
 ] as const
 
 export type Action = (typeof ACTIONS)[number]
 
 const ownerOnly = (role: Role) => role === 'owner'
+/** Signed in: the owner or any member (both can view the site, whatever its visibility). */
+const signedIn = (role: Role) => role === 'owner' || role === 'member'
 
 const RULES: Record<Action, (role: Role, visibility: Visibility) => boolean> = {
   // Public: anyone. Private: any signed-in user, or anyone with the share link.
@@ -87,6 +103,11 @@ const RULES: Record<Action, (role: Role, visibility: Visibility) => boolean> = {
   'share.read': ownerOnly,
   'share.create': ownerOnly,
   'share.revoke': ownerOnly,
+  'comment.read': signedIn,
+  'comment.create': signedIn,
+  'comment.resolve': signedIn,
+  'comment.delete': ownerOnly,
+  'comment.delete.own': signedIn,
 }
 
 /** The actor's role on this site. */
@@ -107,3 +128,20 @@ export function can(actor: Actor, action: Action, site: PolicySite): boolean {
 
 /** A signed-in user as an actor. */
 export const userActor = (user: { email: string }): Actor => ({ kind: 'user', email: user.email })
+
+/** Whether the actor wrote a comment. Guests can't be recognised yet (no guest identity). */
+export function isAuthor(actor: Actor, author: CommentAuthor): boolean {
+  return actor.kind === 'user' && author.kind === 'user' && author.email === actor.email
+}
+
+/** May the actor delete this comment: anyone's (`comment.delete`), or their own. */
+export function canDeleteComment(
+  actor: Actor,
+  site: PolicySite,
+  comment: { author: CommentAuthor }
+): boolean {
+  return (
+    can(actor, 'comment.delete', site) ||
+    (isAuthor(actor, comment.author) && can(actor, 'comment.delete.own', site))
+  )
+}

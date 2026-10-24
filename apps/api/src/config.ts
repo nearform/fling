@@ -40,6 +40,15 @@ const flag = z.preprocess(
   z.boolean()
 )
 
+/** A switch that is on unless set to 0/false/no/off. */
+const flagDefaultOn = z.preprocess(
+  value =>
+    !(
+      typeof value === 'string' && ['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase())
+    ),
+  z.boolean()
+)
+
 const envSchema = z.object({
   APP_ENV: z.preprocess(blank, z.enum(['production', 'development']).default('development')),
   APP_ORIGIN: z.preprocess(blank, z.url().default('http://localhost:47101')),
@@ -73,6 +82,7 @@ const envSchema = z.object({
   OIDC_DISPLAY_NAME: z.preprocess(blank, z.string().min(1).max(60).optional()),
   OIDC_SCOPES: optionalString,
   OIDC_ASSUME_EMAIL_VERIFIED: flag,
+  COMMENTS: flagDefaultOn,
 })
 
 /**
@@ -145,6 +155,11 @@ export interface Config {
   storageDriver: 's3' | 'r2' | 'fs'
   kvsDriver: 'cloudfront' | 'workers-kv' | 'memory'
   fsRoot?: string
+  /**
+   * Comments and review mode (`COMMENTS`, default on; `false` turns them off). Advertised as the
+   * `comments` capability; off, the comment routes and tools don't exist.
+   */
+  comments: boolean
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -201,6 +216,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     storageDriver: e.STORAGE_DRIVER ?? (production ? 's3' : 'fs'),
     kvsDriver: e.KVS_DRIVER ?? (production ? 'cloudfront' : 'memory'),
     fsRoot: e.FS_ROOT,
+    comments: e.COMMENTS,
     devLogin: e.DEV_LOGIN && !production,
     secureCookies: appOrigin.startsWith('https:'),
     oauthRedirectAllowlist: e.OAUTH_REDIRECT_ALLOWLIST

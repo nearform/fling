@@ -1,5 +1,5 @@
 /** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
-import type { Visibility } from '@fling/shared'
+import type { CommentAnchor, CommentAuthor, Visibility } from '@fling/shared'
 
 export interface User {
   email: string
@@ -57,6 +57,28 @@ export interface VersionRecord {
   spa?: boolean
   visibility?: Visibility
   createdAt: string
+}
+
+/**
+ * A comment on a site (a thread's first comment, or a reply to one). Kept in the site's partition,
+ * so it outlives versions and goes with the site.
+ */
+export interface CommentRecord {
+  siteId: string
+  /** sortable by creation time (newCommentId) */
+  id: string
+  /** the thread's first comment; null when this starts a thread */
+  parentId: string | null
+  /** normalizeCommentPath() */
+  path: string
+  /** the version being served when it was made */
+  versionId: string | null
+  anchor: CommentAnchor | null
+  body: string
+  author: CommentAuthor
+  createdAt: string
+  resolvedAt: string | null
+  resolvedBy: CommentAuthor | null
 }
 
 /** An OAuth client registered through DCR (RFC 7591). CIMD clients are fetched, not stored. */
@@ -190,6 +212,21 @@ export interface Store {
   putVersion(site: SiteRef, version: VersionRecord): Promise<void>
   /** In version-id byte order. */
   listVersions(site: SiteRef): Promise<VersionRecord[]>
+
+  // --- comments ---
+  /** Store a new comment (its id is unique: false if one has it already). */
+  createComment(comment: CommentRecord): Promise<boolean>
+  getComment(siteId: string, id: string): Promise<CommentRecord | null>
+  /** In id order: oldest first. */
+  listComments(siteId: string): Promise<CommentRecord[]>
+  /** Set or clear a comment's resolution; null when the comment is gone. */
+  resolveComment(
+    siteId: string,
+    id: string,
+    resolution: Pick<CommentRecord, 'resolvedAt' | 'resolvedBy'>
+  ): Promise<CommentRecord | null>
+  /** Delete a comment and, for a thread, its replies. false when it didn't exist. */
+  deleteComment(siteId: string, id: string): Promise<boolean>
 
   // --- OAuth (remote MCP connector) ---
   putOAuthClient(client: OAuthClientRecord): Promise<void>

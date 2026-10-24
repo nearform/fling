@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { validateCliRedirectUri } from '../src/auth/cli.ts'
 import { admitIdentity, type Identity } from '../src/auth/identity.ts'
 import { safeReturnUrl } from '../src/auth/return-url.ts'
+import { newCommentId } from '../src/lib/ids.ts'
 import { Records } from '../src/store/records.ts'
 import { slugCandidate } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
@@ -133,5 +134,20 @@ describe('user slugs', () => {
     expect([a.userSlug, b.userSlug, again.userSlug]).toEqual(['a-b', 'a-b-2', 'a-b'])
     expect(again.name).toBe('A2')
     expect(slugCandidate('abcdefghijklmnopqrst', 1)).toBe('abcdefghijklmnopqr-2')
+  })
+})
+
+describe('newCommentId', () => {
+  it('sorts by creation time in byte order, whatever the year', () => {
+    const times = [
+      '1970-01-01T00:00:00.001Z',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.001Z',
+      '2400-06-01T00:00:00.000Z',
+    ]
+    const ids = times.map(t => newCommentId(new Date(t)))
+    for (const id of ids) expect(id).toMatch(/^[0-9a-v]{18}$/)
+    expect([...ids].sort()).toEqual(ids)
+    expect(newCommentId(new Date(0))).not.toBe(newCommentId(new Date(0)))
   })
 })

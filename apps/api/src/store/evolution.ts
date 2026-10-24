@@ -19,6 +19,7 @@ export type Kind =
   | 'name'
   | 'site'
   | 'version'
+  | 'comment'
   | 'oauthclient'
   | 'oauthreq'
   | 'oauthcode'

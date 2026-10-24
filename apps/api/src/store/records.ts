@@ -2,13 +2,16 @@
  * Records: the domain persistence behind the `Store` interface, written once over the Table port
  * (`../table/types.ts`). The memory and DynamoDB deployments differ only in the Table they pass.
  *
- * Key layout. Sites are site-centric (a site's partition owns its versions, and later its
- * comments); access is policy's business (policy.ts), not the keys'.
+ * Key layout. Sites are site-centric (a site's partition owns its versions and its comments);
+ * access is policy's business (policy.ts), not the keys'.
  *
  *   pk                     sk                            item
  *   SITE#<siteId>          SITE                          site (email = owner, name, visibility, spa,
  *                                                        archived, currentVersionId, shareToken, …)
  *   SITE#<siteId>          VERSION#<versionId>           version (status, fileCount, totalBytes, …)
+ *   SITE#<siteId>          COMMENT#<commentId>           comment (parentId, path, versionId, body,
+ *                                                        author, resolvedAt, …); ids sort by time,
+ *                                                        so the partition lists them oldest first
  *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
  *                                                        projection), so a user's sites are one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
@@ -75,6 +78,7 @@ import { decode, encode, type Kind } from './evolution.ts'
 import {
   type ApiKeyRecord,
   type AuthCodeRecord,
+  type CommentRecord,
   type GrantRecord,
   type NameClaim,
   type OAuthClientRecord,
@@ -102,6 +106,7 @@ const key = {
   site: (siteId: string) => ({ pk: sitePk(siteId), sk: 'SITE' }),
   siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
+  comment: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `COMMENT#${id}` }),
   /** LEGACY (expand phase): where versions lived before the site-centric keys */
   legacyVersion: (email: string, siteId: string, id: string) => ({
     pk: userPk(email),
@@ -359,6 +364,51 @@ export class Records implements Store {
       byId.set(v.id, newerVersion(byId.get(v.id) ?? null, v) as VersionRecord)
     }
     return [...byId.values()].sort((a, b) => compareSk(a.id, b.id))
+  }
+
+  // --- comments ---
+
+  createComment(comment: CommentRecord) {
+    return unless(
+      this.table.put(encode('comment', key.comment(comment.siteId, comment.id), comment), ifAbsent)
+    )
+  }
+
+  getComment(siteId: string, id: string) {
+    return this.read<CommentRecord>('comment', key.comment(siteId, id))
+  }
+
+  /** In id byte order: oldest first. */
+  listComments(siteId: string) {
+    return this.list<CommentRecord>('comment', sitePk(siteId), 'COMMENT#')
+  }
+
+  async resolveComment(
+    siteId: string,
+    id: string,
+    resolution: Pick<CommentRecord, 'resolvedAt' | 'resolvedBy'>
+  ) {
+    const { pk, sk } = key.comment(siteId, id)
+    try {
+      const item = await this.table.update(pk, sk, { set: resolution }, ifExists)
+      return decode<CommentRecord>('comment', item)
+    } catch (err) {
+      if (err instanceof ConditionFailed) return null
+      throw err
+    }
+  }
+
+  async deleteComment(siteId: string, id: string) {
+    const comment = await this.getComment(siteId, id)
+    if (!comment) return false
+    // Replies first, so an interrupted delete leaves the thread to delete again. A reply written
+    // while its thread is deleted is an orphan: lists drop it, deleting the site removes it.
+    if (comment.parentId === null) {
+      const replies = (await this.listComments(siteId)).filter(c => c.parentId === id)
+      await this.deleteAll(replies.map(r => key.comment(siteId, r.id)))
+    }
+    const { pk, sk } = key.comment(siteId, id)
+    return (await this.table.delete(pk, sk)) !== null
   }
 
   // --- OAuth ---

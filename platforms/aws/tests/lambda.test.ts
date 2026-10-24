@@ -45,6 +45,7 @@ describe.runIf(DYNAMODB_ENDPOINT)('{"fling":"migrate"}', () => {
       migrations: [
         { id: '0001', status: 'partial' },
         { id: '0002', status: 'skipped' },
+        { id: '0003', status: 'pending' },
       ],
     })
 
@@ -55,12 +56,13 @@ describe.runIf(DYNAMODB_ENDPOINT)('{"fling":"migrate"}', () => {
       migrations: [
         { id: '0001', status: 'completed', counts: { 'site copied': 5, 'version copied': 7 } },
         { id: '0002', status: 'skipped' },
+        { id: '0003', status: 'completed' },
       ],
     })
     expect(await table.get('SITE#S1', 'SITE')).not.toBeNull()
     expect(await handler({ fling: 'migrate' }, context(60_000))).toMatchObject({
       done: true,
-      migrations: [{ status: 'up-to-date' }, { status: 'skipped' }],
+      migrations: [{ status: 'up-to-date' }, { status: 'skipped' }, { status: 'up-to-date' }],
     })
     expect(log).toHaveBeenCalledWith(expect.stringContaining('"msg":"migrations"'))
   })

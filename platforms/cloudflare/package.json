@@ -3,13 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Fling on Cloudflare: the D1, R2 and Workers KV adapters for the API's ports (the Worker entry and wrangler config come next). Tested on Miniflare, so no account or network is needed.",
+  "description": "Fling on Cloudflare: one Worker (src/worker.ts) serving the API core, the web UI (Static Assets) and the sites (the shared routing decision over Workers KV + D1 and R2), with the D1, R2 and Workers KV adapters for the API's ports. Tested on Miniflare and, end to end, under wrangler dev; no account or network needed. See DEPLOY.md.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "echo 'platform-cloudflare: no Worker bundle yet'",
-    "bench:publish": "tsx scripts/bench-publish.ts"
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "migrate": "tsx scripts/migrate.ts",
+    "render-config": "node scripts/render-config.mjs",
+    "setup": "node scripts/setup.mjs",
+    "bench:publish": "tsx scripts/bench-publish.ts",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "@fling/api": "workspace:*",
@@ -18,11 +23,13 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261024.1",
     "@fling/conformance": "workspace:*",
+    "@fling/web": "workspace:*",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.12",
     "miniflare": "4.20260730.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "wrangler": "4.152.0"
   }
 }

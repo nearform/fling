@@ -10,3 +10,6 @@ coverage/
 .vscode/
 .claude/settings.local.json
 .fling-dev/
+.dev.vars
+.wrangler/
+platforms/cloudflare/deploy-config.json

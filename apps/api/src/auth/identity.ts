@@ -42,14 +42,17 @@ export type Admission =
 export interface EmailPolicy {
   /** ALLOWED_EMAIL_DOMAINS */
   allowedDomains: string[]
+  /** ALLOWED_EMAILS: individual addresses, admitted whatever their domain. */
+  allowedEmails?: string[]
   /** OIDC_ASSUME_EMAIL_VERIFIED: a missing `email_verified` counts as verified. */
   assumeEmailVerified?: boolean
 }
 
 /**
- * Who may sign in: a verified email whose domain is in ALLOWED_EMAIL_DOMAINS, and whose `hd`
- * (Google Workspace domain) claim, when present, matches the email's domain. An issuer that says
- * nothing about verification is refused unless the instance opts in to trusting it.
+ * Who may sign in: a verified email that is listed in ALLOWED_EMAILS or whose domain is in
+ * ALLOWED_EMAIL_DOMAINS, and whose `hd` (Google Workspace domain) claim, when present, matches the
+ * email's domain. An issuer that says nothing about verification is refused unless the instance
+ * opts in to trusting it.
  */
 export function admitIdentity(identity: Identity, policy: EmailPolicy): Admission {
   const email = identity.email?.trim().toLowerCase()
@@ -58,8 +61,11 @@ export function admitIdentity(identity: Identity, policy: EmailPolicy): Admissio
   if (!email || verified !== true) return { ok: false, reason: 'email_unverified' }
   const at = email.lastIndexOf('@')
   const domain = at > 0 ? email.slice(at + 1) : ''
+  const listed = (policy.allowedEmails ?? []).some(e => e.toLowerCase() === email)
   const allowed = policy.allowedDomains.map(d => d.toLowerCase())
-  if (!domain || !allowed.includes(domain)) return { ok: false, reason: 'domain_not_allowed' }
+  if (!domain || !(listed || allowed.includes(domain))) {
+    return { ok: false, reason: 'domain_not_allowed' }
+  }
   if (identity.hd !== undefined && identity.hd.toLowerCase() !== domain) {
     return { ok: false, reason: 'domain_not_allowed' }
   }

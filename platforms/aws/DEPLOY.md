@@ -120,7 +120,7 @@ the grants, then turn it on). If your own resources sit at other addresses, add 
 | `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/dist/site-router.js` (built by `edge/build.mjs`) |
 | `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` | the distributions | Invalidated after a deploy |
 | `APP_ORIGIN` | `https://<hostname>` | The smoke test's target and the Claude Desktop extension's default server |
-| `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` |
+| `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
 
 ## Instance configuration
 
@@ -140,7 +140,8 @@ Values reach the function two ways, and the function's own environment wins:
 
 | Key | Required | What |
 | --- | --- | --- |
-| `ALLOWED_EMAIL_DOMAINS` | **yes** (production refuses to start without it; the deploy checks `INSTANCE` has it) | Comma-separated email domains that may sign in, e.g. `example.test`. A verified email must match one (and Google's `hd` claim, when present, must match it). |
+| `ALLOWED_EMAIL_DOMAINS` | **yes**, unless `ALLOWED_EMAILS` is set (production refuses to start with neither; the deploy checks `INSTANCE` has one) | Comma-separated email domains that may sign in, e.g. `example.test`. A verified email whose domain matches one is admitted (and Google's `hd` claim, when present, must match its domain). |
+| `ALLOWED_EMAILS` | **yes**, unless `ALLOWED_EMAIL_DOMAINS` is set | Comma-separated email addresses that may sign in whatever their domain, e.g. `you@gmail.com` for a personal instance. Each must still be verified. The addresses are never published: the public metadata only says there are invited accounts. With it set, Google's sign-in page gets no `hd` hint. |
 | `OIDC_ISSUER` | **yes**, with the next one (see [Sign-in](#sign-in-openid-connect)) | The OpenID Connect issuer, exactly as its tokens' `iss`, e.g. `https://accounts.google.com`. Must be `https`. |
 | `OIDC_CLIENT_ID` | with `OIDC_ISSUER` | The client (application) id registered with the issuer. Its secret is the SSM parameter `oidc-client-secret`. |
 | `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else the issuer's host) | What the button says: "Sign in with …". |
@@ -185,8 +186,8 @@ An instance signs people in with one OpenID Connect provider: the authorization 
 PKCE, `state` and `nonce`, endpoints from the issuer's discovery document
 (`$OIDC_ISSUER/.well-known/openid-configuration`), and an ID token whose signature (the issuer's
 JWKS; rotated keys are picked up), issuer, audience, expiry and nonce are checked. Then the email
-policy: the ID token's `email` must be verified (`email_verified: true`) and its domain in
-`ALLOWED_EMAIL_DOMAINS`.
+policy: the ID token's `email` must be verified (`email_verified: true`) and either listed in
+`ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS`.
 
 On the provider, register a confidential **web** client with:
 

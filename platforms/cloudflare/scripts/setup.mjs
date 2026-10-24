@@ -4,7 +4,8 @@
 //
 //   node scripts/setup.mjs [--account-id …] [--worker fling] [--zone example.com]
 //     [--app-host fling.example.com] [--sites-domain fling.example.com]
-//     [--email-domains example.com] [--oidc-issuer https://…] [--oidc-client-id …]
+//     [--email-domains example.com] [--allowed-emails you@example.com]
+//     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //
 // Anything not passed is asked for (defaults from an earlier run's --out file). It:
@@ -31,6 +32,7 @@ const { values: args } = parseArgs({
     'app-host': { type: 'string' },
     'sites-domain': { type: 'string' },
     'email-domains': { type: 'string' },
+    'allowed-emails': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'instance-name': { type: 'string' },
@@ -111,11 +113,29 @@ const sitesDomain = await value(
   previous.SITES_DOMAIN ?? appHost
 )
 const instance = { ...(previous.INSTANCE ?? {}) }
-instance.ALLOWED_EMAIL_DOMAINS = await value(
-  'email-domains',
-  'Email domains allowed to sign in (comma-separated)',
-  instance.ALLOWED_EMAIL_DOMAINS
-)
+// Who may sign in: whole domains, individual addresses (e.g. your own @gmail.com), or both.
+const emailDomains =
+  args['email-domains'] ??
+  (await ask(
+    'Email domains allowed to sign in (comma-separated; blank: none)',
+    instance.ALLOWED_EMAIL_DOMAINS
+  ))
+const allowedEmails =
+  args['allowed-emails'] ??
+  (await ask(
+    `Individual email addresses allowed to sign in (comma-separated${emailDomains ? '; blank: none' : ''})`,
+    instance.ALLOWED_EMAILS
+  ))
+if (!emailDomains && !allowedEmails) {
+  throw new Error('Allow at least one email domain or email address to sign in')
+}
+for (const [key, v] of [
+  ['ALLOWED_EMAIL_DOMAINS', emailDomains],
+  ['ALLOWED_EMAILS', allowedEmails],
+]) {
+  if (v) instance[key] = v
+  else delete instance[key]
+}
 instance.INSTANCE_NAME = await value(
   'instance-name',
   'Instance name',

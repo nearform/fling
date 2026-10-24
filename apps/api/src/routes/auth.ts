@@ -149,6 +149,7 @@ async function callback(c: Context<AppEnv>) {
   }
   const admitted = admitIdentity(who, {
     allowedDomains: config.allowedEmailDomains,
+    allowedEmails: config.allowedEmails,
     assumeEmailVerified: config.oidc.assumeEmailVerified,
   })
   if (!admitted.ok) return loginError(c, admitted.reason)
@@ -227,11 +228,15 @@ authRoutes.get('/dev-login', async c => {
   const email = c.req.query('email')?.trim().toLowerCase()
   const ret = returnOf(c)
   if (!email) {
-    const esc = ret.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+    // A placeholder an instance would admit: an allowed domain, else the first listed address.
+    const domain = config.allowedEmailDomains[0]
+    const example = domain ? `you@${domain}` : (config.allowedEmails[0] ?? 'you@example.test')
+    const attr = (v: string) =>
+      v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
     return c.html(
       `<!doctype html><title>Fling dev login</title><form method="get" action="/auth/dev-login">` +
-        `<input type="hidden" name="return" value="${esc}">` +
-        `<input name="email" type="email" placeholder="you@${config.allowedEmailDomains[0]}" autofocus required>` +
+        `<input type="hidden" name="return" value="${attr(ret)}">` +
+        `<input name="email" type="email" placeholder="${attr(example)}" autofocus required>` +
         '<button>Sign in</button></form>'
     )
   }

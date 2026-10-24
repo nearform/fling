@@ -21,6 +21,8 @@ function authInfo(config: Config): InstanceAuth {
       issuer: oidc.issuer,
       displayName: oidc.displayName,
       emailDomains: config.allowedEmailDomains,
+      // Only that there are invited addresses: the metadata is public, the addresses are not.
+      ...(config.allowedEmails.length > 0 && { invitedEmails: true }),
     }
   }
   return { kind: 'dev', displayName: 'Dev login', emailDomains: [] }

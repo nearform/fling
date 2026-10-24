@@ -81,8 +81,12 @@ export function checkDeployConfig(config) {
       throw new Error(`CF_DEPLOY_CONFIG.INSTANCE.${k} must be a string, number or boolean`)
     }
   }
-  if (typeof instance.ALLOWED_EMAIL_DOMAINS !== 'string' || !instance.ALLOWED_EMAIL_DOMAINS) {
-    throw new Error('CF_DEPLOY_CONFIG.INSTANCE.ALLOWED_EMAIL_DOMAINS is required')
+  // Who may sign in has no default: whole domains, individual addresses, or both.
+  const set = k => typeof instance[k] === 'string' && instance[k].trim() !== ''
+  if (!set('ALLOWED_EMAIL_DOMAINS') && !set('ALLOWED_EMAILS')) {
+    throw new Error(
+      'CF_DEPLOY_CONFIG.INSTANCE needs ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS (or both)'
+    )
   }
   return config
 }

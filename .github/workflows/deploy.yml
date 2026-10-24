@@ -6,9 +6,9 @@ name: Deploy
 #
 # Everything it needs is one repository variable, AWS_DEPLOY_CONFIG: the JSON of the stack's
 # `deploy` output, plus an `INSTANCE` object with the instance's own values (INSTANCE_NAME,
-# ALLOWED_EMAIL_DOMAINS, BRAND_*…; shipped in lambda.zip as instance.json). The job assumes the app's
-# deploy role over OIDC, which only trusts this repository's `production` environment, so there is
-# no AWS key in GitHub. See platforms/aws/DEPLOY.md.
+# ALLOWED_EMAIL_DOMAINS and/or ALLOWED_EMAILS, BRAND_*…; shipped in lambda.zip as instance.json).
+# The job assumes the app's deploy role over OIDC, which only trusts this repository's `production`
+# environment, so there is no AWS key in GitHub. See platforms/aws/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. the API (Lambda code), and wait until the new code is live;
@@ -70,9 +70,11 @@ jobs:
               SITE_ROUTER_FUNCTION APP_DISTRIBUTION_ID SITES_DISTRIBUTION_ID APP_ORIGIN; do
               echo "$key=$(get "$key")"
             done
-            # The instance's own values, as env-style keys. Who may sign in has no default.
-            jq -e '.INSTANCE.ALLOWED_EMAIL_DOMAINS | strings | length > 0' <<<"$CONFIG" >/dev/null || {
-              echo "::error::AWS_DEPLOY_CONFIG.INSTANCE.ALLOWED_EMAIL_DOMAINS is not set (see platforms/aws/DEPLOY.md)"; exit 1; }
+            # The instance's own values, as env-style keys. Who may sign in (domains, individual
+            # addresses, or both) has no default.
+            jq -e '[.INSTANCE.ALLOWED_EMAIL_DOMAINS, .INSTANCE.ALLOWED_EMAILS] | map(strings | select(test("\\S"))) | length > 0' \
+              <<<"$CONFIG" >/dev/null || {
+              echo "::error::AWS_DEPLOY_CONFIG.INSTANCE needs ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS (see platforms/aws/DEPLOY.md)"; exit 1; }
             echo "INSTANCE=$(jq -c '.INSTANCE' <<<"$CONFIG")"
           } >> "$GITHUB_OUTPUT"
 

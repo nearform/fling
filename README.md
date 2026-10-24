@@ -4,7 +4,9 @@ Throw a folder of static files at a Fling server and get a link back:
 `https://<name>.<sites domain>`. Sites are private to people signed in to that Fling by default;
 share links open them to anyone with the link. Each deployment (an *instance*) has its own name,
 domains, sign-in and look, which it publishes at `/.well-known/fling`; the CLI, the MCP servers and
-the web UI read it from there, so none of them is tied to one instance.
+the web UI read it from there, so none of them is tied to one instance. People sign in through the
+instance's OpenID Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its
+email domains.
 
 - **CLI**: `npm install -g @nearform/fling`, then `fling setup <your Fling's address>` (sign in, plus
   the Claude Code plugin and Claude Desktop extension) and `fling deploy ./dist`. Or run it without
@@ -35,5 +37,9 @@ pnpm dev          # API :47101, sites :47102 at http://<name>.fling.lvh.me:47102
 pnpm --filter @fling/web dev   # UI :47100 → open http://fling.lvh.me:47100
 pnpm gate         # lint, typecheck, test, build
 ```
+
+Local dev signs in with a dev form (any email). To try a real provider, set `OIDC_ISSUER`,
+`OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev` and allow the redirect URI
+`http://fling.lvh.me:47100/auth/callback` on that client.
 
 Deployment: [docs/DEPLOY.md](docs/DEPLOY.md).

@@ -27,6 +27,11 @@ Publication is the guarantee.
 
 **Private** — visible to any signed-in member of the instance (not only the owner). **Public** — anyone.
 
+**Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
+`IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
+**email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from it, decides who gets in: a
+verified email in `ALLOWED_EMAIL_DOMAINS`. A user is their email; the issuer's `sub` is not stored.
+
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **member** (any other signed-in user), **share** (holds its current share

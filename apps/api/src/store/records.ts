@@ -17,7 +17,12 @@
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
  *                                                        come, first served); how a site is found
- *   USER#<email>           PROFILE                       user (name, picture, userSlug, …)
+ *   USER#<email>           PROFILE                       user (name, picture, userSlug,
+ *                                                        lastSignInAt, …)
+ *   USERS                  USER#<email>                  users index: what the admin's users list
+ *                                                        shows (name, createdAt, lastSignInAt, …),
+ *                                                        written with the user (migration 0003
+ *                                                        backfilled it), so users list by one query
  *   SLUG#<userSlug>        SLUG                          slug claim → email (unique userSlug)
  *   USER#<email>           KEY#<id>                      api key (name, hash, createdAt, lastUsedAt)
  *   APIKEY#<sha256>        APIKEY                        api key lookup → { email, id }
@@ -54,6 +59,9 @@
  *                                                        1 h; parts are in blobs under uploads/<id>/
  *   UPLOAD#<id>            FILE#<path>                   one uploaded file: encoding, part count —
  *                                                        1 h
+ *   AUDIT                  <sortable id>                 an admin action (impersonation start and
+ *                                                        stop) — 180 days; ids sort by time, so the
+ *                                                        latest are one reverse query
  *
  * Every item also carries `type` (its kind; not the API-key lookup) and `v` (see evolution.ts).
  * MIGRATION#<id> items belong to the migration runner (migrations/runner.ts).
@@ -77,6 +85,7 @@ import {
 import { decode, encode, type Kind } from './evolution.ts'
 import {
   type ApiKeyRecord,
+  type AuditRecord,
   type AuthCodeRecord,
   type CommentRecord,
   type GrantRecord,
@@ -91,6 +100,7 @@ import {
   type UploadFileRecord,
   type UploadRecord,
   type User,
+  type UserSummary,
   type VersionRecord,
 } from './types.ts'
 
@@ -99,6 +109,8 @@ const sitePk = (siteId: string) => `SITE#${siteId}`
 
 const key = {
   user: (email: string) => ({ pk: userPk(email), sk: 'PROFILE' }),
+  userIndex: (email: string) => ({ pk: 'USERS', sk: `USER#${email}` }),
+  audit: (id: string) => ({ pk: 'AUDIT', sk: id }),
   slug: (slug: string) => ({ pk: `SLUG#${slug}`, sk: 'SLUG' }),
   apiKey: (email: string, id: string) => ({ pk: userPk(email), sk: `KEY#${id}` }),
   apiKeyRef: (hash: string) => ({ pk: `APIKEY#${hash}`, sk: 'APIKEY' }),
@@ -139,6 +151,16 @@ function newerVersion(a: VersionRecord | null, b: VersionRecord | null) {
   if (!b) return a
   return b.status === 'complete' && a.status !== 'complete' ? b : a
 }
+
+/** The users index item's fields for a user. */
+const summaryOf = (user: User): UserSummary => ({
+  email: user.email,
+  name: user.name,
+  picture: user.picture,
+  userSlug: user.userSlug,
+  createdAt: user.createdAt,
+  lastSignInAt: user.lastSignInAt ?? null,
+})
 
 /** Run a write whose failed condition just means "no": returns false instead of throwing. */
 async function unless(write: Promise<unknown>): Promise<boolean> {
@@ -187,9 +209,22 @@ export class Records implements Store {
   ) {
     const existing = await this.getUser(input.email)
     if (existing) {
-      const { pk, sk } = key.user(input.email)
-      const set = { name: input.name, picture: input.picture, updatedAt: now }
-      if (await unless(this.table.update(pk, sk, { set }))) return { ...existing, ...set }
+      const user: User = {
+        ...existing,
+        name: input.name,
+        picture: input.picture,
+        updatedAt: now,
+        lastSignInAt: now,
+      }
+      // The record and its index item together; the slug and createdAt never change after
+      // creation, so the whole record is written over the live one.
+      const written = await unless(
+        this.table.transact([
+          { put: encode('user', key.user(user.email), user), cond: ifExists },
+          { put: encode('userindex', key.userIndex(user.email), summaryOf(user)) },
+        ])
+      )
+      if (written) return user
     }
     for (let attempt = 0; attempt < 50; attempt++) {
       const userSlug = slugCandidate(input.preferredSlug, attempt)
@@ -200,11 +235,13 @@ export class Records implements Store {
         userSlug,
         createdAt: now,
         updatedAt: now,
+        lastSignInAt: now,
       }
       try {
         await this.table.transact([
           { put: encode('slug', key.slug(userSlug), { email: input.email }), cond: ifAbsent },
           { put: encode('user', key.user(input.email), user), cond: ifAbsent },
+          { put: encode('userindex', key.userIndex(input.email), summaryOf(user)) },
         ])
         return user
       } catch (err) {
@@ -215,6 +252,29 @@ export class Records implements Store {
       }
     }
     throw new Error('Could not allocate a unique user slug')
+  }
+
+  async listUsers(opts: { prefix?: string; limit: number; cursor?: string }) {
+    const page = await this.table.query('USERS', {
+      skPrefix: `USER#${opts.prefix ?? ''}`,
+      limit: opts.limit,
+      cursor: opts.cursor,
+    })
+    return {
+      users: page.items.map(i => decode<UserSummary>('userindex', i)),
+      ...(page.cursor ? { cursor: page.cursor } : {}),
+    }
+  }
+
+  // --- audit ---
+
+  async addAuditEntry(entry: AuditRecord) {
+    await this.table.put(encode('audit', key.audit(entry.id), entry), ifAbsent)
+  }
+
+  async listAuditEntries(limit: number) {
+    const page = await this.table.query('AUDIT', { reverse: true, limit })
+    return page.items.map(i => decode<AuditRecord>('audit', i))
   }
 
   // --- API keys ---

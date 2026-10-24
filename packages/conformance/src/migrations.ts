@@ -1,6 +1,6 @@
 /**
- * The data migrations on a real backend: 0001 (site-centric keys, expand) and 0002 (contract) run
- * by the runner over a table holding exactly what production holds today: items written by the
+ * The data migrations on a real backend: 0001 (site-centric keys, expand), 0002 (contract) and
+ * 0003 (users index) run by the runner over a table holding exactly what production holds today: items written by the
  * code before the site-centric keys (no `v`, the old keys), including the anomalies a long-lived
  * table collects. Each test needs a table of its own (migrations scan everything and keep their
  * state in it), so the factory must return a fresh, empty one.
@@ -145,13 +145,16 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       expect(run.migrations.map(m => [m.id, m.status])).toEqual([
         ['0001', 'completed'],
         ['0002', 'skipped'],
+        ['0003', 'completed'],
       ])
       expect(run.migrations[0]?.counts).toEqual({ 'site copied': 5, 'version copied': 7 })
 
       const after = await scanAll(table)
       // Every item that was there is still there, unchanged.
       expect(
-        without(after, ['SITE#', 'MIGRATION#']).sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1))
+        without(after, ['SITE#', 'MIGRATION#', 'USERS']).sort((x, y) =>
+          keyOf(x) < keyOf(y) ? -1 : 1
+        )
       ).toEqual([...before].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1)))
       expect(await table.get('SITE#S1', 'SITE')).toEqual({
         ...oldSite('alice@example.test', 'hello', 'S1', {
@@ -280,6 +283,7 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       expect(run.migrations.map(m => [m.id, m.status])).toEqual([
         ['0001', 'skipped'],
         ['0002', 'completed'],
+        ['0003', 'skipped'],
       ])
       expect(run.migrations[1]?.counts).toEqual({
         'site refreshed': 1,
@@ -293,6 +297,104 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       expect(await served(table)).toEqual(view)
       const again = await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })
       expect(again.migrations[1]?.status).toBe('up-to-date')
+    })
+    it('0003 indexes every user from their record, adds nothing else, and the list serves them', async () => {
+      const table = await seeded()
+      // A user who signed in on the new release already has an index item, fresher than the
+      // record this run reads: kept as it is.
+      const fresh = {
+        pk: 'USERS',
+        sk: 'USER#bob@example.test',
+        type: 'userindex',
+        email: 'bob@example.test',
+        name: 'Bob',
+        picture: null,
+        userSlug: 'b',
+        createdAt: T(0),
+        lastSignInAt: T(9),
+        v: 1,
+      }
+      await table.put(fresh)
+      // A record from before lastSignInAt: its updatedAt was the last sign-in.
+      await table.put({
+        pk: 'USER#dave@example.test',
+        sk: 'PROFILE',
+        type: 'user',
+        email: 'dave@example.test',
+        name: 'Dave',
+        picture: 'https://pic.example.test/d',
+        userSlug: 'dave',
+        createdAt: T(1),
+        updatedAt: T(4),
+      })
+      const before = await scanAll(table)
+
+      const run = await runMigrations(table, { migrations: MIGRATIONS, only: ['0003'] })
+      expect(run.migrations.map(m => [m.id, m.status])).toEqual([
+        ['0001', 'skipped'],
+        ['0002', 'skipped'],
+        ['0003', 'completed'],
+      ])
+      expect(run.migrations[2]?.counts).toEqual({ 'user indexed': 3, 'user present': 1 })
+      const after = await scanAll(table)
+      const keyed = (xs: TableItem[]) => [...xs].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1))
+      expect(keyed(without(after, ['USERS', 'MIGRATION#']))).toEqual(
+        keyed(without(before, ['USERS']))
+      )
+      expect(await table.get('USERS', 'USER#bob@example.test')).toEqual(fresh)
+      expect(await table.get('USERS', 'USER#dave@example.test')).toEqual({
+        pk: 'USERS',
+        sk: 'USER#dave@example.test',
+        type: 'userindex',
+        email: 'dave@example.test',
+        name: 'Dave',
+        picture: 'https://pic.example.test/d',
+        userSlug: 'dave',
+        createdAt: T(1),
+        lastSignInAt: T(4),
+        v: 1,
+      })
+
+      const listed = await new Records(table).listUsers({ limit: 10 })
+      expect(listed.users.map(u => u.email)).toEqual([
+        'alice@example.test',
+        'bob@example.test',
+        'carol@example.test',
+        'dave@example.test',
+      ])
+      // The production-shaped records lack most fields: the item says unknown, not invented.
+      expect(listed.users[0]).toEqual({
+        email: 'alice@example.test',
+        name: 'alice',
+        picture: null,
+        userSlug: 'a',
+        createdAt: null,
+        lastSignInAt: null,
+      })
+    })
+
+    it('0003 is idempotent and runs on deploy after 0001', async () => {
+      const table = await seeded()
+      const run = await runMigrations(table, { migrations: MIGRATIONS, pageSize: 5 })
+      expect(run.migrations[2]).toMatchObject({
+        status: 'completed',
+        counts: { 'user indexed': 3 },
+      })
+      const once = await scanAll(table)
+      const again = await runMigrations(table, { migrations: MIGRATIONS })
+      expect(again.migrations[2]?.status).toBe('up-to-date')
+      const m0003 = MIGRATIONS[2]
+      if (!m0003) throw new Error('no 0003')
+      const counts: Record<string, number> = {}
+      await m0003.apply(without(once, ['MIGRATION#']), {
+        table,
+        dryRun: false,
+        count: (what, n = 1) => {
+          counts[what] = (counts[what] ?? 0) + n
+        },
+      })
+      expect(counts).toEqual({ 'user present': 3 })
+      expect(await scanAll(table)).toEqual(once)
     })
   })
 }

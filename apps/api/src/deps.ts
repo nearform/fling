@@ -1,6 +1,6 @@
 /**
- * Build deps from config. The core only knows the dev/test adapters (memory store, fs blobs,
- * memory route table); a platform entry (e.g. platforms/aws) passes its own adapters for the
+ * Build deps from config. The core only knows the dev/test adapters (Records on a memory table,
+ * fs blobs, memory route table); a platform entry (e.g. platforms/aws) passes its own adapters for the
  * drivers config selects. A cloud driver with no adapter supplied is an error, never a silent
  * fall back to memory.
  */
@@ -9,8 +9,9 @@ import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
 import type { RouteTable } from './route-table/types.ts'
-import { MemoryStore } from './store/memory.ts'
+import { Records } from './store/records.ts'
 import type { Store } from './store/types.ts'
+import { MemoryTable } from './table/memory.ts'
 import { type Deps, systemClock } from './types.ts'
 
 export interface Adapters {
@@ -29,7 +30,7 @@ export function buildDeps(
 ): Deps {
   const store: Store =
     opts.store ??
-    (config.storeDriver === 'memory' ? new MemoryStore() : missing(config.storeDriver))
+    (config.storeDriver === 'memory' ? new Records(new MemoryTable()) : missing(config.storeDriver))
   const blobs: Blobs =
     opts.blobs ??
     (config.storageDriver === 'fs'

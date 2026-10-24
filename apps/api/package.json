@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "The cloud-agnostic API core: the Hono app, its ports (Store, Blobs, RouteTable) and the dev/test adapters. Platforms (platforms/*) bundle it with their own entry point and adapters. Consumed as TypeScript source.",
+  "description": "The cloud-agnostic API core: the Hono app, its ports (Table, Blobs, RouteTable), Records (the domain persistence over Table) and the dev/test adapters. Platforms (platforms/*) bundle it with their own entry point and adapters. Consumed as TypeScript source.",
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
@@ -15,7 +15,7 @@
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
     "./store": "./src/store/types.ts",
-    "./store/memory": "./src/store/memory.ts",
+    "./store/records": "./src/store/records.ts",
     "./table": "./src/table/types.ts",
     "./table/memory": "./src/table/memory.ts"
   },

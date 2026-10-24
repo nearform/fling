@@ -1,15 +1,15 @@
 /**
- * The conformance suites against the AWS adapters: DynamoTable and DynamoStore on DynamoDB Local
- * and S3Blobs on MinIO, each skipped unless its endpoint is configured (see services.ts).
+ * The conformance suites against the AWS adapters: DynamoTable (and Records on it) on DynamoDB
+ * Local and S3Blobs on MinIO, each skipped unless its endpoint is configured (see services.ts).
  * CloudFront KeyValueStore has no local emulator; the RouteTable suite runs against the memory
  * adapter in @fling/conformance.
  */
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import type { S3Client } from '@aws-sdk/client-s3'
+import { Records } from '@fling/api/store/records'
 import { blobsConformance, storeConformance, tableConformance } from '@fling/conformance'
 import { beforeAll, describe } from 'vitest'
 import { S3Blobs } from '../src/blobs/s3.ts'
-import { DynamoStore } from '../src/store/dynamo.ts'
 import { DynamoTable } from '../src/table/dynamo.ts'
 import { DYNAMODB_ENDPOINT, dynamoTable, S3_ENDPOINT, s3Bucket } from './services.ts'
 
@@ -19,7 +19,10 @@ describe.runIf(DYNAMODB_ENDPOINT)('DynamoDB Local', () => {
     db = await dynamoTable()
   }, 60_000)
   tableConformance('DynamoTable', () => new DynamoTable(db.table, db.client))
-  storeConformance('DynamoStore', () => new DynamoStore(db.table, db.client))
+  storeConformance(
+    'Records on DynamoTable',
+    () => new Records(new DynamoTable(db.table, db.client))
+  )
 })
 
 describe.runIf(S3_ENDPOINT)('MinIO', () => {

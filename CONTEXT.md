@@ -29,8 +29,13 @@ Publication is the guarantee.
 
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*` and
 `cloudflare:*` there and in `packages/shared`). It talks to storage through three ports:
-**Store** (records), **Blobs** (site files and manifests, including upload URLs bound to a sha256)
-and **RouteTable** (the keys the edge routes site hosts by).
+**Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),
+**Blobs** (site files and manifests, including upload URLs bound to a sha256) and **RouteTable**
+(the keys the edge routes site hosts by).
+
+**Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
+over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of
+its shape; reads upgrade older records and tolerate one version ahead.
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM). Every adapter, including

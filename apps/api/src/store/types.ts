@@ -1,4 +1,4 @@
-/** Persistence port. Implementations: `memory.ts` (dev/tests) here, DynamoDB in platforms/aws. */
+/** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
 import type { Visibility } from '@fling/shared'
 
 export interface User {

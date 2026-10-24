@@ -6,14 +6,18 @@
 
 import type { Config } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
+import { Records } from '@fling/api/store/records'
 import type { Deps } from '@fling/api/types'
 import { S3Blobs } from './blobs/s3.ts'
 import { CloudFrontRouteTable } from './route-table/cloudfront.ts'
-import { DynamoStore } from './store/dynamo.ts'
+import { DynamoTable } from './table/dynamo.ts'
 
 export function buildAwsDeps(config: Config): Deps {
   return buildDeps(config, {
-    store: config.storeDriver === 'dynamo' ? new DynamoStore(config.tableName ?? '') : undefined,
+    store:
+      config.storeDriver === 'dynamo'
+        ? new Records(new DynamoTable(config.tableName ?? ''))
+        : undefined,
     blobs: config.storageDriver === 's3' ? new S3Blobs(config.sitesBucket ?? '') : undefined,
     routeTable:
       config.kvsDriver === 'cloudfront' ? new CloudFrontRouteTable(config.kvsArn ?? '') : undefined,

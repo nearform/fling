@@ -8,7 +8,7 @@
  * versions only at these keys (it would show every site with no versions). The order:
  *   1. decide nobody will redeploy code from before 0001;
  *   2. with the expand-phase release (0001's) live, run it by hand:
- *      `{"fling":"migrate","only":["0002"]}` (docs/DEPLOY.md). That release reads both places,
+ *      `{"fling":"migrate","only":["0002"]}` (platforms/aws/DEPLOY.md). That release reads both places,
  *      so it serves the same before and after; it keeps writing old version keys too, but those
  *      are only duplicates of versions it also wrote to the site partition;
  *   3. the next release removes the expand-phase reads and writes (LEGACY in records.ts) and adds

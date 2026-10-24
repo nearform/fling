@@ -1,9 +1,10 @@
-# Deploying Fling
+# Deploying Fling on AWS
 
 Fling runs serverless in your own AWS account (one region plus global CloudFront). The
-infrastructure is Terraform you keep alongside it (until it moves into this repository as a
-module); this repository ships the code. One deployment is an **instance**: its own domains,
-sign-in allowlist, name and look, all configuration, none of it in the code.
+infrastructure is a Terraform module in this repository, [`platforms/aws/infra`](infra), that you
+call from your own Terraform; this repository's `deploy.yml` ships the code. One deployment is an
+**instance**: its own domains, sign-in allowlist, name and look, all configuration, none of it in
+the code.
 
 The examples below use these placeholders; substitute your own:
 
@@ -12,9 +13,9 @@ The examples below use these placeholders; substitute your own:
 | `$APP_DOMAIN` | `fling.example.test` | the app (UI + API) |
 | `$SITES_DOMAIN` | `fling.example.test` | sites hang off it: `<name>.$SITES_DOMAIN` (may equal `$APP_DOMAIN`; must sit under the app's registrable domain) |
 | `$AWS_REGION` | `eu-west-1` | |
-| `$FUNCTION` | `example-fling-api` | the API's Lambda function |
-| `$TABLE` | `example-fling` | its DynamoDB table |
-| `$SSM_PREFIX` | `/example/fling/` | its SSM parameters |
+| `$FUNCTION` | `example-production-fling-api` | the API's Lambda function (`<namespace>-<env>-<name>-api`) |
+| `$TABLE` | `example-production-fling` | its DynamoDB table |
+| `$SSM_PREFIX` | `/example/production/fling/` | its SSM parameters |
 | `$GITHUB_REPO` | `your-org/fling` | the repository that deploys (this one, or a fork) |
 
 ```
@@ -28,30 +29,98 @@ DynamoDB $TABLE, SSM parameters $SSM_PREFIX*
 
 | Who | Owns |
 | --- | --- |
-| Your Terraform | Buckets, table, distributions, DNS, certificate, roles, the function's configuration and environment, which secrets exist |
+| Terraform ([`infra`](infra), from your root module) | Buckets, table, distributions, DNS, certificate, roles, the function's configuration and environment, which secrets exist |
 | This repo, `deploy.yml` | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` in the sites bucket, the site router's code |
 | The API at runtime | Table items, KeyValueStore keys, site files under `sites/`, chunked MCP upload staging under `uploads/` |
 
-> **IAM for data migrations.** Deploys run data migrations by invoking the function (see
-> [Data migrations](#data-migrations)). Two grants are needed in your Terraform:
->
-> - the **deploy role**: `lambda:InvokeFunction` on the API function
->   (`arn:aws:lambda:$AWS_REGION:<account>:function:$FUNCTION`);
-> - the **function's own role**: `dynamodb:Scan` on `$TABLE`, next to the item permissions it
->   already has. Only migrations scan.
->
-> Until both exist the deploy's migrate step warns ("Data migrations NOT run") and carries on. That
-> is safe: every migration is written so the code serves correctly before it has run.
+## Infrastructure: the Terraform module
 
-The remote MCP connector (`/mcp`, OAuth under `/oauth/*` and `/.well-known/oauth-*`) needs, beyond
-the routes above: DynamoDB TTL enabled on the attribute `ttl` (OAuth codes, requests, refresh
-tokens, grants, DCR clients and uploads carry it), the function role allowed to `s3:PutObject`,
-`s3:GetObject` and delete/list under `uploads/*` as well as `sites/*`, and ideally a lifecycle rule
-expiring `uploads/` after a day. `/mcp` requests carry whole sites, so CloudFront must forward
-`POST` bodies up to the Lambda limit (6 MB) and the `Authorization`, `Mcp-Protocol-Version` and
-`Accept` headers. Access tokens are signed with a key derived from `SESSION_SECRET` (HKDF), so no
-new secret is needed; rotating `SESSION_SECRET` invalidates live access tokens (clients just refresh;
-refresh tokens are opaque and stored hashed). `OAUTH_REDIRECT_ALLOWLIST` (optional) overrides the allowed OAuth redirect URIs.
+[`platforms/aws/infra`](infra) creates everything above in one module call. A minimal root module
+is [`infra/examples/basic`](infra/examples/basic/main.tf); copy it into your own Terraform
+repository and pin a release of this repository (or your fork):
+
+```hcl
+module "fling" {
+  source = "git::https://github.com/<owner>/fling.git//platforms/aws/infra?ref=<tag>"
+
+  providers = { aws = aws, aws.us_east_1 = aws.us_east_1 } # CloudFront certificates live in us-east-1
+
+  namespace     = "example"       # example-production-fling-*, /example/production/fling/
+  env           = "production"
+  bucket_prefix = "example-test-" # S3 bucket names are global
+  hostname      = "fling.example.test"
+  zone_id       = data.aws_route53_zone.this.zone_id
+  github        = { owner = "example-org", owner_id = "1000001", repo = "fling", repo_id = "2000002" }
+  instance      = { ALLOWED_EMAIL_DOMAINS = "example.test", OIDC_ISSUER = "...", OIDC_CLIENT_ID = "..." }
+}
+```
+
+Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
+provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
+resources with the providers' `default_tags`.
+
+| Input | Default | What |
+| --- | --- | --- |
+| `namespace` | (required) | Prefix of every name: `<namespace>-<env>-<name>-…`, and `/<namespace>/<env>/<name>/` for the log group and SSM |
+| `env` | (required) | Environment, e.g. `production` |
+| `name` | `fling` | The app's name in resource names |
+| `bucket_prefix` | `""` | Prepended to the two bucket names (`…-ui`, `…-sites`), which must be globally unique |
+| `hostname` | (required) | `$APP_DOMAIN`; sites are served on `*.<hostname>` (so here `$SITES_DOMAIN` = `$APP_DOMAIN`) |
+| `zone_id` | (required) | Route 53 hosted zone for the two names (A/AAAA aliases) and the certificate's DNS validation |
+| `github` | (required) | `{ owner, owner_id, repo, repo_id, environment = "production" }`: who may assume the deploy role. Ids are numeric (`gh api repos/<owner>/<repo> --jq '.owner.id, .id'`), so a renamed or re-created repository can't inherit trust |
+| `github_oidc_provider_arn` | looked up | The account's IAM OIDC provider for `token.actions.githubusercontent.com` (one per account, so the module never creates it; create it once if you have none) |
+| `instance` | `{}` | The [instance configuration](#instance-configuration), passed through as `INSTANCE` in the `deploy` output |
+| `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, the drivers and `NODE_OPTIONS` from `hostname`, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
+| `manual_secrets` | `["oidc-client-secret"]` | SSM parameters created as `unset`, for you to fill (see [Secrets](#secrets)) |
+| `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
+| `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
+| `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
+| `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }` |
+| `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*` | App paths routed to the function, uncached |
+| `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
+| `log_retention_days` | `30` | The function's log retention |
+| `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |
+
+| Output | What |
+| --- | --- |
+| `deploy` | The [deploy config](#the-deploy-config-aws_deploy_config): set it as the repository variable `AWS_DEPLOY_CONFIG` |
+| `url` | `https://<hostname>` |
+| `manual_secrets` | The SSM parameters you fill by hand |
+| `ssm_prefix`, `table_name`, `function_name`, `key_value_store_arn`, `log_group` | For operating it (migrations, rehearsals, logs) |
+
+Everything the remote MCP connector needs is part of it: DynamoDB TTL on `ttl`, the function's
+access to `sites/*` and `uploads/*`, a lifecycle rule expiring `uploads/` after a day, and the app
+distribution forwarding `POST` bodies and every viewer header but `Host` to the function.
+
+**First apply.** Creating a public function URL can make AWS add the `FunctionURLAllowPublicAccess`
+permission itself, and the apply then fails on the module's own copy ("The statement id
+(FunctionURLAllowPublicAccess) provided already exists"). If it does, adopt it with the `import`
+block commented out in the example, and apply again.
+
+**Upgrading.** Bump the `ref` to a newer tag and read the plan. A release that changes the
+infrastructure says so; most releases change only the code, which needs no apply.
+
+**Adopting it from an existing stack.** The module's resource addresses are those of the module it
+grew out of, so a stack that ran that module under the same `module` name switches with a plan of
+"No changes" (keep `enable_data_migrations = false` for that first plan if the old module lacked
+the grants, then turn it on). If your own resources sit at other addresses, add `moved` blocks
+(`from` your address, `to` `module.<name>.<address>`) until the plan shows no replacements.
+
+## The deploy config (AWS_DEPLOY_CONFIG)
+
+`deploy.yml` needs one repository variable, `AWS_DEPLOY_CONFIG`: a JSON object, the module's
+`deploy` output. Nothing in it is secret.
+
+| Key | From | What |
+| --- | --- | --- |
+| `AWS_REGION` | the provider | Where the function, table and buckets are |
+| `AWS_DEPLOY_ROLE_ARN` | `aws_iam_role.deploy` | Assumed over GitHub OIDC by the deploy job |
+| `LAMBDA_FUNCTION` | `aws_lambda_function.api` | Updated with `lambda.zip`, invoked for migrations |
+| `UI_BUCKET`, `SITES_BUCKET` | the buckets | The UI is synced to the first; the error page goes in the second |
+| `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/src/site-router.js` |
+| `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` | the distributions | Invalidated after a deploy |
+| `APP_ORIGIN` | `https://<hostname>` | The smoke test's target and the Claude Desktop extension's default server |
+| `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` |
 
 ## Instance configuration
 
@@ -62,12 +131,12 @@ plugin and the built UI work with any instance.
 
 Values reach the function two ways, and the function's own environment wins:
 
-1. **The function's environment**, from your Terraform (the deployment plumbing below has always
-   come this way: `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_COOKIE_DOMAIN`, `TABLE_NAME`, `SITES_BUCKET`,
-   `KVS_ARN`, `SSM_PREFIX`, `APP_ENV=production`).
+1. **The function's environment**, from the module (the deployment plumbing: `APP_ORIGIN`,
+   `SITES_DOMAIN`, `SITE_COOKIE_DOMAIN`, `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX`,
+   `APP_ENV=production`; anything in its `environment` input).
 2. **`instance.json` in `lambda.zip`**, written at deploy time from the `INSTANCE` object in
-   `AWS_DEPLOY_CONFIG` (below). Use it for the instance's identity, so changing it needs no
-   infrastructure change.
+   `AWS_DEPLOY_CONFIG` (the module's `instance` input). Use it for the instance's identity: changing
+   it needs a deploy, not an apply.
 
 | Key | Required | What |
 | --- | --- | --- |
@@ -153,31 +222,39 @@ then delete the two `google-client-*` parameters.
 
 ## One-time setup
 
-1. **Infrastructure.** Apply your Terraform: buckets, table, both distributions, certificate, DNS,
-   the function (with the environment above), its role, the deploy role and the secrets. The deploy
-   role trusts GitHub's OIDC provider for `$GITHUB_REPO`'s `production` environment only.
+1. **Infrastructure.** Call the module from your Terraform (see
+   [Infrastructure](#infrastructure-the-terraform-module)) and apply. The account needs GitHub's
+   OIDC provider (`token.actions.githubusercontent.com`, audience `sts.amazonaws.com`) once; the
+   deploy role trusts it for `$GITHUB_REPO`'s `production` environment only. Until the first deploy
+   the API answers 503.
 
 2. **Sign-in client.** Register a web client with your OpenID Connect provider (see
-   [Sign-in](#sign-in-openid-connect)) and store its secret as the SSM SecureString parameter
-   `${SSM_PREFIX}oidc-client-secret`. The other secrets (`session-secret`, `site-hmac-key`,
+   [Sign-in](#sign-in-openid-connect)) and store its secret in the SSM SecureString parameter
+   `${SSM_PREFIX}oidc-client-secret` (the module created it as `unset`):
+
+   ```bash
+   aws ssm put-parameter --region "$AWS_REGION" --overwrite --type SecureString \
+     --name "${SSM_PREFIX}oidc-client-secret" --value "file://client-secret.txt"
+   ```
+
+   The other secrets (`session-secret`, `site-hmac-key`,
    `origin-verify-secret`) are generated by Terraform.
 
 3. **Redirect URI.** On that client, allow `https://$APP_DOMAIN/auth/callback`, and put
    `OIDC_ISSUER` and `OIDC_CLIENT_ID` in the `INSTANCE` object (next step).
 
 4. **GitHub environment and config.** In the repository, create the environment `production`
-   (Settings, Environments; deployment branches: `main` only). Then set the deploy config: the
-   Terraform stack's deploy outputs plus the instance's `INSTANCE` object, for example:
+   (Settings, Environments; deployment branches: `main` only). Then set the
+   [deploy config](#the-deploy-config-aws_deploy_config) from the module's `deploy` output (with
+   `INSTANCE` from its `instance` input):
 
    ```bash
-   terraform output -json deploy \
-     | jq -c --argjson instance "$(cat instance.json)" '. + {INSTANCE: $instance}' \
-     | gh variable set AWS_DEPLOY_CONFIG -R "$GITHUB_REPO"
+   terraform output -json deploy | jq -c . | gh variable set AWS_DEPLOY_CONFIG -R "$GITHUB_REPO"
    ```
 
-   It holds `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `LAMBDA_FUNCTION`, `UI_BUCKET`, `SITES_BUCKET`,
-   `SITE_ROUTER_FUNCTION`, `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID`, `APP_ORIGIN` and
-   `INSTANCE` (see [Instance configuration](#instance-configuration)). Nothing in it is secret.
+   If you keep the instance values out of Terraform (`instance` unset), add them here instead:
+   `terraform output -json deploy | jq -c --argjson i "$(cat instance.json)" '. + {INSTANCE: $i}'`.
+   Set it again whenever the output changes.
 
 5. **npm trusted publishing (no token)**, only for the repository that publishes the CLI. Publish
    the very first version by hand (`npm login`, then `npm publish <tarball> --access public` from a
@@ -255,9 +332,11 @@ A report lists each migration with `status`: `up-to-date`, `completed`, `partial
 call again), `busy` (another run holds its lock; a crashed run's lease runs out within 2 minutes),
 `skipped` (opt-in) or `pending` (an earlier one didn't finish). Progress is also logged.
 
-**Required permissions** (your Terraform): `lambda:InvokeFunction` on the function for the deploy role,
-and `dynamodb:Scan` on the table for the function role. Without them the deploy warns and skips
-the step.
+**Required permissions**: `lambda:InvokeFunction` on the function for the deploy role, and
+`dynamodb:Scan` on the table for the function role. The module grants both unless
+`enable_data_migrations = false`. Without them the deploy warns ("Data migrations NOT run") and
+carries on; that is safe, as every migration is written so the code serves correctly before it has
+run.
 
 ### 0001: site-centric keys, and its rollback story
 
@@ -367,8 +446,8 @@ SSM SecureString parameters under `$SSM_PREFIX`, read by the function at cold st
 | `session-secret`, `site-hmac-key` | Generated by Terraform, never in its state |
 | `origin-verify-secret` | Generated by Terraform. CloudFront also sends it to the function URL as `X-Origin-Verify` |
 
-To rotate the generated ones, have Terraform regenerate them (e.g. bump a `secrets_version`), then redeploy so
-warm functions pick them up. Rotating `session-secret` signs everyone out. Rotating `site-hmac-key`
+To rotate the generated ones, bump the module's `secrets_version` and apply, then redeploy so warm
+functions pick them up. Rotating `session-secret` signs everyone out. Rotating `site-hmac-key`
 also needs the copy the site router reads from the KeyValueStore updated by the API.
 
 ## Deploy security (public repository)

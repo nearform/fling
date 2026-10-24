@@ -21,7 +21,7 @@ email domains.
 | Path | What |
 |---|---|
 | `apps/api` | The cloud-agnostic Hono API: sign-in, CLI keys, deploys, the instance metadata, the remote MCP server and its OAuth server |
-| `platforms/aws` | The API on AWS: Lambda entry point and the DynamoDB, S3, CloudFront KeyValueStore and SSM adapters; builds `lambda.zip` |
+| `platforms/aws` | The API on AWS: Lambda entry point and the DynamoDB, S3, CloudFront KeyValueStore and SSM adapters; builds `lambda.zip`. Its Terraform module is `platforms/aws/infra` |
 | `apps/web` | React UI (sites, connections, get started) and the 404 page, themed at runtime from the instance metadata |
 | `apps/cli` | `@nearform/fling` CLI, local MCP server and the `.mcpb` Claude Desktop extension |
 | `edge` | CloudFront Function that routes `*.<sites domain>` to the right site version |
@@ -42,4 +42,11 @@ Local dev signs in with a dev form (any email). To try a real provider, set `OID
 `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev` and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client.
 
-Deployment: [docs/DEPLOY.md](docs/DEPLOY.md).
+## Deploy
+
+Each cloud is a platform under `platforms/`, with its own entry point, adapters, infrastructure and
+deploy guide. Pick one per instance:
+
+| Platform | Guide | Infrastructure |
+|---|---|---|
+| AWS (Lambda, S3, DynamoDB, CloudFront) | [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md) | Terraform module [platforms/aws/infra](platforms/aws/infra) |

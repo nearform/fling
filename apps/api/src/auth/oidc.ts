@@ -245,7 +245,7 @@ export function identityProviderFor(config: Config, opts?: OidcOptions): Identit
         level: 'warn',
         msg:
           'deprecated sign-in config: google-client-id/secret without OIDC_ISSUER is read as ' +
-          `OIDC_ISSUER=${GOOGLE_ISSUER} on ${LEGACY_GOOGLE_CALLBACK_PATH}; see docs/DEPLOY.md`,
+          `OIDC_ISSUER=${GOOGLE_ISSUER} on ${LEGACY_GOOGLE_CALLBACK_PATH}; see platforms/aws/DEPLOY.md`,
       })
     )
   }

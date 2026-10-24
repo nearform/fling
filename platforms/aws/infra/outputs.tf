@@ -52,6 +52,6 @@ output "log_group" {
 }
 
 output "function_name" {
-  description = "The API's Lambda function (for running migrations by hand: DEPLOY.md)."
+  description = "The API's Lambda function (for running migrations by hand: platforms/aws/DEPLOY.md)."
   value       = aws_lambda_function.api.function_name
 }

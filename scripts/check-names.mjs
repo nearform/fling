@@ -2,7 +2,7 @@
 // publisher allowed in the repository are the npm package of the CLI and the GitHub repository
 // (both defined for code in packages/shared/src/distribution.ts), and only in the files listed
 // below. Instance values (domains, email allowlists, logos, colours) are configuration
-// (docs/DEPLOY.md), never literals. A new use of either name: import the constant in code; add the
+// (platforms/aws/DEPLOY.md), never literals. A new use of either name: import the constant in code; add the
 // file here only when it cannot import (a manifest, a doc, a workflow).
 import { execFileSync } from 'node:child_process'
 // Node strips the types; this script names neither itself.

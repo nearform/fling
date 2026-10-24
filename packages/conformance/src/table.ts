@@ -308,6 +308,55 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
       })
     })
 
+    describe('scan (migrations only)', () => {
+      /** Every page of a whole-table scan; a shared table holds other tests' items too. */
+      async function scanAll(table: Table, limit?: number, cursor?: string) {
+        const out: TableItem[][] = []
+        do {
+          const page = await table.scan({ limit, cursor })
+          out.push(page.items)
+          cursor = page.cursor
+        } while (cursor)
+        return out
+      }
+      const ours = (items: TableItem[], prefix: string) =>
+        items.filter(i => i.pk.startsWith(prefix)).map(i => `${i.pk}|${i.sk}`)
+
+      it('visits every live item exactly once across pages, at most `limit` per page', async () => {
+        const table = await factory()
+        const prefix = `SCAN#${randomUUID()}#`
+        const expected: string[] = []
+        for (let p = 0; p < 3; p++) {
+          for (let i = 0; i < 9; i++) {
+            await table.put({ pk: `${prefix}${p}`, sk: `S${i}`, n: i })
+            expected.push(`${prefix}${p}|S${i}`)
+          }
+        }
+        await table.put({ pk: `${prefix}0`, sk: 'dead', expiresAt: PAST })
+        const paged = await scanAll(table, 50)
+        for (const page of paged) expect(page.length).toBeLessThanOrEqual(50)
+        const seen = ours(paged.flat(), prefix)
+        expect(seen.sort()).toEqual(expected.sort())
+        expect(ours((await table.scan()).items, prefix).sort()).toEqual(expected.sort())
+        const item = paged.flat().find(i => i.pk === `${prefix}1` && i.sk === 'S4')
+        expect(item).toEqual({ pk: `${prefix}1`, sk: 'S4', n: 4 })
+      })
+
+      it('a cursor resumes where its page ended', async () => {
+        const table = await factory()
+        const prefix = `SCAN#${randomUUID()}#`
+        for (let i = 0; i < 6; i++) await table.put({ pk: `${prefix}${i}`, sk: 'S' })
+        const first = await table.scan({ limit: 3 })
+        expect(first.items).toHaveLength(3)
+        expect(first.cursor).toBeDefined()
+        const rest = (await scanAll(table, 50, first.cursor)).flat()
+        const all = [...first.items, ...rest]
+        const keys = all.map(i => `${i.pk}|${i.sk}`)
+        expect(new Set(keys).size).toBe(keys.length)
+        expect(ours(all, prefix)).toHaveLength(6)
+      })
+    })
+
     describe('transact', () => {
       it('applies puts and deletes across partitions together', async () => {
         const { table, pk } = await setup()

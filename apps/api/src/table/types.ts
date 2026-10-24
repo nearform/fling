@@ -12,6 +12,10 @@
  * DynamoDB does for string sort keys). This is not JavaScript's `<` on strings, which compares
  * UTF-16 code units and puts U+E000–U+FFFF after astral characters; use `compareSk`.
  *
+ * `scan` walks the whole table. It exists for data migrations (`migrations/`) and nothing else:
+ * domain code reaches items by key, so a backend never has to make scans cheap, and
+ * tests/no-scan.test.ts fails if anything outside migrations/ and table/ calls it.
+ *
  * Expiry: an item with `expiresAt` (an ISO 8601 UTC timestamp exactly as `Date#toISOString`
  * writes it) is dead from that instant. Dead items are invisible to every read and every condition
  * (`ifAbsent` succeeds over one) even while the backend has not purged them yet.
@@ -82,6 +86,13 @@ export interface QueryOptions {
   reverse?: boolean
 }
 
+export interface ScanOptions {
+  /** at most this many items per page (absent: all of them, in one page) */
+  limit?: number
+  /** from a previous page of the scan */
+  cursor?: string
+}
+
 export interface Page {
   items: TableItem[]
   /**
@@ -98,6 +109,12 @@ export interface Table {
   get(pk: string, sk: string): Promise<TableItem | null>
   /** Live items of one pk in sk byte order (see above), optionally one page at a time. */
   query(pk: string, opts?: QueryOptions): Promise<Page>
+  /**
+   * MIGRATIONS ONLY. Every live item in the table, a page at a time, in an order that is
+   * unspecified but stable: following the cursors visits each item that exists throughout the
+   * scan exactly once (items written or deleted meanwhile may or may not be seen).
+   */
+  scan(opts?: ScanOptions): Promise<Page>
   /** Create or replace the whole item. Throws `ConditionFailed`. */
   put(item: TableItem, cond?: Condition): Promise<void>
   /**

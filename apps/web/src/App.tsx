@@ -10,6 +10,7 @@ import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
 import GetStarted from './pages/GetStarted'
 import Login from './pages/Login'
+import Review from './pages/Review'
 import Sites from './pages/Sites'
 
 const queryClient: QueryClient = new QueryClient({
@@ -27,8 +28,11 @@ const queryClient: QueryClient = new QueryClient({
   },
 })
 
-/** The signed-in shell. No session → Login; the user query failing outright → a retry card. */
-function Authenticated() {
+/**
+ * The signed-in shell. No session → Login; the user query failing outright → a retry card. `bare`:
+ * signed in, without the app's navigation (review mode needs the whole window).
+ */
+function Authenticated({ bare = false }: { bare?: boolean }) {
   const me = useMe()
   if (me.isPending) {
     return (
@@ -54,6 +58,7 @@ function Authenticated() {
     )
   }
   if (!me.data) return <Login />
+  if (bare) return <Outlet />
   return (
     <Layout>
       <Outlet />
@@ -72,6 +77,9 @@ export default function App() {
               <Route path="get-started" element={<GetStarted />} />
               <Route path="connections" element={<ApiKeys />} />
               <Route path="keys" element={<Navigate to="/connections" replace />} />
+            </Route>
+            <Route element={<Authenticated bare />}>
+              <Route path="review/:name" element={<Review />} />
             </Route>
             {/* OAuth consent: signed-in, but outside the app shell */}
             <Route path="authorize" element={<Authorize />} />

@@ -22,6 +22,8 @@ export const S3_ENDPOINT = process.env.FLING_TEST_S3_ENDPOINT
 const region = 'us-east-1'
 const run = randomUUID().slice(0, 8)
 
+let tables = 0
+
 /** A DynamoDB Local client and a fresh table with the production key schema (PK, SK; no GSIs). */
 export async function dynamoTable() {
   const client = new DynamoDBClient({
@@ -29,7 +31,7 @@ export async function dynamoTable() {
     region,
     credentials: { accessKeyId: 'fling', secretAccessKey: 'fling' },
   })
-  const table = `fling-conformance-${run}`
+  const table = `fling-conformance-${run}-${tables++}`
   await client.send(
     new CreateTableCommand({
       TableName: table,

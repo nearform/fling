@@ -41,7 +41,9 @@ missing site (404).
 
 **Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of
-its shape; reads upgrade older records and tolerate one version ahead.
+its shape; reads upgrade older records and tolerate one version ahead. Keys are site-centric: a
+site's partition (`SITE#<id>`) holds its record and versions; a user's sites are index items
+(`USER#<email>/SITE#<name>`); a site is found by name through its name claim.
 
 **Migration** — a one-off rewrite of stored data, written once against Table
 (`apps/api/src/migrations/NNNN-*.ts`), idempotent and resumable, with its checkpoint and lock in

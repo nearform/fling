@@ -199,7 +199,7 @@ export async function listSites(deps: Deps, user: User, archived: boolean): Prom
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
   const site = await requireSite(deps, user, name, 'site.read', 'version.list')
-  const versions = await deps.store.listVersions(site.email, site.id)
+  const versions = await deps.store.listVersions(site)
   return {
     ...toSite(deps, user, site),
     versions: versions
@@ -222,7 +222,7 @@ export async function versionFiles(
   versionId: string
 ): Promise<VersionFiles> {
   const site = await requireSite(deps, user, name, 'version.read')
-  const version = await deps.store.getVersion(site.email, site.id, versionId)
+  const version = await deps.store.getVersion(site, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for version ${versionId} of "${name}" is gone`)
@@ -259,7 +259,7 @@ export async function updateSite(
 
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
   const site = await requireSite(deps, user, name, 'site.rollback')
-  const version = await deps.store.getVersion(site.email, site.id, versionId)
+  const version = await deps.store.getVersion(site, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
   await save(deps, user, site)
@@ -301,6 +301,5 @@ export async function deleteSite(deps: Deps, user: User, name: string) {
   await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
   if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
   await deps.blobs.deletePrefix(sitePrefix(site.id))
-  await deps.store.deleteVersions(site.email, site.id)
-  await deps.store.deleteSite(site.email, site.name)
+  await deps.store.deleteSite(site)
 }

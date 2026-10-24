@@ -38,7 +38,7 @@ describe('deploy API paths', () => {
       const body = await json(res)
       expect(body.error).toMatchObject({ code: 'dotfile', paths: [path] })
       expect(body.error.message).toMatch(/never publishes dotfiles/)
-      expect(await env.store.getSite('alice@nearform.com', 'hello')).toBeNull()
+      expect(await env.store.findSite('hello')).toBeNull()
     }
   )
 
@@ -78,7 +78,7 @@ describe('finalize scans presigned uploads', () => {
     expect(err.message).toMatch(/js\/app\.js line 2: AWS access key ID/)
     expect(JSON.stringify(err)).not.toContain(FAKE_AWS_KEY)
 
-    const site = await env.store.getSite('alice@nearform.com', 'hello')
+    const site = await env.store.findSite('hello')
     expect(site?.currentVersionId).toBeNull()
     expect(env.routeTable.data.get(siteKvsKey('hello'))).toBeUndefined()
     const id = site?.id as string
@@ -116,7 +116,7 @@ describe('remote MCP', () => {
     expect(r.isError).toBe(true)
     expect(r.content[0]?.text).toMatch(/index\.html line 1: AWS access key ID/)
     expect(r.content[0]?.text).not.toContain(FAKE_AWS_KEY)
-    expect(await env.store.getSite('alice@nearform.com', 'leaky')).toBeNull()
+    expect(await env.store.findSite('leaky')).toBeNull()
   })
 
   it('fling_publish with a dotfile or secret file → tool error', async () => {
@@ -156,6 +156,6 @@ describe('remote MCP', () => {
     const fin = await callTool(env, bearer, 'fling_upload_finish', { uploadId })
     expect(fin.isError).toBe(true)
     expect(fin.content[0]?.text).toMatch(/secret_detected/)
-    expect(await env.store.getSite('alice@nearform.com', 'chunky')).toBeNull()
+    expect(await env.store.findSite('chunky')).toBeNull()
   })
 })

@@ -226,7 +226,7 @@ async function prepare(
   }
 
   if (existing) {
-    const version = await store.getVersion(existing.email, existing.id, versionId)
+    const version = await store.getVersion(existing, versionId)
     if (version?.status === 'complete') {
       existing.currentVersionId = versionId
       existing.archived = false
@@ -270,7 +270,7 @@ async function prepare(
     createdAt: now,
   }
   await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
-  await store.putVersion(site.email, version)
+  await store.putVersion(site, version)
   return { kind: 'pending', site, version, files }
 }
 
@@ -288,7 +288,7 @@ async function goLive(
       files: [...files],
       generatedIndex,
     } satisfies StoredManifest)
-    await deps.store.putVersion(site.email, { ...version, status: 'complete' })
+    await deps.store.putVersion(site, { ...version, status: 'complete' })
   }
   site.currentVersionId = version.id
   site.archived = false
@@ -333,7 +333,7 @@ export async function publish(
 ): Promise<Published> {
   const { store, blobs } = deps
   const site = await requireSite(deps, user, name, 'site.deploy')
-  const version = await store.getVersion(site.email, site.id, versionId)
+  const version = await store.getVersion(site, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
   if (version.status === 'complete') return goLive(deps, user, site, version, [])
 

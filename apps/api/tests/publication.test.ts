@@ -33,7 +33,7 @@ async function stageUploads(files: ReturnType<typeof file>[], name = 'hello') {
 }
 
 async function stored(versionId: string, path: string, name = 'hello') {
-  const site = await env.store.getSite(user.email, name)
+  const site = await env.store.findSite(name)
   const bytes = await env.blobs.get(siteObjectKey(site?.id as string, versionId, path))
   return bytes ? Buffer.from(bytes).toString('utf8') : null
 }
@@ -118,7 +118,7 @@ describe('admission', () => {
     await expect(
       stage(env.deps, user, 'hello', { manifest: { files: [bad] } })
     ).rejects.toMatchObject({ name: 'ZodError' })
-    expect(await env.store.getSite(user.email, 'hello')).toBeNull()
+    expect(await env.store.findSite('hello')).toBeNull()
   })
 
   it('applies to publishBytes as well', async () => {
@@ -131,7 +131,7 @@ describe('admission', () => {
         {}
       )
     ).rejects.toMatchObject({ status: 400, code: 'secret_file' })
-    expect(await env.store.getSite(user.email, 'hello')).toBeNull()
+    expect(await env.store.findSite('hello')).toBeNull()
   })
 })
 
@@ -145,7 +145,7 @@ describe('scanning', () => {
       code: 'secret_detected',
     })
     expect(await stored(versionId, 'index.html')).toBeNull()
-    const site = await env.store.getSite(user.email, 'hello')
+    const site = await env.store.findSite('hello')
     expect(site?.currentVersionId).toBeNull()
     // Regression: the manifest is one object, deleted as such (a `deletePrefix` on its key threw
     // on S3 and turned the 422 into a 500).
@@ -166,7 +166,7 @@ describe('scanning', () => {
     await expect(
       publishBytes(env.deps, user, 'hello', [{ path: 'index.html', bytes }], {})
     ).rejects.toMatchObject({ status: 422, code: 'secret_detected' })
-    expect(await env.store.getSite(user.email, 'hello')).toBeNull()
+    expect(await env.store.findSite('hello')).toBeNull()
   })
 
   it('publishBytes goes live, and the same bytes again are unchanged', async () => {

@@ -2,18 +2,36 @@
  * Records: the domain persistence behind the `Store` interface, written once over the Table port
  * (`../table/types.ts`). The memory and DynamoDB deployments differ only in the Table they pass.
  *
- * Key layout (the one the DynamoDB store always used, so existing items read as-is):
+ * Key layout. Sites are site-centric (a site's partition owns its versions, and later its
+ * comments); access is policy's business (policy.ts), not the keys'.
  *
  *   pk                     sk                            item
- *   USER#<email>           PROFILE                       user (name, picture, userSlug, …)
- *   SLUG#<userSlug>        SLUG                          slug claim → email (unique userSlug)
+ *   SITE#<siteId>          SITE                          site (email = owner, name, visibility, spa,
+ *                                                        archived, currentVersionId, shareToken, …)
+ *   SITE#<siteId>          VERSION#<versionId>           version (status, fileCount, totalBytes, …)
+ *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
+ *                                                        projection), so a user's sites are one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
- *                                                        come, first served)
- *   USER#<email>           SITE#<name>                   site (id, visibility, spa, archived, …)
- *   USER#<email>           VERSION#<siteId>#<versionId>  version (status, fileCount, totalBytes, …)
+ *                                                        come, first served); how a site is found
+ *   USER#<email>           PROFILE                       user (name, picture, userSlug, …)
+ *   SLUG#<userSlug>        SLUG                          slug claim → email (unique userSlug)
  *   USER#<email>           KEY#<id>                      api key (name, hash, createdAt, lastUsedAt)
  *   APIKEY#<sha256>        APIKEY                        api key lookup → { email, id }
+ *
+ * A site's record, its index item and (on creation) its claim are written in one transaction.
+ *
+ * EXPAND PHASE (migration 0001; see its header for the deploy and rollback story). Before this
+ * layout a site lived only at USER#<email>/SITE#<name>, which is why the index item keeps that
+ * key and the full record: code from before it reads the index item as the site. Its versions
+ * lived at USER#<email>/VERSION#<siteId>#<versionId> ("legacy versions"). Until the contract step
+ * (migration 0002, with the release that drops the code marked LEGACY here):
+ * - versions are written to both places;
+ * - reads take both into account, because a Lambda rolled back to the old code writes only the
+ *   old keys: the newer of the site record and its index item wins (`updatedAt`), and versions
+ *   are the union of both places (a complete copy beats a pending one).
+ * So data is fully visible before 0001 has run, during it, after it, and across a rollback and
+ * roll-forward of the Lambda.
  *
  * OAuth authorization server and remote MCP (these expire through `expiresAt`, which the Table
  * hides once passed; callers check it too):
@@ -35,14 +53,24 @@
  *                                                        1 h
  *
  * Every item also carries `type` (its kind; not the API-key lookup) and `v` (see evolution.ts).
+ * MIGRATION#<id> items belong to the migration runner (migrations/runner.ts).
  *
  * Conditional writes guard the races that matter: slug claims, and first-deploy site creation,
- * which writes the NAME# claim and the SITE# item in one transaction. Deleting a site removes
- * both; archiving keeps the claim. The API key and its lookup are written/deleted together.
- * Version manifests are not records (they can be large); they live in blobs.
+ * which writes the NAME# claim with the site in one transaction. Deleting a site removes its
+ * partition, its index item and its claim (if the claim is still this site's); archiving keeps
+ * the claim. The API key and its lookup are written/deleted together. Version manifests are not
+ * records (they can be large); they live in blobs.
  */
 import { mapLimit } from '../lib/concurrency.ts'
-import { ConditionFailed, fieldEquals, ifAbsent, ifExists, type Table } from '../table/types.ts'
+import {
+  ConditionFailed,
+  compareSk,
+  fieldEquals,
+  ifAbsent,
+  ifExists,
+  type Table,
+  type TransactOp,
+} from '../table/types.ts'
 import { decode, encode, type Kind } from './evolution.ts'
 import {
   type ApiKeyRecord,
@@ -53,6 +81,7 @@ import {
   type OAuthRequestRecord,
   type RefreshTokenRecord,
   type SiteRecord,
+  type SiteRef,
   type Store,
   slugCandidate,
   type UploadFileRecord,
@@ -62,6 +91,7 @@ import {
 } from './types.ts'
 
 const userPk = (email: string) => `USER#${email}`
+const sitePk = (siteId: string) => `SITE#${siteId}`
 
 const key = {
   user: (email: string) => ({ pk: userPk(email), sk: 'PROFILE' }),
@@ -69,8 +99,11 @@ const key = {
   apiKey: (email: string, id: string) => ({ pk: userPk(email), sk: `KEY#${id}` }),
   apiKeyRef: (hash: string) => ({ pk: `APIKEY#${hash}`, sk: 'APIKEY' }),
   name: (name: string) => ({ pk: `NAME#${name}`, sk: 'NAME' }),
-  site: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
-  version: (email: string, siteId: string, id: string) => ({
+  site: (siteId: string) => ({ pk: sitePk(siteId), sk: 'SITE' }),
+  siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
+  version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
+  /** LEGACY (expand phase): where versions lived before the site-centric keys */
+  legacyVersion: (email: string, siteId: string, id: string) => ({
     pk: userPk(email),
     sk: `VERSION#${siteId}#${id}`,
   }),
@@ -91,6 +124,16 @@ const DELETE_CONCURRENCY = 10
 
 const newestFirst = <T extends { createdAt: string }>(xs: T[]) =>
   xs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+
+/**
+ * LEGACY (expand phase): of two copies of one version, the complete one (versions only ever go
+ * pending → complete), else the first.
+ */
+function newerVersion(a: VersionRecord | null, b: VersionRecord | null) {
+  if (!a) return b
+  if (!b) return a
+  return b.status === 'complete' && a.status !== 'complete' ? b : a
+}
 
 /** Run a write whose failed condition just means "no": returns false instead of throwing. */
 async function unless(write: Promise<unknown>): Promise<boolean> {
@@ -210,25 +253,29 @@ export class Records implements Store {
 
   // --- sites and name claims ---
 
-  getSite(email: string, name: string) {
-    return this.read<SiteRecord>('site', key.site(email, name))
+  getNameClaim(name: string) {
+    return this.read<NameClaim>('name', key.name(name))
   }
 
   async findSite(name: string) {
     const claim = await this.getNameClaim(name)
     if (!claim) return null
-    const site = await this.getSite(claim.email, name)
-    // A record that is not the claim's site is stale; it holds nothing.
-    return site?.id === claim.siteId ? site : null
+    const [record, index] = await Promise.all([
+      this.read<SiteRecord>('site', key.site(claim.siteId)),
+      this.read<SiteRecord>('site', key.siteIndex(claim.email, name)),
+    ])
+    // A copy of another site (a stale index item) holds nothing. LEGACY (expand phase): the index
+    // item may be the newer copy (written by a rolled-back Lambda, or the only one before 0001).
+    const copies = [record, index].filter((s): s is SiteRecord => s?.id === claim.siteId)
+    return copies.reduce<SiteRecord | null>(
+      (newest, s) => (newest && newest.updatedAt >= s.updatedAt ? newest : s),
+      null
+    )
   }
 
   async listSites(email: string) {
     const sites = await this.list<SiteRecord>('site', userPk(email), 'SITE#')
     return sites.sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  getNameClaim(name: string) {
-    return this.read<NameClaim>('name', key.name(name))
   }
 
   async createSite(site: SiteRecord) {
@@ -241,13 +288,14 @@ export class Records implements Store {
     try {
       await this.table.transact([
         { put: encode('name', key.name(site.name), claim), cond: ifAbsent },
-        { put: encode('site', key.site(site.email, site.name), site), cond: ifAbsent },
+        { put: encode('site', key.site(site.id), site), cond: ifAbsent },
+        { put: encode('site', key.siteIndex(site.email, site.name), site), cond: ifAbsent },
       ])
       return site
     } catch (err) {
       if (!(err instanceof ConditionFailed)) throw err
-      const existing = await this.getSite(site.email, site.name)
-      if (existing) return existing
+      const existing = await this.findSite(site.name)
+      if (existing?.email === site.email) return existing
       const owner = await this.getNameClaim(site.name)
       if (owner && owner.email !== site.email) return null
       throw err
@@ -255,42 +303,62 @@ export class Records implements Store {
   }
 
   async putSite(site: SiteRecord) {
-    await this.table.put(encode('site', key.site(site.email, site.name), site))
+    await this.table.transact([
+      { put: encode('site', key.site(site.id), site) },
+      { put: encode('site', key.siteIndex(site.email, site.name), site) },
+    ])
   }
 
-  async deleteSite(email: string, name: string) {
-    // Release the name claim only if it is ours (or absent). If someone else holds it, the site
-    // is still deleted and their claim kept.
-    const released = await unless(
-      this.table.transact([
-        { delete: key.site(email, name) },
-        { delete: key.name(name), cond: fieldEquals('email', email, { orAbsent: true }) },
-      ])
-    )
-    if (!released) {
-      const { pk, sk } = key.site(email, name)
-      await this.table.delete(pk, sk)
+  async deleteSite(site: SiteRecord) {
+    // The partition first (versions, and anything else a site will own), so an interrupted
+    // delete leaves the site findable and the delete can be repeated.
+    const owned = await this.table.query(sitePk(site.id))
+    const legacy = await this.table.query(userPk(site.email), {
+      skPrefix: `VERSION#${site.id}#`,
+    })
+    const rest = owned.items.filter(i => i.sk !== 'SITE')
+    await this.deleteAll([...rest, ...legacy.items])
+    // Release the name claim only if it is this site's (or absent). If another site holds it,
+    // the site is still deleted and the claim kept.
+    const ops: TransactOp[] = [
+      { delete: key.site(site.id) },
+      { delete: key.siteIndex(site.email, site.name) },
+    ]
+    const claim = {
+      delete: key.name(site.name),
+      cond: fieldEquals('siteId', site.id, { orAbsent: true }),
     }
+    if (!(await unless(this.table.transact([...ops, claim])))) await this.table.transact(ops)
   }
 
   // --- versions ---
 
-  getVersion(email: string, siteId: string, id: string) {
-    return this.read<VersionRecord>('version', key.version(email, siteId, id))
+  async getVersion(site: SiteRef, id: string) {
+    const [version, legacy] = await Promise.all([
+      this.read<VersionRecord>('version', key.version(site.id, id)),
+      this.read<VersionRecord>('version', key.legacyVersion(site.email, site.id, id)),
+    ])
+    return newerVersion(version, legacy)
   }
 
-  async putVersion(email: string, version: VersionRecord) {
-    await this.table.put(encode('version', key.version(email, version.siteId, version.id), version))
+  async putVersion(site: SiteRef, version: VersionRecord) {
+    await this.table.transact([
+      { put: encode('version', key.version(site.id, version.id), version) },
+      { put: encode('version', key.legacyVersion(site.email, site.id, version.id), version) },
+    ])
   }
 
-  /** In version-id order. */
-  listVersions(email: string, siteId: string) {
-    return this.list<VersionRecord>('version', userPk(email), `VERSION#${siteId}#`)
-  }
-
-  async deleteVersions(email: string, siteId: string) {
-    const versions = await this.listVersions(email, siteId)
-    await this.deleteAll(versions.map(v => key.version(email, siteId, v.id)))
+  /** In version-id byte order. */
+  async listVersions(site: SiteRef) {
+    const [versions, legacy] = await Promise.all([
+      this.list<VersionRecord>('version', sitePk(site.id), 'VERSION#'),
+      this.list<VersionRecord>('version', userPk(site.email), `VERSION#${site.id}#`),
+    ])
+    const byId = new Map<string, VersionRecord>()
+    for (const v of [...versions, ...legacy]) {
+      byId.set(v.id, newerVersion(byId.get(v.id) ?? null, v) as VersionRecord)
+    }
+    return [...byId.values()].sort((a, b) => compareSk(a.id, b.id))
   }
 
   // --- OAuth ---

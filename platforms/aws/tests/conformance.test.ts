@@ -7,7 +7,12 @@
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { Records } from '@fling/api/store/records'
-import { blobsConformance, storeConformance, tableConformance } from '@fling/conformance'
+import {
+  blobsConformance,
+  migrationsConformance,
+  storeConformance,
+  tableConformance,
+} from '@fling/conformance'
 import { beforeAll, describe } from 'vitest'
 import { S3Blobs } from '../src/blobs/s3.ts'
 import { DynamoTable } from '../src/table/dynamo.ts'
@@ -23,6 +28,11 @@ describe.runIf(DYNAMODB_ENDPOINT)('DynamoDB Local', () => {
     'Records on DynamoTable',
     () => new Records(new DynamoTable(db.table, db.client))
   )
+  // Migrations scan the whole table: a fresh one per test.
+  migrationsConformance('DynamoTable', async () => {
+    const fresh = await dynamoTable()
+    return new DynamoTable(fresh.table, fresh.client)
+  })
 })
 
 describe.runIf(S3_ENDPOINT)('MinIO', () => {

@@ -4,6 +4,7 @@
  * `tableConformance('DynamoTable', () => new DynamoTable(table, client))`.
  */
 export { type BlobsHarness, blobsConformance } from './blobs.ts'
+export { legacyItems, migrationsConformance } from './migrations.ts'
 export { routeTableConformance } from './route-table.ts'
 export { storeConformance } from './store.ts'
 export { tableConformance } from './table.ts'

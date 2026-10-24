@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Fling — throw a folder of static files at fling.labs.nearform.com and get a link back",
+  "description": "Fling — throw a folder of static files at a Fling server and get a link back",
   "type": "module",
   "packageManager": "pnpm@10.18.0",
   "engines": {
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @fling/api dev",
-    "lint": "biome check . --diagnostic-level=error",
+    "lint": "biome check . --diagnostic-level=error && node scripts/check-names.mjs",
     "lint:fix": "biome check --write .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

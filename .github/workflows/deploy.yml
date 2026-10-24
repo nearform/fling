@@ -1,13 +1,14 @@
 name: Deploy
 
-# Deploys Fling to AWS (the Labs account, nearform/labs-infra envs/production/app-fling.tf). Runs on
-# every push to main once CI has passed on it, and by hand (workflow_dispatch) to redeploy or roll
-# back to any earlier commit of main.
+# Deploys Fling to AWS (the instance's account, provisioned by its own Terraform). Runs on every push
+# to main once CI has passed on it, and by hand (workflow_dispatch) to redeploy or roll back to any
+# earlier commit of main.
 #
 # Everything it needs is one repository variable, AWS_DEPLOY_CONFIG: the JSON of the stack's
-# `deploy` output (`terraform -chdir=envs/production output -json fling | jq -c .deploy`). The job
-# assumes the app's deploy role over OIDC, which only trusts this repository's `production`
-# environment, so there is no AWS key in GitHub. See docs/DEPLOY.md.
+# `deploy` output, plus an `INSTANCE` object with the instance's own values (INSTANCE_NAME,
+# ALLOWED_EMAIL_DOMAINS, BRAND_*…; shipped in lambda.zip as instance.json). The job assumes the app's
+# deploy role over OIDC, which only trusts this repository's `production` environment, so there is
+# no AWS key in GitHub. See docs/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. the API (Lambda code), and wait until the new code is live;
@@ -16,10 +17,11 @@ name: Deploy
 #      apps/api/src/migrations), so this comes after the code, never before. Needs
 #      lambda:InvokeFunction on the deploy role and dynamodb:Scan on the function role
 #      (docs/DEPLOY.md); without them the step warns and the deploy goes on, migrations pending;
+#   1c. smoke test: the app origin's /.well-known/fling answers from the new code, for this instance;
 #   2. the UI: hashed assets first and never deleted (open tabs keep loading their chunks), then the
 #      other public files, then index.html last; plus the Claude Desktop extension at
 #      downloads/fling.mcpb (built from apps/cli);
-#   3. the sites' error page (_fling/404.html in the sites bucket);
+#   3. the sites' error page (_fling/404.html in the sites bucket, its __APP_ORIGIN__ filled in);
 #   4. the site router (CloudFront Function): update, then publish to LIVE;
 #   5. invalidate index.html on the app and _fling/* on the sites.
 on:
@@ -67,6 +69,10 @@ jobs:
               SITE_ROUTER_FUNCTION APP_DISTRIBUTION_ID SITES_DISTRIBUTION_ID APP_ORIGIN; do
               echo "$key=$(get "$key")"
             done
+            # The instance's own values, as env-style keys. Who may sign in has no default.
+            jq -e '.INSTANCE.ALLOWED_EMAIL_DOMAINS | strings | length > 0' <<<"$CONFIG" >/dev/null || {
+              echo "::error::AWS_DEPLOY_CONFIG.INSTANCE.ALLOWED_EMAIL_DOMAINS is not set (see docs/DEPLOY.md)"; exit 1; }
+            echo "INSTANCE=$(jq -c '.INSTANCE' <<<"$CONFIG")"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
@@ -92,12 +98,17 @@ jobs:
 
       # `...` builds each package's workspace dependencies first.
       - name: Build the API, the web UI and the Claude Desktop extension
+        env:
+          # lambda.zip carries the instance's values as instance.json (platforms/aws/scripts/build.mjs).
+          FLING_INSTANCE_CONFIG: ${{ steps.config.outputs.INSTANCE }}
+          # The extension this instance serves defaults to this instance.
+          FLING_MCPB_SERVER_URL: ${{ steps.config.outputs.APP_ORIGIN }}
         run: |
           set -euo pipefail
           pnpm --filter "@fling/platform-aws..." build
           pnpm --filter "@fling/web..." build
           # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
-          pnpm --filter "@nearform/fling" build:mcpb
+          pnpm --filter ./apps/cli build:mcpb
           for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/src/site-router.js apps/cli/dist/fling.mcpb; do
             [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
           done
@@ -152,6 +163,23 @@ jobs:
           done
           echo "::error::Data migrations still not done after 40 invocations"; exit 1
 
+      # The new code answers for this instance before anything points at it (the function can only
+      # start with a valid instance config, e.g. ALLOWED_EMAIL_DOMAINS).
+      - name: Smoke test the API
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            if meta="$(curl -fsS -H 'Cache-Control: no-cache' "$APP_ORIGIN/.well-known/fling?deploy=$SHA")" &&
+              jq -e --arg origin "$APP_ORIGIN" '.version >= 1 and .appOrigin == $origin' <<<"$meta" >/dev/null; then
+              jq -c '{name, appOrigin, sitesDomain, auth: .auth.kind}' <<<"$meta"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance (check the function's logs)"; exit 1
+
       - name: Upload the UI
         env:
           BUCKET: ${{ steps.config.outputs.UI_BUCKET }}
@@ -181,10 +209,18 @@ jobs:
       - name: Upload the sites' error page
         env:
           BUCKET: ${{ steps.config.outputs.SITES_BUCKET }}
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
         run: |
+          set -euo pipefail
+          # The page links home and brands itself from the app origin's /.well-known/fling.
+          page="$RUNNER_TEMP/404.html"
+          sed -e "s#__APP_ORIGIN__#${APP_ORIGIN}#g" apps/web/dist-404/404.html > "$page"
+          if grep -q '__APP_ORIGIN__' "$page"; then
+            echo "::error::placeholder left in the 404 page"; exit 1
+          fi
           # no-store: a browser that hits the 404 in the seconds before a new site (or share link)
           # reaches the edge must not keep showing it once the site is there.
-          aws s3 cp apps/web/dist-404/404.html "s3://$BUCKET/_fling/404.html" --no-progress \
+          aws s3 cp "$page" "s3://$BUCKET/_fling/404.html" --no-progress \
             --content-type "text/html; charset=utf-8" --cache-control "no-store"
 
       - name: Publish the site router

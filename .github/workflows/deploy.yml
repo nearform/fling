@@ -8,7 +8,7 @@ name: Deploy
 # `deploy` output, plus an `INSTANCE` object with the instance's own values (INSTANCE_NAME,
 # ALLOWED_EMAIL_DOMAINS, BRAND_*…; shipped in lambda.zip as instance.json). The job assumes the app's
 # deploy role over OIDC, which only trusts this repository's `production` environment, so there is
-# no AWS key in GitHub. See docs/DEPLOY.md.
+# no AWS key in GitHub. See platforms/aws/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. the API (Lambda code), and wait until the new code is live;
@@ -16,7 +16,7 @@ name: Deploy
 #      code just deployed serves correctly before they run (each migration is written so; see
 #      apps/api/src/migrations), so this comes after the code, never before. Needs
 #      lambda:InvokeFunction on the deploy role and dynamodb:Scan on the function role
-#      (docs/DEPLOY.md); without them the step warns and the deploy goes on, migrations pending;
+#      (platforms/aws/DEPLOY.md); without them the step warns and the deploy goes on, migrations pending;
 #   1c. smoke test: the app origin's /.well-known/fling answers from the new code, for this instance;
 #   2. the UI: hashed assets first and never deleted (open tabs keep loading their chunks), then the
 #      other public files, then index.html last; plus the Claude Desktop extension at
@@ -62,7 +62,7 @@ jobs:
         id: config
         run: |
           set -euo pipefail
-          [ -n "$CONFIG" ] || { echo "::error::AWS_DEPLOY_CONFIG is not set (see docs/DEPLOY.md)"; exit 1; }
+          [ -n "$CONFIG" ] || { echo "::error::AWS_DEPLOY_CONFIG is not set (see platforms/aws/DEPLOY.md)"; exit 1; }
           get() { jq -er ".$1" <<<"$CONFIG"; }
           {
             for key in AWS_REGION AWS_DEPLOY_ROLE_ARN LAMBDA_FUNCTION UI_BUCKET SITES_BUCKET \
@@ -71,7 +71,7 @@ jobs:
             done
             # The instance's own values, as env-style keys. Who may sign in has no default.
             jq -e '.INSTANCE.ALLOWED_EMAIL_DOMAINS | strings | length > 0' <<<"$CONFIG" >/dev/null || {
-              echo "::error::AWS_DEPLOY_CONFIG.INSTANCE.ALLOWED_EMAIL_DOMAINS is not set (see docs/DEPLOY.md)"; exit 1; }
+              echo "::error::AWS_DEPLOY_CONFIG.INSTANCE.ALLOWED_EMAIL_DOMAINS is not set (see platforms/aws/DEPLOY.md)"; exit 1; }
             echo "INSTANCE=$(jq -c '.INSTANCE' <<<"$CONFIG")"
           } >> "$GITHUB_OUTPUT"
 
@@ -140,7 +140,7 @@ jobs:
             # Missing permissions (the deploy role's lambda:InvokeFunction, or the function role's
             # dynamodb:Scan) leave the migrations pending, which the code tolerates: warn, go on.
             not_allowed() {
-              echo "::warning::Data migrations NOT run: $1 (docs/DEPLOY.md, Data migrations). The API works meanwhile; grant it and redeploy."
+              echo "::warning::Data migrations NOT run: $1 (platforms/aws/DEPLOY.md, Data migrations). The API works meanwhile; grant it and redeploy."
               echo "### Data migrations not run: $1" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             }

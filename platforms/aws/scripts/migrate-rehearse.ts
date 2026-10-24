@@ -1,6 +1,6 @@
 /**
  * Rehearse the pending data migrations on a DynamoDB table, normally a point-in-time-restored copy
- * of production (docs/DEPLOY.md, "Rehearsing a data migration"), and verify the result:
+ * of production (platforms/aws/DEPLOY.md, "Rehearsing a data migration"), and verify the result:
  *
  *   pnpm --filter @fling/platform-aws migrate:rehearse --table <copy> --region <region>
  *     [--dry-run] [--page-size 100] [--lease-seconds 120] [--endpoint http://localhost:8000]
@@ -154,7 +154,7 @@ if (described.RestoreSummary) {
 } else if (!args.endpoint && !args['any-table']) {
   die(
     `${table} is not a restored copy (no RestoreSummary). Rehearse on a point-in-time restore ` +
-      '(docs/DEPLOY.md), or pass --any-table if you really mean this table.'
+      '(platforms/aws/DEPLOY.md), or pass --any-table if you really mean this table.'
   )
 }
 

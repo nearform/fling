@@ -78,7 +78,7 @@ module "fling" {
     repo_id  = "2000002"
   }
 
-  # Becomes INSTANCE in the deploy output (DEPLOY.md, Instance configuration).
+  # Becomes INSTANCE in the deploy output (platforms/aws/DEPLOY.md, Instance configuration).
   instance = {
     ALLOWED_EMAIL_DOMAINS = "example.test"
     OIDC_ISSUER           = "https://accounts.google.com"

@@ -1,4 +1,5 @@
 import type { IdentityProvider } from './auth/identity.ts'
+import type { SessionClaims } from './auth/session.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
 import type { RouteTable } from './route-table/types.ts'
@@ -33,6 +34,10 @@ export interface AppEnv {
     deps: Deps
     user: User
     via: AuthVia
+    /** the session's claims (session auth only) */
+    session: SessionClaims | undefined
+    /** the admin acting as `user`, while impersonating (session auth only) */
+    impersonator: string | undefined
   }
 }
 

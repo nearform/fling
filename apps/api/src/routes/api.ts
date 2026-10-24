@@ -7,7 +7,7 @@ import {
   CreateCommentRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
-  type Me,
+  MeSchema,
   NameCheckSchema,
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
@@ -20,9 +20,10 @@ import {
   UpdateSiteRequestSchema,
   VersionFilesSchema,
 } from '@fling/shared'
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import { requireAuth } from '../auth/middleware.ts'
+import { meOf } from '../admin.ts'
+import { requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
@@ -31,6 +32,7 @@ import { userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
+import { adminRoutes } from './admin.ts'
 
 export const apiRoutes = new Hono<AppEnv>()
 
@@ -46,10 +48,14 @@ apiRoutes.use(
 apiRoutes.use('*', requireAuth)
 
 apiRoutes.get('/me', c => {
-  const u = c.get('user')
-  const me: Me = { email: u.email, name: u.name, picture: u.picture, userSlug: u.userSlug }
-  return c.json(me)
+  const impersonator = c.get('impersonator')
+  const until = c.get('session')?.impersonating?.until
+  const impersonation =
+    impersonator && until ? { by: impersonator, until: new Date(until * 1000) } : undefined
+  return c.json(MeSchema.parse(meOf(c.get('deps'), c.get('user'), impersonation)))
 })
+
+apiRoutes.route('/admin', adminRoutes)
 
 apiRoutes.get('/keys', async c => {
   const keys = await c.get('deps').store.listApiKeys(c.get('user').email)
@@ -66,6 +72,7 @@ apiRoutes.get('/keys', async c => {
 })
 
 apiRoutes.delete('/keys/:id', async c => {
+  requireAccountAction(c, 'account.revoke', "revoking the user's CLI logins")
   const deleted = await c.get('deps').store.deleteApiKey(c.get('user').email, c.req.param('id'))
   if (!deleted) throw notFound('No such API key')
   return c.body(null, 204)
@@ -91,14 +98,16 @@ apiRoutes.get('/connections', async c => {
 })
 
 apiRoutes.delete('/connections/:id', async c => {
+  requireAccountAction(c, 'account.revoke', "revoking the user's connected apps")
   const deleted = await c.get('deps').store.deleteGrant(c.get('user').email, c.req.param('id'))
   if (!deleted) throw notFound('No such connection')
   return c.body(null, 204)
 })
 
-/** Consent for /oauth/authorize — browser session only (never an API key). */
-const requireSession = (c: { get(k: 'via'): string }) => {
+/** Consent for /oauth/authorize — browser session only (never an API key), not impersonating. */
+const requireSession = (c: Context<AppEnv>) => {
   if (c.get('via') !== 'session') throw forbidden('Sign in with your browser to approve apps')
+  requireAccountAction(c, 'account.oauth.approve', 'connecting apps to the account')
 }
 
 apiRoutes.get('/oauth/requests/:id', async c => {

@@ -34,6 +34,15 @@ verified email listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAI
 needs at least one; the public metadata names the domains, never the addresses). A user is their
 email; the issuer's `sub` is not stored.
 
+**Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
+must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
+last sign-in) and may **impersonate** one: from a browser session only, they act as that user for
+at most 60 minutes, with a banner on every page, and stop to return to their own session. They get
+no rights over anyone's site except by impersonating, and while impersonating can create nothing
+that outlives the session (no API keys or `fling login`, no OAuth approvals, no further
+impersonation). Every start and stop is audited (`AUDIT` items, kept 180 days, and a log line).
+The `admin.*` actions are in `policy.ts` (`canAdmin`).
+
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **member** (any other signed-in user), **share** (holds its current share

@@ -1,7 +1,8 @@
 /**
  * Who may do what to a site: one pure function, `can(actor, action, site)`. Every route and MCP
  * tool that touches a site asks it (through `requireSite` in sites.ts); nothing else decides
- * access, and no key layout implies it.
+ * access, and no key layout implies it. What is not about a site (the admins' actions, and what
+ * an impersonating admin may not do to the user's account) is `canInstance`, at the end.
  *
  * Actors are resolved against the site into a role:
  * - `owner`: the signed-in user who holds the site (`site.email`).
@@ -144,4 +145,106 @@ export function canDeleteComment(
     can(actor, 'comment.delete', site) ||
     (isAuthor(actor, comment.author) && can(actor, 'comment.delete.own', site))
   )
+}
+
+// --- the instance: admins, and what an impersonating admin may not do ---
+
+/**
+ * Who is asking, for actions that are about the instance or the caller's own account rather than
+ * a site. `email` is the effective user: while an admin impersonates someone, it is that someone,
+ * and `impersonator` is the admin.
+ */
+export interface Principal {
+  email: string
+  /** the effective user is in ADMIN_EMAILS (never true while impersonating: admins can't be) */
+  admin: boolean
+  /** how the request authenticated */
+  via: 'session' | 'api_key' | 'oauth'
+  /** the admin acting as `email` (a browser session only) */
+  impersonator?: string
+}
+
+/**
+ * - `admin`: an admin in their own browser session.
+ * - `admin-token`: an admin through an API key or OAuth token (the CLI, MCP, the smoke test).
+ * - `impersonating`: an admin acting as another user (always a browser session).
+ * - `user`: anyone else.
+ */
+export type PrincipalRole = 'admin' | 'admin-token' | 'impersonating' | 'user'
+
+export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
+  'admin',
+  'admin-token',
+  'impersonating',
+  'user',
+]
+
+/**
+ * Actions on the instance and on the caller's own account:
+ *
+ *   admin.users.list         GET /api/admin/users (and site counts)
+ *   admin.audit.read         GET /api/admin/audit
+ *   admin.impersonate        POST /api/admin/impersonate (then `impersonationRefusal` on the target)
+ *   admin.impersonate.stop   POST /api/admin/impersonate/stop
+ *   account.key.create       GET /auth/cli: mint an API key (`fling login`)
+ *   account.oauth.approve    /oauth/authorize and /api/oauth/requests/…: approve (or deny) an app
+ *   account.revoke           DELETE /api/keys/:id, /api/connections/:id
+ *
+ * Admins have no extra rights over sites: `can` never asks whether someone is an admin, so an
+ * admin is a member of other people's sites like anyone else, and acts on them only by
+ * impersonating. Impersonation is for seeing and doing what the user sees and does with their
+ * sites, never for creating anything that outlives it in their name: no API keys, no app
+ * approvals, no other impersonation; and not for undoing what they set up either (revoking their
+ * keys or apps). Starting one needs the admin's browser session: a key or token that leaked
+ * must not be able to become someone else.
+ */
+export const INSTANCE_ACTIONS = [
+  'admin.users.list',
+  'admin.audit.read',
+  'admin.impersonate',
+  'admin.impersonate.stop',
+  'account.key.create',
+  'account.oauth.approve',
+  'account.revoke',
+] as const
+
+export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
+
+const isAdminRole = (role: PrincipalRole) => role === 'admin' || role === 'admin-token'
+const notImpersonating = (role: PrincipalRole) => role !== 'impersonating'
+
+const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> = {
+  'admin.users.list': isAdminRole,
+  'admin.audit.read': isAdminRole,
+  'admin.impersonate': role => role === 'admin',
+  'admin.impersonate.stop': role => role === 'impersonating',
+  'account.key.create': notImpersonating,
+  'account.oauth.approve': notImpersonating,
+  'account.revoke': notImpersonating,
+}
+
+export function principalRole(p: Principal): PrincipalRole {
+  if (p.impersonator !== undefined) return 'impersonating'
+  if (!p.admin) return 'user'
+  return p.via === 'session' ? 'admin' : 'admin-token'
+}
+
+export function canInstance(p: Principal, action: InstanceAction): boolean {
+  return INSTANCE_RULES[action](principalRole(p))
+}
+
+export type ImpersonationRefusal = 'no_such_user' | 'self' | 'admin'
+
+/**
+ * Whom an admin (`admin.impersonate`) may not become: someone who isn't a user, themselves, or
+ * another admin (whose session would be an admin's again). null: allowed.
+ */
+export function impersonationRefusal(
+  p: Principal,
+  target: { email: string; admin: boolean } | null
+): ImpersonationRefusal | null {
+  if (!target) return 'no_such_user'
+  if (target.email === p.email) return 'self'
+  if (target.admin) return 'admin'
+  return null
 }

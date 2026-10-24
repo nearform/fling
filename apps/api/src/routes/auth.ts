@@ -14,16 +14,11 @@ import * as oauth from 'oauth4webapi'
 import { mintApiKey } from '../auth/api-keys.ts'
 import { cliKeyName, validateCliRedirectUri } from '../auth/cli.ts'
 import { admitIdentity, type Identity, type SignInRequest } from '../auth/identity.ts'
+import { resolveSession, sessionPrincipal } from '../auth/middleware.ts'
 import { safeReturnUrl } from '../auth/return-url.ts'
-import {
-  endSession,
-  readSessionToken,
-  setSiteCookie,
-  startSession,
-  verifySession,
-} from '../auth/session.ts'
+import { endSession, setSiteCookie, startSession } from '../auth/session.ts'
 import { badRequest, forbidden, notFound } from '../lib/errors.ts'
-import type { User } from '../store/types.ts'
+import { canInstance } from '../policy.ts'
 import type { AppEnv } from '../types.ts'
 
 const FLOW_COOKIE = 'fling_oauth'
@@ -73,12 +68,6 @@ function oauthDetails(err: unknown) {
   }
 }
 
-async function sessionUser(c: Context<AppEnv>): Promise<User | null> {
-  const { config, clock, store } = c.get('deps')
-  const email = await verifySession(readSessionToken(c), config.secrets.sessionSecret, clock.now())
-  return email ? store.getUser(email) : null
-}
-
 async function upsertUser(c: Context<AppEnv>, email: string, name: string, picture: string | null) {
   const { store, clock } = c.get('deps')
   return store.upsertUser(
@@ -121,9 +110,9 @@ export const authRoutes = new Hono<AppEnv>()
 /** Signed in → refresh `fling_site` and go back; else sign in first. */
 async function login(c: Context<AppEnv>) {
   const ret = returnOf(c)
-  const user = await sessionUser(c)
-  if (!user) return beginSignIn(c, ret)
-  setSiteCookie(c, user.email)
+  const session = await resolveSession(c)
+  if (!session) return beginSignIn(c, ret)
+  setSiteCookie(c, session.user.email)
   return c.redirect(ret, 302)
 }
 
@@ -176,7 +165,8 @@ authRoutes.post('/logout', c => {
 
 /**
  * `GET /auth/cli?redirect_uri=&hostname=`: browser half of `fling login`. Mints an API key named
- * `cli:<hostname>` and 302s to `redirect_uri?key=…`. The key is never logged.
+ * `cli:<hostname>` and 302s to `redirect_uri?key=…`. The key is never logged. Not while
+ * impersonating (`account.key.create`): the CLI gets `error=impersonating`.
  */
 authRoutes.get('/cli', async c => {
   const { store, clock, config } = c.get('deps')
@@ -198,14 +188,18 @@ authRoutes.get('/cli', async c => {
   if (state !== undefined && !/^[A-Za-z0-9._~-]{1,256}$/.test(state)) {
     return c.redirect(`${redirectUri.toString()}?error=invalid_state`, 302)
   }
-  const user = await sessionUser(c)
-  if (!user) {
+  const session = await resolveSession(c)
+  if (!session) {
     const self = new URL('/auth/cli', config.appOrigin)
     self.searchParams.set('redirect_uri', redirectUri.toString())
     const hostname = c.req.query('hostname')
     if (hostname) self.searchParams.set('hostname', hostname)
     if (state) self.searchParams.set('state', state)
     return beginSignIn(c, self.toString())
+  }
+  const { user } = session
+  if (!canInstance(sessionPrincipal(config, session), 'account.key.create')) {
+    return back({ error: 'impersonating' })
   }
   try {
     const { plaintext } = await mintApiKey(

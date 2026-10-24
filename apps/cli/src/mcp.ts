@@ -17,6 +17,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
+  COMMENTS_NOTE,
+  describeComments,
   describeVersionFiles,
   type InstanceMetadata,
   isSecretPath,
@@ -28,6 +30,7 @@ import {
   mcpWording,
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
+  reviewUrl,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -59,11 +62,16 @@ import {
 import { NPX_COMMAND, VERSION } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
+  addComment,
   archiveSite,
   checkName,
+  commentsEnabled,
+  deleteComment,
   deleteSite,
   getSite,
+  listComments,
   listSites,
+  resolveComment,
   rollback,
   setVisibility,
   share,
@@ -103,7 +111,7 @@ export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens th
 export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask the user for their Fling's address and to run \`${NPX_COMMAND} login <url>\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login <url>\`), then try again.`
 
 /** Sent at `initialize`: how to use this (local) server. */
-export const mcpLocalInstructions = (w: McpWording) =>
+export const mcpLocalInstructions = (w: McpWording, opts: { comments?: boolean } = {}) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
     'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
@@ -115,6 +123,7 @@ export const mcpLocalInstructions = (w: McpWording) =>
     NEVER_PUBLISHED,
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
     `Sites are private (only ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. Always give the user the URL that comes back.`,
+    ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
   ].join('\n\n')
 
 const toolDef = <S extends z.ZodRawShape>(def: McpToolDef<S>) => ({
@@ -266,7 +275,11 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
   const server = new McpServer(
     { name: 'fling', version: VERSION },
-    { instructions: mcpLocalInstructions(wording) }
+    {
+      instructions: mcpLocalInstructions(wording, {
+        comments: commentsEnabled(deps.instance),
+      }),
+    }
   )
   const { listHtml, spa, public: isPublic } = mcpTools.publish.inputSchema
 
@@ -630,6 +643,58 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       }
     })
   )
+
+  // Comments: only when the instance logged in to has them (its stored metadata says so).
+  if (deps.instance && commentsEnabled(deps.instance)) {
+    const appOrigin = deps.instance.appOrigin
+    const review = (name: string) => reviewUrl(appOrigin, name)
+
+    server.registerTool(t.commentsList.name, toolDef(t.commentsList), args =>
+      run(async c => {
+        const list = await listComments(c, args.name, { path: args.path })
+        const reviewPage = review(list.site.name)
+        return {
+          summary: describeComments(list, {
+            includeResolved: args.includeResolved,
+            reviewUrl: reviewPage,
+          }),
+          data: { ...list, reviewUrl: reviewPage },
+        }
+      })
+    )
+
+    server.registerTool(t.commentAdd.name, toolDef(t.commentAdd), args =>
+      run(async c => {
+        const comment = await addComment(c, args.name, {
+          body: args.body,
+          path: args.path,
+          parentId: args.replyTo,
+        })
+        const what = comment.parentId ? `Replied to thread ${comment.parentId}` : 'Comment added'
+        return {
+          summary: `${what} on ${args.name} (${comment.path}, id ${comment.id}). Review page: ${review(args.name)}`,
+          data: comment,
+        }
+      })
+    )
+
+    server.registerTool(t.commentResolve.name, toolDef(t.commentResolve), args =>
+      run(async c => {
+        const comment = await resolveComment(c, args.name, args.id, !args.reopen)
+        return {
+          summary: `Thread ${comment.id} on ${args.name} ${args.reopen ? 'reopened' : 'resolved'}`,
+          data: comment,
+        }
+      })
+    )
+
+    server.registerTool(t.commentDelete.name, toolDef(t.commentDelete), args =>
+      run(async c => {
+        const result = await deleteComment(c, args.name, args.id)
+        return { summary: `Comment ${args.id} on ${args.name} deleted`, data: result }
+      })
+    )
+  }
 
   server.registerTool(t.whoami.name, toolDef(t.whoami), () =>
     run(async c => {

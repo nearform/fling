@@ -4,6 +4,8 @@
  * handlers call the site service layer directly.
  */
 import {
+  type Comment,
+  describeComments,
   describeVersionFiles,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
@@ -15,14 +17,17 @@ import {
   probeUrl,
   READY_TIMEOUT_LAMBDA_MS,
   readinessWaitDisabled,
+  reviewUrl,
   type Site,
   waitUntilReachable,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
+import * as comments from '../comments.ts'
 import { instanceMetadata } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
+import { userActor } from '../policy.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
@@ -164,7 +169,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   const mcpTools = mcpToolsFor(wording)
   const server = new McpServer(
     { name: 'fling', title: deps.config.instanceName, version: SERVER_VERSION },
-    { instructions: mcpRemoteInstructions(wording) }
+    { instructions: mcpRemoteInstructions(wording, { comments: deps.config.comments }) }
   )
 
   function register<S extends z.ZodRawShape>(
@@ -371,5 +376,71 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
+  if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
+
   return server
+}
+
+/** Comments of open threads only (a resolved thread's replies go with it). */
+function openOnly(all: Comment[]) {
+  const resolved = new Set(all.filter(c => c.resolvedAt !== null).map(c => c.id))
+  return all.filter(c => !resolved.has(c.parentId ?? c.id))
+}
+
+/** The comment tools: only on an instance with comments (the `comments` capability). */
+function registerCommentTools(
+  deps: Deps,
+  user: User,
+  mcpTools: ReturnType<typeof mcpToolsFor>,
+  register: <S extends z.ZodRawShape>(
+    def: McpToolDef<S>,
+    handler: (args: z.infer<z.ZodObject<S>>) => Promise<Result>
+  ) => void
+) {
+  const actor = userActor(user)
+  const review = (name: string) => reviewUrl(deps.config.appOrigin, name)
+
+  register(mcpTools.commentsList, async args => {
+    const list = await comments.listComments(deps, actor, args.name, { path: args.path })
+    return {
+      text: describeComments(list, {
+        includeResolved: args.includeResolved,
+        reviewUrl: review(list.site.name),
+      }),
+      data: {
+        ...list,
+        comments: args.includeResolved ? list.comments : openOnly(list.comments),
+        reviewUrl: review(list.site.name),
+      },
+    }
+  })
+
+  register(mcpTools.commentAdd, async args => {
+    const comment = await comments.addComment(deps, actor, args.name, {
+      body: args.body,
+      path: args.path,
+      parentId: args.replyTo,
+    })
+    const what = comment.parentId ? `Replied to thread ${comment.parentId}` : 'Comment added'
+    return {
+      text: `${what} on ${args.name} (${comment.path}, id ${comment.id}). Review page: ${review(args.name)}`,
+      data: { ...comment, reviewUrl: review(args.name) },
+    }
+  })
+
+  register(mcpTools.commentResolve, async args => {
+    const comment = await comments.resolveComment(deps, actor, args.name, args.id, !args.reopen)
+    return {
+      text: `Thread ${comment.id} on ${args.name} ${args.reopen ? 'reopened' : 'resolved'}.`,
+      data: comment,
+    }
+  })
+
+  register(mcpTools.commentDelete, async args => {
+    await comments.deleteComment(deps, actor, args.name, args.id)
+    return {
+      text: `Comment ${args.id} on ${args.name} deleted.`,
+      data: { name: args.name, id: args.id, deleted: true },
+    }
+  })
 }

@@ -12,6 +12,13 @@
  */
 import { z } from 'zod'
 import type { VersionFiles } from './api.ts'
+import {
+  authorLabel,
+  COMMENT_MAX_CHARS,
+  type CommentList,
+  commentThreads,
+  reviewUrl,
+} from './comments.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
 import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
@@ -52,11 +59,18 @@ export interface McpWording {
   privateAudience: string
   /** How the user signs in: "their Example SSO account". */
   signIn: string
+  /** Where people review a site in the browser: `https://fling.example.test/review/<name>`. */
+  reviewPattern: string
 }
+
+const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
 
 /** Wording for an instance; without one (not logged in yet) it stays generic. */
 export function mcpWording(
-  instance?: Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> | null
+  instance?:
+    | (Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> &
+        Partial<Pick<InstanceMetadata, 'appOrigin'>>)
+    | null
 ): McpWording {
   if (!instance) {
     return {
@@ -64,6 +78,7 @@ export function mcpWording(
       sitesPattern: 'https://<name>.<sites domain>',
       privateAudience: 'people signed in to this Fling',
       signIn: 'the Fling sign-in page',
+      reviewPattern: GENERIC_REVIEW,
     }
   }
   return {
@@ -71,6 +86,7 @@ export function mcpWording(
     sitesPattern: instanceSitesPattern(instance),
     privateAudience: privateAudience(instance),
     signIn: `their ${instance.auth.displayName} account`,
+    reviewPattern: instance.appOrigin ? reviewUrl(instance.appOrigin, '<name>') : GENERIC_REVIEW,
   }
 }
 
@@ -116,6 +132,9 @@ const sitePath = z
   .describe(
     'Site-relative path with forward slashes, e.g. "index.html", "css/app.css", "img/logo.png". The root page must be "index.html". No dotfiles (".env", ".well-known/…")'
   )
+
+const commentPath = z.string().max(1024)
+const commentId = z.string().min(1).max(100)
 
 const encoding = z
   .enum(['utf8', 'base64'])
@@ -337,6 +356,65 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { destructiveHint: true, openWorldHint: false },
     }),
 
+    commentsList: tool({
+      name: 'fling_comments_list',
+      title: 'List comments',
+      description:
+        `List the comments people left on a site while reviewing it (${w.reviewPattern}), as threads: each ` +
+        'has the page path it is about, the version the site was serving when it was written, its replies, and ' +
+        `whether it is resolved. Anyone signed in to ${w.name} can comment on a site they can open. Resolved threads ` +
+        'are left out unless `includeResolved`. Use it to act on feedback: fix the site, republish, then resolve ' +
+        'the threads with fling_comment_resolve.',
+      inputSchema: {
+        name: siteName,
+        path: commentPath.optional().describe('Only this page, e.g. "/" or "/docs/"'),
+        includeResolved: z.boolean().optional().describe('Include resolved threads'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    commentAdd: tool({
+      name: 'fling_comment_add',
+      title: 'Add a comment',
+      description:
+        `Comment on a page of a site (shown on its review page, ${w.reviewPattern}), or reply to a thread ` +
+        "(`replyTo`: a thread id from fling_comments_list). Comments are signed with the user's name, so only " +
+        'write one the user asked for.',
+      inputSchema: {
+        name: siteName,
+        body: z.string().min(1).max(COMMENT_MAX_CHARS).describe('The comment (plain text)'),
+        path: commentPath
+          .optional()
+          .describe('The page it is about (default "/"); ignored for a reply'),
+        replyTo: commentId.optional().describe('Reply to this thread instead of starting one'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    }),
+
+    commentResolve: tool({
+      name: 'fling_comment_resolve',
+      title: 'Resolve a comment thread',
+      description:
+        'Mark a comment thread resolved (e.g. after fixing what it asks for), or reopen it with `reopen: true`. ' +
+        'Thread ids come from fling_comments_list.',
+      inputSchema: {
+        name: siteName,
+        id: commentId.describe('The thread id'),
+        reopen: z.boolean().optional().describe('Reopen a resolved thread'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    commentDelete: tool({
+      name: 'fling_comment_delete',
+      title: 'Delete a comment',
+      description:
+        'Delete a comment; deleting a thread deletes its replies. People can delete their own comments, and ' +
+        "a site's owner anyone's. Cannot be undone: prefer fling_comment_resolve, and confirm with the user first.",
+      inputSchema: { name: siteName, id: commentId.describe('The comment id') },
+      annotations: { destructiveHint: true, openWorldHint: false },
+    }),
+
     rollback: tool({
       name: 'fling_rollback',
       title: 'Roll back',
@@ -360,7 +438,7 @@ export type McpTools = ReturnType<typeof mcpToolsFor>
 export const mcpTools: McpTools = mcpToolsFor(mcpWording())
 
 /** Sent at `initialize` by the remote server. */
-export const mcpRemoteInstructions = (w: McpWording) =>
+export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean } = {}) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
     'To publish content you created in this conversation (an HTML page, a report, a small app): call fling_publish with ' +
@@ -381,7 +459,14 @@ export const mcpRemoteInstructions = (w: McpWording) =>
     'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +
       'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
       'exactly which files a site has (e.g. when the user reports a 404).',
+    ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
   ].join('\n\n')
+
+/** What the servers say about comments, when the instance has them. */
+export const COMMENTS_NOTE = (w: McpWording) =>
+  `People review sites at ${w.reviewPattern} and leave comments on its pages. fling_comments_list shows them; ` +
+  'after acting on feedback, resolve the threads with fling_comment_resolve. Only post (fling_comment_add) or ' +
+  'delete (fling_comment_delete) comments when the user asks.'
 
 /** Max files listed in a fling_files text result (structured data always has them all). */
 export const MCP_FILES_LISTED = 200
@@ -423,3 +508,34 @@ export function describeVersionFiles(
 }
 
 export type McpToolName = (typeof mcpTools)[keyof typeof mcpTools]['name']
+
+/**
+ * The text of a fling_comments_list result (both servers): one block per thread — id, state, page,
+ * version, author and body, then its replies indented.
+ */
+export function describeComments(
+  list: CommentList,
+  opts: { includeResolved?: boolean; reviewUrl?: string } = {}
+): string {
+  const all = commentThreads(list.comments)
+  const threads = opts.includeResolved ? all : all.filter(t => t.comment.resolvedAt === null)
+  const hidden = all.length - threads.length
+  const name = list.site.name
+  const version = (id: string | null) =>
+    id === null ? '' : id === list.site.currentVersionId ? ', current version' : `, version ${id}`
+  const head =
+    `${threads.length} ${opts.includeResolved ? '' : 'open '}thread${threads.length === 1 ? '' : 's'} on ${name}` +
+    (hidden ? ` (${hidden} resolved not shown)` : '') +
+    (opts.reviewUrl ? `. Review page: ${opts.reviewUrl}` : '')
+  const blocks = threads.map(({ comment: c, replies }) =>
+    [
+      `- [${c.id}] ${c.resolvedAt ? 'RESOLVED ' : ''}${c.path}${version(c.versionId)} — ${authorLabel(c.author)}, ${c.createdAt}:`,
+      `  ${c.body.replace(/\n/g, '\n  ')}`,
+      ...replies.map(
+        r =>
+          `  - [${r.id}] ${authorLabel(r.author)}, ${r.createdAt}: ${r.body.replace(/\n/g, '\n    ')}`
+      ),
+    ].join('\n')
+  )
+  return [head, ...blocks].join('\n')
+}

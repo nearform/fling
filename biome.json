@@ -83,7 +83,6 @@
       "!**/dist",
       "!**/coverage",
       "!**/.claude",
-      "!apps/web/src/brand",
       "!**/dist"
     ]
   },

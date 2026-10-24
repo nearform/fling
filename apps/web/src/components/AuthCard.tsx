@@ -3,6 +3,8 @@
  * `main-gradient`, or over a full-screen `backdrop` (login's `ThreadBackground`).
  */
 import type { ReactNode } from 'react'
+import { useInstance } from '../hooks/instance'
+import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import { LogoMark } from './LogoMark'
 import ThemeToggle from './ThemeToggle'
 
@@ -17,6 +19,7 @@ interface AuthCardProps {
 }
 
 export function AuthCard({ children, width = 'md', footer, backdrop }: AuthCardProps) {
+  const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
   return (
     <div
       className={`relative isolate min-h-screen flex flex-col items-center justify-center px-4 py-10 ${backdrop ? '' : 'main-gradient'}`}
@@ -27,7 +30,7 @@ export function AuthCard({ children, width = 'md', footer, backdrop }: AuthCardP
           <div className="flex h-14 items-center justify-between px-6 border-b border-[color:var(--border-subtle)]">
             <span className="flex items-center gap-2.5">
               <LogoMark />
-              <span className="text-sm font-semibold tracking-tight">Fling</span>
+              <span className="text-sm font-semibold tracking-tight">{name}</span>
             </span>
             <ThemeToggle />
           </div>

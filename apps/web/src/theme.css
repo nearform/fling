@@ -1,18 +1,70 @@
-/* The Fling design system, trimmed from agentic-mapper's src/ui/index.css: the Nearform brand,
-   two DaisyUI themes (`fling-light` / `fling-dark`), the semantic tokens, base styles and the few
-   component classes Fling uses. Shared by the app (index.css) and the standalone 404
-   (not-found.css); each entry imports Tailwind itself and scans only the files it renders. */
+/* The Fling design system: a neutral default theme, two DaisyUI themes (`fling-light` /
+   `fling-dark`), the semantic tokens, base styles and the few component classes Fling uses. Shared
+   by the app (index.css) and the standalone 404 (not-found.css); each entry imports Tailwind itself
+   and scans only the files it renders.
 
-/* Nearform brand: the vendored token sheet. The typefaces are imported in main.tsx. */
-@import "./brand/nearform-brand.css";
+   An instance brands it at runtime, not at build time: src/lib/instance.ts sets the five
+   `--brand-*` inputs on <html> from the instance metadata (`/.well-known/fling`), and every colour
+   below is derived from them. One build serves every instance. */
 
 @plugin "daisyui";
 
-
 @theme {
-  --font-sans: var(--nf-font-sans);
-  --font-serif: var(--nf-font-serif);
-  --font-mono: var(--nf-font-mono);
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/* ------------------------------------------------------------ Brand inputs */
+:root {
+  /* The neutral default. Each is overridden, as a hex colour, by the instance's brand. */
+  --brand-primary: oklch(58% 0.19 268); /* a BACKING colour: --brand-primary-content goes on it */
+  --brand-primary-content: oklch(100% 0 none);
+  --brand-accent: oklch(55% 0.2 260); /* links, interactive text, focus */
+  --brand-ink: oklch(22% 0.03 264); /* text and the dark chrome */
+  --brand-highlight: oklch(60% 0.2 305); /* decoration only (the thread, gradients) */
+
+  /* Everything else is derived. Ink tints: -80 for secondary text, -50 for muted text (kept at
+     >= 5:1 on white), -30 for strong borders, -10 for the light canvas. */
+  --white: oklch(100% 0 none);
+  --ink: var(--brand-ink);
+  --ink-80: color-mix(in oklch, var(--brand-ink) 85%, var(--white));
+  --ink-50: color-mix(in oklch, var(--brand-ink) 68%, var(--white));
+  --ink-30: color-mix(in oklch, var(--brand-ink) 40%, var(--white));
+  --ink-10: color-mix(in oklch, var(--brand-ink) 4%, var(--white));
+
+  --primary: var(--brand-primary);
+  --primary-content: var(--brand-primary-content);
+  --primary-80: color-mix(in oklch, var(--brand-primary) 80%, var(--white));
+  --primary-50: color-mix(in oklch, var(--brand-primary) 50%, var(--white));
+  --primary-30: color-mix(in oklch, var(--brand-primary) 30%, var(--white));
+  --primary-10: color-mix(in oklch, var(--brand-primary) 10%, var(--white));
+
+  --accent: var(--brand-accent);
+  --accent-80: color-mix(in oklch, var(--brand-accent) 80%, var(--white));
+  --accent-50: color-mix(in oklch, var(--brand-accent) 50%, var(--white));
+  --accent-10: color-mix(in oklch, var(--brand-accent) 10%, var(--white));
+
+  --highlight: var(--brand-highlight);
+  --highlight-10: color-mix(in oklch, var(--brand-highlight) 10%, var(--white));
+
+  /* Neutral greys for hairlines and insets. */
+  --grey-10: oklch(93.5% 0.003 none);
+  --grey-30: oklch(88.5% 0 none);
+
+  /* The dark tier: ink tinting near-black greys, darkest (the canvas) first. */
+  --dark-bg: color-mix(in oklch, var(--brand-ink) 25%, oklch(13% 0 none));
+  --dark-surface: color-mix(in oklch, var(--brand-ink) 25%, oklch(17.5% 0 none));
+  --dark-raised: color-mix(in oklch, var(--brand-ink) 25%, oklch(22% 0 none));
+  --dark-border: color-mix(in oklch, var(--brand-ink) 25%, oklch(27% 0 none));
+  --dark-border-strong: color-mix(in oklch, var(--brand-ink) 25%, oklch(35% 0 none));
+
+  /* Status — status semantics only, never decoration. Not brandable. */
+  --danger: oklch(56% 0.2 28);
+  --danger-10: color-mix(in oklch, var(--danger) 6%, var(--white));
+  --warning: oklch(55% 0.14 55);
+  --warning-10: color-mix(in oklch, var(--warning) 6%, var(--white));
+  --success: oklch(52% 0.09 168);
+  --success-10: color-mix(in oklch, var(--success) 8%, var(--white));
 }
 
 /* ------------------------------------------------------------------ Light */
@@ -21,34 +73,34 @@
   default: true;
   color-scheme: light;
 
-  --color-primary: var(--nf-green); /* a BACKING colour: Midnight text on it, never text itself */
-  --color-primary-content: var(--nf-midnight);
-  --color-secondary: var(--nf-midnight-80); /* = --text-secondary, see the header */
-  --color-secondary-content: var(--nf-white);
-  --color-accent: var(--nf-blue); /* links, interactive text */
-  --color-accent-content: var(--nf-white);
-  --color-neutral: var(--nf-midnight);
-  --color-neutral-content: var(--nf-white);
+  --color-primary: var(--primary); /* a BACKING colour: --primary-content on it, never text itself */
+  --color-primary-content: var(--primary-content);
+  --color-secondary: var(--ink-80); /* = --text-secondary, see the header */
+  --color-secondary-content: var(--white);
+  --color-accent: var(--accent); /* links, interactive text */
+  --color-accent-content: var(--white);
+  --color-neutral: var(--ink);
+  --color-neutral-content: var(--white);
 
-  --color-base-100: var(--nf-white);
-  --color-base-200: var(--nf-white); /* cards (bg-base-200) render white too */
-  --color-base-300: var(--nf-grey-30); /* borders / hover / lines */
-  --color-base-content: var(--nf-midnight);
+  --color-base-100: var(--white);
+  --color-base-200: var(--white); /* cards (bg-base-200) render white too */
+  --color-base-300: var(--grey-30); /* borders / hover / lines */
+  --color-base-content: var(--ink);
 
-  --color-info: var(--nf-blue);
-  --color-info-content: var(--nf-white);
-  --color-success: var(--nf-success);
-  --color-success-content: var(--nf-white);
-  --color-warning: var(--nf-warning);
-  --color-warning-content: var(--nf-white);
-  --color-error: var(--nf-danger);
-  --color-error-content: var(--nf-white);
+  --color-info: var(--accent);
+  --color-info-content: var(--white);
+  --color-success: var(--success);
+  --color-success-content: var(--white);
+  --color-warning: var(--warning);
+  --color-warning-content: var(--white);
+  --color-error: var(--danger);
+  --color-error-content: var(--white);
 
   --radius-selector: 0.5rem; /* badges, checkboxes, toggles */
-  --radius-field: 0.5rem; /* --nf-radius-control: buttons + fields share 8px */
-  --radius-box: 0.625rem; /* --nf-radius-md: cards, panels */
+  --radius-field: 0.5rem; /* buttons + fields share 8px */
+  --radius-box: 0.625rem; /* cards, panels */
   --border: 1px;
-  --depth: 0; /* flat — the brand has no drop shadows */
+  --depth: 0; /* flat — no drop shadows */
   --noise: 0;
 }
 
@@ -58,29 +110,29 @@
   prefersdark: true;
   color-scheme: dark;
 
-  --color-primary: var(--nf-green); /* unchanged: Midnight on Green in both themes */
-  --color-primary-content: var(--nf-midnight);
-  --color-secondary: var(--nf-grey-10); /* = --text-secondary */
-  --color-secondary-content: var(--nf-dark-bg);
-  --color-accent: var(--nf-blue-50); /* the brand's on-dark link colour */
-  --color-accent-content: var(--nf-midnight);
-  --color-neutral: var(--nf-midnight-30);
-  --color-neutral-content: var(--nf-dark-bg);
+  --color-primary: var(--primary); /* unchanged in both themes */
+  --color-primary-content: var(--primary-content);
+  --color-secondary: var(--grey-10); /* = --text-secondary */
+  --color-secondary-content: var(--dark-bg);
+  --color-accent: var(--accent-50); /* the on-dark link colour */
+  --color-accent-content: var(--ink);
+  --color-neutral: var(--ink-30);
+  --color-neutral-content: var(--dark-bg);
 
-  --color-base-100: var(--nf-dark-surface);
-  --color-base-200: var(--nf-dark-surface);
-  --color-base-300: var(--nf-dark-border-strong);
-  --color-base-content: var(--nf-white);
+  --color-base-100: var(--dark-surface);
+  --color-base-200: var(--dark-surface);
+  --color-base-300: var(--dark-border-strong);
+  --color-base-content: var(--white);
 
-  /* The brand's `-fg` status set — the base status colours do not reach contrast on dark. */
-  --color-info: var(--nf-blue-50);
-  --color-info-content: var(--nf-midnight);
-  --color-success: var(--nf-green-80);
-  --color-success-content: var(--nf-midnight);
-  --color-warning: #f0b429; /* --nf-warning-fg (dark) — the brand sheet only names it inside its inert dark block */
-  --color-warning-content: var(--nf-midnight);
-  --color-error: #ff8177; /* --nf-danger-fg (dark), same reason */
-  --color-error-content: var(--nf-midnight);
+  /* Lighter status colours: the base ones do not reach contrast on dark. */
+  --color-info: var(--accent-50);
+  --color-info-content: var(--ink);
+  --color-success: color-mix(in oklch, var(--success) 55%, var(--white));
+  --color-success-content: var(--ink);
+  --color-warning: oklch(80% 0.15 80);
+  --color-warning-content: var(--ink);
+  --color-error: oklch(72% 0.16 25);
+  --color-error-content: var(--ink);
 
   --radius-selector: 0.5rem;
   --radius-field: 0.5rem;
@@ -92,92 +144,92 @@
 
 /* ------------------------------------------------ Semantic surface tokens */
 [data-theme="fling-light"] {
-  /* White chrome and cards on the brand's Midnight-10 canvas: the page is the quiet layer, the
+  /* White chrome and cards on the ink-10 canvas: the page is the quiet layer, the
      panels on it are the lit ones. Structure comes from hairlines, never shadow. */
-  --surface-app: var(--nf-midnight-10);
-  --surface-nav: var(--nf-white);
-  --surface-header: var(--nf-white);
-  --surface-panel: var(--nf-white);
-  --surface-raised: var(--nf-white); /* popovers / modals */
-  --surface-inset: var(--nf-grey-10); /* inset boxes, neutral tags */
-  --surface-hover: var(--nf-midnight-10);
-  --surface-nav-hover: var(--nf-midnight-10);
-  --surface-active: var(--nf-green-30); /* active nav item, selected row — Green 10 was too faint to find at a glance */
+  --surface-app: var(--ink-10);
+  --surface-nav: var(--white);
+  --surface-header: var(--white);
+  --surface-panel: var(--white);
+  --surface-raised: var(--white); /* popovers / modals */
+  --surface-inset: var(--grey-10); /* inset boxes, neutral tags */
+  --surface-hover: var(--ink-10);
+  --surface-nav-hover: var(--ink-10);
+  --surface-active: var(--primary-30); /* active nav item, selected row — the -10 tint is too faint to find at a glance */
 
-  --border-subtle: var(--nf-grey-10);
-  --border-default: var(--nf-grey-30);
-  --border-strong: var(--nf-midnight-30);
+  --border-subtle: var(--grey-10);
+  --border-default: var(--grey-30);
+  --border-strong: var(--ink-30);
   /* WCAG 1.4.11: ≥3:1 for the boundary that IDENTIFIES a control (inputs, selects, checkboxes). */
-  --border-control: var(--nf-midnight-50);
+  --border-control: var(--ink-50);
 
-  --text-primary: var(--nf-midnight);
-  --text-secondary: var(--nf-midnight-80);
-  --text-muted: var(--nf-midnight-50); /* ≥5:1 on white and on the inset */
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-80);
+  --text-muted: var(--ink-50); /* ≥5:1 on white and on the inset */
 
-  --focus-ring: var(--nf-blue); /* the brand's light-theme focus colour */
-  --overlay: color-mix(in srgb, var(--nf-midnight) 40%, transparent);
+  --focus-ring: var(--accent); /* the light-theme focus colour */
+  --overlay: color-mix(in oklch, var(--ink) 40%, transparent);
   --shadow-panel: none;
-  --shadow-popover: none; /* the brand bans drop shadows: popovers are a hairline on white */
+  --shadow-popover: none; /* no drop shadows: popovers are a hairline on white */
 
-  /* Status tints = the brand's pastel tier behind, the status colour itself as the border (the
-     brand's alert spec: tint + full 1px border + icon — never a left stripe). */
-  --tone-primary-surface: var(--nf-green-10);
-  --tone-primary-border: var(--nf-green);
-  --tone-info-surface: var(--nf-blue-10);
-  --tone-info-border: var(--nf-blue-50);
-  --tone-success-surface: var(--nf-success-10);
-  --tone-success-border: var(--nf-green-50);
-  --tone-warning-surface: var(--nf-warning-10);
-  --tone-warning-border: var(--nf-warning);
-  --tone-error-surface: var(--nf-danger-10);
-  --tone-error-border: var(--nf-danger);
+  /* Status tints = a pastel tint behind, the status colour itself as the border (tint + full 1px
+     border + icon — never a left stripe). */
+  --tone-primary-surface: var(--primary-10);
+  --tone-primary-border: var(--primary);
+  --tone-info-surface: var(--accent-10);
+  --tone-info-border: var(--accent-50);
+  --tone-success-surface: var(--success-10);
+  --tone-success-border: color-mix(in oklch, var(--success) 60%, var(--white));
+  --tone-warning-surface: var(--warning-10);
+  --tone-warning-border: var(--warning);
+  --tone-error-surface: var(--danger-10);
+  --tone-error-border: var(--danger);
 }
 
 [data-theme="fling-dark"] {
-  /* The brand's neutral dark tier: bg → surface → raised, the canvas the DARKEST layer. */
-  --surface-app: var(--nf-dark-bg);
-  --surface-nav: var(--nf-dark-surface);
-  --surface-header: var(--nf-dark-surface);
-  --surface-panel: var(--nf-dark-surface);
-  --surface-raised: var(--nf-dark-raised);
-  --surface-inset: var(--nf-dark-bg);
-  --surface-hover: var(--nf-dark-raised);
-  --surface-nav-hover: var(--nf-dark-raised);
-  --surface-active: color-mix(in srgb, var(--nf-green) 14%, var(--nf-dark-surface));
+  /* The dark tier: bg → surface → raised, the canvas the DARKEST layer. */
+  --surface-app: var(--dark-bg);
+  --surface-nav: var(--dark-surface);
+  --surface-header: var(--dark-surface);
+  --surface-panel: var(--dark-surface);
+  --surface-raised: var(--dark-raised);
+  --surface-inset: var(--dark-bg);
+  --surface-hover: var(--dark-raised);
+  --surface-nav-hover: var(--dark-raised);
+  --surface-active: color-mix(in oklch, var(--primary) 14%, var(--dark-surface));
 
-  --border-subtle: var(--nf-dark-border);
-  --border-default: var(--nf-dark-border);
-  --border-strong: var(--nf-dark-border-strong);
-  --border-control: var(--nf-midnight-50); /* 3.1:1 on the dark surface; the tier's own borders are ~2:1 */
+  --border-subtle: var(--dark-border);
+  --border-default: var(--dark-border);
+  --border-strong: var(--dark-border-strong);
+  --border-control: var(--ink-50); /* 3.1:1 on the dark surface; the tier's own borders are ~2:1 */
 
-  --text-primary: var(--nf-white);
-  --text-secondary: var(--nf-grey-10);
-  --text-muted: var(--nf-midnight-30); /* the brand's on-dark secondary text, ≥7:1 */
+  --text-primary: var(--white);
+  --text-secondary: var(--grey-10);
+  --text-muted: var(--ink-30); /* on-dark secondary text, ≥7:1 */
 
-  --focus-ring: var(--nf-green); /* the brand flips focus to Green on dark */
-  --overlay: color-mix(in srgb, var(--nf-dark-bg) 70%, transparent);
+  --focus-ring: var(--primary); /* focus flips to the primary colour on dark */
+  --overlay: color-mix(in oklch, var(--dark-bg) 70%, transparent);
   --shadow-panel: none;
   --shadow-popover: none;
 
   /* Mixed into the panel rather than lifted from the light pastels — a pastel wash on a dark
      screen is a light patch. Borders are the on-dark status colours. */
-  --tone-primary-surface: color-mix(in srgb, var(--nf-green) 12%, var(--nf-dark-surface));
-  --tone-primary-border: var(--nf-green);
-  --tone-info-surface: color-mix(in srgb, var(--nf-blue) 16%, var(--nf-dark-surface));
-  --tone-info-border: var(--nf-blue-50);
-  --tone-success-surface: color-mix(in srgb, var(--nf-green) 12%, var(--nf-dark-surface));
-  --tone-success-border: var(--nf-green-80);
-  --tone-warning-surface: color-mix(in srgb, var(--nf-warning) 16%, var(--nf-dark-surface));
+  --tone-primary-surface: color-mix(in oklch, var(--primary) 12%, var(--dark-surface));
+  --tone-primary-border: var(--primary);
+  --tone-info-surface: color-mix(in oklch, var(--accent) 16%, var(--dark-surface));
+  --tone-info-border: var(--accent-50);
+  --tone-success-surface: color-mix(in oklch, var(--success) 16%, var(--dark-surface));
+  --tone-success-border: var(--color-success);
+  --tone-warning-surface: color-mix(in oklch, var(--warning) 16%, var(--dark-surface));
   --tone-warning-border: var(--color-warning);
-  --tone-error-surface: color-mix(in srgb, var(--nf-danger) 16%, var(--nf-dark-surface));
+  --tone-error-surface: color-mix(in oklch, var(--danger) 16%, var(--dark-surface));
   --tone-error-border: var(--color-error);
 }
 
 /* ------------------------------------------------ Shape / spacing / motion */
 :root {
-  --radius-control: var(--nf-radius-control); /* 8px — buttons, fields */
-  --radius-panel: var(--nf-radius-md); /* 10px — cards, panels */
-  --radius-popover: var(--nf-radius-md);
+  --radius-control: 8px; /* buttons, fields */
+  --radius-panel: 10px; /* cards, panels */
+  --radius-popover: 10px;
 
   --control-height-sm: 30px;
   --control-height-md: 36px;
@@ -223,15 +275,15 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Brand: headings are never bold — weight 500 carries hierarchy (600 is buttons and table
+  /* Headings are never bold — weight 500 carries hierarchy (600 is buttons and table
      emphasis). A `font-semibold`/`font-bold` utility on a heading overrides this; don't add one. */
   h1, h2, h3, h4 {
     color: var(--text-primary);
-    font-weight: var(--nf-weight-heading);
+    font-weight: 500;
     letter-spacing: -0.014em;
   }
 
-  /* Links are Blue — the colour text is allowed to be. Green is a backing colour. */
+  /* Links are the accent — the colour text is allowed to be. Primary is a backing colour. */
   a.link {
     color: var(--color-accent);
   }
@@ -344,7 +396,7 @@
 
   /* The tone triples as reusable marks (the avatar fallback, the public badge). */
   .tone-primary {
-    color: var(--text-primary); /* Midnight on the green tint — green TEXT is banned */
+    color: var(--text-primary); /* ink on the primary tint — primary-coloured TEXT is banned */
     background: var(--tone-primary-surface);
     border-color: var(--tone-primary-border);
   }
@@ -395,8 +447,8 @@
     background: var(--surface-active);
     font-weight: 600;
   }
-  /* Light: a Midnight glyph on the green tint (the brand's pastel-tile pairing — a green icon on a
-     green wash disappears). Dark: the icon itself is Green, which reads on the dark tier. */
+  /* Light: an ink glyph on the primary tint (a primary icon on a primary wash disappears). Dark:
+     the icon itself is the primary colour, which reads on the dark tier. */
   .nav-item[data-active="true"] svg {
     color: var(--text-primary);
   }
@@ -404,9 +456,9 @@
     color: var(--color-primary);
   }
 
-  /* Section labels: the brand's Label size, sentence case — no tracked uppercase eyebrows. */
+  /* Section labels: the label size, sentence case — no tracked uppercase eyebrows. */
   .nav-group-label {
-    font-size: var(--nf-text-label);
+    font-size: 0.8125rem;
     font-weight: 500;
     color: var(--text-muted);
   }
@@ -420,18 +472,18 @@
   }
 }
 
-/* Auth / error pages: the brand's "backing A" wash (Green + Blue, diffused, top-right) on light;
-   on dark, a faint Green glow from the transition family. The only gradient in the app. */
+/* Auth / error pages: a primary + accent wash (diffused, top-right) on light; on dark, a faint
+   primary glow with a touch of the highlight. The only gradient in the app. */
 .main-gradient {
   background:
-    radial-gradient(60% 50% at 100% 0%, color-mix(in srgb, var(--nf-green) 18%, transparent) 0%, transparent 70%),
-    radial-gradient(50% 45% at 75% 0%, color-mix(in srgb, var(--nf-blue) 12%, transparent) 0%, transparent 70%),
+    radial-gradient(60% 50% at 100% 0%, color-mix(in oklch, var(--primary) 18%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 45% at 75% 0%, color-mix(in oklch, var(--accent) 12%, transparent) 0%, transparent 70%),
     var(--surface-app);
 }
 [data-theme="fling-dark"] .main-gradient {
   background:
-    radial-gradient(70% 50% at 50% 110%, color-mix(in srgb, var(--nf-green) 14%, transparent) 0%, transparent 70%),
-    radial-gradient(50% 40% at 100% 0%, color-mix(in srgb, var(--nf-purple) 12%, transparent) 0%, transparent 70%),
+    radial-gradient(70% 50% at 50% 110%, color-mix(in oklch, var(--primary) 14%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 40% at 100% 0%, color-mix(in oklch, var(--highlight) 12%, transparent) 0%, transparent 70%),
     var(--surface-app);
 }
 

@@ -6,7 +6,9 @@
  */
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
+import { useInstance } from '../hooks/instance'
 import { useThreadTone } from '../hooks/useDocumentTheme'
+import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import { LogoMark } from './LogoMark'
 import ThemeToggle from './ThemeToggle'
 import { ThreadBackground } from './ThreadBackground'
@@ -28,14 +30,15 @@ export function pickMessage(random: () => number = Math.random): string {
 export function NotFound({ homeHref = '/' }: { homeHref?: string }) {
   const [message] = useState(pickMessage)
   const tone = useThreadTone()
+  const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
 
   return (
     <div className="relative isolate min-h-screen flex flex-col">
       <ThreadBackground tone={tone} />
       <header className="flex items-center justify-between px-5 py-4">
-        <a href={homeHref} className="flex items-center gap-2.5" aria-label="Fling home">
+        <a href={homeHref} className="flex items-center gap-2.5" aria-label={`${name} home`}>
           <LogoMark />
-          <span className="text-sm font-semibold tracking-tight">Fling</span>
+          <span className="text-sm font-semibold tracking-tight">{name}</span>
         </a>
         <ThemeToggle />
       </header>
@@ -54,7 +57,7 @@ export function NotFound({ homeHref = '/' }: { homeHref?: string }) {
           </p>
           <a href={homeHref} className="btn btn-primary mt-8">
             <ArrowLeftIcon className="h-4 w-4" />
-            Back to Fling home
+            Back to {name} home
           </a>
         </div>
       </main>

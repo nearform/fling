@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
     <title>Fling</title>
-    <meta name="description" content="Fling a static site at fling.labs.nearform.com" />
+    <meta name="description" content="Fling: put a folder of static files online and get a link back" />
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#000e38" />
+    <meta name="theme-color" content="#161b2a" />
 
     <!-- Apply the saved theme before React mounts so there is no flash. Only the two known
          theme names are accepted; anything else falls back to the OS preference so a stale
@@ -26,6 +26,32 @@
               : 'fling-light'
         }
         document.documentElement.setAttribute('data-theme', saved)
+      })()
+    </script>
+    <!-- Apply the instance's brand cached by the last visit (src/lib/instance.ts writes it), so
+         there is no flash of the default theme. Only --brand-* hex colours and an http(s)/data:image
+         favicon are accepted. -->
+    <script>
+      ;(function () {
+        try {
+          var b = JSON.parse(localStorage.getItem('fling-brand') || 'null')
+          if (!b) return
+          var vars = b.vars || {}
+          for (var k in vars) {
+            if (/^--brand-[a-z-]+$/.test(k) && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(vars[k])) {
+              document.documentElement.style.setProperty(k, vars[k])
+            }
+          }
+          if (vars['--brand-ink']) {
+            var meta = document.querySelector('meta[name="theme-color"]')
+            if (meta) meta.setAttribute('content', vars['--brand-ink'])
+          }
+          var icon = document.querySelector('link[rel="icon"]')
+          if (icon && typeof b.faviconUrl === 'string' && /^(https?:\/\/|data:image\/)/i.test(b.faviconUrl)) {
+            icon.removeAttribute('type')
+            icon.href = b.faviconUrl
+          }
+        } catch (e) {}
       })()
     </script>
   </head>

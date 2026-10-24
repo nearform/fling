@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom
 import Layout from './components/Layout'
 import { NotFound } from './components/NotFound'
 import { Toasts } from './components/Toasts'
+import { AppInstanceProvider } from './hooks/instance'
 import { queryKeys, useMe } from './hooks/queries'
 import { errorMessage, isUnauthorized } from './lib/api'
 import ApiKeys from './pages/ApiKeys'
@@ -63,20 +64,22 @@ function Authenticated() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Authenticated />}>
-            <Route index element={<Sites />} />
-            <Route path="get-started" element={<GetStarted />} />
-            <Route path="connections" element={<ApiKeys />} />
-            <Route path="keys" element={<Navigate to="/connections" replace />} />
-          </Route>
-          {/* OAuth consent: signed-in, but outside the app shell */}
-          <Route path="authorize" element={<Authorize />} />
-          <Route path="login" element={<Login />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AppInstanceProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Authenticated />}>
+              <Route index element={<Sites />} />
+              <Route path="get-started" element={<GetStarted />} />
+              <Route path="connections" element={<ApiKeys />} />
+              <Route path="keys" element={<Navigate to="/connections" replace />} />
+            </Route>
+            {/* OAuth consent: signed-in, but outside the app shell */}
+            <Route path="authorize" element={<Authorize />} />
+            <Route path="login" element={<Login />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </AppInstanceProvider>
       <Toasts />
     </QueryClientProvider>
   )

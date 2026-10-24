@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 
-// Dev only: serve the Claude Desktop extension built by `pnpm --filter @nearform/fling build:mcpb`
+// Dev only: serve the Claude Desktop extension built by apps/cli's `build:mcpb` script
 // (in production CI uploads it to the ui bucket at /downloads/fling.mcpb).
 const mcpb = fileURLToPath(new URL('../cli/dist/fling.mcpb', import.meta.url))
 const devDownloads = (): Plugin => ({
@@ -21,8 +21,9 @@ const devDownloads = (): Plugin => ({
 // `FLING_API_URL` points the dev proxy at another API (default: `pnpm dev`'s on :3001).
 const API = process.env.FLING_API_URL ?? 'http://localhost:3001'
 
-// The app: served from S3 at the root of fling.labs.nearform.com (CloudFront does the SPA
-// fallback). In dev, everything the API answers in production is proxied to it.
+// The app: served from object storage at the root of the instance's app origin (the CDN does the
+// SPA fallback). It reads everything instance-specific at runtime from /.well-known/fling.
+// In dev, everything the API answers in production is proxied to it.
 export default defineConfig({
   plugins: [react(), devDownloads()],
   build: {

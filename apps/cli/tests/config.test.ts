@@ -74,7 +74,7 @@ describe('config store', () => {
   it('normalizes server addresses', () => {
     expect(normalizeServerUrl('fling.example.test')).toBe('https://fling.example.test')
     expect(normalizeServerUrl(' https://fling.example.test/ ')).toBe('https://fling.example.test')
-    expect(normalizeServerUrl('http://localhost:3001')).toBe('http://localhost:3001')
+    expect(normalizeServerUrl('http://localhost:47101')).toBe('http://localhost:47101')
     expect(() => normalizeServerUrl('ftp://x.test')).toThrow(/http/)
   })
 

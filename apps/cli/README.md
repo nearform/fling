@@ -251,7 +251,7 @@ To use the MCP server in another client, run it over stdio:
 From the repo root:
 
 ```sh
-pnpm cli login http://localhost:3001   # against `pnpm dev`
+pnpm cli login http://localhost:47101   # against `pnpm dev`
 pnpm --filter ./apps/cli test
 pnpm --filter ./apps/cli build         # → dist/cli.js
 ```

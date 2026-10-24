@@ -29,6 +29,9 @@ export interface Blobs {
   get(key: string): Promise<Uint8Array | null>
   putJson(key: string, value: unknown): Promise<void>
   getJson<T>(key: string): Promise<T | null>
+  /** Delete one object; a missing object is not an error. */
+  delete(key: string): Promise<void>
+  /** Delete every object under a `dir/` prefix. Throws unless the prefix ends in `/`. */
   deletePrefix(prefix: string): Promise<void>
 }
 

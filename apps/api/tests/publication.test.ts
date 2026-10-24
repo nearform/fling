@@ -5,6 +5,7 @@
 import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { FsBlobs } from '../src/blobs/fs.ts'
+import { manifestKey } from '../src/blobs/types.ts'
 import { publish, publishBytes, stage, UPLOAD_URL_TTL_SECONDS } from '../src/publication.ts'
 import type { User } from '../src/store/types.ts'
 import { APP_ORIGIN, createUser, type Env, file, setup, upload } from './helpers.ts'
@@ -144,7 +145,11 @@ describe('scanning', () => {
       code: 'secret_detected',
     })
     expect(await stored(versionId, 'index.html')).toBeNull()
-    expect((await env.store.getSite(user.email, 'hello'))?.currentVersionId).toBeNull()
+    const site = await env.store.getSite(user.email, 'hello')
+    expect(site?.currentVersionId).toBeNull()
+    // Regression: the manifest is one object, deleted as such (a `deletePrefix` on its key threw
+    // on S3 and turned the 422 into a 500).
+    expect(await env.blobs.getJson(manifestKey(site?.id as string, versionId))).toBeNull()
   })
 
   it('text files above the old 5 MB cap are scanned', async () => {

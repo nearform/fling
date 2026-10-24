@@ -356,7 +356,7 @@ export async function publish(
   const findings = await scanStoredVersion(deps, site.id, versionId, manifest.files)
   if (findings.length > 0) {
     await blobs.deletePrefix(siteVersionPrefix(site.id, versionId))
-    await blobs.deletePrefix(manifestKey(site.id, versionId))
+    await blobs.delete(manifestKey(site.id, versionId))
     throw secretDetected(findings)
   }
   return goLive(deps, user, site, version, manifest.files)

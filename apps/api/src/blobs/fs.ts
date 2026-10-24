@@ -115,8 +115,13 @@ export class FsBlobs implements Blobs {
     }
   }
 
+  async delete(key: string) {
+    await rm(this.pathFor(key), { force: true })
+  }
+
   async deletePrefix(prefix: string) {
-    // Prefixes used by the app always end at a directory boundary (`sites/<id>/`).
+    // As strict as S3Blobs, so a file key passed here fails in tests rather than in production.
+    if (!prefix.endsWith('/')) throw new Error('deletePrefix needs a `dir/` prefix')
     const dir = this.pathFor(prefix.replace(/\/+$/, ''))
     if (dir === this.root) throw new Error('refusing to delete storage root')
     await rm(join(dir), { recursive: true, force: true })

@@ -4,6 +4,12 @@ name: CI
 # person runs before committing. The workflow adds no check of its own, so what passes here is
 # exactly what passes on a laptop.
 #
+# The one addition is local stand-ins for the cloud services: DynamoDB Local and MinIO as service
+# containers, and the env vars that point the adapter conformance suites in platforms/aws at them.
+# Without those env vars (a laptop without Docker) the suites skip, so `pnpm gate` still passes;
+# with them, the AWS adapters must behave like the core's memory/fs ones. The tests create their
+# own table and bucket. To run them locally, see platforms/aws/tests/services.ts.
+#
 # deploy.yml runs after this workflow succeeds on main. release-cli.yml calls it (workflow_call)
 # before publishing. Every dependency is public, so no npm token is needed.
 on:
@@ -25,6 +31,26 @@ jobs:
     name: Gate
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local:3.3.2
+        ports: ['8000:8000']
+      # bitnami's image starts the server by default (the official one needs `server /data`, and
+      # service containers take no command).
+      minio:
+        image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+        ports: ['9000:9000']
+        env:
+          MINIO_ROOT_USER: fling-test
+          MINIO_ROOT_PASSWORD: fling-test-secret
+        options: >-
+          --health-cmd "curl -fs http://localhost:9000/minio/health/live"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      FLING_TEST_DYNAMODB_ENDPOINT: http://localhost:8000
+      FLING_TEST_S3_ENDPOINT: http://localhost:9000
+      FLING_TEST_S3_ACCESS_KEY: fling-test
+      FLING_TEST_S3_SECRET_KEY: fling-test-secret
     steps:
       - uses: actions/checkout@v7
       # pnpm version comes from `packageManager` in the root package.json. Must precede setup-node

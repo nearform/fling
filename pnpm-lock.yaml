@@ -183,6 +183,22 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
+  packages/conformance:
+    dependencies:
+      '@fling/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
+
   packages/shared:
     dependencies:
       zod:
@@ -232,6 +248,9 @@ importers:
         specifier: ^4.13.5
         version: 4.13.13
     devDependencies:
+      '@fling/conformance':
+        specifier: workspace:*
+        version: link:../../packages/conformance
       '@types/aws-lambda':
         specifier: ^8.10.152
         version: 8.10.164

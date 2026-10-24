@@ -104,7 +104,7 @@ async function deploy(env: ReturnType<typeof setup>, key: string, name: string, 
 describe('the edge agrees with site.view', () => {
   it('for every role and visibility', async () => {
     const env = setup()
-    const owner = await createUser(env, 'alice@nearform.com')
+    const owner = await createUser(env, 'alice@example.test')
     await deploy(env, owner.key, 'pub', { visibility: 'public' })
     await deploy(env, owner.key, 'priv', { visibility: 'private' })
     // The platform entry (lambda.ts, dev.ts) puts the cookie key where the edge reads it.
@@ -123,14 +123,14 @@ describe('the edge agrees with site.view', () => {
       const shareHost = new URL(share.shareUrl).host
       const site = (await env.store.findSite(name)) as PolicySite
       const requests: Record<Role, Parameters<typeof toCloudFrontEvent>[0]> = {
-        owner: { host: `${name}.fling.test`, cookieHeader: cookie('alice@nearform.com') },
-        member: { host: `${name}.fling.test`, cookieHeader: cookie('bob@nearform.com') },
+        owner: { host: `${name}.fling.test`, cookieHeader: cookie('alice@example.test') },
+        member: { host: `${name}.fling.test`, cookieHeader: cookie('bob@example.test') },
         share: { host: shareHost },
         anonymous: { host: `${name}.fling.test` },
       }
       const actors: Record<Role, Actor> = {
-        owner: { kind: 'user', email: 'alice@nearform.com' },
-        member: { kind: 'user', email: 'bob@nearform.com' },
+        owner: { kind: 'user', email: 'alice@example.test' },
+        member: { kind: 'user', email: 'bob@example.test' },
         share: { kind: 'share', token: shareHost.split('.')[0]?.slice(3) ?? '' },
         anonymous: { kind: 'anonymous' },
       }
@@ -151,8 +151,8 @@ describe('the edge agrees with site.view', () => {
 describe("a member can't act on another user's site", () => {
   async function twoUsers() {
     const env = setup()
-    const alice = await createUser(env, 'alice@nearform.com')
-    const bob = await createUser(env, 'bob@nearform.com')
+    const alice = await createUser(env, 'alice@example.test')
+    const bob = await createUser(env, 'bob@example.test')
     const live = await deploy(env, alice.key, 'hello', { visibility: 'public' })
     await api(env, alice.key, 'POST', '/api/sites/hello/share')
     const before = {
@@ -196,7 +196,7 @@ describe("a member can't act on another user's site", () => {
 
   it('through MCP: the same refusals', async () => {
     const { env, alice, versionId, before } = await twoUsers()
-    const { accessToken } = await connect(env, 'bob@nearform.com')
+    const { accessToken } = await connect(env, 'bob@example.test')
     const calls: [string, object][] = [
       ['fling_info', { name: 'hello' }],
       ['fling_files', { name: 'hello' }],
@@ -233,16 +233,16 @@ describe("a member can't act on another user's site", () => {
 
   it("a stale record of the name can't delete the current owner's route", async () => {
     const env = setup()
-    const alice = await createUser(env, 'alice@nearform.com')
-    const bob = await createUser(env, 'bob@nearform.com')
+    const alice = await createUser(env, 'alice@example.test')
+    const bob = await createUser(env, 'bob@example.test')
     await deploy(env, bob.key, 'hello')
     // Alice's old site record for the name, left behind while Bob holds the claim.
     await env.table.put({
-      pk: 'USER#alice@nearform.com',
+      pk: 'USER#alice@example.test',
       sk: 'SITE#hello',
       type: 'site',
       id: 'stale',
-      email: 'alice@nearform.com',
+      email: 'alice@example.test',
       name: 'hello',
       visibility: 'public',
       spa: false,

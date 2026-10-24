@@ -7,23 +7,23 @@ import { slugCandidate } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
 
 describe('admitGoogleClaims', () => {
-  const allowed = ['nearform.com']
+  const allowed = ['example.test']
   it('admits a verified allowed-domain email', () => {
     expect(
       admitGoogleClaims(
-        { email: 'Alice@Nearform.com', email_verified: true, hd: 'nearform.com', name: 'Alice' },
+        { email: 'Alice@Example.test', email_verified: true, hd: 'example.test', name: 'Alice' },
         allowed
       )
-    ).toEqual({ ok: true, email: 'alice@nearform.com', name: 'Alice', picture: null })
+    ).toEqual({ ok: true, email: 'alice@example.test', name: 'Alice', picture: null })
   })
   it.each([
-    [{ email: 'a@nearform.com', email_verified: false }, 'email_unverified'],
-    [{ email: 'a@nearform.com' }, 'email_unverified'],
+    [{ email: 'a@example.test', email_verified: false }, 'email_unverified'],
+    [{ email: 'a@example.test' }, 'email_unverified'],
     [{ email_verified: true }, 'email_unverified'],
     [{ email: 'a@gmail.com', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@evil.nearform.com', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@nearform.com.evil.io', email_verified: true }, 'domain_not_allowed'],
-    [{ email: 'a@nearform.com', email_verified: true, hd: 'other.com' }, 'domain_not_allowed'],
+    [{ email: 'a@evil.example.test', email_verified: true }, 'domain_not_allowed'],
+    [{ email: 'a@example.test.evil.io', email_verified: true }, 'domain_not_allowed'],
+    [{ email: 'a@example.test', email_verified: true, hd: 'other.com' }, 'domain_not_allowed'],
   ])('rejects %j', (claims, reason) => {
     expect(admitGoogleClaims(claims, allowed)).toEqual({ ok: false, reason })
   })
@@ -36,23 +36,17 @@ describe('admitGoogleClaims', () => {
 
 describe('safeReturnUrl', () => {
   const cfg = {
-    appOrigin: 'https://fling.labs.nearform.com',
-    sitesDomain: 'fling.labs.nearform.com',
+    appOrigin: 'https://fling.example.test',
+    sitesDomain: 'fling.example.test',
     siteScheme: 'https' as const,
   }
   it.each([
-    ['/sites', 'https://fling.labs.nearform.com/sites'],
+    ['/sites', 'https://fling.example.test/sites'],
+    ['https://fling.example.test/auth/cli?x=1', 'https://fling.example.test/auth/cli?x=1'],
+    ['https://my-app.fling.example.test/a?b=c', 'https://my-app.fling.example.test/a?b=c'],
     [
-      'https://fling.labs.nearform.com/auth/cli?x=1',
-      'https://fling.labs.nearform.com/auth/cli?x=1',
-    ],
-    [
-      'https://my-app.fling.labs.nearform.com/a?b=c',
-      'https://my-app.fling.labs.nearform.com/a?b=c',
-    ],
-    [
-      'https://s--abcdefghij0123456789.fling.labs.nearform.com/',
-      'https://s--abcdefghij0123456789.fling.labs.nearform.com/',
+      'https://s--abcdefghij0123456789.fling.example.test/',
+      'https://s--abcdefghij0123456789.fling.example.test/',
     ],
   ])('allows %s', (input, out) => {
     expect(safeReturnUrl(input, cfg)).toBe(out)
@@ -63,16 +57,16 @@ describe('safeReturnUrl', () => {
     '//evil.com/x',
     '/\\evil.com',
     'https://evil.com/',
-    'http://my-app.fling.labs.nearform.com/',
-    'https://app--bob.fling.labs.nearform.com/',
-    'https://s--short.fling.labs.nearform.com/',
-    'https://www.fling.labs.nearform.com/',
-    'https://fling.labs.nearform.com.evil.com/',
-    'https://evilfling.labs.nearform.com/',
-    'https://a.b.fling.labs.nearform.com/',
-    'https://user:pw@my-app.fling.labs.nearform.com/',
+    'http://my-app.fling.example.test/',
+    'https://app--bob.fling.example.test/',
+    'https://s--short.fling.example.test/',
+    'https://www.fling.example.test/',
+    'https://fling.example.test.evil.com/',
+    'https://evilfling.example.test/',
+    'https://a.b.fling.example.test/',
+    'https://user:pw@my-app.fling.example.test/',
     'javascript:alert(1)',
-    'https://fling.labs.nearform.com:444/',
+    'https://fling.example.test:444/',
   ])('rejects %s', input => {
     expect(safeReturnUrl(input, cfg)).toBe('/')
   })

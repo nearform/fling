@@ -5,10 +5,15 @@
  *
  * The local server reads files from disk (`fling_deploy {path}`); the remote one can't, so it takes
  * content inline (`fling_publish`, or the chunked `fling_upload_*` trio for bigger sites).
+ *
+ * Descriptions are templates: they name the instance, where its sites live and who can open a
+ * private site. Each server renders them with `mcpToolsFor(mcpWording(instance))` — the remote one
+ * from its config, the local one from the instance the CLI is logged in to.
  */
 import { z } from 'zod'
 import type { VersionFiles } from './api.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
+import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -37,20 +42,44 @@ export interface McpToolDef<S extends z.ZodRawShape = z.ZodRawShape> {
 
 const tool = <S extends z.ZodRawShape>(def: McpToolDef<S>) => def
 
-// --- shared wording -----------------------------------------------------------------------------
+/** The instance-specific words in the descriptions. */
+export interface McpWording {
+  /** The instance's display name, e.g. "Fling". */
+  name: string
+  /** `https://<name>.sites.example.test` */
+  sitesPattern: string
+  /** Who can open a private site: "anyone signed in to Fling (@example.test accounts)". */
+  privateAudience: string
+  /** How the user signs in: "their Google account". */
+  signIn: string
+}
 
-const NAME_RULES =
-  `Site names are 1-${SITE_NAME_MAX} chars of lowercase letters, digits and single hyphens, and are ` +
-  'one global namespace (first come, first served): the site is served at https://<name>.fling.labs.nearform.com.'
+/** Wording for an instance; without one (not logged in yet) it stays generic. */
+export function mcpWording(
+  instance?: Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> | null
+): McpWording {
+  if (!instance) {
+    return {
+      name: 'Fling',
+      sitesPattern: 'https://<name>.<sites domain>',
+      privateAudience: 'people signed in to this Fling',
+      signIn: 'the Fling sign-in page',
+    }
+  }
+  return {
+    name: instance.name,
+    sitesPattern: instanceSitesPattern(instance),
+    privateAudience: privateAudience(instance),
+    signIn: `their ${instance.auth.displayName} account`,
+  }
+}
+
+// --- shared wording -----------------------------------------------------------------------------
 
 const NAME_REQUIRED =
   'Publishing needs a name: if the user did not give one, propose a short descriptive one (e.g. "q3-report") ' +
   'and confirm it with them first (fling_check_name tells you whether it is free). If the name is taken by someone ' +
   'else the call fails with free suggestions — offer those to the user and retry with the one they pick.'
-
-const VISIBILITY =
-  'Sites are private by default (only signed-in Nearformers can open them); pass `public: true` only if the ' +
-  'user asks for a public site. Share links (fling_share) are public to anyone who has them.'
 
 const INLINE_ONLY =
   'If you created the content in this conversation, pass it directly — never pass file paths from your ' +
@@ -100,239 +129,259 @@ const spa = z
     'Single-page app: serve index.html for unknown paths (client-side routing). Omit to keep the current setting'
   )
 
-const isPublic = z
-  .boolean()
-  .optional()
-  .describe(
-    'true → anyone can view; false → Nearformers only. Omit to keep the current setting (new sites are private)'
-  )
-
 // --- tools --------------------------------------------------------------------------------------
 
-export const mcpTools = {
-  whoami: tool({
-    name: 'fling_whoami',
-    title: 'Who am I',
-    description: 'Show the signed-in Nearform user that Fling acts as.',
-    inputSchema: {},
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }),
+/** The catalogue, its descriptions rendered with `w`. */
+export function mcpToolsFor(w: McpWording) {
+  const NAME_RULES =
+    `Site names are 1-${SITE_NAME_MAX} chars of lowercase letters, digits and single hyphens, and are ` +
+    `one global namespace (first come, first served): the site is served at ${w.sitesPattern}.`
 
-  list: tool({
-    name: 'fling_list',
-    title: 'List sites',
-    description: "List the user's Fling sites with URL, visibility and share link.",
-    inputSchema: {
-      archived: z.boolean().optional().describe('List archived sites instead of live ones'),
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }),
+  const VISIBILITY =
+    `Sites are private by default (only ${w.privateAudience} can open them); pass \`public: true\` only if ` +
+    'the user asks for a public site. Share links (fling_share) are public to anyone who has them.'
 
-  info: tool({
-    name: 'fling_info',
-    title: 'Site details',
-    description:
-      'Show one site: URL, visibility, share link, current version and version history (ids for fling_rollback).',
-    inputSchema: { name: siteName },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }),
+  const isPublic = z
+    .boolean()
+    .optional()
+    .describe(
+      `true → anyone can view; false → only ${w.privateAudience}. Omit to keep the current setting (new sites are private)`
+    )
 
-  files: tool({
-    name: 'fling_files',
-    title: 'List site files',
-    description:
-      "List the files in a site's current version (or in `versionId`, from fling_info): path, size and content " +
-      'type, sorted by path. Use it to check what was actually published — e.g. when the user sees a 404, confirm ' +
-      'the page exists at that path and that there is a root index.html (without one the site root 404s).',
-    inputSchema: {
-      name: siteName,
-      versionId: z
-        .string()
-        .min(1)
-        .max(100)
-        .optional()
-        .describe('Version id (from fling_info); omit for the version being served'),
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }),
+  return {
+    whoami: tool({
+      name: 'fling_whoami',
+      title: 'Who am I',
+      description: `Show the signed-in user that ${w.name} acts as.`,
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
 
-  checkName: tool({
-    name: 'fling_check_name',
-    title: 'Check a site name',
-    description:
-      'Check whether a site name can be used before publishing: `available` (a new site), `yours` (publishing ' +
-      "updates the user's existing site), `taken` (someone else's — free `suggestions` are returned) or `invalid`. " +
-      NAME_RULES,
-    inputSchema: { name: z.string().min(1).max(200).describe('Site name to check') },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-  }),
+    list: tool({
+      name: 'fling_list',
+      title: 'List sites',
+      description: "List the user's Fling sites with URL, visibility and share link.",
+      inputSchema: {
+        archived: z.boolean().optional().describe('List archived sites instead of live ones'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
 
-  publish: tool({
-    name: 'fling_publish',
-    title: 'Publish a site',
-    description:
-      'Publish a static site to Fling in one call and get back its URL. Pass every file of the site inline in ' +
-      `\`files\` (whole site, up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB decoded in total; bigger sites: ` +
-      `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
-      'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too); ' +
-      'publishing identical content again is a no-op. ' +
-      `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
-      'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
-      'the site has.',
-    inputSchema: {
-      name: siteName,
-      files: z
-        .array(
-          z.object({
-            path: sitePath,
-            content: z.string().describe('The file content, encoded as `encoding` says'),
-            encoding,
-          })
-        )
-        .min(1)
-        .max(MAX_FILES)
-        .describe('Every file of the site'),
-      spa,
-      public: isPublic,
-      listHtml,
-    },
-    annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }),
+    info: tool({
+      name: 'fling_info',
+      title: 'Site details',
+      description:
+        'Show one site: URL, visibility, share link, current version and version history (ids for fling_rollback).',
+      inputSchema: { name: siteName },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
 
-  uploadBegin: tool({
-    name: 'fling_upload_begin',
-    title: 'Start a chunked upload',
-    description:
-      `Start publishing a site too big for one fling_publish call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, ` +
-      'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
-      `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
-      `${NAME_REQUIRED} ${VISIBILITY}`,
-    inputSchema: { name: siteName, spa, public: isPublic },
-    annotations: { destructiveHint: false, openWorldHint: false },
-  }),
+    files: tool({
+      name: 'fling_files',
+      title: 'List site files',
+      description:
+        "List the files in a site's current version (or in `versionId`, from fling_info): path, size and content " +
+        'type, sorted by path. Use it to check what was actually published — e.g. when the user sees a 404, confirm ' +
+        'the page exists at that path and that there is a root index.html (without one the site root 404s).',
+      inputSchema: {
+        name: siteName,
+        versionId: z
+          .string()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Version id (from fling_info); omit for the version being served'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
 
-  uploadFile: tool({
-    name: 'fling_upload_file',
-    title: 'Upload a file (chunked)',
-    description:
-      'Add one file to a chunked upload started with fling_upload_begin. Sending the same path again replaces it. ' +
-      `A file larger than ${MCP_UPLOAD_CHUNK_MAX_CHARS / 1024 / 1024} MB of content can span calls: send the first ` +
-      'part normally, then the following parts in order with `append: true` (same path and encoding; send appends ' +
-      `one at a time, not in parallel). ${ENCODING} ${NEVER_PUBLISHED}`,
-    inputSchema: {
-      uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
-      path: sitePath,
-      content: z
-        .string()
-        .max(MCP_UPLOAD_CHUNK_MAX_CHARS)
-        .describe('The file content (or the next part of it, with `append`)'),
-      encoding,
-      append: z
-        .boolean()
-        .optional()
-        .describe('Append this content to the file sent earlier with the same path'),
-    },
-    annotations: { destructiveHint: false, openWorldHint: false },
-  }),
+    checkName: tool({
+      name: 'fling_check_name',
+      title: 'Check a site name',
+      description:
+        'Check whether a site name can be used before publishing: `available` (a new site), `yours` (publishing ' +
+        "updates the user's existing site), `taken` (someone else's — free `suggestions` are returned) or `invalid`. " +
+        NAME_RULES,
+      inputSchema: { name: z.string().min(1).max(200).describe('Site name to check') },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
 
-  uploadFinish: tool({
-    name: 'fling_upload_finish',
-    title: 'Finish a chunked upload',
-    description:
-      'Publish everything sent with fling_upload_file as the new version of the site and return its URL. The site ' +
-      `becomes exactly the uploaded files. ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
-      'again with `listHtml`. The result includes `warnings`.',
-    inputSchema: {
-      uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
-      listHtml,
-    },
-    annotations: { destructiveHint: false, openWorldHint: true },
-  }),
+    publish: tool({
+      name: 'fling_publish',
+      title: 'Publish a site',
+      description:
+        'Publish a static site to Fling in one call and get back its URL. Pass every file of the site inline in ' +
+        `\`files\` (whole site, up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB decoded in total; bigger sites: ` +
+        `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
+        'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too); ' +
+        'publishing identical content again is a no-op. ' +
+        `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
+        'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
+        'the site has.',
+      inputSchema: {
+        name: siteName,
+        files: z
+          .array(
+            z.object({
+              path: sitePath,
+              content: z.string().describe('The file content, encoded as `encoding` says'),
+              encoding,
+            })
+          )
+          .min(1)
+          .max(MAX_FILES)
+          .describe('Every file of the site'),
+        spa,
+        public: isPublic,
+        listHtml,
+      },
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }),
 
-  share: tool({
-    name: 'fling_share',
-    title: 'Share link',
-    description:
-      'Get or create a public share link for a site: anyone with the link can view it without signing in (use it to ' +
-      'show a private site to someone outside Nearform). `refresh` replaces the link (the old one stops working); ' +
-      '`revoke` removes it.',
-    inputSchema: {
-      name: siteName,
-      refresh: z.boolean().optional().describe('Rotate the link'),
-      revoke: z.boolean().optional().describe('Remove the link'),
-    },
-    annotations: { destructiveHint: false, openWorldHint: true },
-  }),
+    uploadBegin: tool({
+      name: 'fling_upload_begin',
+      title: 'Start a chunked upload',
+      description:
+        `Start publishing a site too big for one fling_publish call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, ` +
+        'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
+        `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
+        `${NAME_REQUIRED} ${VISIBILITY}`,
+      inputSchema: { name: siteName, spa, public: isPublic },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    }),
 
-  setVisibility: tool({
-    name: 'fling_set_visibility',
-    title: 'Set visibility',
-    description: 'Make a site private (signed-in Nearformers only) or public (anyone).',
-    inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
-    annotations: { idempotentHint: true, openWorldHint: true },
-  }),
+    uploadFile: tool({
+      name: 'fling_upload_file',
+      title: 'Upload a file (chunked)',
+      description:
+        'Add one file to a chunked upload started with fling_upload_begin. Sending the same path again replaces it. ' +
+        `A file larger than ${MCP_UPLOAD_CHUNK_MAX_CHARS / 1024 / 1024} MB of content can span calls: send the first ` +
+        'part normally, then the following parts in order with `append: true` (same path and encoding; send appends ' +
+        `one at a time, not in parallel). ${ENCODING} ${NEVER_PUBLISHED}`,
+      inputSchema: {
+        uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
+        path: sitePath,
+        content: z
+          .string()
+          .max(MCP_UPLOAD_CHUNK_MAX_CHARS)
+          .describe('The file content (or the next part of it, with `append`)'),
+        encoding,
+        append: z
+          .boolean()
+          .optional()
+          .describe('Append this content to the file sent earlier with the same path'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    }),
 
-  archive: tool({
-    name: 'fling_archive',
-    title: 'Archive or restore a site',
-    description:
-      'Archive a site (it stops being served and is hidden from lists, but its name, files and versions are kept) ' +
-      'or, with `unarchive`, bring it back. Prefer this over deleting.',
-    inputSchema: {
-      name: siteName,
-      unarchive: z.boolean().optional().describe('Restore an archived site'),
-    },
-    annotations: { idempotentHint: true, openWorldHint: false },
-  }),
+    uploadFinish: tool({
+      name: 'fling_upload_finish',
+      title: 'Finish a chunked upload',
+      description:
+        'Publish everything sent with fling_upload_file as the new version of the site and return its URL. The site ' +
+        `becomes exactly the uploaded files. ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
+        'again with `listHtml`. The result includes `warnings`.',
+      inputSchema: {
+        uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
+        listHtml,
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    }),
 
-  delete: tool({
-    name: 'fling_delete',
-    title: 'Delete a site',
-    description:
-      'Permanently delete a site and every version of it, freeing its name. Cannot be undone — confirm with the user ' +
-      'first and pass `confirm: true`. Consider fling_archive instead.',
-    inputSchema: {
-      name: siteName,
-      confirm: z.literal(true).describe('Must be true: the user has confirmed the deletion'),
-    },
-    annotations: { destructiveHint: true, openWorldHint: false },
-  }),
+    share: tool({
+      name: 'fling_share',
+      title: 'Share link',
+      description:
+        'Get or create a public share link for a site: anyone with the link can view it without signing in (use it to ' +
+        'show a private site to someone who cannot sign in). `refresh` replaces the link (the old one stops working); ' +
+        '`revoke` removes it.',
+      inputSchema: {
+        name: siteName,
+        refresh: z.boolean().optional().describe('Rotate the link'),
+        revoke: z.boolean().optional().describe('Remove the link'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    }),
 
-  rollback: tool({
-    name: 'fling_rollback',
-    title: 'Roll back',
-    description:
-      'Point a site at an earlier version (ids from fling_info). Instant; nothing is uploaded.',
-    inputSchema: {
-      name: siteName,
-      versionId: z.string().min(1).max(100).describe('Version id to serve'),
-    },
-    annotations: { idempotentHint: true, openWorldHint: false },
-  }),
-} as const
+    setVisibility: tool({
+      name: 'fling_set_visibility',
+      title: 'Set visibility',
+      description: `Make a site private (only ${w.privateAudience}) or public (anyone).`,
+      inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
+      annotations: { idempotentHint: true, openWorldHint: true },
+    }),
+
+    archive: tool({
+      name: 'fling_archive',
+      title: 'Archive or restore a site',
+      description:
+        'Archive a site (it stops being served and is hidden from lists, but its name, files and versions are kept) ' +
+        'or, with `unarchive`, bring it back. Prefer this over deleting.',
+      inputSchema: {
+        name: siteName,
+        unarchive: z.boolean().optional().describe('Restore an archived site'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    delete: tool({
+      name: 'fling_delete',
+      title: 'Delete a site',
+      description:
+        'Permanently delete a site and every version of it, freeing its name. Cannot be undone — confirm with the user ' +
+        'first and pass `confirm: true`. Consider fling_archive instead.',
+      inputSchema: {
+        name: siteName,
+        confirm: z.literal(true).describe('Must be true: the user has confirmed the deletion'),
+      },
+      annotations: { destructiveHint: true, openWorldHint: false },
+    }),
+
+    rollback: tool({
+      name: 'fling_rollback',
+      title: 'Roll back',
+      description:
+        'Point a site at an earlier version (ids from fling_info). Instant; nothing is uploaded.',
+      inputSchema: {
+        name: siteName,
+        versionId: z.string().min(1).max(100).describe('Version id to serve'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+  } as const
+}
+
+export type McpTools = ReturnType<typeof mcpToolsFor>
+
+/**
+ * The catalogue with generic wording: for tool names and input schemas. Servers register
+ * `mcpToolsFor(mcpWording(instance))` so the descriptions name the instance.
+ */
+export const mcpTools: McpTools = mcpToolsFor(mcpWording())
 
 /** Sent at `initialize` by the remote server. */
-export const MCP_REMOTE_INSTRUCTIONS = [
-  'Fling publishes static sites (HTML/CSS/JS, images, documents) for Nearform staff at https://<name>.fling.labs.nearform.com.',
-  'To publish content you created in this conversation (an HTML page, a report, a small app): call fling_publish with ' +
-    'every file inline (text as utf8, binary as base64). This server cannot read files in your sandbox and your sandbox ' +
-    'cannot reach Fling, so never pass sandbox file paths and never curl or upload from the sandbox. Make the site ' +
-    'self-contained: an index.html at the root, relative links between files.',
-  'Every site needs a name. If the user did not give one, propose a short descriptive name and confirm it before ' +
-    'publishing (fling_check_name shows whether it is free). Names are global and first come, first served; when a ' +
-    'name is taken, offer the returned suggestions.',
-  'Sites are private (Nearformers only) by default. Only make one public if asked; to show a private site to someone ' +
-    'outside Nearform, create a share link with fling_share.',
-  'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
-    'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +
-    '(`listHtml: false`, the root URL will 404), then retry.',
-  NEVER_PUBLISHED,
-  `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
-    '`append` for big files) and fling_upload_finish.',
-  'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +
-    'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
-    'exactly which files a site has (e.g. when the user reports a 404).',
-].join('\n\n')
+export const mcpRemoteInstructions = (w: McpWording) =>
+  [
+    `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
+    'To publish content you created in this conversation (an HTML page, a report, a small app): call fling_publish with ' +
+      'every file inline (text as utf8, binary as base64). This server cannot read files in your sandbox and your sandbox ' +
+      'cannot reach Fling, so never pass sandbox file paths and never curl or upload from the sandbox. Make the site ' +
+      'self-contained: an index.html at the root, relative links between files.',
+    'Every site needs a name. If the user did not give one, propose a short descriptive name and confirm it before ' +
+      'publishing (fling_check_name shows whether it is free). Names are global and first come, first served; when a ' +
+      'name is taken, offer the returned suggestions.',
+    `Sites are private (only ${w.privateAudience}) by default. Only make one public if asked; to show a private ` +
+      'site to someone who cannot sign in, create a share link with fling_share.',
+    'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
+      'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +
+      '(`listHtml: false`, the root URL will 404), then retry.',
+    NEVER_PUBLISHED,
+    `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
+      '`append` for big files) and fling_upload_finish.',
+    'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +
+      'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
+      'exactly which files a site has (e.g. when the user reports a 404).',
+  ].join('\n\n')
 
 /** Max files listed in a fling_files text result (structured data always has them all). */
 export const MCP_FILES_LISTED = 200

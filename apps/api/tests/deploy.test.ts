@@ -276,7 +276,7 @@ describe('site operations', () => {
 
   it("can't see another user's sites", async () => {
     await deployLive(v1)
-    const bob = await createUser(env, 'bob@nearform.com')
+    const bob = await createUser(env, 'bob@example.test')
     expect((await api(env, bob.key, 'GET', '/api/sites/hello')).status).toBe(404)
     expect((await json(await api(env, bob.key, 'GET', '/api/sites'))).sites).toEqual([])
   })
@@ -342,16 +342,16 @@ describe('version files', () => {
     )
     expect(pending.status).toBe('upload')
     expect((await filesOf('hello', pending.versionId)).status).toBe(404)
-    const bob = await createUser(env, 'bob@nearform.com')
+    const bob = await createUser(env, 'bob@example.test')
     expect((await filesOf('hello', live.versionId, bob.key)).status).toBe(404)
   })
 })
 
 describe('global site names', () => {
-  // alice@nearform.com deploys 'hello' first; clifton.cunningham@… then wants it.
+  // alice@example.test deploys 'hello' first; clifton.cunningham@… then wants it.
   let cc: Awaited<ReturnType<typeof createUser>>
   beforeEach(async () => {
-    cc = await createUser(env, 'clifton.cunningham@nearform.com')
+    cc = await createUser(env, 'clifton.cunningham@example.test')
   })
 
   const deployAs = (k: string, name: string, files = v1) =>

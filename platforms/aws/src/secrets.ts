@@ -1,5 +1,5 @@
 /**
- * Secrets from SSM SecureString parameters under `SSM_PREFIX` (e.g. `/labs/production/fling/`):
+ * Secrets from SSM SecureString parameters under `SSM_PREFIX` (e.g. `/example/fling/`):
  * google-client-id, google-client-secret, session-secret, site-hmac-key, origin-verify-secret.
  * Loaded once per cold start with GetParametersByPath(WithDecryption).
  */

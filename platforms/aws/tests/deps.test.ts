@@ -18,6 +18,7 @@ describe('buildAwsDeps', () => {
   it('production defaults: DynamoDB, S3 and CloudFront KeyValueStore', () => {
     const base = loadBaseConfig({
       APP_ENV: 'production',
+      ALLOWED_EMAIL_DOMAINS: 'example.test',
       TABLE_NAME: 'table',
       SITES_BUCKET: 'bucket',
       KVS_ARN: 'arn:aws:cloudfront::123456789012:key-value-store/x',

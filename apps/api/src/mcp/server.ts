@@ -6,10 +6,12 @@
 import {
   describeVersionFiles,
   MCP_PUBLISH_MAX_BYTES,
-  MCP_REMOTE_INSTRUCTIONS,
   type McpToolDef,
-  mcpTools,
+  mcpRemoteInstructions,
+  mcpToolsFor,
+  mcpWording,
   NOT_READY_NOTE,
+  privateAudience,
   probeUrl,
   READY_TIMEOUT_LAMBDA_MS,
   readinessWaitDisabled,
@@ -19,6 +21,7 @@ import {
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
+import { instanceMetadata } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
@@ -126,7 +129,7 @@ async function publishResult(
   const warnings = outcome.warnings.length ? `\nWarnings:\n- ${outcome.warnings.join('\n- ')}` : ''
   const privacy =
     site.visibility === 'private'
-      ? ' Only signed-in Nearformers can open it; use fling_share for a public link.'
+      ? ` Only ${privateAudience(instanceMetadata(deps.config))} can open it; use fling_share for a public link.`
       : ''
   const edge =
     status === 'unchanged'
@@ -157,9 +160,11 @@ const visibilityOf = (pub: boolean | undefined) =>
   pub === undefined ? undefined : pub ? ('public' as const) : ('private' as const)
 
 export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
+  const wording = mcpWording(instanceMetadata(deps.config))
+  const mcpTools = mcpToolsFor(wording)
   const server = new McpServer(
-    { name: 'fling', title: 'Fling', version: SERVER_VERSION },
-    { instructions: MCP_REMOTE_INSTRUCTIONS }
+    { name: 'fling', title: deps.config.instanceName, version: SERVER_VERSION },
+    { instructions: mcpRemoteInstructions(wording) }
   )
 
   function register<S extends z.ZodRawShape>(

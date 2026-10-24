@@ -1,4 +1,4 @@
-// Node-only. The `fling_site` cookie that lets logged-in Nearformers view private
+// Node-only. The `fling_site` cookie that lets signed-in members view private
 // sites. Minted by the API at login, verified by the CloudFront Function
 // (edge/site-router.js re-implements `verify` with the cloudfront `crypto` module —
 // keep the two in step; edge tests check them against each other).

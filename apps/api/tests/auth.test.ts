@@ -34,7 +34,7 @@ describe('API authentication', () => {
     const { key, session } = await createUser(env)
     const viaKey = await env.app.request('/api/me', { headers: { authorization: `Bearer ${key}` } })
     expect(await json(viaKey)).toEqual({
-      email: 'alice@nearform.com',
+      email: 'alice@example.test',
       name: 'Alice',
       picture: null,
       userSlug: 'alice',
@@ -112,7 +112,7 @@ describe('Google OAuth', () => {
     return { flow, state: env.google.lastState as string }
   }
 
-  it('signs in a verified nearform user: session + site cookie, redirect to return', async () => {
+  it('signs in a verified user on the allowlist: session + site cookie, redirect to return', async () => {
     const { flow, state } = await start()
     const res = await env.app.request(`/auth/google/callback?code=good-code&state=${state}`, {
       headers: { cookie: `fling_oauth=${flow}` },
@@ -132,7 +132,7 @@ describe('Google OAuth', () => {
       env.config.secrets.siteHmacKey,
       Math.floor(env.deps.clock.now().getTime() / 1000)
     )
-    expect(payload?.e).toBe('alice@nearform.com')
+    expect(payload?.e).toBe('alice@example.test')
 
     const me = await env.app.request('/api/me', {
       headers: { cookie: `${SESSION}=${cookies[SESSION]?.value}` },
@@ -140,7 +140,7 @@ describe('Google OAuth', () => {
     expect((await json(me)).userSlug).toBe('alice')
   })
 
-  it('rejects a state mismatch and a non-nearform account', async () => {
+  it('rejects a state mismatch and a account outside the allowlist', async () => {
     const { flow } = await start()
     const mismatch = await env.app.request('/auth/google/callback?code=good-code&state=other', {
       headers: { cookie: `fling_oauth=${flow}` },
@@ -219,11 +219,11 @@ describe('/auth/login, logout, cli', () => {
   it('dev-login is 404 unless enabled', async () => {
     expect((await env.app.request('/auth/dev-login?email=a@b.c')).status).toBe(404)
     const dev = setup({ devLogin: true, secureCookies: false })
-    const res = await dev.app.request('/auth/dev-login?email=Dev@Nearform.com&return=/sites')
+    const res = await dev.app.request('/auth/dev-login?email=Dev@Example.test&return=/sites')
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toBe(`${APP_ORIGIN}/sites`)
     const cookies = cookiesOf(res)
     expect(cookies.fling_session?.raw).not.toMatch(/Secure/)
-    expect(await dev.store.getUser('dev@nearform.com')).not.toBeNull()
+    expect(await dev.store.getUser('dev@example.test')).not.toBeNull()
   })
 })

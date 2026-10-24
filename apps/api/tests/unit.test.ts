@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { validateCliRedirectUri } from '../src/auth/cli.ts'
 import { admitGoogleClaims } from '../src/auth/google.ts'
 import { safeReturnUrl } from '../src/auth/return-url.ts'
-import { MemoryStore } from '../src/store/memory.ts'
+import { Records } from '../src/store/records.ts'
 import { slugCandidate } from '../src/store/types.ts'
+import { MemoryTable } from '../src/table/memory.ts'
 
 describe('admitGoogleClaims', () => {
   const allowed = ['nearform.com']
@@ -111,7 +112,7 @@ describe('validateCliRedirectUri', () => {
 
 describe('user slugs', () => {
   it('are unique per email', async () => {
-    const store = new MemoryStore()
+    const store = new Records(new MemoryTable())
     const now = new Date().toISOString()
     const a = await store.upsertUser(
       { email: 'a.b@x.com', name: 'A', picture: null, preferredSlug: 'a-b' },

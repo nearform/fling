@@ -1,7 +1,7 @@
 /**
- * The suites against the core's own adapters (memory table and store, fs blobs, memory route
- * table). They run here rather than in apps/api so @fling/api doesn't depend on this package (a
- * cycle).
+ * The suites against the core's own adapters (memory table and Records on it, fs blobs, memory
+ * route table). They run here rather than in apps/api so @fling/api doesn't depend on this package
+ * (a cycle).
  * Presigned uploads go through the real app, whose `/dev-upload/*` route is FsBlobs' signed PUT.
  */
 import { mkdtempSync } from 'node:fs'
@@ -12,7 +12,7 @@ import { FsBlobs } from '@fling/api/blobs/fs'
 import { loadBaseConfig } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
 import { MemoryRouteTable } from '@fling/api/route-table/memory'
-import { MemoryStore } from '@fling/api/store/memory'
+import { Records } from '@fling/api/store/records'
 import { MemoryTable } from '@fling/api/table/memory'
 import {
   blobsConformance,
@@ -25,7 +25,7 @@ const APP_ORIGIN = 'https://app.example.test'
 
 tableConformance('MemoryTable', () => new MemoryTable())
 
-storeConformance('MemoryStore', () => new MemoryStore())
+storeConformance('Records on MemoryTable', () => new Records(new MemoryTable()))
 
 routeTableConformance('MemoryRouteTable', () => new MemoryRouteTable())
 

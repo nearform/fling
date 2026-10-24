@@ -9,7 +9,8 @@ import { signSession } from '../src/auth/session.ts'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
 import { MemoryRouteTable } from '../src/route-table/memory.ts'
-import { MemoryStore } from '../src/store/memory.ts'
+import { Records } from '../src/store/records.ts'
+import { MemoryTable } from '../src/table/memory.ts'
 import type { Deps, GoogleClaims } from '../src/types.ts'
 
 export const APP_ORIGIN = 'https://fling.test'
@@ -40,12 +41,13 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 
 export function setup(overrides: Partial<Config> = {}) {
   const config = testConfig(overrides)
-  const store = new MemoryStore()
+  let now = new Date('2026-01-01T00:00:00Z')
+  const clock = { now: () => now }
+  // Expiry in the table follows the test clock, as it follows real time in production.
+  const store = new Records(new MemoryTable(() => clock.now().getTime()))
   const routeTable = new MemoryRouteTable()
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
-  let now = new Date('2026-01-01T00:00:00Z')
-  const clock = { now: () => now }
   const google: { claims: GoogleClaims; lastState?: string } = {
     claims: { email: 'alice@nearform.com', email_verified: true, hd: 'nearform.com' },
   }

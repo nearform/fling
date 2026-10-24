@@ -1,12 +1,11 @@
 import { FsBlobs } from '@fling/api/blobs/fs'
 import { loadBaseConfig } from '@fling/api/config'
 import { MemoryRouteTable } from '@fling/api/route-table/memory'
-import { MemoryStore } from '@fling/api/store/memory'
+import { Records } from '@fling/api/store/records'
 import { describe, expect, it } from 'vitest'
 import { S3Blobs } from '../src/blobs/s3.ts'
 import { buildAwsDeps } from '../src/deps.ts'
 import { CloudFrontRouteTable } from '../src/route-table/cloudfront.ts'
-import { DynamoStore } from '../src/store/dynamo.ts'
 
 const secrets = {
   googleClientId: '',
@@ -24,7 +23,7 @@ describe('buildAwsDeps', () => {
       KVS_ARN: 'arn:aws:cloudfront::123456789012:key-value-store/x',
     })
     const deps = buildAwsDeps({ ...base, secrets })
-    expect(deps.store).toBeInstanceOf(DynamoStore)
+    expect(deps.store).toBeInstanceOf(Records)
     expect(deps.blobs).toBeInstanceOf(S3Blobs)
     expect(deps.routeTable).toBeInstanceOf(CloudFrontRouteTable)
   })
@@ -32,7 +31,7 @@ describe('buildAwsDeps', () => {
   it('memory/fs drivers are the core adapters', () => {
     const base = loadBaseConfig({ APP_ENV: 'development', FS_ROOT: '/tmp/fling-deps-test' })
     const deps = buildAwsDeps({ ...base, secrets })
-    expect(deps.store).toBeInstanceOf(MemoryStore)
+    expect(deps.store).toBeInstanceOf(Records)
     expect(deps.blobs).toBeInstanceOf(FsBlobs)
     expect(deps.routeTable).toBeInstanceOf(MemoryRouteTable)
   })

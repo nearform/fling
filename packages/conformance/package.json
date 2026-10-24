@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Adapter conformance suites for the API's ports (Store, Blobs, RouteTable): vitest suite functions every adapter runs, so the core's memory/fs adapters (tested here) and each platform's adapters (tested in platforms/*) keep the same semantics. Consumed as TypeScript source.",
+  "description": "Adapter conformance suites for the API's ports (Table, Blobs, RouteTable) and for Records (the Store over Table): vitest suite functions every adapter runs, so the core's memory/fs adapters (tested here) and each platform's adapters (tested in platforms/*) keep the same semantics. Consumed as TypeScript source.",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

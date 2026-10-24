@@ -1,5 +1,5 @@
 /**
- * Publication through its own interface (stage / publish / publishBytes) on MemoryStore + FsBlobs.
+ * Publication through its own interface (stage / publish / publishBytes) on Records (memory table) + FsBlobs.
  * FsBlobs enforces the same rules as S3: upload URLs are bound to the manifest's sha256 and expire.
  */
 import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'

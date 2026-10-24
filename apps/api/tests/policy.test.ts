@@ -15,7 +15,15 @@ import {
   type Actor,
   can,
   canDeleteComment,
+  canInstance,
+  INSTANCE_ACTIONS,
+  type InstanceAction,
+  impersonationRefusal,
   type PolicySite,
+  PRINCIPAL_ROLES,
+  type Principal,
+  type PrincipalRole,
+  principalRole,
   ROLES,
   type Role,
   roleOf,
@@ -76,6 +84,77 @@ describe('can', () => {
       }
     }
   }
+})
+
+/** Allowed principal roles per instance action: a(dmin) t(oken: an admin's key) i(mpersonating) u(ser). */
+const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
+  'admin.users.list': 'at',
+  'admin.audit.read': 'at',
+  'admin.impersonate': 'a',
+  'admin.impersonate.stop': 'i',
+  'account.key.create': 'atu',
+  'account.oauth.approve': 'atu',
+  'account.revoke': 'atu',
+}
+
+const ROLE_LETTER: Record<PrincipalRole, string> = {
+  admin: 'a',
+  'admin-token': 't',
+  impersonating: 'i',
+  user: 'u',
+}
+
+const principalFor: Record<PrincipalRole, Principal> = {
+  admin: { email: 'boss@example.test', admin: true, via: 'session' },
+  'admin-token': { email: 'boss@example.test', admin: true, via: 'api_key' },
+  impersonating: {
+    email: 'member@example.test',
+    admin: false,
+    via: 'session',
+    impersonator: 'boss@example.test',
+  },
+  user: { email: 'member@example.test', admin: false, via: 'session' },
+}
+
+describe('canInstance', () => {
+  it('covers every action', () => {
+    expect(Object.keys(INSTANCE_EXPECTED).sort()).toEqual([...INSTANCE_ACTIONS].sort())
+  })
+
+  for (const action of INSTANCE_ACTIONS) {
+    for (const role of PRINCIPAL_ROLES) {
+      const allowed = INSTANCE_EXPECTED[action].includes(ROLE_LETTER[role])
+      it(`${role} ${allowed ? 'may' : 'may not'} ${action}`, () => {
+        expect(canInstance(principalFor[role], action)).toBe(allowed)
+      })
+    }
+  }
+
+  it('resolves roles: impersonating wins, an admin is a token-admin off a browser session', () => {
+    expect(principalRole({ email: 'u@x.test', admin: false, via: 'api_key' })).toBe('user')
+    expect(principalRole({ email: 'u@x.test', admin: true, via: 'oauth' })).toBe('admin-token')
+    for (const role of PRINCIPAL_ROLES) expect(principalRole(principalFor[role])).toBe(role)
+  })
+
+  it('refuses to impersonate nobody, yourself or an admin', () => {
+    const boss = principalFor.admin
+    expect(impersonationRefusal(boss, null)).toBe('no_such_user')
+    expect(impersonationRefusal(boss, { email: boss.email, admin: true })).toBe('self')
+    expect(impersonationRefusal(boss, { email: 'other@example.test', admin: true })).toBe('admin')
+    expect(impersonationRefusal(boss, { email: 'm@example.test', admin: false })).toBeNull()
+  })
+
+  it("gives admins nothing on other people's sites: an admin is a member there", () => {
+    // `can` has no notion of admins; an admin's actor is a user like any other.
+    const admin: Actor = { kind: 'user', email: principalFor.admin.email }
+    for (const action of ACTIONS) {
+      for (const visibility of ['public', 'private'] as const) {
+        expect(can(admin, action, siteWith(visibility))).toBe(
+          can(actorFor.member, action, siteWith(visibility))
+        )
+      }
+    }
+  })
 })
 
 describe('canDeleteComment', () => {

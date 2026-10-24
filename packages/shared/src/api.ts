@@ -12,6 +12,12 @@ export const MeSchema = z.object({
   name: z.string(),
   picture: z.string().nullable(),
   userSlug: z.string(),
+  /** one of the instance's admins (servers from before admins don't say: false) */
+  admin: z.boolean().default(false),
+  /** while an admin impersonates this user: the admin (browser sessions only) */
+  impersonator: z.string().optional(),
+  /** …and when the impersonation lapses */
+  impersonationEndsAt: z.string().optional(),
 })
 export type Me = z.infer<typeof MeSchema>
 
@@ -176,3 +182,44 @@ export type OAuthRequestInfo = z.infer<typeof OAuthRequestInfoSchema>
 
 /** POST /api/oauth/requests/:id/approve | /deny → where to send the browser. */
 export const OAuthDecisionSchema = z.object({ redirectUrl: z.string() })
+
+// --- admin (ADMIN_EMAILS only; anyone else gets 404s) ---
+
+/** GET /api/admin/users?q=<email prefix>&cursor=&limit= — one page, by email. */
+export const AdminUserSchema = z.object({
+  email: z.string(),
+  name: z.string(),
+  picture: z.string().nullable(),
+  userSlug: z.string(),
+  createdAt: z.string().nullable(),
+  lastSignInAt: z.string().nullable(),
+  /** sites the user holds, archived ones included */
+  siteCount: z.number(),
+  admin: z.boolean(),
+})
+export type AdminUser = z.infer<typeof AdminUserSchema>
+export const AdminUserListSchema = z.object({
+  users: z.array(AdminUserSchema),
+  /** pass back as `cursor` for the next page; null: no more */
+  cursor: z.string().nullable(),
+})
+export type AdminUserList = z.infer<typeof AdminUserListSchema>
+
+/** GET /api/admin/audit — the latest admin actions, newest first. */
+export const AuditEntrySchema = z.object({
+  id: z.string(),
+  at: z.string(),
+  action: z.enum(['impersonation.start', 'impersonation.stop']),
+  actor: z.string(),
+  target: z.string(),
+  until: z.string().optional(),
+  lapsed: z.boolean().optional(),
+})
+export type AuditEntry = z.infer<typeof AuditEntrySchema>
+export const AuditListSchema = z.object({ entries: z.array(AuditEntrySchema) })
+
+/**
+ * POST /api/admin/impersonate { email } (browser session, an admin) → the new Me; POST
+ * /api/admin/impersonate/stop → the admin's own Me again.
+ */
+export const ImpersonateRequestSchema = z.object({ email: z.string().trim().toLowerCase().min(3) })

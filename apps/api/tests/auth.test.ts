@@ -28,6 +28,7 @@ describe('API authentication', () => {
       name: 'Alice',
       picture: null,
       userSlug: 'alice',
+      admin: false,
     })
     const viaCookie = await env.app.request('/api/me', {
       headers: { cookie: `${SESSION}=${session}` },

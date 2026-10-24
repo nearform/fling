@@ -14,7 +14,7 @@
 import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { cors } from 'hono/cors'
-import { readSessionToken, verifySession } from '../auth/session.ts'
+import { resolveSession, sessionPrincipal } from '../auth/middleware.ts'
 import { ApiError } from '../lib/errors.ts'
 import { RegistrationError, registerClient } from '../oauth/clients.ts'
 import {
@@ -26,6 +26,7 @@ import {
   validateAuthorize,
 } from '../oauth/flow.ts'
 import { mcpResource, SCOPE } from '../oauth/tokens.ts'
+import { canInstance } from '../policy.ts'
 import type { AppEnv } from '../types.ts'
 
 export const oauthRoutes = new Hono<AppEnv>()
@@ -145,7 +146,7 @@ oauthRoutes.post('/oauth/register', async c => {
 
 oauthRoutes.get('/oauth/authorize', async c => {
   const deps = c.get('deps')
-  const { config, clock, store } = deps
+  const { config } = deps
   const outcome = await validateAuthorize(deps, c.req.query())
   if (outcome.kind === 'error_page') {
     const q = new URLSearchParams({ error: outcome.error, error_description: outcome.description })
@@ -153,13 +154,20 @@ oauthRoutes.get('/oauth/authorize', async c => {
   }
   if (outcome.kind === 'redirect') return c.redirect(outcome.url, 302)
 
-  const email = await verifySession(readSessionToken(c), config.secrets.sessionSecret, clock.now())
-  const user = email ? await store.getUser(email) : null
-  if (!user) {
+  const session = await resolveSession(c)
+  if (!session) {
     const self = `${config.appOrigin}/oauth/authorize${new URL(c.req.url).search}`
     return c.redirect(`/auth/login?return=${encodeURIComponent(self)}`, 302)
   }
-  const req = await createAuthRequest(deps, user, outcome.client, outcome.params)
+  // An impersonating admin may not connect apps in the user's name.
+  if (!canInstance(sessionPrincipal(config, session), 'account.oauth.approve')) {
+    const q = new URLSearchParams({
+      error: 'access_denied',
+      error_description: `You are impersonating ${session.user.email}. Stop impersonating to connect apps.`,
+    })
+    return c.redirect(`/authorize?${q}`, 302)
+  }
+  const req = await createAuthRequest(deps, session.user, outcome.client, outcome.params)
   return c.redirect(`/authorize?request=${encodeURIComponent(req.id)}`, 302)
 })
 

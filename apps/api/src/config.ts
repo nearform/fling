@@ -309,3 +309,7 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     originVerifySecret: env.ORIGIN_VERIFY_SECRET?.trim() || undefined,
   }
 }
+
+/** Whether `email` is one of the instance's admins (ADMIN_EMAILS), now. */
+export const isAdminEmail = (config: Pick<Config, 'adminEmails'>, email: string) =>
+  config.adminEmails.includes(email)

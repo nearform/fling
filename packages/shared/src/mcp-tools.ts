@@ -50,7 +50,7 @@ export interface McpWording {
   sitesPattern: string
   /** Who can open a private site: "anyone signed in to Fling (@example.test accounts)". */
   privateAudience: string
-  /** How the user signs in: "their Google account". */
+  /** How the user signs in: "their Example SSO account". */
   signIn: string
 }
 

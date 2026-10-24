@@ -19,8 +19,8 @@ export const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
 const color = z.string().regex(HEX_COLOR_RE)
 
 /**
- * How people sign in. `kind` names the method (today `google`; generic OIDC will add
- * `{ kind: 'oidc', issuer, displayName }`); clients show `displayName` and must tolerate kinds
+ * How people sign in. `kind` names the method: `oidc` (the instance's OpenID Connect `issuer`) or
+ * `dev` (local dev login); clients show `displayName` ("Sign in with …") and must tolerate kinds
  * they don't know. `emailDomains` is the allowlist a verified email must match.
  */
 export const InstanceAuthSchema = z.looseObject({

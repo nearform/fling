@@ -25,7 +25,12 @@ describe('mcp tool catalogue', () => {
       name: 'Acme Fling',
       sitesDomain: 'sites.example.test',
       siteScheme: 'https',
-      auth: { kind: 'google', displayName: 'Google', emailDomains: ['example.test'] },
+      auth: {
+        kind: 'oidc',
+        issuer: 'https://sso.example.test',
+        displayName: 'Example SSO',
+        emailDomains: ['example.test'],
+      },
     })
     const tools = mcpToolsFor(w)
     expect(tools.checkName.description).toContain('https://<name>.sites.example.test')

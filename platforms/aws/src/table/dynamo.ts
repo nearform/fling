@@ -14,6 +14,7 @@ import {
   GetCommand,
   PutCommand,
   QueryCommand,
+  ScanCommand,
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
@@ -27,6 +28,7 @@ import {
   type Page,
   type Patch,
   type QueryOptions,
+  type ScanOptions,
   type Table,
   type TableItem,
   TRANSACT_MAX,
@@ -185,6 +187,27 @@ export class DynamoTable implements Table {
     } while (start && (opts.limit === undefined || items.length < opts.limit))
     const last = items[items.length - 1]
     return start && last ? { items, cursor: encodeCursor(last.sk) } : { items }
+  }
+
+  /** Migrations only (see the Table port). The cursor is DynamoDB's LastEvaluatedKey. */
+  async scan(opts: ScanOptions = {}): Promise<Page> {
+    const items: TableItem[] = []
+    let start: Attrs | undefined =
+      opts.cursor === undefined ? undefined : JSON.parse(decodeCursor(opts.cursor))
+    const now = this.now()
+    do {
+      const res = await this.doc.send(
+        new ScanCommand({
+          TableName: this.table,
+          ExclusiveStartKey: start,
+          ConsistentRead: true,
+          ...(opts.limit === undefined ? {} : { Limit: opts.limit - items.length }),
+        })
+      )
+      for (const item of res.Items ?? []) if (!isExpired(item, now)) items.push(fromAttrs(item))
+      start = res.LastEvaluatedKey
+    } while (start && (opts.limit === undefined || items.length < opts.limit))
+    return start ? { items, cursor: encodeCursor(JSON.stringify(start)) } : { items }
   }
 
   async put(item: TableItem, cond?: Condition) {

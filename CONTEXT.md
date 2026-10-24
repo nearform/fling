@@ -43,6 +43,11 @@ missing site (404).
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of
 its shape; reads upgrade older records and tolerate one version ahead.
 
+**Migration** — a one-off rewrite of stored data, written once against Table
+(`apps/api/src/migrations/NNNN-*.ts`), idempotent and resumable, with its checkpoint and lock in
+`MIGRATION#NNNN` items. Deploys run the pending ones (`runMigrations`); they are the only code that
+scans the table.
+
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM). Every adapter, including
 the core's memory/fs ones, passes the same suites from `packages/conformance`.

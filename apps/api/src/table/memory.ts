@@ -13,6 +13,7 @@ import {
   type Page,
   type Patch,
   type QueryOptions,
+  type ScanOptions,
   type Table,
   type TableItem,
   TRANSACT_MAX,
@@ -26,6 +27,11 @@ function clean(item: TableItem): TableItem {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(item)) if (v !== undefined) out[k] = clone(v)
   return out as TableItem
+}
+
+function scanKey(cursor: string) {
+  const [pk, sk] = JSON.parse(decodeCursor(cursor)) as [string, string]
+  return { pk, sk }
 }
 
 export class MemoryTable implements Table {
@@ -82,6 +88,24 @@ export class MemoryTable implements Table {
     const items = matches.slice(0, limit).map(clone)
     const last = items[items.length - 1]
     return matches.length > limit && last ? { items, cursor: encodeCursor(last.sk) } : { items }
+  }
+
+  /** In (pk, sk) byte order; the cursor is the last item's key. */
+  async scan(opts: ScanOptions = {}): Promise<Page> {
+    const after = opts.cursor === undefined ? undefined : scanKey(opts.cursor)
+    const now = this.now()
+    const order = (a: TableItem, b: { pk: string; sk: string }) =>
+      compareSk(a.pk, b.pk) || compareSk(a.sk, b.sk)
+    const matches = [...this.items.values()]
+      .flatMap(part => [...part.values()])
+      .filter(i => !isExpired(i, now) && (after === undefined || order(i, after) > 0))
+      .sort(order)
+    const limit = opts.limit ?? matches.length
+    const items = matches.slice(0, limit).map(clone)
+    const last = items[items.length - 1]
+    return matches.length > limit && last
+      ? { items, cursor: encodeCursor(JSON.stringify([last.pk, last.sk])) }
+      : { items }
   }
 
   async put(item: TableItem, cond?: Condition) {

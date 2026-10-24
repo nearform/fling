@@ -1,0 +1,40 @@
+/**
+ * The post-deploy smoke test: the same scenario as `pnpm e2e`, against a deployed instance, signed
+ * in with an API key (no browser). It creates three sites named `e2e-<random>…` and removes them.
+ *
+ *   FLING_E2E_API_KEY=fling_… tsx src/smoke.ts https://fling.example.com [--propagation-seconds 120]
+ *
+ * The key belongs to a test user of the instance (create it in the web UI, API keys page) and is a
+ * secret of the deploy workflow. Without a browser session there is no `fling_site` cookie, so the
+ * private-site check is the sign-in redirect only.
+ */
+import { parseArgs } from 'node:util'
+import { runScenario } from './scenario.ts'
+import { apiKeySession } from './sign-in.ts'
+
+const { values: args, positionals } = parseArgs({
+  allowPositionals: true,
+  options: { 'propagation-seconds': { type: 'string', default: '120' } },
+})
+
+const appOrigin = positionals[0] ?? process.env.FLING_URL
+const apiKey = process.env.FLING_E2E_API_KEY
+if (!appOrigin || !apiKey) {
+  console.error('usage: FLING_E2E_API_KEY=… tsx src/smoke.ts <app origin>')
+  process.exit(2)
+}
+
+console.log(`Smoke test: ${appOrigin}`)
+try {
+  const session = await apiKeySession(appOrigin, apiKey)
+  const t0 = Date.now()
+  await runScenario({
+    appOrigin,
+    session,
+    propagationMs: Number(args['propagation-seconds']) * 1000,
+  })
+  console.log(`  passed in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+} catch (err) {
+  console.error(`  ✗ ${err instanceof Error ? err.message : err}`)
+  process.exit(1)
+}

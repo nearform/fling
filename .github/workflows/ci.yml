@@ -1,6 +1,7 @@
 name: CI
 
-# The quality gate, in one job: `pnpm gate` (lint, terraform, typecheck, test, build), the same
+# The quality gate, in one job: `pnpm gate` (lint, terraform, typecheck, test, build, and the e2e
+# scenario on each platform's local runtime: apps/api's dev server and `wrangler dev`), the same
 # command a person runs before committing. The workflow adds no check of its own, so what passes
 # here is exactly what passes on a laptop. It also installs terraform, which the gate's Terraform
 # check only skips when it is missing outside CI.

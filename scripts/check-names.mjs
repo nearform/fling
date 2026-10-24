@@ -28,10 +28,7 @@ const ALLOWED = {
 }
 
 /** Matches that are neither name, by file and line pattern. */
-const EXCEPTIONS = {
-  // The copyright holder: a legal notice, not branding.
-  LICENSE: [/^Copyright \(c\) \d{4} \S+$/],
-}
+const EXCEPTIONS = {}
 
 let out = ''
 try {

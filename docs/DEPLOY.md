@@ -72,6 +72,11 @@ Values reach the function two ways, and the function's own environment wins:
 | Key | Required | What |
 | --- | --- | --- |
 | `ALLOWED_EMAIL_DOMAINS` | **yes** (production refuses to start without it; the deploy checks `INSTANCE` has it) | Comma-separated email domains that may sign in, e.g. `example.test`. A verified email must match one (and Google's `hd` claim, when present, must match it). |
+| `OIDC_ISSUER` | **yes**, with the next one (see [Sign-in](#sign-in-openid-connect)) | The OpenID Connect issuer, exactly as its tokens' `iss`, e.g. `https://accounts.google.com`. Must be `https`. |
+| `OIDC_CLIENT_ID` | with `OIDC_ISSUER` | The client (application) id registered with the issuer. Its secret is the SSM parameter `oidc-client-secret`. |
+| `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else the issuer's host) | What the button says: "Sign in with …". |
+| `OIDC_SCOPES` | no (`openid email profile`) | Space- or comma-separated scopes; must include `openid` and give an `email` claim. |
+| `OIDC_ASSUME_EMAIL_VERIFIED` | no (`false`) | `true` treats an ID token *without* `email_verified` as verified. See [Sign-in](#sign-in-openid-connect). |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |
 | `BRAND_PRIMARY` | no | Hex colour behind primary buttons and active states, e.g. `#4f46e5`. |
@@ -93,6 +98,8 @@ Example `INSTANCE` object:
 ```json
 {
   "ALLOWED_EMAIL_DOMAINS": "example.test",
+  "OIDC_ISSUER": "https://accounts.google.com",
+  "OIDC_CLIENT_ID": "1234-abcd.apps.googleusercontent.com",
   "INSTANCE_NAME": "Example Fling",
   "BRAND_PRIMARY": "#00e5a4",
   "BRAND_PRIMARY_CONTENT": "#000e38",
@@ -103,20 +110,60 @@ Example `INSTANCE` object:
 }
 ```
 
+## Sign-in (OpenID Connect)
+
+An instance signs people in with one OpenID Connect provider: the authorization code flow with
+PKCE, `state` and `nonce`, endpoints from the issuer's discovery document
+(`$OIDC_ISSUER/.well-known/openid-configuration`), and an ID token whose signature (the issuer's
+JWKS; rotated keys are picked up), issuer, audience, expiry and nonce are checked. Then the email
+policy: the ID token's `email` must be verified (`email_verified: true`) and its domain in
+`ALLOWED_EMAIL_DOMAINS`.
+
+On the provider, register a confidential **web** client with:
+
+- the redirect URI `https://$APP_DOMAIN/auth/callback` (a separate dev client can allow
+  `http://fling.lvh.me:47100/auth/callback` to try it locally),
+- the scopes `openid email profile`,
+- its client secret stored as `${SSM_PREFIX}oidc-client-secret` (SecureString).
+
+Then set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`. Examples (`example.test` stands for your
+domain):
+
+| Provider | `OIDC_ISSUER` | Notes |
+| --- | --- | --- |
+| Google | `https://accounts.google.com` | Google Cloud console, APIs & Services, Credentials, an OAuth client of type Web application. An Internal consent screen limits it to your Workspace. With one allowed domain, sign-in hints it (`hd`). |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant id>/v2.0` | App registrations, a Web platform with the redirect URI, a client secret, and the optional `email` claim on the ID token. Use your tenant's issuer, never `common` or `organizations`. Entra sends no `email_verified`: set `OIDC_ASSUME_EMAIL_VERIFIED=true` only if your tenant's admins control every account's email. |
+| Okta | `https://example-test.okta.com` (or `…/oauth2/default` for a custom authorization server) | An OIDC Web Application with the sign-in redirect URI; assign the people who may use it. |
+| Auth0 | `https://example-test.eu.auth0.com/` (with the trailing slash, as Auth0's `iss` has it) | A Regular Web Application with the callback URL. |
+
+**Why `email_verified` is required.** Fling knows people by email, so an unverified address could
+claim someone else's sites. An ID token with `email_verified: false` is always refused. One with
+no `email_verified` at all is refused too, unless `OIDC_ASSUME_EMAIL_VERIFIED=true` says this
+issuer only hands out addresses its admins control (a single-tenant Entra ID, for example).
+
+**Before generic OIDC** an instance signed in with Google from the SSM parameters
+`google-client-id` and `google-client-secret`, on the redirect URI
+`https://$APP_DOMAIN/auth/google/callback`. That still works unchanged: with no `OIDC_ISSUER`, those
+parameters are read as `OIDC_ISSUER=https://accounts.google.com` on the old callback (the function
+logs a deprecation warning at cold start), and `/auth/google` and `/auth/google/callback` stay as
+aliases of `/auth/login` and `/auth/callback`. To move to the new settings: add
+`https://$APP_DOMAIN/auth/callback` to the Google client's redirect URIs, put the secret at
+`${SSM_PREFIX}oidc-client-secret`, set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`, deploy, and
+then delete the two `google-client-*` parameters.
+
 ## One-time setup
 
 1. **Infrastructure.** Apply your Terraform: buckets, table, both distributions, certificate, DNS,
    the function (with the environment above), its role, the deploy role and the secrets. The deploy
    role trusts GitHub's OIDC provider for `$GITHUB_REPO`'s `production` environment only.
 
-2. **Sign-in secrets.** Create a Google OAuth client (APIs & Services, Credentials, a Web
-   application) and store its id and secret as SSM SecureString parameters
-   `${SSM_PREFIX}google-client-id` and `${SSM_PREFIX}google-client-secret`. The other secrets
-   (`session-secret`, `site-hmac-key`, `origin-verify-secret`) are generated by Terraform.
+2. **Sign-in client.** Register a web client with your OpenID Connect provider (see
+   [Sign-in](#sign-in-openid-connect)) and store its secret as the SSM SecureString parameter
+   `${SSM_PREFIX}oidc-client-secret`. The other secrets (`session-secret`, `site-hmac-key`,
+   `origin-verify-secret`) are generated by Terraform.
 
-3. **Google redirect URIs.** On that OAuth client, add these authorised redirect URIs:
-   - `https://$APP_DOMAIN/auth/google/callback`
-   - `http://localhost:47101/auth/google/callback` (local development)
+3. **Redirect URI.** On that client, allow `https://$APP_DOMAIN/auth/callback`, and put
+   `OIDC_ISSUER` and `OIDC_CLIENT_ID` in the `INSTANCE` object (next step).
 
 4. **GitHub environment and config.** In the repository, create the environment `production`
    (Settings, Environments; deployment branches: `main` only). Then set the deploy config: the
@@ -315,7 +362,8 @@ SSM SecureString parameters under `$SSM_PREFIX`, read by the function at cold st
 
 | Parameter | Source |
 | --- | --- |
-| `google-client-id`, `google-client-secret` | Your Google OAuth client, put there by hand (One-time setup, step 2) |
+| `oidc-client-secret` | Your OpenID Connect client's secret, put there by hand (One-time setup, step 2) |
+| `google-client-id`, `google-client-secret` | Deprecated: read only when `OIDC_ISSUER` is unset, as the Google issuer (see [Sign-in](#sign-in-openid-connect)) |
 | `session-secret`, `site-hmac-key` | Generated by Terraform, never in its state |
 | `origin-verify-secret` | Generated by Terraform. CloudFront also sends it to the function URL as `X-Origin-Verify` |
 
@@ -333,8 +381,8 @@ also needs the copy the site router reads from the KeyValueStore updated by the 
   including forks', never get the role or any secret.
 - **The deploy role can't read app secrets.** It can update the Lambda code, the UI bucket,
   `_fling/*` in the sites bucket and the CloudFront functions, invalidate caches, and invoke the
-  function (to run data migrations; the function does nothing else for a non-HTTP event). Google
-  credentials and the signing keys live in SSM, readable only by the Lambda's own role.
+  function (to run data migrations; the function does nothing else for a non-HTTP event). The
+  sign-in client secret and the signing keys live in SSM, readable only by the Lambda's own role.
 - **Logs are public.** They show resource names and the role ARN, which are identifiers, not
   credentials. Never `echo` anything secret in a workflow.
 - Anyone who can push to `main` can deploy. Protect `main` (require pull requests) to tighten

@@ -14,6 +14,21 @@ const T = (n: number) => new Date(Date.UTC(2025, 0, 1) + n * 60_000).toISOString
 const FUTURE = '2099-01-01T00:00:00.000Z'
 
 /** A site item as the pre-site-centric code wrote it. */
+/** One migration's entry in a run's report, by id: never by position in the registry. */
+function entry(run: Awaited<ReturnType<typeof runMigrations>>, id: string) {
+  const found = run.migrations.find(m => m.id === id)
+  if (!found) throw new Error(`migration ${id} is not in the report`)
+  return found
+}
+
+/** Every migration but `id` was left alone (`only`). */
+function onlyRan(run: Awaited<ReturnType<typeof runMigrations>>, id: string) {
+  expect(entry(run, id).status).toBe('completed')
+  expect(run.migrations.filter(m => m.id !== id).map(m => m.status)).toEqual(
+    run.migrations.filter(m => m.id !== id).map(() => 'skipped')
+  )
+}
+
 function oldSite(email: string, name: string, id: string, extra: Record<string, unknown> = {}) {
   return {
     pk: `USER#${email}`,
@@ -142,12 +157,11 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
 
       const run = await runMigrations(table, { migrations: MIGRATIONS, pageSize: 7 })
       expect(run.done).toBe(true)
-      expect(run.migrations.map(m => [m.id, m.status])).toEqual([
-        ['0001', 'completed'],
-        ['0002', 'skipped'],
-        ['0003', 'completed'],
-      ])
-      expect(run.migrations[0]?.counts).toEqual({ 'site copied': 5, 'version copied': 7 })
+      // Every automatic migration ran; opt-in ones (auto: false) waited to be asked for.
+      expect(run.migrations.map(m => [m.id, m.status])).toEqual(
+        MIGRATIONS.map(m => [m.id, m.auto === false ? 'skipped' : 'completed'])
+      )
+      expect(entry(run, '0001').counts).toEqual({ 'site copied': 5, 'version copied': 7 })
 
       const after = await scanAll(table)
       // Every item that was there is still there, unchanged.
@@ -280,12 +294,8 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       const view = await served(table)
 
       const run = await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })
-      expect(run.migrations.map(m => [m.id, m.status])).toEqual([
-        ['0001', 'skipped'],
-        ['0002', 'completed'],
-        ['0003', 'skipped'],
-      ])
-      expect(run.migrations[1]?.counts).toEqual({
+      onlyRan(run, '0002')
+      expect(entry(run, '0002').counts).toEqual({
         'site refreshed': 1,
         'version copied': 1,
         'version dropped': 8,
@@ -296,7 +306,7 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       expect(await table.get('SITE#S1', 'VERSION#v4')).not.toBeNull()
       expect(await served(table)).toEqual(view)
       const again = await runMigrations(table, { migrations: MIGRATIONS, only: ['0002'] })
-      expect(again.migrations[1]?.status).toBe('up-to-date')
+      expect(entry(again, '0002').status).toBe('up-to-date')
     })
     it('0003 indexes every user from their record, adds nothing else, and the list serves them', async () => {
       const table = await seeded()
@@ -330,12 +340,8 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       const before = await scanAll(table)
 
       const run = await runMigrations(table, { migrations: MIGRATIONS, only: ['0003'] })
-      expect(run.migrations.map(m => [m.id, m.status])).toEqual([
-        ['0001', 'skipped'],
-        ['0002', 'skipped'],
-        ['0003', 'completed'],
-      ])
-      expect(run.migrations[2]?.counts).toEqual({ 'user indexed': 3, 'user present': 1 })
+      onlyRan(run, '0003')
+      expect(entry(run, '0003').counts).toEqual({ 'user indexed': 3, 'user present': 1 })
       const after = await scanAll(table)
       const keyed = (xs: TableItem[]) => [...xs].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1))
       expect(keyed(without(after, ['USERS', 'MIGRATION#']))).toEqual(

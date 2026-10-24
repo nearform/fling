@@ -6,6 +6,11 @@
 import {
   ApiKeyListSchema,
   type ApiKeySchema,
+  type Comment,
+  type CommentAnchor,
+  type CommentList,
+  CommentListSchema,
+  CommentSchema,
   type Connection,
   ConnectionListSchema,
   ErrorEnvelopeSchema,
@@ -142,6 +147,20 @@ export const api = {
   deleteSite: (name: string) => request(site(name), ignoreBody, { method: 'DELETE' }),
   setCurrentVersion: (name: string, versionId: string) =>
     request(`${site(name)}/current`, ignoreBody, { method: 'POST', body: { versionId } }),
+  /** A site's comments and what the caller may do (members too: it is how they review). */
+  listComments: (name: string): Promise<CommentList> =>
+    request(`${site(name)}/comments`, CommentListSchema),
+  addComment: (
+    name: string,
+    body: { body: string; path?: string; parentId?: string; anchor?: CommentAnchor }
+  ): Promise<Comment> => request(`${site(name)}/comments`, CommentSchema, { method: 'POST', body }),
+  resolveComment: (name: string, id: string, resolved: boolean): Promise<Comment> =>
+    request(`${site(name)}/comments/${encodeURIComponent(id)}`, CommentSchema, {
+      method: 'PATCH',
+      body: { resolved },
+    }),
+  deleteComment: (name: string, id: string) =>
+    request(`${site(name)}/comments/${encodeURIComponent(id)}`, ignoreBody, { method: 'DELETE' }),
   async listKeys(): Promise<ApiKey[]> {
     const { keys } = await request('/api/keys', ApiKeyListSchema)
     return keys

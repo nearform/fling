@@ -10,6 +10,7 @@ import {
   ArchiveBoxXMarkIcon,
   ArrowPathIcon,
   ArrowTopRightOnSquareIcon,
+  ChatBubbleLeftRightIcon,
   ChevronDownIcon,
   ClipboardDocumentIcon,
   EllipsisVerticalIcon,
@@ -20,11 +21,13 @@ import {
   TrashIcon,
 } from '@heroicons/react/24/outline'
 import { Fragment, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useInstance } from '../hooks/instance'
 import { useSiteActions, useSiteDetail } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../lib/format'
 import { audienceFor, DEFAULT_INSTANCE_NAME } from '../lib/instance'
+import { reviewHref } from '../lib/review'
 import { showToast } from '../lib/toast'
 import { ConfirmModal } from './ConfirmModal'
 import { CopyButton } from './CopyButton'
@@ -57,6 +60,8 @@ export function SiteCard({ site }: { site: Site }) {
     versions: false,
   })
   const id = useId()
+  // Review mode: the instance has comments, and the site is being served.
+  const reviewable = instance?.capabilities.comments === true && !site.archived
   const close = () => setDialog(null)
   const toggle = (panel: Panel) => setOpen(o => ({ ...o, [panel]: !o[panel] }))
 
@@ -79,6 +84,16 @@ export function SiteCard({ site }: { site: Site }) {
       showToast('Share link copied')
     } catch {
       showToast('Could not copy — open Sharing and copy the link by hand', 'warning')
+    }
+  }
+
+  /** For people to comment: anyone signed in who can open the site. */
+  const copyReviewLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${reviewHref(site.name)}`)
+      showToast('Review link copied — anyone who can open the site can comment')
+    } catch {
+      showToast('Could not copy the review link', 'warning')
     }
   }
 
@@ -145,6 +160,16 @@ export function SiteCard({ site }: { site: Site }) {
 
         {/* Actions */}
         <div className="flex shrink-0 items-center gap-0.5">
+          {reviewable && (
+            <Link
+              to={reviewHref(site.name)}
+              className="btn btn-ghost btn-xs h-6 min-h-6 gap-1 px-1.5 font-normal"
+              title="Open the site with its comments"
+            >
+              <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" aria-hidden />
+              Review
+            </Link>
+          )}
           {site.archived && (
             <button
               type="button"
@@ -193,6 +218,17 @@ export function SiteCard({ site }: { site: Site }) {
                         }}
                       >
                         Create share link
+                      </MenuItem>
+                    )}
+                    {reviewable && (
+                      <MenuItem
+                        icon={ChatBubbleLeftRightIcon}
+                        onClick={() => {
+                          close()
+                          copyReviewLink()
+                        }}
+                      >
+                        Copy review link
                       </MenuItem>
                     )}
                     <li className="my-1 border-t border-[color:var(--border-subtle)]" />

@@ -1,4 +1,4 @@
-import type { Visibility } from '@fling/shared'
+import type { CommentAnchor, Visibility } from '@fling/shared'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, errorMessage } from '../lib/api'
 import { showToast } from '../lib/toast'
@@ -9,6 +9,7 @@ export const queryKeys = {
   allSites: ['sites'] as const,
   site: (name: string) => ['site', name] as const,
   versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
+  comments: (name: string) => ['comments', name] as const,
   keys: ['keys'] as const,
   connections: ['connections'] as const,
 }
@@ -77,6 +78,44 @@ export function useSiteActions(name: string) {
       (versionId: string) => api.setCurrentVersion(name, versionId),
       'Version restored — the site now serves it'
     ),
+  }
+}
+
+/** A site's comments, refetched now and then so a review session sees other people's. */
+export function useComments(name: string) {
+  return useQuery({
+    queryKey: queryKeys.comments(name),
+    queryFn: () => api.listComments(name),
+    refetchInterval: 30_000,
+  })
+}
+
+/** Add, resolve and delete comments on one site; each refetches the list, failures are toasted. */
+export function useCommentActions(name: string) {
+  const queryClient = useQueryClient()
+  const options = {
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.comments(name) }),
+    onError: (error: unknown) => showToast(errorMessage(error), 'error'),
+  }
+  return {
+    add: useMutation({
+      mutationFn: (body: {
+        body: string
+        path?: string
+        parentId?: string
+        anchor?: CommentAnchor
+      }) => api.addComment(name, body),
+      ...options,
+    }),
+    resolve: useMutation({
+      mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
+        api.resolveComment(name, id, resolved),
+      ...options,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => api.deleteComment(name, id),
+      ...options,
+    }),
   }
 }
 

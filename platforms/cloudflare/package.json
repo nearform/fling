@@ -8,7 +8,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "echo 'platform-cloudflare: no Worker bundle yet'"
+    "build": "echo 'platform-cloudflare: no Worker bundle yet'",
+    "bench:publish": "tsx scripts/bench-publish.ts"
   },
   "dependencies": {
     "@fling/api": "workspace:*",

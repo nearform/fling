@@ -3,8 +3,9 @@
  * claims, single-use codes, refresh-token reuse, upload part counters). Every test uses fresh
  * random emails, names and ids, so a shared table (DynamoDB Local, a real one) needs no cleanup.
  *
- * Lists the Store does not sort itself (versions, upload files across mixed case) are compared as
- * sets: their order is the backend's.
+ * Lists come back in a defined order: sites by name, keys and grants newest first, versions by id
+ * and upload files by path in UTF-8 byte order (compareSk), which the tests use sort keys that
+ * JavaScript orders differently to check.
  */
 import { randomUUID } from 'node:crypto'
 import type {
@@ -16,6 +17,7 @@ import type {
   UploadFileRecord,
   VersionRecord,
 } from '@fling/api/store'
+import { compareSk } from '@fling/api/table'
 import { describe, expect, it } from 'vitest'
 
 const NOW = '2026-01-01T00:00:00.000Z'
@@ -87,8 +89,13 @@ const fileRec = (uploadId: string, path: string, encoding: 'utf8' | 'base64' = '
   expiresAt: EXPIRES,
 })
 
-const sortBy = <T>(xs: T[], key: (x: T) => string) =>
-  [...xs].sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
+/** Ids that sort differently in UTF-16 (JavaScript's `<`) and in UTF-8 byte order. */
+const awkward = () => {
+  const u = uid()
+  return [`${u}-\u{1F600}`, `${u}-\uFFFD`, `${u}-Z`, `${u}-a`, `${u}-\u00E9`]
+}
+const byteOrder = <T>(xs: T[], key: (x: T) => string) =>
+  [...xs].sort((a, b) => compareSk(key(a), key(b)))
 
 export function storeConformance(name: string, factory: () => Store | Promise<Store>) {
   describe(`Store conformance: ${name}`, () => {
@@ -201,7 +208,8 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const s = site(e)
         expect(await store.getNameClaim(s.name)).toBeNull()
         expect(await store.createSite(s)).toEqual(s)
-        expect(await store.getSite(e, s.name)).toEqual(s)
+        expect(await store.findSite(s.name)).toEqual(s)
+        expect(await store.listSites(e)).toEqual([s])
         expect(await store.getNameClaim(s.name)).toEqual({
           name: s.name,
           email: e,
@@ -216,7 +224,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.findSite(s.name)).toBeNull()
         await store.createSite(s)
         expect(await store.findSite(s.name)).toEqual(s)
-        await store.deleteSite(s.email, s.name)
+        await store.deleteSite(s)
         expect(await store.findSite(s.name)).toBeNull()
       })
 
@@ -227,7 +235,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createSite(s)
         const again = await store.createSite({ ...s, id: uid(), spa: true })
         expect(again).toEqual(s)
-        expect(await store.getSite(e, s.name)).toEqual(s)
+        expect(await store.findSite(s.name)).toEqual(s)
       })
 
       it("createSite on another user's name returns null and changes nothing", async () => {
@@ -237,7 +245,8 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createSite(s)
         const other = email()
         expect(await store.createSite(site(other, s.name))).toBeNull()
-        expect(await store.getSite(other, s.name)).toBeNull()
+        expect(await store.listSites(other)).toEqual([])
+        expect(await store.findSite(s.name)).toEqual(s)
         expect((await store.getNameClaim(s.name))?.email).toBe(owner)
       })
 
@@ -250,10 +259,9 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(winners).toHaveLength(1)
         const winner = winners[0] as SiteRecord
         expect((await store.getNameClaim(name))?.email).toBe(winner.email)
+        expect(await store.findSite(name)).toEqual(winner)
         for (const c of contenders) {
-          expect(await store.getSite(c.email, name)).toEqual(
-            c.email === winner.email ? winner : null
-          )
+          expect(await store.listSites(c.email)).toEqual(c.email === winner.email ? [winner] : [])
         }
       })
 
@@ -264,8 +272,9 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const results = await Promise.all(
           Array.from({ length: 4 }, () => store.createSite(site(e, name)))
         )
-        const stored = await store.getSite(e, name)
+        const stored = await store.findSite(name)
         expect(stored).not.toBeNull()
+        expect(await store.listSites(e)).toEqual([stored])
         for (const r of results) expect(r).toEqual(stored)
         expect((await store.getNameClaim(name))?.siteId).toBe(stored?.id)
       })
@@ -286,7 +295,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           updatedAt: LATER,
         }
         await store.putSite(updated)
-        expect(await store.getSite(e, a.name)).toEqual(updated)
+        expect(await store.findSite(a.name)).toEqual(updated)
         expect(await store.listSites(e)).toEqual([updated, b])
       })
 
@@ -295,9 +304,11 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const e = email()
         const s = site(e)
         await store.createSite(s)
-        await store.deleteSite(e, s.name)
-        expect(await store.getSite(e, s.name)).toBeNull()
+        await store.putVersion(s, version(s.id))
+        await store.deleteSite(s)
+        expect(await store.findSite(s.name)).toBeNull()
         expect(await store.getNameClaim(s.name)).toBeNull()
+        expect(await store.listVersions(s)).toEqual([])
         expect(await store.listSites(e)).toEqual([])
         const other = site(email(), s.name)
         expect(await store.createSite(other)).toEqual(other)
@@ -305,49 +316,54 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
 
       it('deleteSite of a site that does not exist is a no-op', async () => {
         const store = await factory()
-        await expect(store.deleteSite(email(), siteName())).resolves.toBeUndefined()
+        await expect(store.deleteSite(site(email()))).resolves.toBeUndefined()
       })
     })
 
     describe('versions', () => {
-      it('put, get, overwrite, list (as a set) and delete', async () => {
+      it('put, get, overwrite, list in id byte order', async () => {
         const store = await factory()
-        const e = email()
-        const siteId = uid()
-        const v1 = version(siteId)
-        const v2 = version(siteId)
-        await store.putVersion(e, v1)
-        await store.putVersion(e, v2)
-        await store.putVersion(e, version(uid()))
-        expect(await store.getVersion(e, siteId, v1.id)).toEqual(v1)
-        expect(await store.getVersion(e, siteId, 'missing')).toBeNull()
+        const s = site(email())
+        await store.createSite(s)
+        const [id1, id2, ...more] = awkward() as [string, string, ...string[]]
+        const v1 = version(s.id, id1)
+        const v2 = version(s.id, id2)
+        await store.putVersion(s, v1)
+        await store.putVersion(s, v2)
+        for (const id of more) await store.putVersion(s, version(s.id, id))
+        const other = site(s.email)
+        await store.createSite(other)
+        await store.putVersion(other, version(other.id))
+        expect(await store.getVersion(s, v1.id)).toEqual(v1)
+        expect(await store.getVersion(s, 'missing')).toBeNull()
         const done = {
           ...v1,
           status: 'complete' as const,
           spa: true,
           visibility: 'public' as const,
         }
-        await store.putVersion(e, done)
-        expect(await store.getVersion(e, siteId, v1.id)).toEqual(done)
-        expect(sortBy(await store.listVersions(e, siteId), v => v.id)).toEqual(
-          sortBy([done, v2], v => v.id)
-        )
-        await store.deleteVersions(e, siteId)
-        expect(await store.listVersions(e, siteId)).toEqual([])
-        expect(await store.getVersion(e, siteId, v2.id)).toBeNull()
+        await store.putVersion(s, done)
+        expect(await store.getVersion(s, v1.id)).toEqual(done)
+        const listed = await store.listVersions(s)
+        expect(listed.map(v => v.id)).toEqual(byteOrder([id1, id2, ...more], id => id))
+        expect(listed.find(v => v.id === v1.id)).toEqual(done)
+        expect(listed.find(v => v.id === v2.id)).toEqual(v2)
       })
 
-      it('deleteVersions removes more versions than one batch', async () => {
+      it('deleteSite removes more versions than one batch, and only its own', async () => {
         const store = await factory()
-        const e = email()
-        const siteId = uid()
-        const other = version(uid())
-        await store.putVersion(e, other)
-        await Promise.all(Array.from({ length: 30 }, () => store.putVersion(e, version(siteId))))
-        expect(await store.listVersions(e, siteId)).toHaveLength(30)
-        await store.deleteVersions(e, siteId)
-        expect(await store.listVersions(e, siteId)).toEqual([])
-        expect(await store.getVersion(e, other.siteId, other.id)).toEqual(other)
+        const s = site(email())
+        const neighbour = site(s.email)
+        await store.createSite(s)
+        await store.createSite(neighbour)
+        const kept = version(neighbour.id)
+        await store.putVersion(neighbour, kept)
+        await Promise.all(Array.from({ length: 30 }, () => store.putVersion(s, version(s.id))))
+        expect(await store.listVersions(s)).toHaveLength(30)
+        await store.deleteSite(s)
+        expect(await store.listVersions(s)).toEqual([])
+        expect(await store.listVersions(neighbour)).toEqual([kept])
+        expect(await store.findSite(neighbour.name)).toEqual(neighbour)
       })
     })
 
@@ -519,6 +535,17 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         ] satisfies UploadFileRecord[])
       })
 
+      it('listUploadFiles is in path byte order', async () => {
+        const store = await factory()
+        const u = upload()
+        await store.putUpload(u)
+        const paths = awkward().map(p => `dir/${p}.html`)
+        for (const p of paths) await store.putUploadFile({ ...fileRec(u.id, p), parts: 1 })
+        expect((await store.listUploadFiles(u.id)).map(f => f.path)).toEqual(
+          byteOrder(paths, p => p)
+        )
+      })
+
       it('appendUploadPart counts parts, creating the file when absent', async () => {
         const store = await factory()
         const u = upload()
@@ -527,7 +554,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.appendUploadPart(fileRec(u.id, 'big.bin', 'base64'))).toBe(2)
         await store.putUploadFile({ ...fileRec(u.id, 'x.html'), parts: 1 })
         expect(await store.appendUploadPart(fileRec(u.id, 'x.html'))).toBe(2)
-        expect(sortBy(await store.listUploadFiles(u.id), f => f.path)).toEqual([
+        expect(await store.listUploadFiles(u.id)).toEqual([
           { ...fileRec(u.id, 'big.bin', 'base64'), parts: 2 },
           { ...fileRec(u.id, 'x.html'), parts: 2 },
         ])

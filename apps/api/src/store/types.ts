@@ -35,6 +35,9 @@ export interface SiteRecord {
   updatedAt: string
 }
 
+/** What locates a site's versions. */
+export type SiteRef = Pick<SiteRecord, 'id' | 'email'>
+
 /** Global claim on a site name (names are one namespace, first come, first served). */
 export interface NameClaim {
   name: string
@@ -164,12 +167,12 @@ export interface Store {
   deleteApiKey(email: string, id: string): Promise<boolean>
   touchApiKey(email: string, id: string, at: string): Promise<void>
 
-  getSite(email: string, name: string): Promise<SiteRecord | null>
   /**
    * The site holding the name claim for `name`, whoever owns it (null → no claim, or no site
    * record for it). Access is policy's decision, not the lookup's.
    */
   findSite(name: string): Promise<SiteRecord | null>
+  /** The user's own sites, by name. */
   listSites(email: string): Promise<SiteRecord[]>
   /** Who owns `name` globally (null → free). */
   getNameClaim(name: string): Promise<NameClaim | null>
@@ -180,13 +183,13 @@ export interface Store {
    */
   createSite(site: SiteRecord): Promise<SiteRecord | null>
   putSite(site: SiteRecord): Promise<void>
-  /** Delete the site and release its name claim. */
-  deleteSite(email: string, name: string): Promise<void>
+  /** Delete the site with its versions, and release its name claim (if the claim is its). */
+  deleteSite(site: SiteRecord): Promise<void>
 
-  getVersion(email: string, siteId: string, id: string): Promise<VersionRecord | null>
-  putVersion(email: string, version: VersionRecord): Promise<void>
-  listVersions(email: string, siteId: string): Promise<VersionRecord[]>
-  deleteVersions(email: string, siteId: string): Promise<void>
+  getVersion(site: SiteRef, id: string): Promise<VersionRecord | null>
+  putVersion(site: SiteRef, version: VersionRecord): Promise<void>
+  /** In version-id byte order. */
+  listVersions(site: SiteRef): Promise<VersionRecord[]>
 
   // --- OAuth (remote MCP connector) ---
   putOAuthClient(client: OAuthClientRecord): Promise<void>

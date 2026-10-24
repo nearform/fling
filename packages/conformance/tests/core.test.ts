@@ -16,6 +16,7 @@ import { Records } from '@fling/api/store/records'
 import { MemoryTable } from '@fling/api/table/memory'
 import {
   blobsConformance,
+  migrationsConformance,
   routeTableConformance,
   storeConformance,
   tableConformance,
@@ -26,6 +27,8 @@ const APP_ORIGIN = 'https://app.example.test'
 tableConformance('MemoryTable', () => new MemoryTable())
 
 storeConformance('Records on MemoryTable', () => new Records(new MemoryTable()))
+
+migrationsConformance('MemoryTable', async () => new MemoryTable())
 
 routeTableConformance('MemoryRouteTable', () => new MemoryRouteTable())
 

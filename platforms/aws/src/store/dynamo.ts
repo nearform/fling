@@ -19,7 +19,7 @@
  *                                                       90 days, pushed out by each authorization
  *   OAUTHREQ#<id>         REQ                           pending consent request — ttl 10 min
  *   OAUTHCODE#<sha256>    CODE                          authorization code — ttl 60 s; taken
- *                                                       with a delete (single use)
+ *                                                       with a conditional delete (single use)
  *   USER#<email>          GRANT#<id>                    connection/grant (client, current
  *                                                       refreshHash, lastUsedAt) — ttl = sliding
  *                                                       30-day refresh expiry
@@ -432,14 +432,22 @@ export class DynamoStore implements Store {
   }
 
   async takeAuthCode(hash: string) {
-    const res = await this.doc.send(
-      new DeleteCommand({
-        TableName: this.table,
-        Key: { PK: `OAUTHCODE#${hash}`, SK: 'CODE' },
-        ReturnValues: 'ALL_OLD',
-      })
-    )
-    return strip<AuthCodeRecord>(res.Attributes)
+    // Conditional, so exactly one of two concurrent exchanges of a code gets it back (an
+    // unconditional delete can return ALL_OLD to both).
+    try {
+      const res = await this.doc.send(
+        new DeleteCommand({
+          TableName: this.table,
+          Key: { PK: `OAUTHCODE#${hash}`, SK: 'CODE' },
+          ConditionExpression: 'attribute_exists(PK)',
+          ReturnValues: 'ALL_OLD',
+        })
+      )
+      return strip<AuthCodeRecord>(res.Attributes)
+    } catch (err) {
+      if (isConditionFailure(err)) return null
+      throw err
+    }
   }
 
   private grantItem = (grant: GrantRecord) => ({

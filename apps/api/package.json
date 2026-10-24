@@ -15,6 +15,7 @@
     "./blobs/signed-upload": "./src/blobs/signed-upload.ts",
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
+    "./route-table/table": "./src/route-table/table.ts",
     "./store": "./src/store/types.ts",
     "./store/records": "./src/store/records.ts",
     "./table": "./src/table/types.ts",

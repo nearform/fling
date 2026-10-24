@@ -62,9 +62,9 @@ const envSchema = z.object({
   SITES_BUCKET: optionalString,
   KVS_ARN: optionalString,
   SSM_PREFIX: optionalString,
-  STORE_DRIVER: z.preprocess(blank, z.enum(['dynamo', 'memory']).optional()),
-  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'fs']).optional()),
-  KVS_DRIVER: z.preprocess(blank, z.enum(['cloudfront', 'memory']).optional()),
+  STORE_DRIVER: z.preprocess(blank, z.enum(['dynamo', 'd1', 'memory']).optional()),
+  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'fs']).optional()),
+  KVS_DRIVER: z.preprocess(blank, z.enum(['cloudfront', 'workers-kv', 'memory']).optional()),
   FS_ROOT: optionalString,
   DEV_LOGIN: flag,
   OAUTH_REDIRECT_ALLOWLIST: z.preprocess(blank, z.string().optional()),
@@ -136,9 +136,14 @@ export interface Config {
   sitesBucket?: string
   kvsArn?: string
   ssmPrefix?: string
-  storeDriver: 'dynamo' | 'memory'
-  storageDriver: 's3' | 'fs'
-  kvsDriver: 'cloudfront' | 'memory'
+  /**
+   * Which adapter each port uses. The core has the dev/test ones (memory, fs); a platform entry
+   * supplies the others (platforms/aws: dynamo, s3, cloudfront; platforms/cloudflare: d1, r2,
+   * workers-kv). Production defaults to the AWS ones, as before there was a second platform.
+   */
+  storeDriver: 'dynamo' | 'd1' | 'memory'
+  storageDriver: 's3' | 'r2' | 'fs'
+  kvsDriver: 'cloudfront' | 'workers-kv' | 'memory'
   fsRoot?: string
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean

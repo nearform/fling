@@ -25,7 +25,7 @@
  * layout a site lived only at USER#<email>/SITE#<name>, which is why the index item keeps that
  * key and the full record: code from before it reads the index item as the site. Its versions
  * lived at USER#<email>/VERSION#<siteId>#<versionId> ("legacy versions"). Until the contract step
- * (migration 0002, with the release that drops the code marked LEGACY here):
+ * (migration 0002, run by hand, then a release that drops the code marked LEGACY here):
  * - versions are written to both places;
  * - reads take both into account, because a Lambda rolled back to the old code writes only the
  *   old keys: the newer of the site record and its index item wins (`updatedAt`), and versions

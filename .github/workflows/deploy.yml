@@ -11,6 +11,11 @@ name: Deploy
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. the API (Lambda code), and wait until the new code is live;
+#   1b. data migrations: invoke the function with {"fling":"migrate"} until it reports done. The
+#      code just deployed serves correctly before they run (each migration is written so; see
+#      apps/api/src/migrations), so this comes after the code, never before. Needs
+#      lambda:InvokeFunction on the deploy role and dynamodb:Scan on the function role
+#      (docs/DEPLOY.md); without them the step warns and the deploy goes on, migrations pending;
 #   2. the UI: hashed assets first and never deleted (open tabs keep loading their chunks), then the
 #      other public files, then index.html last; plus the Claude Desktop extension at
 #      downloads/fling.mcpb (built from apps/cli);
@@ -110,6 +115,42 @@ jobs:
           aws lambda update-function-code --function-name "$FUNCTION" \
             --zip-file fileb://platforms/aws/dist/lambda.zip --query CodeSha256 --output text
           aws lambda wait function-updated-v2 --function-name "$FUNCTION"
+
+      # Each invoke runs migration pages until shortly before the function's timeout, checkpoints
+      # and returns the runner's report; call again until `done`. `busy` means another run holds
+      # a migration's lock (a crashed one's lease runs out within 2 minutes).
+      - name: Run data migrations
+        env:
+          FUNCTION: ${{ steps.config.outputs.LAMBDA_FUNCTION }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/migrate.json"
+          for attempt in $(seq 1 40); do
+            # Missing permissions (the deploy role's lambda:InvokeFunction, or the function role's
+            # dynamodb:Scan) leave the migrations pending, which the code tolerates: warn, go on.
+            not_allowed() {
+              echo "::warning::Data migrations NOT run: $1 (docs/DEPLOY.md, Data migrations). The API works meanwhile; grant it and redeploy."
+              echo "### Data migrations not run: $1" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            }
+            if ! meta="$(aws lambda invoke --function-name "$FUNCTION" \
+              --cli-binary-format raw-in-base64-out --payload '{"fling":"migrate"}' \
+              --cli-read-timeout 0 "$out" 2>&1)"; then
+              grep -q AccessDenied <<<"$meta" && not_allowed "the deploy role lacks lambda:InvokeFunction"
+              echo "$meta"; exit 1
+            fi
+            if jq -e '.FunctionError' <<<"$meta" >/dev/null; then
+              grep -q AccessDenied "$out" && not_allowed "the function role lacks dynamodb:Scan on the table"
+              echo "::error::The migrate invoke failed"; cat "$out"; exit 1
+            fi
+            jq -r '.migrations[] | "\(.id) \(.title): \(.status), \(.scanned) items, \(.counts)"' "$out"
+            if jq -e '.done' "$out" >/dev/null; then
+              jq -r '.migrations[] | "- \(.id) \(.title): \(.status)"' "$out" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if jq -e 'any(.migrations[]; .status == "busy")' "$out" >/dev/null; then sleep 20; fi
+          done
+          echo "::error::Data migrations still not done after 40 invocations"; exit 1
 
       - name: Upload the UI
         env:

@@ -1,5 +1,6 @@
 /**
- * Local dev: the API on :3001 (memory store, fs blobs under `.fling-dev/`, memory route table) and
+ * Local dev: the API on :3001 (Records on a memory table, fs blobs under `.fling-dev/`, memory
+ * route table; pending data migrations run first, as a deploy runs them) and
  * the sites on :3002 — `http://<label>.fling.lvh.me:3002/…` runs the real edge/site-router.js (via
  * the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
  * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404.
@@ -16,7 +17,10 @@ import { createApp } from './app.ts'
 import { type Config, loadBaseConfig, secretsFromEnv } from './config.ts'
 import { buildDeps } from './deps.ts'
 import { contentTypeFor } from './lib/mime.ts'
+import { MIGRATIONS, runMigrations } from './migrations/index.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
+import { Records } from './store/records.ts'
+import { MemoryTable } from './table/memory.ts'
 
 const API_PORT = Number(process.env.PORT ?? 3001)
 const SITES_PORT = Number(process.env.SITES_PORT ?? 3002)
@@ -44,7 +48,17 @@ const env = {
 const base = loadBaseConfig(env)
 const config: Config = { ...base, secrets: secretsFromEnv(env) }
 const routeTable = new MemoryRouteTable()
-const deps = buildDeps(config, { fsRoot, apiBaseUrl: `http://localhost:${API_PORT}`, routeTable })
+const table = new MemoryTable()
+const migrated = await runMigrations(table, { migrations: MIGRATIONS })
+console.log(
+  `fling migrations: ${migrated.migrations.map(m => `${m.id} ${m.status}`).join(', ') || 'none'}`
+)
+const deps = buildDeps(config, {
+  fsRoot,
+  apiBaseUrl: `http://localhost:${API_PORT}`,
+  routeTable,
+  store: new Records(table),
+})
 await routeTable.put(SITE_HMAC_KVS_KEY, config.secrets.siteHmacKey)
 
 serve({ fetch: createApp(deps).fetch, port: API_PORT }, info =>

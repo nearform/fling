@@ -8,7 +8,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate:rehearse": "tsx scripts/migrate-rehearse.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudfront-keyvaluestore": "3.1150.0",
@@ -27,6 +28,7 @@
     "@types/aws-lambda": "^8.10.152",
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.12",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
   }

@@ -1,14 +1,18 @@
+import type { Me } from '@fling/shared'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
   GlobeAltIcon,
   KeyIcon,
   RocketLaunchIcon,
+  ShieldCheckIcon,
 } from '@heroicons/react/24/outline'
 import type { ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import { useInstance } from '../hooks/instance'
+import { useMe } from '../hooks/queries'
 import { useBooleanPreference } from '../hooks/useLocalStoragePreference'
+import { ADMIN_USERS_PATH, showsAdmin } from '../lib/admin'
 import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import { LogoMark } from './LogoMark'
 
@@ -23,6 +27,18 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/get-started', label: 'Get started', icon: RocketLaunchIcon },
   { to: '/connections', label: 'Connections', icon: KeyIcon },
 ]
+
+/** Admin → Users, for admins in their own session. */
+export const ADMIN_NAV_ITEM: NavItem = {
+  to: ADMIN_USERS_PATH,
+  label: 'Admin',
+  icon: ShieldCheckIcon,
+}
+
+/** The side nav's items for this user: everyone's, then Admin for admins. */
+export function navItemsFor(me: Me | null | undefined): NavItem[] {
+  return showsAdmin(me) ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS
+}
 
 /** `/` matches only itself; every other path matches itself and its descendants. */
 export function isPathActive(pathname: string, to: string): boolean {
@@ -40,6 +56,7 @@ export default function SideNav() {
   const { pathname } = useLocation()
   const [isCollapsed, setIsCollapsed] = useBooleanPreference('sideNavCollapsed', false)
   const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
+  const { data: me } = useMe()
 
   return (
     <aside
@@ -61,7 +78,7 @@ export default function SideNav() {
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="Main">
-        {NAV_ITEMS.map(item => (
+        {navItemsFor(me).map(item => (
           <div key={item.to} className="relative group">
             <NavLink
               to={item.to}

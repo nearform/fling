@@ -1,11 +1,14 @@
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { ImpersonationBanner } from './components/ImpersonationBanner'
 import Layout from './components/Layout'
 import { NotFound } from './components/NotFound'
 import { Toasts } from './components/Toasts'
 import { AppInstanceProvider } from './hooks/instance'
 import { queryKeys, useMe } from './hooks/queries'
+import { ADMIN_USERS_PATH } from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
+import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
 import GetStarted from './pages/GetStarted'
@@ -58,11 +61,17 @@ function Authenticated({ bare = false }: { bare?: boolean }) {
     )
   }
   if (!me.data) return <Login />
-  if (bare) return <Outlet />
   return (
-    <Layout>
-      <Outlet />
-    </Layout>
+    <>
+      {bare ? (
+        <Outlet />
+      ) : (
+        <Layout>
+          <Outlet />
+        </Layout>
+      )}
+      <ImpersonationBanner />
+    </>
   )
 }
 
@@ -77,6 +86,8 @@ export default function App() {
               <Route path="get-started" element={<GetStarted />} />
               <Route path="connections" element={<ApiKeys />} />
               <Route path="keys" element={<Navigate to="/connections" replace />} />
+              <Route path="admin/users" element={<AdminUsers />} />
+              <Route path="admin" element={<Navigate to={ADMIN_USERS_PATH} replace />} />
             </Route>
             <Route element={<Authenticated bare />}>
               <Route path="review/:name" element={<Review />} />

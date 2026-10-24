@@ -1,3 +1,4 @@
+import type { IdentityProvider } from './auth/identity.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
 import type { RouteTable } from './route-table/types.ts'
@@ -7,30 +8,14 @@ export interface Clock {
   now(): Date
 }
 
-/** The verified claims we need from Google's ID token. */
-export interface GoogleClaims {
-  sub?: string
-  email?: string
-  email_verified?: boolean
-  hd?: string
-  name?: string
-  picture?: string
-}
-
-/** Thin seam over arctic so tests can fake Google. */
-export interface OAuthClient {
-  authorizationUrl(state: string, verifier: string): URL
-  exchange(code: string, verifier: string): Promise<GoogleClaims>
-}
-
 export interface Deps {
   config: Config
   store: Store
   blobs: Blobs
   routeTable: RouteTable
   clock: Clock
-  /** defaults to the arctic Google client built from config */
-  oauth?: OAuthClient
+  /** The instance's sign-in (generic OIDC, from config); null/absent → none (dev-login only). */
+  identity?: IdentityProvider | null
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

@@ -9,16 +9,21 @@ import {
   type InstanceAuth,
   type InstanceMetadata,
 } from '@fling/shared'
+import { oidcSettings } from './auth/oidc.ts'
 import type { Config } from './config.ts'
 
-/** The sign-in method people see. Generic OIDC (one issuer per instance) replaces Google later. */
+/** The sign-in method people see: the instance's OIDC issuer, or dev-login in local dev. */
 function authInfo(config: Config): InstanceAuth {
-  const { googleClientId, googleClientSecret } = config.secrets
-  const google = Boolean(googleClientId && googleClientSecret)
-  if (!google && config.devLogin) {
-    return { kind: 'dev', displayName: 'Dev login', emailDomains: [] }
+  const oidc = oidcSettings(config)
+  if (oidc) {
+    return {
+      kind: 'oidc',
+      issuer: oidc.issuer,
+      displayName: oidc.displayName,
+      emailDomains: config.allowedEmailDomains,
+    }
   }
-  return { kind: 'google', displayName: 'Google', emailDomains: config.allowedEmailDomains }
+  return { kind: 'dev', displayName: 'Dev login', emailDomains: [] }
 }
 
 export function instanceMetadata(config: Config): InstanceMetadata {

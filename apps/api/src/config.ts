@@ -2,6 +2,7 @@
  * Configuration: one zod schema over the env object (rocketpod pattern). Plain vars come from the
  * Lambda environment; secrets come from SSM (`SSM_PREFIX`, loaded once per cold start in
  * platforms/aws/src/secrets.ts) or, when that is unset (dev/tests), from the same-named env vars.
+ * Sign-in (`OIDC_*`) is resolved from both in auth/oidc.ts.
  */
 import { DEFAULT_INSTALL_COMMAND, HEX_COLOR_RE, type InstanceBrand } from '@fling/shared'
 import { z } from 'zod'
@@ -67,6 +68,11 @@ const envSchema = z.object({
   FS_ROOT: optionalString,
   DEV_LOGIN: flag,
   OAUTH_REDIRECT_ALLOWLIST: z.preprocess(blank, z.string().optional()),
+  OIDC_ISSUER: z.preprocess(blank, z.url().optional()),
+  OIDC_CLIENT_ID: optionalString,
+  OIDC_DISPLAY_NAME: z.preprocess(blank, z.string().min(1).max(60).optional()),
+  OIDC_SCOPES: optionalString,
+  OIDC_ASSUME_EMAIL_VERIFIED: flag,
 })
 
 /**
@@ -83,12 +89,32 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
 export const DEV_EMAIL_DOMAINS = ['example.test']
 
 export interface Secrets {
-  googleClientId: string
-  googleClientSecret: string
+  /** The OIDC client's secret (`OIDC_CLIENT_SECRET`; SSM `oidc-client-secret`). */
+  oidcClientSecret?: string
+  /**
+   * Deprecated: the Google OAuth client from before generic OIDC (`GOOGLE_CLIENT_ID/SECRET`; SSM
+   * `google-client-id/secret`). Used, as the issuer https://accounts.google.com, only when
+   * OIDC_ISSUER is unset.
+   */
+  googleClientId?: string
+  googleClientSecret?: string
   sessionSecret: string
   siteHmacKey: string
   /** CloudFront adds `x-origin-verify: <secret>`; unset → no check. */
   originVerifySecret?: string
+}
+
+/** The identity provider from env (`OIDC_*`); the client secret is in Secrets. */
+export interface OidcConfig {
+  /** Exactly the issuer's `iss` (e.g. https://accounts.google.com); unset → legacy/dev. */
+  issuer?: string
+  clientId?: string
+  /** What the sign-in button says ("Sign in with …"); default derived from the issuer. */
+  displayName?: string
+  /** Default `openid email profile`. */
+  scopes?: string[]
+  /** Treat a missing `email_verified` claim as verified (an explicit `false` is still refused). */
+  assumeEmailVerified: boolean
 }
 
 export interface Config {
@@ -120,6 +146,7 @@ export interface Config {
   secureCookies: boolean
   /** OAuth redirect URI allowlist (exact URLs and/or `loopback`) */
   oauthRedirectAllowlist: string[]
+  oidc: OidcConfig
   secrets: Secrets
 }
 
@@ -132,6 +159,12 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
   const siteScheme = e.SITE_SCHEME ?? (production ? 'https' : 'http')
   if (production && !e.ALLOWED_EMAIL_DOMAINS) {
     throw new Error('ALLOWED_EMAIL_DOMAINS is required in production (e.g. example.test)')
+  }
+  if (Boolean(e.OIDC_ISSUER) !== Boolean(e.OIDC_CLIENT_ID)) {
+    throw new Error('OIDC_ISSUER and OIDC_CLIENT_ID go together')
+  }
+  if (production && e.OIDC_ISSUER && !e.OIDC_ISSUER.startsWith('https://')) {
+    throw new Error('OIDC_ISSUER must be an https URL in production')
   }
   const colors = {
     primary: e.BRAND_PRIMARY,
@@ -170,6 +203,13 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
           .map(s => s.trim())
           .filter(Boolean)
       : DEFAULT_OAUTH_REDIRECT_ALLOWLIST,
+    oidc: definedOnly({
+      issuer: e.OIDC_ISSUER,
+      clientId: e.OIDC_CLIENT_ID,
+      displayName: e.OIDC_DISPLAY_NAME,
+      scopes: e.OIDC_SCOPES?.split(/[\s,]+/).filter(Boolean),
+      assumeEmailVerified: e.OIDC_ASSUME_EMAIL_VERIFIED,
+    }),
   }
   if (cfg.storeDriver === 'dynamo' && !cfg.tableName) throw new Error('TABLE_NAME is required')
   if (cfg.storageDriver === 's3' && !cfg.sitesBucket) throw new Error('SITES_BUCKET is required')
@@ -182,7 +222,7 @@ function definedOnly<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T
 }
 
-/** Secrets from env (dev/tests). Missing Google creds are allowed (dev-login still works). */
+/** Secrets from env (dev/tests). A missing client secret is allowed (dev-login still works). */
 export function secretsFromEnv(env: Record<string, string | undefined> = process.env): Secrets {
   const sessionSecret = env.SESSION_SECRET?.trim()
   const siteHmacKey = env.SITE_HMAC_KEY?.trim()
@@ -193,8 +233,9 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     throw new Error('SITE_HMAC_KEY must be at least 32 characters')
   }
   return {
-    googleClientId: env.GOOGLE_CLIENT_ID?.trim() ?? '',
-    googleClientSecret: env.GOOGLE_CLIENT_SECRET?.trim() ?? '',
+    oidcClientSecret: env.OIDC_CLIENT_SECRET?.trim() || undefined,
+    googleClientId: env.GOOGLE_CLIENT_ID?.trim() || undefined,
+    googleClientSecret: env.GOOGLE_CLIENT_SECRET?.trim() || undefined,
     sessionSecret,
     siteHmacKey,
     originVerifySecret: env.ORIGIN_VERIFY_SECRET?.trim() || undefined,

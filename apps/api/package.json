@@ -30,9 +30,9 @@
     "@fling/shared": "workspace:*",
     "@hono/node-server": "^2.1.4",
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "arctic": "^3.7.0",
     "hono": "^4.13.5",
     "jose": "^6.2.12",
+    "oauth4webapi": "^3.8.8",
     "zod": "^4.6.7"
   },
   "devDependencies": {

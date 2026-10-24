@@ -22,11 +22,13 @@ email domains.
 |---|---|
 | `apps/api` | The cloud-agnostic Hono API: sign-in, CLI keys, deploys, the instance metadata, the remote MCP server and its OAuth server |
 | `platforms/aws` | The API on AWS: Lambda entry point and the DynamoDB, S3, CloudFront KeyValueStore and SSM adapters; builds `lambda.zip`. Its Terraform module is `platforms/aws/infra` |
+| `platforms/cloudflare` | Fling on Cloudflare: one Worker (API, UI from Static Assets, sites) with the D1, R2 and Workers KV adapters; `wrangler.jsonc`, setup and deploy scripts |
 | `apps/web` | React UI (sites, connections, get started) and the 404 page, themed at runtime from the instance metadata |
 | `apps/cli` | `@nearform/fling` CLI, local MCP server and the `.mcpb` Claude Desktop extension |
-| `edge` | CloudFront Function that routes `*.<sites domain>` to the right site version |
-| `packages/shared` | Contracts shared by all of the above |
-| `packages/conformance` | Test suites every storage adapter must pass (the core's memory/fs adapters; DynamoDB Local and MinIO in CI) |
+| `edge` | The CloudFront Function that routes `*.<sites domain>`: a generated shell around the shared routing decision |
+| `packages/shared` | Contracts shared by all of the above, including the sites' routing decision (`site-routing.ts`) every platform's edge runs |
+| `packages/conformance` | Test suites every storage adapter must pass (the core's memory/fs adapters; DynamoDB Local and MinIO in CI; Miniflare's D1, R2 and KV) |
+| `packages/e2e` | The end-to-end scenario every platform must pass, on its local runtime (`pnpm e2e`) and as the post-deploy smoke test |
 | `plugin` | Claude Code plugin (skill + MCP) |
 
 ## Develop
@@ -35,7 +37,9 @@ email domains.
 pnpm install
 pnpm dev          # API :47101, sites :47102 at http://<name>.fling.lvh.me:47102
 pnpm --filter @fling/web dev   # UI :47100 → open http://fling.lvh.me:47100
-pnpm gate         # lint, typecheck, test, build
+pnpm gate         # lint, typecheck, test, build, e2e
+pnpm e2e          # the e2e scenario on both local runtimes (after pnpm build)
+pnpm --filter @fling/platform-cloudflare dev   # the Worker under wrangler dev :47103
 ```
 
 Local dev signs in with a dev form (any email). To try a real provider, set `OIDC_ISSUER`,
@@ -50,3 +54,4 @@ deploy guide. Pick one per instance:
 | Platform | Guide | Infrastructure |
 |---|---|---|
 | AWS (Lambda, S3, DynamoDB, CloudFront) | [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md) | Terraform module [platforms/aws/infra](platforms/aws/infra) |
+| Cloudflare (Workers, D1, R2, Workers KV) | [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md) | `wrangler.jsonc` and [scripts/setup.mjs](platforms/cloudflare/scripts/setup.mjs) |

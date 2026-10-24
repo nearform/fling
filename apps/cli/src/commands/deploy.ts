@@ -18,13 +18,19 @@
 
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { isValidSiteName, SITE_NAME_MAX } from '@fling/shared'
+import {
+  type InstanceMetadata,
+  isValidSiteName,
+  privateAudience,
+  SITE_NAME_MAX,
+} from '@fling/shared'
 import chalk from 'chalk'
 import type { ApiClient } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { deploy, resolveSiteName } from '../deploy.ts'
 import { CliError } from '../errors.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
+import { loadInstance } from '../instance.ts'
 import {
   buildManifest,
   describeSkipped,
@@ -34,7 +40,7 @@ import {
   withHtmlListing,
 } from '../manifest.ts'
 import { waitWithSpinner } from '../ready.ts'
-import { checkName, discoverSitesBase, type SitesBase, sitesBaseFor, siteUrlFor } from '../sites.ts'
+import { checkName, type SitesBase, sitesBaseOf, siteUrlFor } from '../sites.ts'
 import { box, brand } from '../ui/theme.ts'
 import { formatBytes } from '../utils/output.ts'
 
@@ -57,8 +63,9 @@ export async function runDeploy(
 ): Promise<void> {
   const client = requireClient(ctx)
   const ask = ctx.interactive && !opts.yes
-  // Where the site will be served, for the prompts (only worth a lookup when we're asking).
-  const base = ask ? await discoverSitesBase(client) : sitesBaseFor(client.serverUrl)
+  // Where the site will be served and who can see it: from the instance stored at login.
+  const instance = await loadInstance(ctx.store, ctx.config, ctx.fetch)
+  const base = sitesBaseOf(instance)
 
   const path = resolve(input ?? '.')
   if (!(await stat(path).catch(() => null)))
@@ -67,7 +74,7 @@ export async function runDeploy(
     })
   const prepared = await prepareInput(path)
   try {
-    await deployPrepared(ctx, client, base, prepared, opts, ask)
+    await deployPrepared(ctx, client, instance, base, prepared, opts, ask)
   } finally {
     await prepared.cleanup()
   }
@@ -76,6 +83,7 @@ export async function runDeploy(
 async function deployPrepared(
   ctx: CommandContext,
   client: ApiClient,
+  instance: InstanceMetadata | null,
   base: SitesBase | null,
   prepared: PreparedInput,
   opts: DeployCommandOptions,
@@ -154,7 +162,8 @@ async function deployPrepared(
           )
         ).ready
 
-  const privateNote = `Private: Nearform sign-in required. Share publicly with \`${ctx.binName} share ${result.name}\`.`
+  const who = instance ? `only ${privateAudience(instance)} can open it` : 'sign-in required'
+  const privateNote = `Private: ${who}. Share publicly with \`${ctx.binName} share ${result.name}\`.`
   ctx.out.data({ status: result.status, site: result.site, ready, skipped: local.skipped }, () => {
     const isPrivate = result.site.visibility === 'private'
     // On a terminal the URL gets a box; piped, it stays a bare line so `fling deploy … | pbcopy` works.

@@ -3,7 +3,7 @@ name: Release CLI
 # Publishes the CLI, @nearform/fling, to public npm when a `cli-v<version>` tag is pushed:
 #
 #   # bump apps/cli/package.json, merge, then on that commit:
-#   git tag cli-v0.2.0 && git push origin cli-v0.2.0
+#   git tag cli-v0.3.0 && git push origin cli-v0.3.0
 #
 # The tag must match apps/cli/package.json's version. The gate (ci.yml) runs on the tagged commit
 # first. `pnpm pack` writes the tarball (it rewrites any workspace: ranges), `npm publish` uploads it.
@@ -63,7 +63,8 @@ jobs:
         run: |
           set -euo pipefail
           pnpm pack --pack-destination "$RUNNER_TEMP"
-          tarball="$(ls "$RUNNER_TEMP"/nearform-fling-*.tgz)"
+          # pnpm names it after the package (scope and name, joined by a dash) and the version.
+          tarball="$(ls "$RUNNER_TEMP"/*-fling-*.tgz)"
           # List to a file first: `tar | grep -q` fails under pipefail (grep exits early, tar gets SIGPIPE).
           tar -tzf "$tarball" > "$RUNNER_TEMP/pack-contents.txt"
           grep -qx 'package/dist/cli.js' "$RUNNER_TEMP/pack-contents.txt" || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }

@@ -344,7 +344,7 @@ describe('name and index.html prompts', () => {
     await runDeploy(ctx, dir, {})
     expect(p.questions).toEqual(['Use "my-app"? [Y/n or type another name] '])
     expect(log.lines.join('\n')).toMatch(
-      /Site name: .*my-app.* → http:\/\/my-app\.server\.test\/ .*\(new\)/
+      /Site name: .*my-app.* → https:\/\/my-app\.sites\.example\.test\/ .*\(new\)/
     )
     expect(deployed(m)).toEqual(['/api/sites/my-app/deploys'])
   })
@@ -468,7 +468,7 @@ describe('name and index.html prompts', () => {
     await runDeploy(fling.ctx, dir, { name: 'my-app' })
     expect(manifestOf(m).map(f => f.path)).toEqual(['docs/two.html', 'page.html'])
     expect(fling.log.lines.join('\n')).toMatch(
-      /No index\.html at the root — http:\/\/my-app\.server\.test\/ will show a 404\./
+      /No index\.html at the root — https:\/\/my-app\.sites\.example\.test\/ will show a 404\./
     )
   })
 

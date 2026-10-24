@@ -1,8 +1,9 @@
 /**
- * Login handoff. The CLI listens on the first free port in 8765–8770 at
+ * Login handoff. First `<server>/.well-known/fling` is fetched: it proves the URL is a Fling and is
+ * stored as the instance. Then the CLI listens on the first free port in 8765–8770 at
  * `http://127.0.0.1:<port>/callback`, opens
  * `<server>/auth/cli?redirect_uri=<callback>&hostname=<host>&state=<random>` in the browser, and the
- * server — after Google sign-in — redirects back with `?key=<api key>` (or `?error=<code>`). If the
+ * server — after sign-in — redirects back with `?key=<api key>` (or `?error=<code>`). If the
  * server echoes `state`, it must match. The callback answers a tiny self-closing page, the CLI
  * verifies the key with `GET /api/me`, and writes the config. Five-minute timeout. The key is never
  * printed in full.
@@ -10,11 +11,12 @@
 import { randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { hostname as osHostname } from 'node:os'
-import { type Me, MeSchema } from '@fling/shared'
+import { type InstanceMetadata, type Me, MeSchema } from '@fling/shared'
 import { createApiClient, type FetchLike } from './api.ts'
 import { type ConfigStore, redactKey } from './config.ts'
 import type { OpenLike } from './context.ts'
 import { CliError } from './errors.ts'
+import { fetchInstance } from './instance.ts'
 import { BIN_NAME } from './package-info.ts'
 import type { Logger } from './utils/logger.ts'
 
@@ -41,16 +43,18 @@ export interface LoginResult {
   serverUrl: string
   keyPrefix: string
   user: Me
+  instance: InstanceMetadata
 }
 
 export async function loginFlow(options: LoginOptions): Promise<LoginResult> {
   const { serverUrl, store, log } = options
+  const instance = await fetchInstance(serverUrl, options.fetch ?? fetch)
   const state = randomBytes(16).toString('hex')
   const callback = await startCallbackServer({ state, timeoutMs: options.timeoutMs })
   try {
     const authUrl = buildAuthUrl(serverUrl, callback.url, options.hostname ?? osHostname(), state)
     options.onAuthUrl?.(authUrl)
-    log.info(`Opening your browser to sign in at ${serverUrl}`)
+    log.info(`Opening your browser to sign in to ${instance.name} at ${serverUrl}`)
     log.hint(`If it does not open, visit: ${authUrl}`)
     try {
       await options.open(authUrl)
@@ -65,6 +69,7 @@ export async function loginFlow(options: LoginOptions): Promise<LoginResult> {
 
     await store.update({
       serverUrl,
+      instance,
       apiKey: key,
       user: { email: user.email, name: user.name, userSlug: user.userSlug },
     })
@@ -72,7 +77,7 @@ export async function loginFlow(options: LoginOptions): Promise<LoginResult> {
     log.success(`Signed in as ${user.email}`)
     log.hint(`Server: ${serverUrl}`)
     log.hint(`API key: ${keyPrefix} (stored in ${store.file})`)
-    return { serverUrl, keyPrefix, user }
+    return { serverUrl, keyPrefix, user, instance }
   } finally {
     callback.close()
   }

@@ -1,14 +1,18 @@
 # @nearform/fling
 
-Fling a folder of static files at [fling.labs.nearform.com](https://fling.labs.nearform.com) and
-get a stable link back:
+Fling a folder of static files at your Fling server and get a stable link back:
 
 ```
-https://<name>.fling.labs.nearform.com
+https://<name>.<your sites domain>
 ```
 
-Site names are one global namespace, first come first served. Sites are private to signed-in Nearformers by default. Share links make them viewable by anyone
-who has the link.
+Site names are one global namespace per server, first come first served. Sites are private to
+people signed in to that Fling by default. Share links make them viewable by anyone who has the
+link.
+
+> **Upgrading from 0.2?** The CLI no longer has a built-in server. If you were logged in with 0.2
+> it carries on with the server you logged in to. Otherwise (or on a new machine) run
+> `fling login <url>` once with your Fling's address. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Install
 
@@ -23,13 +27,14 @@ npx @nearform/fling …
 ## Set up
 
 ```sh
-fling setup
+fling setup https://fling.example.com   # your Fling's address; later runs can leave it out
 ```
 
 This does everything a new machine needs:
 
-1. **Signs you in.** Your browser opens for Nearform Google sign-in and an API key is stored in
-   `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
+1. **Signs you in.** The CLI reads the server's `/.well-known/fling` (its name, where its sites
+   live, how people sign in) and remembers it. Your browser opens for sign-in and an API key is
+   stored in `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
 2. **Adds Fling to Claude Code.** If `claude` is on your PATH, setup installs the Fling plugin
    (skill + MCP server) from the `nearform/fling` marketplace, or updates it if it's already
    installed. `--scope project|local` installs it for this project only (default `user`).
@@ -38,15 +43,17 @@ This does everything a new machine needs:
 
 On a terminal it asks before steps 2 and 3. With `--yes` it does them without asking.
 
-To sign in only, use `fling login`. `fling whoami` shows who you are, and `fling logout` removes the
-key. For CI, set `FLING_API_KEY` instead.
+To sign in only, use `fling login <url>` (the URL is remembered: later `fling login` needs none).
+There is no default server: until you log in, commands say to run `fling login <url>`.
+`fling whoami` shows who you are, and `fling logout` removes the key (and keeps the server). For CI,
+set `FLING_URL` and `FLING_API_KEY` instead.
 
 ## Deploy
 
 ```sh
 npm run build
 fling deploy ./dist                        # name generated from the project, e.g. rocketpod-docs; you confirm it
-fling deploy ./dist --name my-app          # → https://my-app.fling.labs.nearform.com
+fling deploy ./dist --name my-app          # → https://my-app.<your sites domain>
 fling deploy ./dist --name my-app --spa    # client-side routing: unknown paths serve index.html
 fling deploy ./dist --public               # no sign-in needed to view
 fling deploy ./dist --yes                  # never prompt (CI): use the generated name as is
@@ -126,7 +133,7 @@ Without `--name`, the name is generated from the folder, never from your user na
 In a terminal, Fling checks the generated name and asks before deploying:
 
 ```
-fling Site name: rocketpod-docs → https://rocketpod-docs.fling.labs.nearform.com/  (new)
+fling Site name: rocketpod-docs → https://rocketpod-docs.sites.example.com/  (new)
 Use "rocketpod-docs"? [Y/n or type another name]
 ```
 
@@ -162,8 +169,8 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
-Global options: `--json` prints machine-readable output, and `--server <url>` points at another
-server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
+Global options: `--json` prints machine-readable output, and `--server <url>` points one command at
+another server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
 (where the MCP server looks for files given by name first), `FLING_NO_WAIT=1` (after a deploy or a new share
@@ -185,7 +192,9 @@ Or install it by hand in Claude Code:
 /plugin install fling@fling
 ```
 
-Log in once with `fling login` (or `npx @nearform/fling login` if it is not installed). The MCP server reuses that login.
+Log in once with `fling login <url>` (or `npx @nearform/fling login <url>` if it is not installed).
+The MCP server reuses that login, and its tool descriptions name your Fling and where its sites
+live.
 
 The MCP tools:
 
@@ -215,20 +224,21 @@ For Claude Desktop (including Cowork), install the one-click extension. It runs 
 on your computer, so Claude can fling files you downloaded or that Claude Desktop saved, by name,
 without uploading anything from Claude's sandbox.
 
-1. Download [fling.mcpb](https://fling.labs.nearform.com/downloads/fling.mcpb).
+1. Download `fling.mcpb` from your Fling (Get started → Download, or `https://<your Fling>/downloads/fling.mcpb`).
 2. Double-click it, or drag it into Claude Desktop, or go to **Settings → Extensions → Advanced
    settings → Install Extension…** and pick the file.
-3. Optional settings: **Fling server** (default `https://fling.labs.nearform.com`) and **Downloads
-   folder** (default `~/Downloads`).
+3. Optional settings: **Fling server** (filled in with the Fling you downloaded it from; empty means
+   the one the CLI is logged in to) and **Downloads folder** (default `~/Downloads`).
 4. Ask Claude to "fling Pitch Deck.html from my Downloads". If you're not signed in, Claude calls
    `fling_login` and your browser opens. The extension and the CLI share the login in
    `~/.fling/config.json`.
 
 It needs Node.js 20 or later, which Claude Desktop provides, on macOS or Windows.
 
-Build it with `pnpm --filter @nearform/fling build:mcpb`. That bundles `src/mcp-entry.ts` and every
-dependency into one file, then validates and packs `mcpb/manifest.json` into `dist/fling.mcpb`.
-CI publishes it at `/downloads/fling.mcpb`.
+Build it with `pnpm --filter ./apps/cli build:mcpb`. That bundles `src/mcp-entry.ts` and every
+dependency into one file, then validates and packs `mcpb/manifest.json` into `dist/fling.mcpb`
+(`FLING_MCPB_SERVER_URL` sets the **Fling server** default). A deploy publishes it at
+`/downloads/fling.mcpb`.
 
 To use the MCP server in another client, run it over stdio:
 
@@ -241,7 +251,7 @@ To use the MCP server in another client, run it over stdio:
 From the repo root:
 
 ```sh
-pnpm cli --server http://localhost:3001 login   # against `pnpm dev`
-pnpm --filter @nearform/fling test
-pnpm --filter @nearform/fling build             # → dist/cli.js
+pnpm cli login http://localhost:3001   # against `pnpm dev`
+pnpm --filter ./apps/cli test
+pnpm --filter ./apps/cli build         # → dist/cli.js
 ```

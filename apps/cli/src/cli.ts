@@ -20,7 +20,7 @@ import {
   runVersions,
   runVisibility,
 } from './commands/sites.ts'
-import { DEFAULT_SERVER_URL, ENV } from './config.ts'
+import { ENV } from './config.ts'
 import { type CommandContext, createContext } from './context.ts'
 import { CliError, exitCodeFor } from './errors.ts'
 import { runMcpServer } from './mcp.ts'
@@ -40,10 +40,7 @@ program
   .name(BIN_NAME)
   .description('Fling a folder of static files at Fling and get a link back')
   .version(VERSION)
-  .option(
-    '--server <url>',
-    `server URL (default: $${ENV.url} or config, else ${DEFAULT_SERVER_URL})`
-  )
+  .option('--server <url>', `server URL (default: $${ENV.url}, else the one you logged in to)`)
   .option('--json', 'print JSON instead of human output', false)
   .showHelpAfterError()
   .configureHelp({
@@ -61,13 +58,14 @@ program
     'after',
     () => `
 ${chalk.bold(brand.primary('Examples:'))}
+  $ ${BIN_NAME} login https://fling.example.com  sign in to your Fling (once; there is no default)
   $ ${BIN_NAME} setup                      sign in and add Fling to Claude Code / Claude Desktop
-  $ ${BIN_NAME} deploy ./dist --name my-app → https://my-app.fling.labs.nearform.com
+  $ ${BIN_NAME} deploy ./dist --name my-app → https://my-app.<your sites domain>
   $ ${BIN_NAME} ./dist                     the same: an existing path deploys
   $ ${BIN_NAME} ./dist --yes               no prompts (CI): use the generated name, fail if it is taken
   $ ${BIN_NAME} "Pitch Deck.html"          a single page
   $ ${BIN_NAME} site.zip                   a zip of a site
-  $ ${BIN_NAME} share my-app               public link for people outside Nearform
+  $ ${BIN_NAME} share my-app               public link for people who can't sign in
 
 ${chalk.dim(`Exit codes: 0 ok · 1 error · 2 not logged in · 3 forbidden
 Env:        ${ENV.apiKey} · ${ENV.url} · ${ENV.configDir} · ${ENV.debug}`)}`
@@ -128,7 +126,7 @@ program
     'site name — names are global, first come first served (default: generated from the project and folder, e.g. rocketpod-docs; you confirm it on a terminal)'
   )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
-  .option('--public', 'make the site public (default: Nearform sign-in required)')
+  .option('--public', 'make the site public (default: sign-in required)')
   .option(
     '-y, --yes',
     'never prompt: accept the generated name; without index.html, list the HTML pages (or fling anyway if there are none)'
@@ -148,21 +146,27 @@ program
 // ---- setup and auth ------------------------------------------------------------------------
 
 program
-  .command('setup')
+  .command('setup [url]')
   .helpGroup('Setup:')
   .description(
-    'sign in, then add the Fling plugin to Claude Code and the extension to Claude Desktop'
+    'sign in (to the Fling at url, the first time), then add the Fling plugin to Claude Code and the extension to Claude Desktop'
   )
   .option('-y, --yes', 'do every step without asking')
   .option('-s, --scope <scope>', 'Claude Code plugin scope: user, project or local', 'user')
-  .action(action((ctx, opts: { yes?: boolean; scope?: string }) => runSetup(ctx, opts)))
-program
-  .command('login')
-  .helpGroup('Setup:')
-  .description('sign in through the browser and store an API key')
   .action(
-    action(async ctx => {
-      await runLogin(ctx)
+    action((ctx, url: string | undefined, opts: { yes?: boolean; scope?: string }) =>
+      runSetup(ctx, { ...opts, url })
+    )
+  )
+program
+  .command('login [url]')
+  .helpGroup('Setup:')
+  .description(
+    'sign in through the browser to the Fling at url (remembered; later logins can omit it) and store an API key'
+  )
+  .action(
+    action(async (ctx, url: string | undefined) => {
+      await runLogin(ctx, url)
       ctx.log.hint(`Next: \`${BIN_NAME} setup\` adds Fling to Claude Code and Claude Desktop.`)
     })
   )
@@ -224,7 +228,7 @@ program
 program
   .command('visibility <name> <visibility>')
   .helpGroup('Sites:')
-  .description('private (Nearform sign-in) or public (anyone)')
+  .description('private (sign-in required) or public (anyone)')
   .action(action((ctx, name: string, visibility: string) => runVisibility(ctx, name, visibility)))
 program
   .command('archive <name>')

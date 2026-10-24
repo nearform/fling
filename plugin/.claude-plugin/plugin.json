@@ -1,11 +1,11 @@
 {
   "name": "fling",
   "displayName": "Fling",
-  "version": "0.2.0",
-  "description": "Fling a folder of static files (a build output, an HTML report, a prototype) at fling.labs.nearform.com and get a stable URL back. Skill + MCP server for Nearformers.",
-  "author": { "name": "Nearform", "url": "https://nearform.com" },
-  "homepage": "https://fling.labs.nearform.com",
+  "version": "0.3.0",
+  "description": "Fling a folder of static files (a build output, an HTML report, a prototype) at your Fling server and get a stable URL back. Skill + MCP server.",
+  "author": { "name": "Fling contributors", "url": "https://github.com/nearform/fling" },
+  "homepage": "https://github.com/nearform/fling",
   "repository": "https://github.com/nearform/fling",
   "license": "MIT",
-  "keywords": ["deploy", "static-site", "hosting", "share", "nearform"]
+  "keywords": ["deploy", "static-site", "hosting", "share"]
 }

@@ -34,6 +34,16 @@ export class NotLoggedInError extends CliError {
   }
 }
 
+/** No server to talk to: a fresh install, or a 0.2 config from before the server was stored. */
+export class NoServerError extends CliError {
+  constructor(binName: string) {
+    super(`No Fling server set — run \`${binName} login <url>\` with your Fling's address`, {
+      exitCode: EXIT_NOT_LOGGED_IN,
+    })
+    this.name = 'NoServerError'
+  }
+}
+
 /** Exit code for anything a command may throw. Unknown errors → 1. */
 export function exitCodeFor(error: unknown): number {
   return error instanceof CliError ? error.exitCode : EXIT_ERROR

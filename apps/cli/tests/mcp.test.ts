@@ -7,11 +7,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { FetchLike } from '../src/api.ts'
 import type { ConfigStore } from '../src/config.ts'
 import { createMcpServer, type McpDeps } from '../src/mcp.ts'
+import { NPX_COMMAND } from '../src/package-info.ts'
 import {
+  INSTANCE,
+  instanceRoute,
   jsonResponse,
   loggedInStore,
   mockFetch,
   runCleanups,
+  SERVER,
   site,
   tempDir,
   tempStore,
@@ -91,7 +95,7 @@ describe('MCP server', () => {
     const client = await connect(store)
     const res = await client.callTool({ name: 'fling_whoami', arguments: {} })
     expect(res.isError).toBe(true)
-    expect(text(res)).toMatch(/npx @nearform\/fling login/)
+    expect(text(res)).toContain(`${NPX_COMMAND} login`)
   })
 
   it('maps a 401 to the same login hint', async () => {
@@ -120,7 +124,7 @@ describe('MCP server', () => {
     const client = await connect(store, m.fetch, cwd)
     const res = await client.callTool({ name: 'fling_deploy', arguments: { path: 'proj/dist' } })
     expect(res.isError).toBeFalsy()
-    expect(text(res)).toMatch(/^Unchanged — already live: https:\/\/my-app\.fling/)
+    expect(text(res)).toMatch(/^Unchanged — already live: https:\/\/my-app\.sites\.example\.test/)
   })
 
   it('fling_deploy without index.html asks for a listHtml decision, then lists or not', async () => {
@@ -294,8 +298,9 @@ describe('MCP server', () => {
   it('fling_login signs in through the loopback callback', async () => {
     const { store } = await tempStore()
     const m = mockFetch({
+      ...instanceRoute,
       'GET /api/me': () =>
-        jsonResponse({ email: 'me@nearform.com', name: 'Me', picture: null, userSlug: 'me' }),
+        jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
     })
     const open = async (url: string) => {
       const u = new URL(url)
@@ -304,18 +309,21 @@ describe('MCP server', () => {
       cb.searchParams.set('state', u.searchParams.get('state') as string)
       await fetch(cb)
     }
-    const client = await connect(store, m.fetch, undefined, { open })
+    // The server comes from the extension's setting (FLING_URL) or `fling mcp --server`.
+    const client = await connect(store, m.fetch, undefined, { open, server: SERVER })
     const res = await client.callTool({ name: 'fling_login', arguments: {} })
-    expect(text(res)).toMatch(/^Signed in as me@nearform\.com/)
+    expect(text(res)).toMatch(/^Signed in as me@example\.test/)
+    expect((await store.load()).instance).toEqual(INSTANCE)
     expect((await store.load()).apiKey).toBe('fling_k_0123456789abcdefghij')
     const again = await client.callTool({ name: 'fling_login', arguments: {} })
-    expect(text(again)).toMatch(/^Already signed in .* as me@nearform\.com/)
+    expect(text(again)).toMatch(/^Already signed in .* as me@example\.test/)
   })
 
   it('fling_login returns after the wait and keeps listening in the background', async () => {
     const { store } = await tempStore()
     let opened = ''
-    const client = await connect(store, mockFetch({}).fetch, undefined, {
+    const client = await connect(store, mockFetch(instanceRoute).fetch, undefined, {
+      server: SERVER,
       open: async url => {
         opened = url
       },
@@ -327,6 +335,28 @@ describe('MCP server', () => {
     expect(text(res)).toMatch(/^Finish signing in in your browser, then try again/)
     expect(text(res)).toContain(opened)
     await new Promise(r => setTimeout(r, 300)) // let the background listener time out and close
+  })
+
+  it('fling_login without any server asks the user to log in with their Fling address', async () => {
+    const { store } = await tempStore()
+    const client = await connect(store)
+    const res = await client.callTool({ name: 'fling_login', arguments: {} })
+    expect(res.isError).toBe(true)
+    expect(text(res)).toContain(`${NPX_COMMAND} login <url>`)
+  })
+
+  it('names the logged-in instance in its descriptions, and stays generic before a login', async () => {
+    const named = await connect(await loggedInStore(), undefined, undefined, { instance: INSTANCE })
+    expect(named.getInstructions()).toMatch(
+      /^Example Fling publishes static sites .* at https:\/\/<name>\.sites\.example\.test\./
+    )
+    const tools = (await named.listTools()).tools
+    expect(tools.find(t => t.name === 'fling_set_visibility')?.description).toContain(
+      'anyone signed in to Example Fling (@example.test accounts)'
+    )
+    expect(tools.find(t => t.name === 'fling_login')?.description).toContain('Google account')
+    const generic = await connect((await tempStore()).store)
+    expect(generic.getInstructions()).toContain('https://<name>.<sites domain>')
   })
 
   it('fling_deploy with a taken generated name errors with suggestions and asks to choose', async () => {
@@ -370,7 +400,7 @@ describe('MCP server', () => {
       name: 'fling_check_name',
       arguments: { path: 'proj/dist' },
     })
-    expect(text(gen)).toMatch(/^"proj" is available → http:\/\/proj\.server\.test\//)
+    expect(text(gen)).toMatch(/^"proj" is available → https:\/\/proj\.sites\.example\.test\//)
     expect(JSON.parse(text(gen).slice(text(gen).indexOf('\n\n') + 2))).toMatchObject({
       name: 'proj',
       status: 'available',

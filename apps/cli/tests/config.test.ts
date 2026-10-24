@@ -1,8 +1,8 @@
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createConfigStore, DEFAULT_SERVER_URL, fileMode, redactKey } from '../src/config.ts'
-import { runCleanups, TEST_KEY, tempDir, tempStore } from './helpers.ts'
+import { createConfigStore, fileMode, normalizeServerUrl, redactKey } from '../src/config.ts'
+import { INSTANCE, runCleanups, SERVER, TEST_KEY, tempDir, tempStore } from './helpers.ts'
 
 afterEach(runCleanups)
 
@@ -18,12 +18,12 @@ describe('config store', () => {
     expect(await fileMode(store.file)).toBe(0o600)
   })
 
-  it('resolves flag > env > file > default for the URL and env > file for the key', async () => {
+  it('resolves flag > env > file for the URL (no default) and env > file for the key', async () => {
     const dir = await tempDir()
     const store = createConfigStore({ dir: join(dir, '.fling'), env: {} })
     expect(await store.resolve()).toMatchObject({
-      serverUrl: DEFAULT_SERVER_URL,
-      serverUrlSource: 'default',
+      serverUrl: undefined,
+      serverUrlSource: 'none',
       apiKeySource: 'none',
     })
     await store.save({ serverUrl: 'http://file.test/', apiKey: 'file-key' })
@@ -47,13 +47,35 @@ describe('config store', () => {
     })
   })
 
-  it('FLING_CONFIG_DIR relocates the file; clearCredentials keeps the server URL', async () => {
+  it('FLING_CONFIG_DIR relocates the file; clearCredentials keeps the server and instance', async () => {
     const dir = await tempDir()
     const store = createConfigStore({ env: { FLING_CONFIG_DIR: dir } })
     expect(store.file).toBe(join(dir, 'config.json'))
-    await store.save({ serverUrl: 'http://x.test', apiKey: 'k', user: { email: 'a@b' } })
+    await store.save({ serverUrl: SERVER, instance: INSTANCE, apiKey: 'k', user: { email: 'a@b' } })
     await store.clearCredentials()
-    expect(await store.load()).toEqual({ serverUrl: 'http://x.test' })
+    expect(await store.load()).toEqual({ serverUrl: SERVER, instance: INSTANCE })
+  })
+
+  it('gives the stored instance only for the server it came from', async () => {
+    const { store } = await tempStore()
+    await store.save({ serverUrl: `${SERVER}/`, instance: INSTANCE })
+    expect((await store.resolve()).instance).toEqual(INSTANCE)
+    expect((await store.resolve({ serverUrl: 'https://other.test' })).instance).toBeUndefined()
+  })
+
+  it('drops a stored instance it cannot read instead of failing', async () => {
+    const { store, dir } = await tempStore()
+    const { writeFile, mkdir } = await import('node:fs/promises')
+    await mkdir(join(dir, '.fling'), { recursive: true })
+    await writeFile(store.file, JSON.stringify({ serverUrl: SERVER, instance: { nope: 1 } }))
+    expect(await store.load()).toEqual({ serverUrl: SERVER })
+  })
+
+  it('normalizes server addresses', () => {
+    expect(normalizeServerUrl('fling.example.test')).toBe('https://fling.example.test')
+    expect(normalizeServerUrl(' https://fling.example.test/ ')).toBe('https://fling.example.test')
+    expect(normalizeServerUrl('http://localhost:3001')).toBe('http://localhost:3001')
+    expect(() => normalizeServerUrl('ftp://x.test')).toThrow(/http/)
   })
 
   it('ignores blank and unsubstituted extension placeholders in the env', async () => {
@@ -62,7 +84,7 @@ describe('config store', () => {
       FLING_API_KEY: '  ',
     })
     expect(await store.resolve()).toMatchObject({
-      serverUrlSource: 'default',
+      serverUrlSource: 'none',
       apiKeySource: 'none',
     })
   })

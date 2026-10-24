@@ -1,12 +1,12 @@
 {
   "name": "fling",
-  "description": "Fling — Nearform's zero-friction static hosting, for Claude Code",
-  "owner": { "name": "Nearform", "url": "https://nearform.com" },
+  "description": "Fling — zero-friction static hosting, for Claude Code",
+  "owner": { "name": "Fling contributors", "url": "https://github.com/nearform/fling" },
   "plugins": [
     {
       "name": "fling",
       "source": "./plugin",
-      "description": "Deploy and share static sites on fling.labs.nearform.com from Claude Code"
+      "description": "Deploy and share static sites on your Fling server from Claude Code"
     }
   ]
 }

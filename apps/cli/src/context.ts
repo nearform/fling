@@ -6,7 +6,7 @@
 import { confirm, isCancel, text } from '@clack/prompts'
 import { type ApiClient, createApiClient, type FetchLike } from './api.ts'
 import { type ConfigStore, createConfigStore, type Env, type ResolvedConfig } from './config.ts'
-import { CliError, NotLoggedInError } from './errors.ts'
+import { CliError, NoServerError, NotLoggedInError } from './errors.ts'
 import { BIN_NAME } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import { createLogger, type Logger } from './utils/logger.ts'
@@ -88,13 +88,20 @@ function ttyProgress(line: string | null): void {
   process.stderr.write(`\r\x1b[2K${line ?? ''}`)
 }
 
-/** An authenticated client, or `NotLoggedInError` (exit 2) when no key is configured. */
+/** The server to talk to, or `NoServerError` (exit 2): there is no default server. */
+export function requireServer(ctx: Pick<CommandContext, 'config' | 'binName'>): string {
+  if (!ctx.config.serverUrl) throw new NoServerError(ctx.binName)
+  return ctx.config.serverUrl
+}
+
+/** An authenticated client, or `NoServerError` / `NotLoggedInError` (exit 2). */
 export function requireClient(
   ctx: Pick<CommandContext, 'config' | 'fetch' | 'binName'>
 ): ApiClient {
+  const serverUrl = requireServer(ctx)
   if (!ctx.config.apiKey) throw new NotLoggedInError(ctx.binName)
   return createApiClient({
-    serverUrl: ctx.config.serverUrl,
+    serverUrl,
     apiKey: ctx.config.apiKey,
     fetch: ctx.fetch,
   })

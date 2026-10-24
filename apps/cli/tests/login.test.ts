@@ -11,7 +11,8 @@ import {
 import { createMemoryLogger } from '../src/utils/logger.ts'
 import {
   captureError,
-  headersOf,
+  INSTANCE,
+  instanceRoute,
   jsonResponse,
   mockFetch,
   runCleanups,
@@ -23,7 +24,7 @@ import {
 afterEach(runCleanups)
 
 const ME = {
-  email: 'ada.lovelace@nearform.com',
+  email: 'ada.lovelace@example.test',
   name: 'Ada',
   picture: null,
   userSlug: 'ada-lovelace',
@@ -120,7 +121,7 @@ describe('callback server', () => {
 describe('loginFlow', () => {
   it('verifies the key with /api/me and stores it 0600', async () => {
     const { store } = await tempStore()
-    const m = mockFetch({ 'GET /api/me': () => jsonResponse(ME) })
+    const m = mockFetch({ ...instanceRoute, 'GET /api/me': () => jsonResponse(ME) })
     const b = browser({ key: TEST_KEY })
     const log = createMemoryLogger()
     const result = await loginFlow({
@@ -134,9 +135,14 @@ describe('loginFlow', () => {
     expect(result.user.email).toBe(ME.email)
     expect(result.keyPrefix).not.toBe(TEST_KEY)
     expect(new URL(b.seen[0] ?? '').searchParams.get('hostname')).toBe('box')
-    expect(headersOf(m.calls).Authorization).toBe(`Bearer ${TEST_KEY}`)
+    const me = m.calls.find(c => c.url.pathname === '/api/me')
+    expect((me?.init.headers as Record<string, string> | undefined)?.Authorization).toBe(
+      `Bearer ${TEST_KEY}`
+    )
+    expect(result.instance).toEqual(INSTANCE)
     expect(await store.load()).toEqual({
       serverUrl: SERVER,
+      instance: INSTANCE,
       apiKey: TEST_KEY,
       user: { email: ME.email, name: ME.name, userSlug: ME.userSlug },
     })
@@ -146,6 +152,7 @@ describe('loginFlow', () => {
   it('fails (and stores nothing) when the key is rejected or the state does not match', async () => {
     const { store } = await tempStore()
     const m = mockFetch({
+      ...instanceRoute,
       'GET /api/me': () => jsonResponse({ error: { code: 'unauthorized', message: 'nope' } }, 401),
     })
     const e = await captureError(
@@ -170,6 +177,25 @@ describe('loginFlow', () => {
       })
     )
     expect(e2.message).toMatch(/state mismatch/)
+    expect(await store.load()).toEqual({})
+  })
+
+  it('refuses a server that is not a Fling, before opening the browser', async () => {
+    const { store } = await tempStore()
+    const b = browser({ key: TEST_KEY })
+    const e = await captureError(
+      loginFlow({
+        serverUrl: 'https://example.test',
+        store,
+        log: createMemoryLogger(),
+        open: b.open,
+        fetch: mockFetch({ 'GET /.well-known/fling': () => jsonResponse({ hello: 1 }) }).fetch,
+      })
+    )
+    expect(e.message).toBe(
+      'https://example.test does not look like a Fling server (no valid https://example.test/.well-known/fling)'
+    )
+    expect(b.seen).toHaveLength(0)
     expect(await store.load()).toEqual({})
   })
 })

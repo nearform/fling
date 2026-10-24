@@ -1,5 +1,6 @@
+import { CLI_PACKAGE } from '@fling/shared'
 import { afterEach, describe, expect, it } from 'vitest'
-import { CliApiError, createApiClient, exitCodeForStatus } from '../src/api.ts'
+import { CliApiError, exitCodeForStatus } from '../src/api.ts'
 import { runWhoami } from '../src/commands/auth.ts'
 import {
   runArchive,
@@ -11,16 +12,23 @@ import {
   runVersions,
   runVisibility,
 } from '../src/commands/sites.ts'
-import { CliError, exitCodeFor, NotLoggedInError } from '../src/errors.ts'
-import { discoverSitesBase, sitesBaseFor, sitesBaseFromSiteUrl, siteUrlFor } from '../src/sites.ts'
+import { requireClient } from '../src/context.ts'
+import { CliError, exitCodeFor, NoServerError, NotLoggedInError } from '../src/errors.ts'
+import { loadInstance } from '../src/instance.ts'
+import { NPX_COMMAND, PACKAGE_NAME } from '../src/package-info.ts'
+import { sitesBaseOf, sitesPattern, siteUrlFor } from '../src/sites.ts'
 import {
   captureError,
+  INSTANCE,
+  instanceRoute,
   jsonResponse,
   loggedInStore,
   mockFetch,
   runCleanups,
+  SERVER,
   site,
   TEST_KEY,
+  tempStore,
   testContext,
 } from './helpers.ts'
 
@@ -63,12 +71,12 @@ describe('commands', () => {
     const store = await loggedInStore()
     const m = mockFetch({
       '/api/me': () =>
-        jsonResponse({ email: 'a@nearform.com', name: 'A', picture: null, userSlug: 'a' }),
+        jsonResponse({ email: 'a@example.test', name: 'A', picture: null, userSlug: 'a' }),
     })
     const { ctx, out } = await testContext({ store, fetch: m.fetch, json: true })
     await runWhoami(ctx)
     const json = JSON.parse(out.content())
-    expect(json).toMatchObject({ email: 'a@nearform.com', userSlug: 'a', apiKeySource: 'config' })
+    expect(json).toMatchObject({ email: 'a@example.test', userSlug: 'a', apiKeySource: 'config' })
     expect(out.content()).not.toContain(TEST_KEY)
   })
 
@@ -76,11 +84,11 @@ describe('commands', () => {
     const store = await loggedInStore()
     const m = mockFetch({
       '/api/me': () =>
-        jsonResponse({ email: 'a@nearform.com', name: 'A', picture: null, userSlug: 'a' }),
+        jsonResponse({ email: 'a@example.test', name: 'A', picture: null, userSlug: 'a' }),
     })
     const { ctx, out } = await testContext({ store, fetch: m.fetch })
     await runWhoami(ctx)
-    expect(out.content()).toMatch(/Sites:\s+http:\/\/<name>\.server\.test\//)
+    expect(out.content()).toMatch(/Sites:\s+https:\/\/<name>\.sites\.example\.test\//)
     expect(out.content()).not.toMatch(/--a\b/)
   })
 
@@ -253,31 +261,50 @@ describe('commands', () => {
 })
 
 describe('sites base (for showing URLs before a deploy)', () => {
-  it('is inferred from a production-style server URL, else read off an existing site', async () => {
-    expect(sitesBaseFor('https://fling.labs.nearform.com')).toEqual({
-      protocol: 'https:',
-      domain: 'fling.labs.nearform.com',
-    })
-    expect(sitesBaseFor('http://fling.lvh.me:4100')).toBeNull()
-    expect(sitesBaseFor('http://localhost')).toBeNull()
-    expect(sitesBaseFromSiteUrl('http://docs.fling.lvh.me:4102/')).toEqual({
-      protocol: 'http:',
-      domain: 'fling.lvh.me:4102',
-    })
-
-    const m = mockFetch({
-      '/api/sites': () =>
-        jsonResponse({ sites: [site({ url: 'http://docs.fling.lvh.me:4102/' })] }),
-    })
-    const client = createApiClient({ serverUrl: 'http://fling.lvh.me:4100', fetch: m.fetch })
-    const base = await discoverSitesBase(client)
+  it('comes from the instance metadata, never from the server URL', () => {
+    const base = sitesBaseOf(INSTANCE)
+    expect(base).toEqual({ protocol: 'https:', domain: 'sites.example.test' })
     expect(base && siteUrlFor('rocketpod-docs', base)).toBe(
-      'http://rocketpod-docs.fling.lvh.me:4102/'
+      'https://rocketpod-docs.sites.example.test/'
     )
-    const none = createApiClient({
-      serverUrl: 'http://localhost:4100',
-      fetch: mockFetch({ '/api/sites': () => jsonResponse({ sites: [] }) }).fetch,
-    })
-    expect(await discoverSitesBase(none)).toBeNull()
+    expect(sitesPattern(sitesBaseOf(null))).toBe('<name>.<sites domain>')
+  })
+
+  it('fetches and stores the metadata for a 0.2 config that has a server but none stored', async () => {
+    const { store } = await tempStore()
+    await store.save({ serverUrl: SERVER, apiKey: TEST_KEY })
+    const m = mockFetch(instanceRoute)
+    expect(await loadInstance(store, await store.resolve(), m.fetch)).toEqual(INSTANCE)
+    expect((await store.load()).instance).toEqual(INSTANCE)
+    // Stored now: no second fetch.
+    expect(await loadInstance(store, await store.resolve(), m.fetch)).toEqual(INSTANCE)
+    expect(m.calls).toHaveLength(1)
+  })
+
+  it('is null (not an error) when the server has no metadata', async () => {
+    const { store } = await tempStore()
+    await store.save({ serverUrl: SERVER })
+    expect(await loadInstance(store, await store.resolve(), mockFetch({}).fetch)).toBeNull()
+  })
+})
+
+describe('package identity', () => {
+  it('the npm name code uses is the one package.json publishes', () => {
+    expect(PACKAGE_NAME).toBe(CLI_PACKAGE)
+    expect(NPX_COMMAND).toBe(`npx ${CLI_PACKAGE}`)
+  })
+})
+
+describe('no default server', () => {
+  it('a config with a key but no server (or no config at all) says to run fling login <url>', async () => {
+    const { store } = await tempStore()
+    await store.save({ apiKey: TEST_KEY })
+    const { ctx } = await testContext({ store })
+    const error = await captureError(Promise.resolve().then(() => requireClient(ctx)))
+    expect(error).toBeInstanceOf(NoServerError)
+    expect(error.message).toBe(
+      "No Fling server set — run `fling login <url>` with your Fling's address"
+    )
+    expect(exitCodeFor(error)).toBe(2)
   })
 })

@@ -2,7 +2,9 @@
 //
 // 1. esbuild src/mcp-entry.ts into ONE self-contained ESM file (every dependency bundled — the
 //    extension ships no node_modules) at dist/mcpb/server/index.mjs;
-// 2. copy mcpb/manifest.json (its version set from package.json) and mcpb/icon.png next to it;
+// 2. copy mcpb/manifest.json (its version set from package.json; with FLING_MCPB_SERVER_URL set,
+//    that becomes the "Fling server" setting's default — the deploy passes the instance's app
+//    origin, so the extension a Fling serves points at it) and mcpb/icon.png next to it;
 // 3. `mcpb validate` + `mcpb pack` (npx -y @anthropic-ai/mcpb) → dist/fling.mcpb.
 //
 // Run after `build` (which clears dist/); `build:mcpb` does both.
@@ -40,6 +42,8 @@ await build({
 
 const manifest = JSON.parse(await readFile(join(root, 'mcpb/manifest.json'), 'utf8'))
 manifest.version = pkg.version
+const serverUrl = process.env.FLING_MCPB_SERVER_URL?.trim()
+if (serverUrl) manifest.user_config.server_url.default = new URL(serverUrl).origin
 await writeFile(join(stage, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 await copyFile(join(root, 'mcpb/icon.png'), join(stage, 'icon.png'))
 

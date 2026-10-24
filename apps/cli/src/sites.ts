@@ -3,6 +3,7 @@
  * print what these return; the MCP tools serialise it. Nothing here prints.
  */
 import {
+  type InstanceMetadata,
   type Me,
   MeSchema,
   type NameCheck,
@@ -40,63 +41,25 @@ export function checkName(client: ApiClient, name: string): Promise<NameCheck> {
   })
 }
 
-/** Where sites are served: `https:` + `fling.labs.nearform.com` (a site is `<name>.<domain>`). */
+/** Where sites are served: `https:` + `sites.example.test` (a site is `<name>.<domain>`). */
 export interface SitesBase {
   protocol: string
   /** host, including any port */
   domain: string
 }
 
-/**
- * Inferred from the server URL: the API lives at `https://fling.labs.nearform.com` and sites at
- * `https://<name>.fling.labs.nearform.com`. Null when that can't be relied on — a server with an
- * explicit port (local dev serves sites on another port), an IP or a dotless host.
- */
-export function sitesBaseFor(serverUrl: string): SitesBase | null {
-  try {
-    const url = new URL(serverUrl)
-    const { hostname } = url
-    if (
-      url.port ||
-      !hostname.includes('.') ||
-      /^[\d.]+$/.test(hostname) ||
-      hostname.startsWith('[')
-    )
-      return null
-    return { protocol: url.protocol, domain: hostname }
-  } catch {
-    return null
-  }
-}
-
-/** From an existing site URL: `http://docs.fling.lvh.me:4102/` → `http:` + `fling.lvh.me:4102`. */
-export function sitesBaseFromSiteUrl(siteUrl: string): SitesBase | null {
-  try {
-    const url = new URL(siteUrl)
-    const dot = url.host.indexOf('.')
-    return dot > 0 ? { protocol: url.protocol, domain: url.host.slice(dot + 1) } : null
-  } catch {
-    return null
-  }
-}
-
-/**
- * The sites base for display: inferred from the server URL, else read off one of the user's sites
- * (the API has no endpoint for it). Null when neither works; never throws.
- */
-export async function discoverSitesBase(client: ApiClient): Promise<SitesBase | null> {
-  const inferred = sitesBaseFor(client.serverUrl)
-  if (inferred) return inferred
-  const sites = await listSites(client).catch(() => [])
-  const first = sites[0]
-  return first ? sitesBaseFromSiteUrl(first.url) : null
+/** From the instance metadata (`sitesDomain`, `siteScheme`); null when there is none. */
+export function sitesBaseOf(
+  instance: Pick<InstanceMetadata, 'sitesDomain' | 'siteScheme'> | null | undefined
+): SitesBase | null {
+  return instance ? { protocol: `${instance.siteScheme}:`, domain: instance.sitesDomain } : null
 }
 
 export function siteUrlFor(name: string, base: SitesBase): string {
   return siteUrl(name, base.domain, base.protocol)
 }
 
-/** `https://<name>.fling.labs.nearform.com/` for display. */
+/** `https://<name>.sites.example.test/` for display. */
 export function sitesPattern(base: SitesBase | null): string {
   return base ? siteUrlFor('<name>', base) : '<name>.<sites domain>'
 }

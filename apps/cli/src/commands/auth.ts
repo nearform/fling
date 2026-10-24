@@ -1,13 +1,27 @@
-/** `fling login | logout | whoami`. */
+/** `fling login [url] | logout | whoami`. */
 import chalk from 'chalk'
 import { loginFlow } from '../auth.ts'
-import { redactKey } from '../config.ts'
-import { type CommandContext, requireClient } from '../context.ts'
-import { discoverSitesBase, sitesPattern, whoami } from '../sites.ts'
+import { normalizeServerUrl, redactKey } from '../config.ts'
+import { type CommandContext, requireClient, requireServer } from '../context.ts'
+import { CliError } from '../errors.ts'
+import { loadInstance } from '../instance.ts'
+import { sitesBaseOf, sitesPattern, whoami } from '../sites.ts'
 
-export async function runLogin(ctx: CommandContext): Promise<void> {
+/** `fling login <url>` → that server; bare `fling login` → --server, FLING_URL or the stored one. */
+export function loginServer(ctx: CommandContext, url: string | undefined): string {
+  if (url === undefined) return requireServer(ctx)
+  try {
+    return normalizeServerUrl(url)
+  } catch {
+    throw new CliError(`"${url}" is not a server address`, {
+      hint: `Run \`${ctx.binName} login <url>\` with your Fling's address, e.g. https://fling.example.com.`,
+    })
+  }
+}
+
+export async function runLogin(ctx: CommandContext, url?: string): Promise<void> {
   const result = await loginFlow({
-    serverUrl: ctx.config.serverUrl,
+    serverUrl: loginServer(ctx, url),
     store: ctx.store,
     log: ctx.log,
     open: ctx.open,
@@ -24,25 +38,27 @@ export async function runLogout(ctx: CommandContext): Promise<void> {
   }
   await ctx.store.clearCredentials()
   ctx.log.success('Logged out; API key removed from this machine')
-  ctx.log.hint(`Revoke it on the server under API keys at ${ctx.config.serverUrl}`)
+  if (ctx.config.serverUrl)
+    ctx.log.hint(`Revoke it on the server under Connections at ${ctx.config.serverUrl}`)
 }
 
 export async function runWhoami(ctx: CommandContext): Promise<void> {
   const client = requireClient(ctx)
   const me = await whoami(client)
-  const base = ctx.json ? null : await discoverSitesBase(client)
+  const instance = await loadInstance(ctx.store, ctx.config, ctx.fetch)
   ctx.out.data(
     {
       ...me,
       serverUrl: ctx.config.serverUrl,
+      instance: instance?.name ?? null,
       apiKey: redactKey(ctx.config.apiKey),
       apiKeySource: ctx.config.apiKeySource,
     },
     () =>
       [
         `${chalk.bold('User:')}    ${me.name} <${me.email}>`,
-        `${chalk.bold('Sites:')}   ${sitesPattern(base)} ${chalk.dim('(names are first come, first served)')}`,
-        `${chalk.bold('Server:')}  ${ctx.config.serverUrl}`,
+        `${chalk.bold('Sites:')}   ${sitesPattern(sitesBaseOf(instance))} ${chalk.dim('(names are first come, first served)')}`,
+        `${chalk.bold('Server:')}  ${ctx.config.serverUrl}${instance ? chalk.dim(` (${instance.name})`) : ''}`,
         `${chalk.bold('API key:')} ${redactKey(ctx.config.apiKey)} ${chalk.dim(`(from ${ctx.config.apiKeySource})`)}`,
       ].join('\n')
   )

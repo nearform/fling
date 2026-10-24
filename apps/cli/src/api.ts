@@ -9,7 +9,7 @@
 import { ErrorEnvelopeSchema } from '@fling/shared'
 import type { z } from 'zod'
 import { CliError, EXIT_ERROR, EXIT_FORBIDDEN, EXIT_NOT_LOGGED_IN } from './errors.ts'
-import { BIN_NAME, VERSION } from './package-info.ts'
+import { BIN_NAME, PACKAGE_NAME, VERSION } from './package-info.ts'
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 export type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
@@ -128,7 +128,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         code: 'invalid_response',
         body: raw,
         message: `Unexpected response from ${method} ${path}${where}: ${issue?.message ?? 'invalid'}`,
-        hint: `Your ${BIN_NAME} CLI may be out of date — try \`npm i -g @nearform/fling@latest\`.`,
+        hint: `Your ${BIN_NAME} CLI may be out of date — try \`npm i -g ${PACKAGE_NAME}@latest\`.`,
       })
     }
     return parsed.data
@@ -211,7 +211,7 @@ const NEVER_PUBLISHED_HINTS: Record<string, string> = {
     'Remove the secret from the file (and rotate it if it was ever shared), or add the file to .flingignore if the site does not need it.',
   secret_file:
     'Move the secret files out of the folder, or add them to .flingignore if the site does not need them.',
-  dotfile: `Dotfiles are never flung. Update the CLI (\`npm i -g @nearform/fling@latest\`), which skips them.`,
+  dotfile: `Dotfiles are never flung. Update the CLI (\`npm i -g ${PACKAGE_NAME}@latest\`), which skips them.`,
 }
 
 function describeCause(cause: unknown): string {

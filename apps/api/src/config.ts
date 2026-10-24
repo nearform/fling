@@ -6,6 +6,7 @@
  */
 import { DEFAULT_INSTALL_COMMAND, HEX_COLOR_RE, type InstanceBrand } from '@fling/shared'
 import { z } from 'zod'
+import { emailAllowed } from './auth/identity.ts'
 
 /** Blank env strings are "unset". */
 const blank = (value: unknown) =>
@@ -26,6 +27,12 @@ const csvLower = z.preprocess(
 
 /** A full email address, as ALLOWED_EMAILS lists them. */
 const EMAIL_RE = /^[^@\s]+@[^@\s]+$/
+
+/** A comma-separated list of email addresses, lowercased (ALLOWED_EMAILS, ADMIN_EMAILS). */
+const emailList = z.preprocess(
+  blank,
+  csvLower.pipe(z.array(z.string().regex(EMAIL_RE, 'must be an email address'))).optional()
+)
 
 const hexColor = z.preprocess(blank, z.string().regex(HEX_COLOR_RE).optional())
 
@@ -63,10 +70,9 @@ const envSchema = z.object({
    * with neither, dev/tests fall back to DEV_EMAIL_DOMAINS.
    */
   ALLOWED_EMAIL_DOMAINS: z.preprocess(blank, csvLower.optional()),
-  ALLOWED_EMAILS: z.preprocess(
-    blank,
-    csvLower.pipe(z.array(z.string().regex(EMAIL_RE, 'must be an email address'))).optional()
-  ),
+  ALLOWED_EMAILS: emailList,
+  /** The instance's admins (users list, impersonation). They still have to be allowed to sign in. */
+  ADMIN_EMAILS: emailList,
   INSTANCE_NAME: z.preprocess(blank, z.string().min(1).max(60).default('Fling')),
   INSTALL_COMMAND: z.preprocess(blank, z.string().min(1).default(DEFAULT_INSTALL_COMMAND)),
   BRAND_LOGO_URL: assetUrl,
@@ -107,6 +113,12 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
 
 /** Who may sign in to a dev/test instance when no ALLOWED_EMAIL_DOMAINS/ALLOWED_EMAILS is set. */
 export const DEV_EMAIL_DOMAINS = ['example.test']
+
+/**
+ * The admin of an instance with dev login on and no ADMIN_EMAILS (local dev, the e2e). Dev login
+ * already lets anyone be anyone, so this grants nothing that isn't there; production never has it.
+ */
+export const DEV_ADMIN_EMAILS = ['admin@example.test']
 
 export interface Secrets {
   /** The OIDC client's secret (`OIDC_CLIENT_SECRET`; SSM `oidc-client-secret`). */
@@ -150,6 +162,12 @@ export interface Config {
   allowedEmailDomains: string[]
   /** Individual addresses admitted whatever their domain (`ALLOWED_EMAILS`). Never published. */
   allowedEmails: string[]
+  /**
+   * The instance's admins (`ADMIN_EMAILS`): they list users and impersonate them (policy.ts,
+   * admin.ts). Checked on every request, so removing an address takes effect at once. Every one
+   * must be allowed to sign in; never published.
+   */
+  adminEmails: string[]
   /** Logo, favicon and colours the web applies (`BRAND_*`); empty → the neutral default. */
   brand: InstanceBrand
   /** How the instance tells people to install the CLI (`INSTALL_COMMAND`). */
@@ -207,6 +225,19 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     ink: e.BRAND_INK,
     highlight: e.BRAND_HIGHLIGHT,
   }
+  const allowedEmailDomains = e.ALLOWED_EMAIL_DOMAINS ?? (e.ALLOWED_EMAILS ? [] : DEV_EMAIL_DOMAINS)
+  const allowedEmails = e.ALLOWED_EMAILS ?? []
+  const devLogin = e.DEV_LOGIN && !production
+  const maySignIn = (email: string) =>
+    emailAllowed(email, { allowedDomains: allowedEmailDomains, allowedEmails })
+  for (const admin of e.ADMIN_EMAILS ?? []) {
+    if (!maySignIn(admin)) {
+      throw new Error(
+        `ADMIN_EMAILS: ${admin} may not sign in (add it to ALLOWED_EMAILS or its domain to ALLOWED_EMAIL_DOMAINS)`
+      )
+    }
+  }
+  const adminEmails = e.ADMIN_EMAILS ?? (devLogin ? DEV_ADMIN_EMAILS.filter(maySignIn) : [])
   const cfg: BaseConfig = {
     appEnv: e.APP_ENV,
     instanceName: e.INSTANCE_NAME,
@@ -214,8 +245,9 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     sitesDomain: e.SITES_DOMAIN.toLowerCase(),
     siteScheme,
     siteCookieDomain: e.SITE_COOKIE_DOMAIN,
-    allowedEmailDomains: e.ALLOWED_EMAIL_DOMAINS ?? (e.ALLOWED_EMAILS ? [] : DEV_EMAIL_DOMAINS),
-    allowedEmails: e.ALLOWED_EMAILS ?? [],
+    allowedEmailDomains,
+    allowedEmails,
+    adminEmails,
     brand: definedOnly({
       logoUrl: e.BRAND_LOGO_URL,
       logoDarkUrl: e.BRAND_LOGO_DARK_URL,
@@ -232,7 +264,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     kvsDriver: e.KVS_DRIVER ?? (production ? 'cloudfront' : 'memory'),
     fsRoot: e.FS_ROOT,
     comments: e.COMMENTS,
-    devLogin: e.DEV_LOGIN && !production,
+    devLogin,
     secureCookies: appOrigin.startsWith('https:'),
     oauthRedirectAllowlist: e.OAUTH_REDIRECT_ALLOWLIST
       ? e.OAUTH_REDIRECT_ALLOWLIST.split(',')

@@ -1,0 +1,27 @@
+{
+  "name": "@fling/platform-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Fling on Cloudflare: the D1, R2 and Workers KV adapters for the API's ports (the Worker entry and wrangler config come next). Tested on Miniflare, so no account or network is needed.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "echo 'platform-cloudflare: no Worker bundle yet'"
+  },
+  "dependencies": {
+    "@fling/api": "workspace:*",
+    "@fling/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261024.1",
+    "@fling/conformance": "workspace:*",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.12",
+    "miniflare": "4.20260730.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

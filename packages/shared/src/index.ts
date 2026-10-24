@@ -1,4 +1,5 @@
-// Browser-safe exports. Node-only helpers: `@fling/shared/version-id`, `@fling/shared/site-cookie`.
+// Browser-safe exports. Node/edge-only: `@fling/shared/version-id`, `@fling/shared/site-cookie`,
+// `@fling/shared/site-routing` (the edge's routing decision).
 export * from './api.ts'
 export * from './cache-control.ts'
 export * from './distribution.ts'

@@ -1,0 +1,55 @@
+// The Fling Worker (src/worker.ts). This file is the template: as committed it runs locally
+// (`pnpm dev`, the e2e) against local D1/R2/KV (the zero ids are placeholders), with dev-only vars.
+// A deploy never uses it as is: scripts/render-config.mjs writes dist/wrangler.jsonc from it and
+// the instance's deploy config (CF_DEPLOY_CONFIG, written by scripts/setup.mjs), which sets the
+// account, the resource names and ids and the routes, and replaces the dev vars below with the
+// instance's. See DEPLOY.md.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fling",
+  "main": "src/worker.ts",
+  // workerd 1.20261019 (wrangler 4.152.0) supports dates up to 2026-10-19.
+  "compatibility_date": "2026-10-19",
+  // node:crypto, Buffer and process.env for the API core.
+  "compatibility_flags": ["nodejs_compat"],
+  // The remote MCP publish hashes and scans up to 4 MB in one request (scripts/bench-publish.ts:
+  // ~10-15 ms of CPU). Needs the Workers Paid plan; the Free plan's 10 ms is not enough.
+  "limits": { "cpu_ms": 30000 },
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  // Every request reaches the Worker first: assets are only for the app host, never a site's.
+  "assets": {
+    "directory": "dist/assets",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fling",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "fling-sites" }],
+  "kv_namespaces": [{ "binding": "ROUTES", "id": "00000000000000000000000000000000" }],
+  // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
+  "triggers": { "crons": ["17 * * * *"] },
+  "secrets": { "required": ["SESSION_SECRET", "SITE_HMAC_KEY"] },
+  // Local development only (replaced wholesale on deploy). lvh.me and its subdomains resolve to
+  // 127.0.0.1, so the app is http://flingcf.lvh.me:47103 and sites http://<name>.flingcf.lvh.me:47103.
+  "vars": {
+    "APP_ENV": "development",
+    "DEV_LOGIN": "1",
+    "APP_ORIGIN": "http://flingcf.lvh.me:47103",
+    "SITES_DOMAIN": "flingcf.lvh.me:47103",
+    "SITE_SCHEME": "http",
+    "SITE_COOKIE_DOMAIN": "flingcf.lvh.me",
+    "STORE_DRIVER": "d1",
+    "STORAGE_DRIVER": "r2",
+    "KVS_DRIVER": "workers-kv"
+  },
+  "dev": { "ip": "127.0.0.1", "port": 47103 }
+}

@@ -3,8 +3,9 @@
  * D1/R2/KV simulators, in memory) driven from Node. The adapters get the real bindings through
  * Miniflare's proxies, so SQL, batches and R2 checksums run in workerd while the conformance suites
  * stay plain vitest. (@cloudflare/vitest-pool-workers, which would run the tests themselves in
- * workerd, needs vitest 4.) Signed uploads go to tests/worker.ts running in workerd, because a body
- * streamed from Node through a proxy has no known length and R2 only streams known-length bodies.
+ * workerd, needs vitest 4.) Signed uploads and the sites host go to tests/worker.ts running in
+ * workerd: a body streamed from Node through a proxy has no known length (R2 only streams
+ * known-length bodies), and Headers (R2's conditional and range reads) don't cross the proxy.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -77,15 +78,18 @@ export interface Local {
   freshDb(): Promise<D1Database>
   /** HMAC secret of the upload route in tests/worker.ts */
   uploadSecret: string
+  /** the `fling_site` cookie key of the sites host in tests/worker.ts */
+  siteKey: string
 }
 
 export async function local(): Promise<Local> {
   const uploadSecret = 'u'.repeat(40)
+  const siteKey = 'k'.repeat(40)
   const mf = new Miniflare({
     modules: true,
     script: await bundle(join(import.meta.dirname, 'worker.ts')),
     ...COMPATIBILITY,
-    bindings: { UPLOAD_SECRET: uploadSecret },
+    bindings: { UPLOAD_SECRET: uploadSecret, SITE_KEY: siteKey },
     d1Databases: ['DB', 'SCRATCH'],
     r2Buckets: ['BUCKET'],
     kvNamespaces: ['KV'],
@@ -99,6 +103,7 @@ export async function local(): Promise<Local> {
     mf,
     db,
     uploadSecret,
+    siteKey,
     bucket: (await mf.getR2Bucket('BUCKET')) as unknown as R2Bucket,
     kv: (await mf.getKVNamespace('KV')) as unknown as KVNamespace,
     async freshDb() {

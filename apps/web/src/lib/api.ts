@@ -169,7 +169,7 @@ export const api = {
   logout: () => request('/auth/logout', ignoreBody, { method: 'POST' }),
 }
 
-/** Full-page redirect into Google sign-in; the API sends the browser back to `returnTo`. */
+/** Full-page redirect into the instance's sign-in; the API sends the browser back to `returnTo`. */
 export function loginUrl(returnTo: string): string {
-  return `/auth/google?return=${encodeURIComponent(returnTo)}`
+  return `/auth/login?return=${encodeURIComponent(returnTo)}`
 }

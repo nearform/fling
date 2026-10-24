@@ -354,7 +354,7 @@ describe('MCP server', () => {
     expect(tools.find(t => t.name === 'fling_set_visibility')?.description).toContain(
       'anyone signed in to Example Fling (@example.test accounts)'
     )
-    expect(tools.find(t => t.name === 'fling_login')?.description).toContain('Google account')
+    expect(tools.find(t => t.name === 'fling_login')?.description).toContain('Example SSO account')
     const generic = await connect((await tempStore()).store)
     expect(generic.getInstructions()).toContain('https://<name>.<sites domain>')
   })

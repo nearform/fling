@@ -19,7 +19,12 @@ export const INSTANCE: InstanceMetadata = {
   appOrigin: SERVER,
   sitesDomain: 'sites.example.test',
   siteScheme: 'https',
-  auth: { kind: 'google', displayName: 'Google', emailDomains: ['example.test'] },
+  auth: {
+    kind: 'oidc',
+    issuer: 'https://sso.example.test',
+    displayName: 'Example SSO',
+    emailDomains: ['example.test'],
+  },
   brand: { colors: {} },
   capabilities: { remoteMcp: true },
   installCommand: 'npm install -g fling-cli',

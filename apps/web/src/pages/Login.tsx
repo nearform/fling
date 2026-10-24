@@ -5,6 +5,9 @@ import { useInstance } from '../hooks/instance'
 import { loginUrl } from '../lib/api'
 import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 
+/** Issuers whose mark the sign-in button shows; any other gets a plain button. */
+const GOOGLE_ISSUER = 'https://accounts.google.com'
+
 /** Google's G, in currentColor (from agentic-mapper ProviderIcons). */
 function GoogleIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
@@ -76,7 +79,7 @@ export default function Login() {
         className="btn btn-outline w-full justify-start gap-3 font-normal"
         onClick={signIn}
       >
-        {instance?.auth.kind === 'google' && <GoogleIcon className="w-5 h-5" />}
+        {instance?.auth.issuer === GOOGLE_ISSUER && <GoogleIcon className="w-5 h-5" />}
         Sign in{instance ? ` with ${instance.auth.displayName}` : ''}
       </button>
       {domains && <p className="mt-4 text-xs text-muted">{domains} accounts only.</p>}

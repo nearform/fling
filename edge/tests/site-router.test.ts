@@ -1,5 +1,4 @@
-import { statSync } from 'node:fs'
-import { parseLabel, RESERVED_SITE_NAMES } from '@fling/shared/hosts'
+import { parseLabel } from '@fling/shared/hosts'
 import { SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
 import { signSiteCookie } from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -9,7 +8,6 @@ import {
   createSiteRouter,
   isResponse,
   renderSiteRouter,
-  SITE_ROUTER_PATH,
   SITE_ROUTER_SOURCE,
   type SiteRouter,
   toCloudFrontEvent,
@@ -233,12 +231,6 @@ describe('path rewriting', () => {
 })
 
 describe('label parsing parity with shared/hosts.ts', () => {
-  it('keeps the reserved list in step with RESERVED_SITE_NAMES', () => {
-    const m = /const RESERVED = \[([^\]]*)\]/.exec(SITE_ROUTER_SOURCE)
-    const list = (m?.[1] ?? '').match(/'[^']*'/g)?.map(x => x.slice(1, -1))
-    expect(list).toEqual([...RESERVED_SITE_NAMES])
-  })
-
   it.each([
     'my-app',
     's',
@@ -276,15 +268,17 @@ describe('label parsing parity with shared/hosts.ts', () => {
 
 describe('deployable source', () => {
   it('is under the 10 KB CloudFront Functions limit', () => {
-    expect(statSync(SITE_ROUTER_PATH).size).toBeLessThan(10 * 1024)
+    expect(Buffer.byteLength(renderSiteRouter({ appOrigin: APP }))).toBeLessThan(10 * 1024)
   })
 
-  it('only imports cloudfront and crypto and has both placeholders', () => {
+  it('only imports cloudfront and crypto, exports nothing and has both placeholders', () => {
     const imports = SITE_ROUTER_SOURCE.match(/^import .*$/gm)
-    expect(imports).toEqual(["import cf from 'cloudfront'", "import crypto from 'crypto'"])
+    expect(imports).toEqual(['import cf from "cloudfront";', 'import crypto from "crypto";'])
+    expect(SITE_ROUTER_SOURCE).not.toMatch(/^export\b/m)
+    expect(SITE_ROUTER_SOURCE).toMatch(/^async function handler\(event\)/m)
     expect(SITE_ROUTER_SOURCE).not.toMatch(/\brequire\(/)
     const rendered = renderSiteRouter({ appOrigin: APP })
-    expect(rendered).toContain(`'${APP}'`)
+    expect(rendered).toContain(`"${APP}"`)
     expect(rendered).not.toMatch(/__APP_ORIGIN__|__SITE_SCHEME__/)
   })
 })

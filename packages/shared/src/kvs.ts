@@ -1,14 +1,11 @@
 import { z } from 'zod'
 
-// CloudFront KeyValueStore contract between the API (writer) and
-// edge/site-router.js (reader). Values must stay under 1 KB.
+// The route table contract between the API (writer) and the edge (reader: the shared routing
+// function in site-routing.ts, run by the CloudFront Function and the Worker). Values must stay
+// under 1 KB (CloudFront KeyValueStore). The keys live in route-keys.ts, which has no
+// dependencies, so the CloudFront Function bundle stays small.
 
-/** `site:<name>` → routing for a live (non-archived) site. */
-export const siteKvsKey = (label: string) => `site:${label}`
-/** `share:<token>` → routing for a share link; served without auth. */
-export const shareKvsKey = (token: string) => `share:${token}`
-/** HMAC key the edge uses to verify the `fling_site` cookie. */
-export const SITE_HMAC_KVS_KEY = 'cfg:site-hmac'
+export * from './route-keys.ts'
 
 export const KvsSiteValueSchema = z.object({
   /** siteId — S3 prefix is `sites/<id>/<v>/` */
@@ -26,7 +23,3 @@ export const siteObjectKey = (siteId: string, versionId: string, path: string) =
 export const siteVersionPrefix = (siteId: string, versionId: string) =>
   `sites/${siteId}/${versionId}/`
 export const sitePrefix = (siteId: string) => `sites/${siteId}/`
-
-/** Object key that never exists; the edge rewrites unknown hosts here so S3 404s into the error page. */
-export const MISSING_KEY = '/_fling/missing'
-export const NOT_FOUND_PAGE = '/_fling/404.html'

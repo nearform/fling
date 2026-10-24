@@ -1,12 +1,12 @@
-// Node harness for src/site-router.js. Evaluates the exact deployable source (placeholders
-// substituted, `cloudfront`/`crypto` imports swapped for stubs) so tests and the API's local
-// dev server run the same code CloudFront does.
+// Node harness for the CloudFront Function. Builds the exact deployable source (build.mjs: the
+// shell bundled with @fling/shared/site-routing) and evaluates it with placeholders substituted
+// and the `cloudfront`/`crypto` imports swapped for stubs, so tests and the API's local dev server
+// run the same code CloudFront does.
 
 import nodeCrypto from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { buildSiteRouter } from './build.mjs'
 
-export const SITE_ROUTER_PATH = new URL('./src/site-router.js', import.meta.url)
-export const SITE_ROUTER_SOURCE = readFileSync(SITE_ROUTER_PATH, 'utf8')
+export const SITE_ROUTER_SOURCE = buildSiteRouter()
 
 /** Substitute deploy-time placeholders. Use this when publishing the CloudFront Function too. */
 export function renderSiteRouter({ appOrigin, siteScheme = 'https' }, source = SITE_ROUTER_SOURCE) {
@@ -15,9 +15,9 @@ export function renderSiteRouter({ appOrigin, siteScheme = 'https' }, source = S
 
 export function createSiteRouter({ kvs, appOrigin, siteScheme = 'https', now = Date.now }) {
   const body = renderSiteRouter({ appOrigin, siteScheme })
-    .replace(/^import cf from 'cloudfront'\s*$/m, '')
-    .replace(/^import crypto from 'crypto'\s*$/m, '')
-  if (/^import\s/m.test(body)) throw new Error('site-router.js has an unexpected import')
+    .replace(/^import cf from ["']cloudfront["'];?\s*$/m, '')
+    .replace(/^import crypto from ["']crypto["'];?\s*$/m, '')
+  if (/^import\s/m.test(body)) throw new Error('the site router has an unexpected import')
 
   // Like the real KVS handle: get() rejects when the key is missing.
   const cf = {

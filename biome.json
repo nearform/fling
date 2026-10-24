@@ -126,6 +126,25 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "packages/shared/src/site-routing.ts",
+        "packages/shared/src/site-labels.ts",
+        "packages/shared/src/route-keys.ts",
+        "edge/tests/fixtures/**"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNodejsImportProtocol": "off"
+          },
+          "complexity": {
+            "noForEach": "off",
+            "useOptionalChain": "off"
+          }
+        }
+      }
     }
   ]
 }

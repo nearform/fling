@@ -12,6 +12,7 @@
     "./types": "./src/types.ts",
     "./blobs": "./src/blobs/types.ts",
     "./blobs/fs": "./src/blobs/fs.ts",
+    "./blobs/signed-upload": "./src/blobs/signed-upload.ts",
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
     "./store": "./src/store/types.ts",

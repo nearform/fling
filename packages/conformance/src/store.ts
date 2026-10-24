@@ -10,6 +10,7 @@
 import { randomUUID } from 'node:crypto'
 import type {
   ApiKeyRecord,
+  AuditRecord,
   CommentRecord,
   GrantRecord,
   RefreshTokenRecord,
@@ -135,6 +136,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           userSlug: slug,
           createdAt: NOW,
           updatedAt: NOW,
+          lastSignInAt: NOW,
         })
         const again = await store.upsertUser(
           { email: e, name: 'Alice B', picture: 'https://pic', preferredSlug: 'ignored' },
@@ -145,6 +147,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           name: 'Alice B',
           picture: 'https://pic',
           updatedAt: LATER,
+          lastSignInAt: LATER,
         })
         expect(await store.getUser(e)).toEqual(again)
       })
@@ -183,6 +186,87 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(new Set(users.map(u => u.userSlug))).toEqual(
           new Set([slug, `${slug}-2`, `${slug}-3`, `${slug}-4`])
         )
+      })
+    })
+
+    describe('users index', () => {
+      /** Emails that share a prefix no other test's do. */
+      const family = () => {
+        const p = `ux${uid()}`
+        return { prefix: p, email: (s: string) => `${p}${s}@example.test` }
+      }
+      const signIn = (store: Store, e: string, at: string, name = 'N') =>
+        store.upsertUser({ email: e, name, picture: null, preferredSlug: `u${uid()}` }, at)
+
+      it('every sign-in writes the index item: created once, last sign-in each time', async () => {
+        const store = await factory()
+        const f = family()
+        const user = await signIn(store, f.email('a'), NOW, 'Alice')
+        expect(await store.listUsers({ prefix: f.prefix, limit: 10 })).toEqual({
+          users: [
+            {
+              email: f.email('a'),
+              name: 'Alice',
+              picture: null,
+              userSlug: user.userSlug,
+              createdAt: NOW,
+              lastSignInAt: NOW,
+            },
+          ],
+        })
+        await signIn(store, f.email('a'), LATER, 'Alice B')
+        const { users } = await store.listUsers({ prefix: f.prefix, limit: 10 })
+        expect(users).toEqual([
+          expect.objectContaining({ name: 'Alice B', createdAt: NOW, lastSignInAt: LATER }),
+        ])
+      })
+
+      it('lists by email in byte order, a page at a time, only under the prefix', async () => {
+        const store = await factory()
+        const f = family()
+        for (const s of ['c', 'a', 'b', 'd', 'e']) await signIn(store, f.email(s), NOW)
+        await signIn(store, `x${f.prefix}@example.test`, NOW)
+        const seen: string[] = []
+        let cursor: string | undefined
+        let pages = 0
+        do {
+          const page = await store.listUsers({ prefix: f.prefix, limit: 2, cursor })
+          expect(page.users.length).toBeLessThanOrEqual(2)
+          seen.push(...page.users.map(u => u.email))
+          cursor = page.cursor
+          pages++
+        } while (cursor && pages < 10)
+        expect(seen).toEqual(['a', 'b', 'c', 'd', 'e'].map(f.email))
+        expect(pages).toBeGreaterThanOrEqual(3)
+        expect((await store.listUsers({ prefix: f.email('b'), limit: 5 })).users).toEqual([
+          expect.objectContaining({ email: f.email('b') }),
+        ])
+      })
+
+      it('race: concurrent first logins of one user index it once', async () => {
+        const store = await factory()
+        const f = family()
+        await Promise.all(Array.from({ length: 5 }, () => signIn(store, f.email('r'), NOW)))
+        expect((await store.listUsers({ prefix: f.prefix, limit: 10 })).users).toHaveLength(1)
+      })
+    })
+
+    describe('audit', () => {
+      it('adds entries and lists the latest, newest first', async () => {
+        const store = await factory()
+        const tag = uid()
+        // Later than anything else a shared table holds, so these are the latest.
+        const entry = (n: number): AuditRecord => ({
+          id: `zz${tag}${n}`,
+          at: `2098-01-01T00:00:0${n}.000Z`,
+          action: n % 2 ? 'impersonation.stop' : 'impersonation.start',
+          actor: 'admin@example.test',
+          target: `t${n}-${tag}@example.test`,
+          ...(n % 2 ? {} : { until: '2098-01-01T01:00:00.000Z' }),
+          expiresAt: EXPIRES,
+        })
+        for (const n of [0, 1, 2]) await store.addAuditEntry(entry(n))
+        expect(await store.listAuditEntries(2)).toEqual([entry(2), entry(1)])
       })
     })
 

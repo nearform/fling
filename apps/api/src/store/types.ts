@@ -9,6 +9,41 @@ export interface User {
   userSlug: string
   createdAt: string
   updatedAt: string
+  /** every sign-in sets it (upsertUser); absent on users who haven't signed in since it exists */
+  lastSignInAt?: string
+}
+
+/**
+ * A user as the admin's users list shows them: the `USERS/USER#<email>` index item, written with
+ * the user record (and backfilled by migration 0003), so listing users is one query.
+ */
+export interface UserSummary {
+  email: string
+  name: string
+  picture: string | null
+  userSlug: string
+  /** null: unknown (a user record from before it was always written) */
+  createdAt: string | null
+  lastSignInAt: string | null
+}
+
+export type AuditAction = 'impersonation.start' | 'impersonation.stop'
+
+/** Something an admin did, kept for a while (`expiresAt`) and listed newest first. */
+export interface AuditRecord {
+  /** time-sortable (newSortableId), so the AUDIT partition lists in time order */
+  id: string
+  at: string
+  action: AuditAction
+  /** who did it: the admin */
+  actor: string
+  /** whom it was done to */
+  target: string
+  /** impersonation.start: when the impersonation lapses */
+  until?: string
+  /** impersonation.stop: true when it had already lapsed */
+  lapsed?: boolean
+  expiresAt: string
 }
 
 export interface ApiKeyRecord {
@@ -174,13 +209,28 @@ export interface UploadFileRecord {
 export interface Store {
   getUser(email: string): Promise<User | null>
   /**
-   * Create the user (claiming a unique userSlug derived from `preferredSlug`) or refresh
-   * name/picture on an existing one.
+   * A sign-in: create the user (claiming a unique userSlug derived from `preferredSlug`) or
+   * refresh name/picture on an existing one; either way `lastSignInAt` = `now`, and the users
+   * index item with it.
    */
   upsertUser(
     input: { email: string; name: string; picture: string | null; preferredSlug: string },
     now: string
   ): Promise<User>
+  /**
+   * Users by email (byte order), optionally only those whose email starts with `prefix`, a page
+   * at a time.
+   */
+  listUsers(opts: {
+    prefix?: string
+    limit: number
+    cursor?: string
+  }): Promise<{ users: UserSummary[]; cursor?: string }>
+
+  // --- audit (admin actions) ---
+  addAuditEntry(entry: AuditRecord): Promise<void>
+  /** The latest `limit` entries, newest first. */
+  listAuditEntries(limit: number): Promise<AuditRecord[]>
 
   createApiKey(key: ApiKeyRecord): Promise<void>
   findApiKeyByHash(hash: string): Promise<ApiKeyRecord | null>

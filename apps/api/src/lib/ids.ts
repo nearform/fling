@@ -29,7 +29,7 @@ const SORTABLE = '0123456789abcdefghijklmnopqrstuv'
  * 18 chars: the time in ms (10 base32hex digits, good until the year 37000) then 8 random ones
  * (40 bits). Ids made later sort later (byte order); ones made in the same millisecond, randomly.
  */
-export function newCommentId(now: Date): string {
+export function newSortableId(now: Date): string {
   let t = now.getTime()
   let time = ''
   for (let i = 0; i < 10; i++) {
@@ -38,3 +38,6 @@ export function newCommentId(now: Date): string {
   }
   return time + randomString(8, SORTABLE)
 }
+
+/** Comment ids are sortable ids (a comment partition lists oldest first). */
+export const newCommentId = newSortableId

@@ -13,6 +13,8 @@
 /** Each kind of item, as stored in its `type` attribute (the API-key lookup item has none). */
 export type Kind =
   | 'user'
+  | 'userindex'
+  | 'audit'
   | 'slug'
   | 'apikey'
   | 'apikeyref'

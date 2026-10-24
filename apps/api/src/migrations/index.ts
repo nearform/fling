@@ -4,9 +4,10 @@
  */
 import { m0001 } from './0001-site-centric.ts'
 import { m0002 } from './0002-drop-old-version-keys.ts'
+import { m0003 } from './0003-users-index.ts'
 import type { Migration } from './runner.ts'
 
-export const MIGRATIONS: readonly Migration[] = [m0001, m0002]
+export const MIGRATIONS: readonly Migration[] = [m0001, m0002, m0003]
 
 export { scanAll, type Verification, verifySiteCentric } from './0001-site-centric.ts'
 export {

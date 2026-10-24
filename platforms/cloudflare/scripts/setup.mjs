@@ -7,6 +7,7 @@
 //     [--email-domains example.com] [--allowed-emails you@example.com]
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
+//     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
 //
 // Anything not passed is asked for (defaults from an earlier run's --out file). It:
 //   1. checks wrangler is signed in (`wrangler login`, or CLOUDFLARE_API_TOKEN);
@@ -35,6 +36,7 @@ const { values: args } = parseArgs({
     'allowed-emails': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
+    'oidc-client-secret-file': { type: 'string' },
     'instance-name': { type: 'string' },
     location: { type: 'string' },
     out: { type: 'string', default: 'deploy-config.json' },
@@ -226,7 +228,9 @@ for (const name of ['SESSION_SECRET', 'SITE_HMAC_KEY']) {
   else secrets[name] = randomBytes(32).toString('base64url')
 }
 if (instance.OIDC_ISSUER && !existing.includes('OIDC_CLIENT_SECRET')) {
-  const oidcSecret = await askSecret('OIDC client secret (blank: set it later)')
+  const oidcSecret = args['oidc-client-secret-file']
+    ? readFileSync(resolve(args['oidc-client-secret-file']), 'utf8').trim()
+    : await askSecret('OIDC client secret (blank: set it later)')
   if (oidcSecret) secrets.OIDC_CLIENT_SECRET = oidcSecret
 } else if (existing.includes('OIDC_CLIENT_SECRET')) {
   console.log('OIDC_CLIENT_SECRET: set')

@@ -2,12 +2,15 @@
  * Rehearse the pending data migrations on a DynamoDB table, normally a point-in-time-restored copy
  * of production (platforms/aws/DEPLOY.md, "Rehearsing a data migration"), and verify the result:
  *
- *   pnpm --filter @fling/platform-aws migrate:rehearse --table <copy> --region <region>
- *     [--dry-run] [--page-size 100] [--lease-seconds 120] [--endpoint http://localhost:8000]
- *     [--any-table]
+ *   pnpm --filter @fling/platform-aws migrate:rehearse --table <copy> --live-table <production>
+ *     --region <region> [--dry-run] [--page-size 100] [--lease-seconds 120]
+ *     [--endpoint http://localhost:8000] [--any-table]
  *
- * 1. Refuses a table that is not a restored copy (DescribeTable has no RestoreSummary) unless
- *    --endpoint (DynamoDB Local) or --any-table is given.
+ * 1. Refuses to run on the live table. `--live-table` (or FLING_LIVE_TABLE) names it, the
+ *    module's `table_name` output, and is required: `--table` must be another table, and must not
+ *    resolve to the same ARN. DescribeTable's RestoreSummary is shown when AWS reports it, but it
+ *    is not relied on: AWS has left it null on a table restored to a point in time. --endpoint
+ *    (DynamoDB Local) and --any-table skip these checks.
  * 2. Counts items per kind, notes anomalies already in the data, and records what the API serves
  *    for every user and site (through Records).
  * 3. Runs the runner until it reports done (waiting out another run's lease if one holds the lock;
@@ -37,6 +40,7 @@ const { values: args } = parseArgs({
   options: {
     table: { type: 'string' },
     region: { type: 'string' },
+    'live-table': { type: 'string' },
     endpoint: { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
     'page-size': { type: 'string', default: '100' },
@@ -130,7 +134,18 @@ const list = (lines: string[]) => {
   if (lines.length > MAX_LISTED) say(`    … and ${lines.length - MAX_LISTED} more`)
 }
 
-const table = args.table ?? die('--table <name> is required')
+const table = args.table ?? die('--table <name> (the restored copy) is required')
+const liveTable = args['live-table'] ?? process.env.FLING_LIVE_TABLE
+const guarded = !args.endpoint && !args['any-table']
+if (guarded && !liveTable) {
+  die(
+    '--live-table <name> (or FLING_LIVE_TABLE) is required: the production table, so the ' +
+      'rehearsal can refuse to touch it (platforms/aws/DEPLOY.md)'
+  )
+}
+if (guarded && table === liveTable) {
+  die(`--table ${table} is the live table. Rehearse on a point-in-time restore (DEPLOY.md).`)
+}
 const region = args.region ?? process.env.AWS_REGION ?? die('--region (or AWS_REGION) is required')
 const client = new DynamoDBClient({
   region,
@@ -151,11 +166,18 @@ if (described.RestoreSummary) {
   say(
     `  restored from ${r.SourceTableArn ?? r.SourceBackupArn} at ${r.RestoreDateTime?.toISOString()}`
   )
-} else if (!args.endpoint && !args['any-table']) {
-  die(
-    `${table} is not a restored copy (no RestoreSummary). Rehearse on a point-in-time restore ` +
-      '(platforms/aws/DEPLOY.md), or pass --any-table if you really mean this table.'
-  )
+} else {
+  say('  no RestoreSummary (AWS does not always report one for a restored table)')
+}
+if (guarded) {
+  const live = (await client.send(new DescribeTableCommand({ TableName: liveTable }))).Table
+  if (!live?.TableArn) die(`no live table ${liveTable}: check --live-table`)
+  if (live.TableArn === described.TableArn) die(`${table} is the live table ${liveTable}`)
+  const source = described.RestoreSummary?.SourceTableArn
+  if (source && source !== live.TableArn) {
+    say(`  note: restored from ${source}, not from the live table ${live.TableArn}`)
+  }
+  say(`  live table ${liveTable} is not touched`)
 }
 
 const dynamo = new DynamoTable(table, client)

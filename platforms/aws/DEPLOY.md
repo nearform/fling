@@ -390,16 +390,21 @@ will be deployed, after `pnpm install`.
 3. **Dry run** (reads only: counts per kind, anomalies already in the data, what would be written):
 
    ```bash
-   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --region "$AWS_REGION" --dry-run
+   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --live-table "$TABLE" \
+     --region "$AWS_REGION" --dry-run
    ```
 
 4. **Rehearse** (runs the migrations on the copy, then verifies):
 
    ```bash
-   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --region "$AWS_REGION"
+   pnpm --filter @fling/platform-aws migrate:rehearse --table "$COPY" --live-table "$TABLE" \
+     --region "$AWS_REGION"
    ```
 
-   It refuses a table that isn't a restored copy. It must end `Verification: PASSED`, after
+   It refuses to run on the live table: `--live-table` (the module's `table_name` output, or
+   `FLING_LIVE_TABLE`) is required, and `--table` must be a different table with a different ARN.
+   It prints the copy's `RestoreSummary` when AWS reports one, but doesn't require it (AWS has left
+   it empty on a point-in-time restore). It must end `Verification: PASSED`, after
    checking:
    - counts per kind before and after: nothing of the old layout lost or changed, one site record
      per old site and one copy per old version;

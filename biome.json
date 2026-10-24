@@ -117,7 +117,7 @@
                     "message": "The core is cloud-agnostic: AWS SDK code belongs in platforms/aws."
                   },
                   {
-                    "group": ["cloudflare:*"],
+                    "group": ["cloudflare:*", "@cloudflare/*", "miniflare"],
                     "message": "The core is cloud-agnostic: Workers runtime code belongs in platforms/cloudflare."
                   }
                 ]

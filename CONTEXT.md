@@ -38,8 +38,9 @@ pure function every site route and MCP tool goes through. Actors resolve to a ro
 link), **anonymous**. Today only `site.view` reaches beyond the owner. A refusal looks like a
 missing site (404).
 
-**Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*` and
-`cloudflare:*` there and in `packages/shared`). It talks to storage through three ports:
+**Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
+`cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three
+ports:
 **Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),
 **Blobs** (site files and manifests, including upload URLs bound to a sha256) and **RouteTable**
 (the keys the edge routes site hosts by).
@@ -56,5 +57,6 @@ site's partition (`SITE#<id>`) holds its record and versions; a user's sites are
 scans the table.
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
-(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM). Every adapter, including
-the core's memory/fs ones, passes the same suites from `packages/conformance`.
+(`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: D1,
+R2, Workers KV). Every adapter, including the core's memory/fs ones, passes the same suites from
+`packages/conformance`.

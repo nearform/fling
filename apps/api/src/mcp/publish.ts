@@ -21,12 +21,12 @@ import {
   type Site,
   type Visibility,
 } from '@fling/shared'
+import { uploadPrefix } from '../blobs/types.ts'
 import { mapLimit } from '../lib/concurrency.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import { newId } from '../lib/ids.ts'
 import { assertPublishablePaths, publishBytes } from '../publication.ts'
 import * as sites from '../sites.ts'
-import { uploadPrefix } from '../storage/types.ts'
 import type { UploadRecord, User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
 
@@ -232,7 +232,7 @@ export async function uploadFile(
     await deps.store.putUploadFile({ ...file, parts: 1 })
     part = 0
   }
-  await deps.storage.put(
+  await deps.blobs.put(
     partKey(upload.id, path, part),
     new Uint8Array(Buffer.from(input.content, 'utf8'))
   )
@@ -254,7 +254,7 @@ export async function finishUpload(
   const files = await mapLimit(records, 8, async rec => {
     const chunks: string[] = []
     for (let part = 0; part < rec.parts; part++) {
-      const bytes = await deps.storage.get(partKey(upload.id, rec.path, part))
+      const bytes = await deps.blobs.get(partKey(upload.id, rec.path, part))
       if (!bytes) {
         throw new ApiError(
           409,
@@ -278,7 +278,7 @@ export async function finishUpload(
   })
   // Keep the staged upload when the user still has to decide about the index page.
   if (outcome.kind === 'published') {
-    await deps.storage.deletePrefix(uploadPrefix(upload.id))
+    await deps.blobs.deletePrefix(uploadPrefix(upload.id))
     await deps.store.deleteUpload(upload.id)
   }
   return outcome

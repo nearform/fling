@@ -89,11 +89,11 @@ jobs:
       - name: Build the API, the web UI and the Claude Desktop extension
         run: |
           set -euo pipefail
-          pnpm --filter "@fling/api..." build
+          pnpm --filter "@fling/platform-aws..." build
           pnpm --filter "@fling/web..." build
           # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
           pnpm --filter "@nearform/fling" build:mcpb
-          for f in apps/api/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/src/site-router.js apps/cli/dist/fling.mcpb; do
+          for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html edge/src/site-router.js apps/cli/dist/fling.mcpb; do
             [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
           done
 
@@ -108,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           aws lambda update-function-code --function-name "$FUNCTION" \
-            --zip-file fileb://apps/api/dist/lambda.zip --query CodeSha256 --output text
+            --zip-file fileb://platforms/aws/dist/lambda.zip --query CodeSha256 --output text
           aws lambda wait function-updated-v2 --function-name "$FUNCTION"
 
       - name: Upload the UI

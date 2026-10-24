@@ -7,9 +7,9 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
-import type { PresignedPut, Storage } from './types.ts'
+import type { Blobs, PresignedPut } from './types.ts'
 
-export class FsStorage implements Storage {
+export class FsBlobs implements Blobs {
   readonly root: string
 
   constructor(

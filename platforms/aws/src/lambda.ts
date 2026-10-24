@@ -3,12 +3,12 @@
  * env, secrets from SSM, and the KVS `cfg:site-hmac` key is brought in line with the SSM
  * site-hmac-key so the edge verifies the same `fling_site` cookies we mint.
  */
+import { createApp } from '@fling/api/app'
+import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
-import { createApp } from './app.ts'
-import { type Config, loadBaseConfig, secretsFromEnv } from './config.ts'
-import { buildDeps } from './deps.ts'
+import { buildAwsDeps } from './deps.ts'
 import { loadSecretsFromSsm } from './secrets.ts'
 
 async function init() {
@@ -17,9 +17,9 @@ async function init() {
     ? await loadSecretsFromSsm(base.ssmPrefix)
     : secretsFromEnv(process.env)
   const config: Config = { ...base, secrets }
-  const deps = buildDeps(config)
-  if ((await deps.kvs.get(SITE_HMAC_KVS_KEY)) !== secrets.siteHmacKey) {
-    await deps.kvs.put(SITE_HMAC_KVS_KEY, secrets.siteHmacKey)
+  const deps = buildAwsDeps(config)
+  if ((await deps.routeTable.get(SITE_HMAC_KVS_KEY)) !== secrets.siteHmacKey) {
+    await deps.routeTable.put(SITE_HMAC_KVS_KEY, secrets.siteHmacKey)
   }
   return handle(createApp(deps))
 }

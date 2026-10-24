@@ -1,7 +1,7 @@
 /**
  * Configuration: one zod schema over the env object (rocketpod pattern). Plain vars come from the
  * Lambda environment; secrets come from SSM (`SSM_PREFIX`, loaded once per cold start in
- * `secrets.ts`) or, when that is unset (dev/tests), from the same-named env vars.
+ * platforms/aws/src/secrets.ts) or, when that is unset (dev/tests), from the same-named env vars.
  */
 import { z } from 'zod'
 

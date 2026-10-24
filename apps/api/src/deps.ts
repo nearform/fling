@@ -1,32 +1,46 @@
-/** Build adapters from config (shared by lambda.ts and dev.ts). */
+/**
+ * Build deps from config. The core only knows the dev/test adapters (memory store, fs blobs,
+ * memory route table); a platform entry (e.g. platforms/aws) passes its own adapters for the
+ * drivers config selects. A cloud driver with no adapter supplied is an error, never a silent
+ * fall back to memory.
+ */
+import { FsBlobs } from './blobs/fs.ts'
+import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
-import { CloudFrontKvs } from './kvs/cloudfront.ts'
-import { MemoryKvs } from './kvs/memory.ts'
-import type { Kvs } from './kvs/types.ts'
-import { FsStorage } from './storage/fs.ts'
-import { S3Storage } from './storage/s3.ts'
-import type { Storage } from './storage/types.ts'
-import { DynamoStore } from './store/dynamo.ts'
+import { MemoryRouteTable } from './route-table/memory.ts'
+import type { RouteTable } from './route-table/types.ts'
 import { MemoryStore } from './store/memory.ts'
 import type { Store } from './store/types.ts'
 import { type Deps, systemClock } from './types.ts'
 
+export interface Adapters {
+  store?: Store
+  blobs?: Blobs
+  routeTable?: RouteTable
+}
+
+const missing = (driver: string): never => {
+  throw new Error(`The ${driver} driver needs its platform adapter (see platforms/)`)
+}
+
 export function buildDeps(
   config: Config,
-  opts: { fsRoot?: string; apiBaseUrl?: string; kvs?: Kvs } = {}
+  opts: Adapters & { fsRoot?: string; apiBaseUrl?: string } = {}
 ): Deps {
   const store: Store =
-    config.storeDriver === 'dynamo' ? new DynamoStore(config.tableName ?? '') : new MemoryStore()
-  const storage: Storage =
-    config.storageDriver === 's3'
-      ? new S3Storage(config.sitesBucket ?? '')
-      : new FsStorage(
+    opts.store ??
+    (config.storeDriver === 'memory' ? new MemoryStore() : missing(config.storeDriver))
+  const blobs: Blobs =
+    opts.blobs ??
+    (config.storageDriver === 'fs'
+      ? new FsBlobs(
           opts.fsRoot ?? config.fsRoot ?? '.fling-dev',
           opts.apiBaseUrl ?? config.appOrigin,
           config.secrets.sessionSecret
         )
-  const kvs: Kvs =
-    opts.kvs ??
-    (config.kvsDriver === 'cloudfront' ? new CloudFrontKvs(config.kvsArn ?? '') : new MemoryKvs())
-  return { config, store, storage, kvs, clock: systemClock }
+      : missing(config.storageDriver))
+  const routeTable: RouteTable =
+    opts.routeTable ??
+    (config.kvsDriver === 'memory' ? new MemoryRouteTable() : missing(config.kvsDriver))
+  return { config, store, blobs, routeTable, clock: systemClock }
 }

@@ -1,11 +1,14 @@
-/** Object storage port (the sites bucket). Implementations: `s3.ts`, `fs.ts` (dev/tests). */
+/**
+ * Blob storage port (the sites bucket). Implementations: `fs.ts` (dev/tests) here, S3 in
+ * platforms/aws.
+ */
 export interface PresignedPut {
   url: string
   /** headers the client must send with the PUT — they are part of the signature */
   headers: Record<string, string>
 }
 
-export interface Storage {
+export interface Blobs {
   /**
    * A PUT URL for exactly one body: the object whose SHA-256 is `sha256` (hex). Any other bytes
    * are rejected, so the URL can never replace what was published with something else.

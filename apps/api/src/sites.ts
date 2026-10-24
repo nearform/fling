@@ -1,7 +1,7 @@
 /**
  * Site lifecycle around publication (publication.ts makes versions live): name checks, listing,
- * settings, rollback, share links, archive, delete. The KVS is a projection of the store:
- * `syncKvs` writes `site:<label>` (and `share:<token>`) for a live site and removes them otherwise.
+ * settings, rollback, share links, archive, delete. The route table is a projection of the store:
+ * `syncRouteTable` writes `site:<label>` (and `share:<token>`) for a live site and removes them otherwise.
  *
  * Names are one global namespace (first come, first served). Deleting a site frees its name;
  * archiving keeps it.
@@ -28,9 +28,9 @@ import {
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
+import { manifestKey } from './blobs/types.ts'
 import { conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
-import { manifestKey } from './storage/types.ts'
 import type { SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -52,7 +52,7 @@ export async function detectGeneratedIndex(
 ): Promise<boolean> {
   const index = files.find(f => f.path === 'index.html')
   if (!index || index.size > MAX_LISTING_BYTES) return false
-  const bytes = await deps.storage.get(siteObjectKey(siteId, versionId, 'index.html'))
+  const bytes = await deps.blobs.get(siteObjectKey(siteId, versionId, 'index.html'))
   return bytes ? isGeneratedListing(new TextDecoder().decode(bytes)) : false
 }
 
@@ -75,16 +75,21 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
   }
 }
 
-/** Make the KVS reflect the site: live (not archived, has a version) → keys present, else gone. */
-export async function syncKvs(deps: Deps, _user: User, site: SiteRecord, oldShareToken?: string) {
-  const { kvs } = deps
+/** Make the route table reflect the site: live (not archived, has a version) → keys present, else gone. */
+export async function syncRouteTable(
+  deps: Deps,
+  _user: User,
+  site: SiteRecord,
+  oldShareToken?: string
+) {
+  const { routeTable } = deps
   const label = siteLabel(site.name)
   if (oldShareToken && oldShareToken !== site.shareToken) {
-    await kvs.delete(shareKvsKey(oldShareToken))
+    await routeTable.delete(shareKvsKey(oldShareToken))
   }
   if (site.archived || !site.currentVersionId) {
-    await kvs.delete(siteKvsKey(label))
-    if (site.shareToken) await kvs.delete(shareKvsKey(site.shareToken))
+    await routeTable.delete(siteKvsKey(label))
+    if (site.shareToken) await routeTable.delete(shareKvsKey(site.shareToken))
     return
   }
   const value: KvsSiteValue = {
@@ -94,8 +99,8 @@ export async function syncKvs(deps: Deps, _user: User, site: SiteRecord, oldShar
     spa: site.spa,
   }
   const json = JSON.stringify(value)
-  await kvs.put(siteKvsKey(label), json)
-  if (site.shareToken) await kvs.put(shareKvsKey(site.shareToken), json)
+  await routeTable.put(siteKvsKey(label), json)
+  if (site.shareToken) await routeTable.put(shareKvsKey(site.shareToken), json)
 }
 
 const SUGGESTION_COUNT = 3
@@ -154,7 +159,7 @@ export async function requireSite(deps: Deps, user: User, name: string): Promise
 export async function save(deps: Deps, user: User, site: SiteRecord, oldShareToken?: string) {
   site.updatedAt = deps.clock.now().toISOString()
   await deps.store.putSite(site)
-  await syncKvs(deps, user, site, oldShareToken)
+  await syncRouteTable(deps, user, site, oldShareToken)
 }
 
 export function applySettings(site: SiteRecord, opts: { spa?: boolean; visibility?: Visibility }) {
@@ -196,7 +201,7 @@ export async function versionFiles(
   const site = await requireSite(deps, user, name)
   const version = await deps.store.getVersion(user.email, site.id, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
-  const manifest = await deps.storage.getJson<StoredManifest>(manifestKey(site.id, versionId))
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for version ${versionId} of "${name}" is gone`)
   const files = manifest.files
     .map(f => ({ path: f.path, size: f.size, contentType: f.contentType }))
@@ -259,9 +264,9 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
 
 export async function deleteSite(deps: Deps, user: User, name: string) {
   const site = await requireSite(deps, user, name)
-  await deps.kvs.delete(siteKvsKey(siteLabel(site.name)))
-  if (site.shareToken) await deps.kvs.delete(shareKvsKey(site.shareToken))
-  await deps.storage.deletePrefix(sitePrefix(site.id))
+  await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
+  if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
+  await deps.blobs.deletePrefix(sitePrefix(site.id))
   await deps.store.deleteVersions(user.email, site.id)
   await deps.store.deleteSite(user.email, site.name)
 }

@@ -1,8 +1,8 @@
 /**
- * Local dev: the API on :3001 (memory store, fs storage under `.fling-dev/`, memory KVS) and the
- * sites on :3002 — `http://<label>.fling.lvh.me:3002/…` runs the real edge/site-router.js (via the
- * @fling/edge harness) against the same in-memory KVS, then serves the rewritten object from
- * `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404.
+ * Local dev: the API on :3001 (memory store, fs blobs under `.fling-dev/`, memory route table) and
+ * the sites on :3002 — `http://<label>.fling.lvh.me:3002/…` runs the real edge/site-router.js (via
+ * the @fling/edge harness) against the same in-memory route table, then serves the rewritten object
+ * from `.fling-dev/`. Missing objects get apps/web/dist-404/404.html with a 404.
  */
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -15,8 +15,8 @@ import { Hono } from 'hono'
 import { createApp } from './app.ts'
 import { type Config, loadBaseConfig, secretsFromEnv } from './config.ts'
 import { buildDeps } from './deps.ts'
-import { MemoryKvs } from './kvs/memory.ts'
 import { contentTypeFor } from './lib/mime.ts'
+import { MemoryRouteTable } from './route-table/memory.ts'
 
 const API_PORT = Number(process.env.PORT ?? 3001)
 const SITES_PORT = Number(process.env.SITES_PORT ?? 3002)
@@ -43,16 +43,16 @@ const env = {
 
 const base = loadBaseConfig(env)
 const config: Config = { ...base, secrets: secretsFromEnv(env) }
-const kvs = new MemoryKvs()
-const deps = buildDeps(config, { fsRoot, apiBaseUrl: `http://localhost:${API_PORT}`, kvs })
-await kvs.put(SITE_HMAC_KVS_KEY, config.secrets.siteHmacKey)
+const routeTable = new MemoryRouteTable()
+const deps = buildDeps(config, { fsRoot, apiBaseUrl: `http://localhost:${API_PORT}`, routeTable })
+await routeTable.put(SITE_HMAC_KVS_KEY, config.secrets.siteHmacKey)
 
 serve({ fetch: createApp(deps).fetch, port: API_PORT }, info =>
   console.log(`fling api   http://localhost:${info.port}  (app origin ${config.appOrigin})`)
 )
 
 const router = createSiteRouter({
-  kvs,
+  kvs: routeTable,
   appOrigin: config.appOrigin,
   siteScheme: 'http',
   now: () => deps.clock.now().getTime(),

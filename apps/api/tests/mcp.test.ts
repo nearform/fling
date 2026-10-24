@@ -1,6 +1,6 @@
 import { siteKvsKey } from '@fling/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Storage } from '../src/storage/types.ts'
+import type { Blobs } from '../src/blobs/types.ts'
 import { APP_ORIGIN, createUser, type Env, json, setup } from './helpers.ts'
 import { callTool, connect, rpc } from './oauth-helpers.ts'
 
@@ -116,11 +116,11 @@ describe('/mcp tools', () => {
     })
     expect(r.content[0]?.text).toContain('https://q3-report.fling.test/')
     expect(r.content[0]?.text).toContain('fling_files')
-    const kvs = JSON.parse(env.kvs.data.get(siteKvsKey('q3-report')) ?? '{}')
+    const kvs = JSON.parse(env.routeTable.data.get(siteKvsKey('q3-report')) ?? '{}')
     expect(kvs.v).toBe(r.structuredContent.versionId)
-    const png = await env.storage.get(`sites/${kvs.id}/${kvs.v}/dot.png`)
+    const png = await env.blobs.get(`sites/${kvs.id}/${kvs.v}/dot.png`)
     expect([...(png ?? [])]).toEqual([137, 80, 78, 71])
-    const html = await env.storage.head(`sites/${kvs.id}/${kvs.v}/index.html`)
+    const html = await env.blobs.head(`sites/${kvs.id}/${kvs.v}/index.html`)
     expect(html?.size).toBe(Buffer.byteLength(files[0]?.content ?? ''))
 
     const again = await callTool(env, bearer, 'fling_publish', { name: 'q3-report', files })
@@ -136,7 +136,7 @@ describe('/mcp tools', () => {
   })
 
   it('server-side puts use the cache rule: hashed names immutable, the rest revalidate', async () => {
-    const put = vi.spyOn(env.storage as Storage, 'put')
+    const put = vi.spyOn(env.blobs as Blobs, 'put')
     const r = await callTool(env, bearer, 'fling_publish', {
       name: 'cached',
       files: [
@@ -238,7 +238,7 @@ describe('/mcp tools', () => {
       htmlPages: ['a.html', 'docs/b.html'],
     })
     expect(ask.content[0]?.text).toMatch(/listHtml: true/)
-    expect(env.kvs.data.get(siteKvsKey('pages'))).toBeUndefined()
+    expect(env.routeTable.data.get(siteKvsKey('pages'))).toBeUndefined()
 
     const listed = await callTool(env, bearer, 'fling_publish', {
       name: 'pages',
@@ -250,9 +250,9 @@ describe('/mcp tools', () => {
       generatedIndex: true,
       fileCount: 4,
     })
-    const kvs = JSON.parse(env.kvs.data.get(siteKvsKey('pages')) ?? '{}')
+    const kvs = JSON.parse(env.routeTable.data.get(siteKvsKey('pages')) ?? '{}')
     const index = Buffer.from(
-      (await env.storage.get(`sites/${kvs.id}/${kvs.v}/index.html`)) ?? []
+      (await env.blobs.get(`sites/${kvs.id}/${kvs.v}/index.html`)) ?? []
     ).toString('utf8')
     expect(index).toContain('Alpha')
     expect(index).toContain('docs/b.html')
@@ -358,14 +358,14 @@ describe('/mcp tools', () => {
       spa: true,
       fileCount: 2,
     })
-    const kvs = JSON.parse(env.kvs.data.get(siteKvsKey('big-site')) ?? '{}')
-    const html = Buffer.from((await env.storage.get(`sites/${kvs.id}/${kvs.v}/index.html`)) ?? [])
+    const kvs = JSON.parse(env.routeTable.data.get(siteKvsKey('big-site')) ?? '{}')
+    const html = Buffer.from((await env.blobs.get(`sites/${kvs.id}/${kvs.v}/index.html`)) ?? [])
     expect(html.toString()).toBe('<h1>part one and two</h1>')
-    const blob = Buffer.from((await env.storage.get(`sites/${kvs.id}/${kvs.v}/img/blob.bin`)) ?? [])
+    const blob = Buffer.from((await env.blobs.get(`sites/${kvs.id}/${kvs.v}/img/blob.bin`)) ?? [])
     expect(blob.equals(bin)).toBe(true)
 
     // staging is gone; the upload can't be finished twice
-    expect(await env.storage.head(`uploads/${uploadId}/x`)).toBeNull()
+    expect(await env.blobs.head(`uploads/${uploadId}/x`)).toBeNull()
     expect(await env.store.getUpload(uploadId)).toBeNull()
     const twice = await callTool(env, bearer, 'fling_upload_finish', { uploadId })
     expect(twice.isError).toBe(true)
@@ -446,9 +446,9 @@ describe('/mcp tools', () => {
     })
     expect(rb.structuredContent.currentVersionId).toBe(v1.structuredContent.versionId)
     await callTool(env, bearer, 'fling_archive', { name: 'm' })
-    expect(env.kvs.data.get(siteKvsKey('m'))).toBeUndefined()
+    expect(env.routeTable.data.get(siteKvsKey('m'))).toBeUndefined()
     await callTool(env, bearer, 'fling_archive', { name: 'm', unarchive: true })
-    expect(env.kvs.data.get(siteKvsKey('m'))).toBeDefined()
+    expect(env.routeTable.data.get(siteKvsKey('m'))).toBeDefined()
     const noConfirm = await rpc(env, bearer, 'tools/call', {
       name: 'fling_delete',
       arguments: { name: 'm', confirm: false },

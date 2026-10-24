@@ -1,6 +1,6 @@
-import type { Kvs } from './types.ts'
+import type { RouteTable } from './types.ts'
 
-export class MemoryKvs implements Kvs {
+export class MemoryRouteTable implements RouteTable {
   readonly data = new Map<string, string>()
 
   async get(key: string) {

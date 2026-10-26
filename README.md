@@ -1,5 +1,7 @@
 # Fling
 
+**Why Fling?** See the deck, published with Fling itself: <https://why-fling.fling.labs.nearform.com/>
+
 Throw a folder of static files at a Fling server and get a link back:
 `https://<name>.<sites domain>`. Sites are private to people signed in to that Fling by default;
 share links open them to anyone with the link. Each deployment (an *instance*) has its own name,

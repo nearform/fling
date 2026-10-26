@@ -41,16 +41,14 @@ the `comments` capability and every client hides them.
 
 ```sh
 pnpm install
-pnpm dev          # API :47101, sites :47102 at http://<name>.fling.lvh.me:47102
-pnpm --filter @fling/web dev   # UI :47100 → open http://fling.lvh.me:47100
-pnpm gate         # lint, typecheck, test, build, e2e
-pnpm e2e          # the e2e scenario on both local runtimes (after pnpm build)
-pnpm --filter @fling/platform-cloudflare dev   # the Worker under wrangler dev :47103
+pnpm dev                       # API :47101, sites :47102 at http://<name>.fling.lvh.me:47102
+pnpm --filter @fling/web dev   # UI :47100, open http://fling.lvh.me:47100 (dev login: any @example.test)
+pnpm gate                      # lint, terraform, typecheck, test, build, e2e: what CI runs
 ```
 
-Local dev signs in with a dev form (any email). To try a real provider, set `OIDC_ISSUER`,
-`OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev` and allow the redirect URI
-`http://fling.lvh.me:47100/auth/callback` on that client.
+See [docs/development.md](docs/development.md) for the Cloudflare local runtime, the e2e scenario,
+and how to add a feature, a data migration, a config value or a platform. Terms are defined in
+[CONTEXT.md](CONTEXT.md).
 
 ## Deploy
 

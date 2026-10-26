@@ -432,17 +432,6 @@ will be deployed, after `pnpm install`.
 7. **Run it for real**: merge and let the deploy run it, then confirm with a dry run (see Data
    migrations above), which should report `up-to-date`.
 
-## Releasing the CLI
-
-Bump `apps/cli/package.json`, merge, then tag that commit:
-
-```bash
-git tag cli-v0.3.0 && git push origin cli-v0.3.0
-```
-
-`release-cli.yml` checks the tag matches the version, runs the gate and publishes the CLI package
-(`apps/cli/package.json` `name`) to npm through trusted publishing (OIDC, no stored token), with provenance added automatically.
-
 ## Secrets
 
 SSM SecureString parameters under `$SSM_PREFIX`, read by the function at cold start:

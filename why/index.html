@@ -405,6 +405,9 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   .branded .top, .branded .cta { transition: background-color 300ms var(--ease-out); }
 }
 
+.deploy-links { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+.deploy-links a { text-decoration: none; }
+
 /* ---------- 9 · start ---------- */
 .start .inner { justify-items: center; text-align: center; }
 .cmds { display: grid; gap: 0.7rem; inline-size: min(720px, 100%); text-align: start; }
@@ -614,6 +617,11 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
             <div class="body"><div class="sk h" style="inline-size: 60%"></div><div class="sk l"></div><div class="sk l" style="inline-size: 70%"></div><span class="cta">Get started</span></div>
           </div>
         </div>
+      </div>
+      <div class="deploy-links reveal">
+        <a class="btn" href="https://github.com/nearform/fling#readme">How do I deploy it? <span aria-hidden="true">→</span></a>
+        <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/aws/DEPLOY.md">On AWS</a>
+        <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/cloudflare/DEPLOY.md">On Cloudflare</a>
       </div>
     </div>
   </section>

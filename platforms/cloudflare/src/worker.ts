@@ -52,8 +52,15 @@ const UI_SECURITY_HEADERS: Record<string, string> = {
 /** The web UI from Static Assets, with the cache headers deploy.yml gives it on AWS. */
 async function serveUi(request: Request, env: Env, https: boolean): Promise<Response> {
   const res = await env.ASSETS.fetch(request as never)
-  const out = new Response(res.body as never, res as never)
   const path = new URL(request.url).pathname
+  // A Worker deployed without the extension would answer with index.html (the SPA's fallback).
+  if (
+    path === '/downloads/fling.mcpb' &&
+    (res.headers.get('content-type') ?? '').startsWith('text/html')
+  ) {
+    return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-cache' } })
+  }
+  const out = new Response(res.body as never, res as never)
   if (res.ok) {
     if ((out.headers.get('content-type') ?? '').startsWith('text/html')) {
       out.headers.set('cache-control', 'no-cache') // index.html (every client-side route)

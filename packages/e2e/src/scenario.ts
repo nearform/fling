@@ -152,6 +152,16 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `metadata appOrigin ${meta.appOrigin}, expected ${appOrigin}`
     )
     step(`instance "${meta.name}": sites at ${meta.siteScheme}://<name>.${meta.sitesDomain}`)
+    // The Claude Desktop extension, where the Get started page links to it: a zip (an mcpb) or,
+    // where none was built (local runs), a 404; never the web UI's index.html under its name.
+    const mcpb = await fetch(`${appOrigin}/downloads/fling.mcpb`, { redirect: 'manual' })
+    const mcpbBytes = new Uint8Array(await mcpb.arrayBuffer())
+    check(
+      mcpb.status === 404 ||
+        (mcpb.status === 200 && mcpbBytes[0] === 0x50 && mcpbBytes[1] === 0x4b),
+      `downloads/fling.mcpb: ${mcpb.status} ${mcpb.headers.get('content-type')}, not a zip`
+    )
+    step(`Claude Desktop extension: ${mcpb.status === 200 ? 'a zip' : 'none built (404)'}`)
 
     const who = (await fling('whoami')) as { email?: string }
     check(who.email === opts.session.email, `whoami: ${JSON.stringify(who)}`)

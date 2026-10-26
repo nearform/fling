@@ -157,11 +157,12 @@ pnpm exec wrangler secret put OIDC_CLIENT_SECRET --config dist/wrangler.jsonc
 
 `scripts/deploy.mjs`, in this order, so nothing is served that points at something missing:
 
-1. renders `dist/wrangler.jsonc` from the template and `CF_DEPLOY_CONFIG`;
+1. renders `dist/wrangler.jsonc` from the template and `CF_DEPLOY_CONFIG`, and builds the Claude
+   Desktop extension (`apps/cli` `build:mcpb`) with the instance's address filled in;
 2. assembles `dist/assets`: the web UI (`apps/web/dist`), the sites' 404 page at `_fling/404.html`
    and the review shell at `_fling/review.html` (the Worker fills their `__APP_ORIGIN__` when
-   serving them) and, when built,
-   `downloads/fling.mcpb`; then bundles the Worker without deploying it and checks the bundle (no
+   serving them) and the extension at `downloads/fling.mcpb` (a deploy without it stops here);
+   then bundles the Worker without deploying it and checks the bundle (no
    AWS SDK, under 10 MB);
 3. applies the D1 schema migrations (`migrations/*.sql`, `wrangler d1 migrations apply --remote`).
    They are additive, so the running code keeps working;

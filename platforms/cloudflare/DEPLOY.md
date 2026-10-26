@@ -105,7 +105,7 @@ version's file, a sign-in redirect or the 404 page.
 
    ```bash
    pnpm install && pnpm --filter "@fling/web..." build
-   pnpm --filter @fling/platform-cloudflare run deploy -- --config-file "$PWD/<path to deploy-config.json>"
+   pnpm --filter @fling/platform-cloudflare run deploy --config-file "$PWD/<path to deploy-config.json>"
    ```
 
 Then open `https://$APP_HOST`, sign in, and `fling login https://$APP_HOST`.

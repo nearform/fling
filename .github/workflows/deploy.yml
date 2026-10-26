@@ -250,6 +250,19 @@ jobs:
           etag="$(aws cloudfront update-function --name "$FUNCTION" --if-match "$etag" \
             --function-config "file://$RUNNER_TEMP/function-config.json" \
             --function-code "fileb://$code" --query ETag --output text)"
+          # Run the new code in CloudFront's own runtime before it goes LIVE: it accepts less than
+          # Node does (e.g. no await inside call arguments), and an error there takes every site down.
+          host="deploy-check-${SHA:0:7}.$(jq -r .sitesDomain <<<"$(curl -fsS "$APP_ORIGIN/.well-known/fling")")"
+          jq -n --arg host "$host" '{version: "1.0", context: {eventType: "viewer-request"},
+            viewer: {ip: "192.0.2.1"}, request: {method: "GET", uri: "/", querystring: {},
+            headers: {host: {value: $host}}, cookies: {}}}' > "$RUNNER_TEMP/event.json"
+          result="$(aws cloudfront test-function --name "$FUNCTION" --if-match "$etag" \
+            --stage DEVELOPMENT --event-object "fileb://$RUNNER_TEMP/event.json" --output json)"
+          error="$(jq -r '.TestResult.FunctionErrorMessage // ""' <<<"$result")"
+          if [ -n "$error" ]; then
+            echo "::error::The site router fails in CloudFront, not published: $error"; exit 1
+          fi
+          jq -r '"site router test: \(.TestResult.FunctionOutput), utilization \(.TestResult.ComputeUtilization)%"' <<<"$result"
           aws cloudfront publish-function --name "$FUNCTION" --if-match "$etag" \
             --query FunctionSummary.Status --output text
 

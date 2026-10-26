@@ -46,6 +46,7 @@ comments every 30 seconds.
 | `edge` | The CloudFront Function that routes `*.<sites domain>`: a generated shell around the shared routing decision |
 | `packages/shared` | Contracts shared by all of the above, including the sites' routing decision (`site-routing.ts`) every platform's edge runs |
 | `packages/conformance` | Test suites every storage adapter must pass (the core's memory/fs adapters; DynamoDB Local and MinIO in CI; Miniflare's D1, R2 and KV) |
+| `why` | The "Why Fling?" deck: one static page, published with Fling itself (`fling deploy why`) |
 | `packages/e2e` | The end-to-end scenario every platform must pass, on its local runtime (`pnpm e2e`) and as the post-deploy smoke test |
 | `plugin` | Claude Code plugin (skill + MCP) |
 

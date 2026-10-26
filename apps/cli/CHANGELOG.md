@@ -2,13 +2,6 @@
 
 ## Unreleased
 
-- Comments: `fling comments`, `fling comment` (and `--reply`), `fling resolve`, `fling uncomment`;
-  the local MCP server gains `fling_comments_list`, `fling_comment_add`, `fling_comment_resolve`
-  and `fling_comment_delete` on an instance with the `comments` capability.
-- On an instance with comments, a deploy (`fling deploy`, and the MCP server's `fling_deploy` and
-  `fling_publish`) also gives the review page, the link to share for feedback: in the output box,
-  as `reviewUrl` in `--json` and in the MCP result, where it leads.
-
 ## 0.3.0
 
 **Breaking: no default server.** The CLI works with any Fling deployment, so it no longer has one
@@ -27,6 +20,12 @@ built in.
 - The local MCP server (`fling mcp`, the Claude Desktop extension) names your Fling and its sites
   domain in its tool descriptions. The extension's **Fling server** setting has no built-in
   default; the copy a Fling serves at `/downloads/fling.mcpb` has its address filled in.
+- Comments: `fling comments`, `fling comment` (and `--reply`), `fling resolve`, `fling uncomment`;
+  the local MCP server gains `fling_comments_list`, `fling_comment_add`, `fling_comment_resolve`
+  and `fling_comment_delete` on an instance with the `comments` capability.
+- On an instance with comments, a deploy (`fling deploy`, and the MCP server's `fling_deploy` and
+  `fling_publish`) also gives the review page, the link to share for feedback: in the output box,
+  as `reviewUrl` in `--json` and in the MCP result, where it leads.
 
 ## 0.2.0
 

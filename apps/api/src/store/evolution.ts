@@ -22,6 +22,8 @@ export type Kind =
   | 'site'
   | 'version'
   | 'comment'
+  | 'live'
+  | 'liveref'
   | 'oauthclient'
   | 'oauthreq'
   | 'oauthcode'

@@ -37,7 +37,7 @@ export function instanceMetadata(config: Config): InstanceMetadata {
     siteScheme: config.siteScheme,
     auth: authInfo(config),
     brand: config.brand,
-    capabilities: { ...CORE_CAPABILITIES, comments: config.comments },
+    capabilities: { ...CORE_CAPABILITIES, comments: config.comments, live: config.live },
     installCommand: config.installCommand,
   }
 }

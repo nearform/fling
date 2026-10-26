@@ -3,6 +3,9 @@
  * env, secrets from SSM, and the KVS `cfg:site-hmac` key is brought in line with the SSM
  * site-hmac-key so the edge verifies the same `fling_site` cookies we mint.
  *
+ * API Gateway WebSocket events (the live rooms' `$connect`, `$default`, `$disconnect`, infra/live.tf)
+ * go to live.ts with the same deps.
+ *
  * One non-HTTP event: `{"fling":"migrate"}` runs the pending data migrations (deploy.yml invokes it
  * after updating the code; see @fling/api/migrations) until shortly before the invocation's
  * timeout and returns the runner's report; invoke again until `done`. Optional `only: ["NNNN"]`
@@ -23,6 +26,7 @@ import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
 import { buildAwsDeps } from './deps.ts'
+import { handleLiveEvent, isLiveEvent, type LiveEvent } from './live.ts'
 import { loadSecretsFromSsm } from './secrets.ts'
 import { DynamoTable } from './table/dynamo.ts'
 
@@ -51,11 +55,11 @@ async function init() {
   const base = loadBaseConfig(env)
   const secrets = base.ssmPrefix ? await loadSecretsFromSsm(base.ssmPrefix) : secretsFromEnv(env)
   const config: Config = { ...base, secrets }
-  const deps = buildAwsDeps(config)
+  const { deps, live } = buildAwsDeps(config)
   if ((await deps.routeTable.get(SITE_HMAC_KVS_KEY)) !== secrets.siteHmacKey) {
     await deps.routeTable.put(SITE_HMAC_KVS_KEY, secrets.siteHmacKey)
   }
-  return handle(createApp(deps))
+  return { http: handle(createApp(deps)), deps, live }
 }
 
 export interface MigrateEvent {
@@ -92,11 +96,16 @@ export async function migrate(event: MigrateEvent, context: LambdaContext): Prom
 
 let ready: ReturnType<typeof init> | undefined
 
-export const handler = async (event: LambdaEvent | MigrateEvent, context: LambdaContext) => {
+export const handler = async (
+  event: LambdaEvent | MigrateEvent | LiveEvent,
+  context: LambdaContext
+) => {
   if (isMigrate(event)) return migrate(event, context)
   ready ??= init().catch(err => {
     ready = undefined // retry the cold start on the next invocation
     throw err
   })
-  return (await ready)(event, context)
+  const { http, deps, live } = await ready
+  if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }
+  return http(event as LambdaEvent, context)
 }

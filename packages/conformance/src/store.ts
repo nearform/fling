@@ -13,6 +13,7 @@ import type {
   AuditRecord,
   CommentRecord,
   GrantRecord,
+  LiveConnectionRecord,
   RefreshTokenRecord,
   SiteRecord,
   Store,
@@ -66,6 +67,16 @@ function comment(siteId: string, n: number, overrides: Partial<CommentRecord> = 
     resolvedAt: null,
     resolvedBy: null,
     ...overrides,
+  }
+}
+
+function liveConnection(siteId: string, connectionId = uid()): LiveConnectionRecord {
+  return {
+    siteId,
+    connectionId,
+    peer: { id: uid(), name: 'Pat', colour: 'hsl(1 75% 45%)' },
+    connectedAt: NOW,
+    expiresAt: EXPIRES,
   }
 }
 
@@ -535,6 +546,59 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.deleteSite(s)
         expect(await store.listComments(s.id)).toEqual([])
         expect(await store.findSite(s.name)).toBeNull()
+      })
+    })
+
+    describe('live connections', () => {
+      it('put, get by id, list the room in connection-id byte order, only its own', async () => {
+        const store = await factory()
+        const s = site(email())
+        const other = site(s.email)
+        await store.createSite(s)
+        await store.createSite(other)
+        const conns = awkward().map(id => liveConnection(s.id, id))
+        for (const c of [...conns].reverse()) await store.putLiveConnection(c)
+        const elsewhere = liveConnection(other.id)
+        await store.putLiveConnection(elsewhere)
+        expect(await store.listLiveConnections(s.id)).toEqual(byteOrder(conns, c => c.connectionId))
+        expect(await store.listLiveConnections(other.id)).toEqual([elsewhere])
+        expect(await store.getLiveConnection(elsewhere.connectionId)).toEqual(elsewhere)
+        expect(await store.getLiveConnection(uid())).toBeNull()
+        // Comments and versions in the same partition are not connections.
+        await store.createComment(comment(s.id, 1))
+        expect(await store.listLiveConnections(s.id)).toHaveLength(conns.length)
+      })
+
+      it('deleteLiveConnection forgets it from its room and by id; null when unknown', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const [a, b] = [liveConnection(s.id), liveConnection(s.id)] as const
+        await store.putLiveConnection(a)
+        await store.putLiveConnection(b)
+        expect(await store.deleteLiveConnection(a.connectionId)).toEqual(a)
+        expect(await store.getLiveConnection(a.connectionId)).toBeNull()
+        expect(await store.listLiveConnections(s.id)).toEqual([b])
+        expect(await store.deleteLiveConnection(a.connectionId)).toBeNull()
+      })
+
+      it('an expired connection is gone', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const stale = { ...liveConnection(s.id), expiresAt: '2000-01-01T00:00:00.000Z' }
+        await store.putLiveConnection(stale)
+        expect(await store.getLiveConnection(stale.connectionId)).toBeNull()
+        expect(await store.listLiveConnections(s.id)).toEqual([])
+      })
+
+      it('deleteSite empties its room', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        await store.putLiveConnection(liveConnection(s.id))
+        await store.deleteSite(s)
+        expect(await store.listLiveConnections(s.id)).toEqual([])
       })
     })
 

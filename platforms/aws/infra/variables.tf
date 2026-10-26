@@ -73,7 +73,7 @@ variable "environment" {
   description = <<-EOT
     Extra or overriding environment variables for the function. The module already sets APP_ENV,
     APP_ORIGIN, SITES_DOMAIN, SITE_SCHEME, SITE_COOKIE_DOMAIN, the drivers and NODE_OPTIONS (from the
-    hostname), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN and SSM_PREFIX. Not secret: they are
+    hostname) and LIVE_URL (the live rooms' stage, live.tf), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN and SSM_PREFIX. Not secret: they are
     in the function's configuration. Instance values belong in var.instance instead.
   EOT
   type        = map(string)

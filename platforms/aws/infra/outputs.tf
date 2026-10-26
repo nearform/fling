@@ -26,6 +26,11 @@ output "deploy" {
   )
 }
 
+output "live_url" {
+  description = "Where review pages open their live room's WebSocket (the function's LIVE_URL)."
+  value       = local.live_url
+}
+
 output "ssm_prefix" {
   description = "Where the app's secrets are (SSM SecureString parameters)."
   value       = local.ssm_prefix

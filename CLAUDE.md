@@ -48,7 +48,7 @@ Fling runs on several clouds and is not tied to any one instance. Every change k
 
 - **The core is cloud-agnostic.** `apps/api` and `packages/shared` never import a cloud SDK; Biome
   enforces this. Cloud code lives in `platforms/<cloud>/`, behind the core's ports: `Table`,
-  `Blobs`, `RouteTable` and `IdentityProvider`. A new storage need extends a port and every
+  `Blobs`, `RouteTable`, `IdentityProvider` and `LiveHub`. A new storage need extends a port and every
   adapter, and the conformance suite proves they agree.
 - **Write once.** Domain logic, Records, migrations, policy and the sites' routing decision exist
   once. Platforms only adapt. If you are writing the same logic in two platforms, move it into the

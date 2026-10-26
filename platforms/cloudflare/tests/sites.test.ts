@@ -1,7 +1,7 @@
 /**
  * The Worker's sites host beyond the e2e: the route table's KV-miss fallback, and serving files
  * from R2 the way the AWS sites distribution does (stored headers, ETag revalidation, ranges, HEAD,
- * the 404 page). R2, KV and D1 are Miniflare's (tests/miniflare.ts).
+ * the 404 page, the review shell). R2, KV and D1 are Miniflare's (tests/miniflare.ts).
  */
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { routeTableConformance } from '@fling/conformance'
@@ -110,6 +110,17 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
       expect(res.status).toBe(404)
       expect(res.headers.get('cache-control')).toBe('no-store')
       expect(await res.text()).toBe(`<p>404 for ${APP}</p>`)
+    }
+  })
+
+  it('serves the review shell on any site host, filled in, frameable and revalidated', async () => {
+    for (const host of ['priv.sites.example.test', 'nope.sites.example.test']) {
+      const res = await req(host, '/_fling/review.html?path=%2F')
+      expect(res.status).toBe(200)
+      expect(res.headers.get('cache-control')).toBe('no-cache')
+      expect(res.headers.get('x-frame-options')).toBeNull()
+      expect(res.headers.get('content-security-policy')).toBeNull()
+      expect(await res.text()).toBe(`<p>shell for ${APP}</p>`)
     }
   })
 

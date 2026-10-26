@@ -4,12 +4,14 @@
  * frame is the site as everyone sees it (its sign-in cookie is the app's, on the shared parent
  * domain, so private sites load too).
  *
- * The frame is another origin, so this page can't see which page it is on or where it is
- * scrolled. The page owns the path: its path bar loads a page into the frame and new comments
- * attach to that path (and to the version being served). When the frame navigates by itself (a
- * link inside the site) the page notices only that it loaded something else, and asks for the
- * path. A pin is a point in the frame's viewport, as percentages: where the reviewer pointed,
- * shown over the frame as it is now, not following its scroll.
+ * The frame holds the review shell (`/_fling/review.html` on the site's origin), which frames the
+ * site and talks to this page over the review bridge (@fling/shared/review-bridge). The shell
+ * reports where the frame is (path and hash route, through SPA navigation), keeps it on the site,
+ * turns a click into an anchor when placing a pin, draws the pins and other reviewers' pointers,
+ * and says when a pin is clicked. This page owns the data: new comments attach to the path the
+ * shell reports, and the path bar and `?path=` follow it. With the `live` capability, the site's
+ * live room (useLive) shows who else is reviewing, where they point, and refetches comments as
+ * soon as anyone changes them.
  */
 import {
   authorLabel,
@@ -18,6 +20,10 @@ import {
   type CommentList,
   type CommentThread,
   commentThreads,
+  type PageMessage,
+  pageMessage,
+  reviewShellUrl,
+  ShellMessageSchema,
 } from '@fling/shared'
 import {
   ArrowLeftIcon,
@@ -25,26 +31,58 @@ import {
   ArrowTopRightOnSquareIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
-  ExclamationTriangleIcon,
   MapPinIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { type ReactNode, useEffect, useMemo, useState } from 'react'
+import {
+  type CSSProperties,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { useInstance } from '../hooks/instance'
 import { useCommentActions, useComments } from '../hooks/queries'
+import { type Live, useLive } from '../hooks/useLive'
 import { ApiError, errorMessage } from '../lib/api'
 import { fullDate, shortVersion, timeAgo } from '../lib/format'
-import { anchorAt, frameUrl, openCountsByPath, reviewPath, visibleThreads } from '../lib/review'
+import {
+  cursorsAt,
+  dropExited,
+  initials,
+  type PresenceCircle,
+  presenceCircles,
+  reconcileCircles,
+  type ShownCircle,
+} from '../lib/live'
+import {
+  type FrameLocation,
+  frameUrl,
+  linkHost,
+  openCountsByPath,
+  pinsFor,
+  reviewTarget,
+  targetString,
+  visibleThreads,
+} from '../lib/review'
+import { showToast } from '../lib/toast'
+
+/** The id of the pin being placed, before its comment exists. */
+const NEW_PIN = 'new'
 
 export default function Review() {
   const name = useParams().name ?? ''
   const instance = useInstance()
-  const comments = useComments(name)
+  const commentsOn = instance?.capabilities.comments === true
+  const live = useLive(name, commentsOn && instance?.capabilities.live === true)
+  const comments = useComments(name, { live: live.connected })
 
-  if (instance && instance.capabilities.comments !== true) {
+  if (instance && !commentsOn) {
     return <Message title="Review mode is off">This instance has comments turned off.</Message>
   }
   if (comments.isPending) {
@@ -64,7 +102,7 @@ export default function Review() {
       </Message>
     )
   }
-  return <ReviewSession name={name} list={comments.data} />
+  return <ReviewSession name={name} list={comments.data} live={live} />
 }
 
 function Message({ title, children }: { title: string; children: ReactNode }) {
@@ -81,47 +119,169 @@ function Message({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function ReviewSession({ name, list }: { name: string; list: CommentList }) {
+function ReviewSession({ name, list, live }: { name: string; list: CommentList; live: Live }) {
   const [params, setParams] = useSearchParams()
-  const path = reviewPath(params.get('path'))
-  const [draftPath, setDraftPath] = useState(path)
+  // The shell loads once, on the page asked for; after that it navigates itself and reports.
+  const [initial] = useState(() => reviewTarget(params.get('path')))
+  const [shellSrc] = useState(() => reviewShellUrl(list.site.url, targetString(initial)))
+  const siteOrigin = new URL(list.site.url).origin
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [ready, setReady] = useState(false)
+  const [at, setAt] = useState<FrameLocation>(initial)
+  const atRef = useRef(at)
+  atRef.current = at
+
+  const [draftPath, setDraftPath] = useState(targetString(initial))
   const [scope, setScope] = useState<'page' | 'all'>('page')
   const [showResolved, setShowResolved] = useState(false)
   const [showPins, setShowPins] = useState(true)
   const [placing, setPlacing] = useState(false)
-  const [pin, setPin] = useState<CommentAnchor | null>(null)
-  // The frame's loads since this page last pointed it somewhere: more than one means it moved on.
-  const [loads, setLoads] = useState(0)
-  const [reloadKey, setReloadKey] = useState(0)
+  const [pin, setPin] = useState<{ anchor: CommentAnchor; at: FrameLocation } | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const threads = useMemo(() => commentThreads(list.comments), [list.comments])
-  const shown = visibleThreads(threads, { path: scope === 'page' ? path : null, showResolved })
+  const shown = visibleThreads(threads, { path: scope === 'page' ? at.path : null, showResolved })
   const counts = openCountsByPath(threads)
-  const pinned = visibleThreads(threads, { path, showResolved: false }).filter(
-    t => t.comment.anchor
+
+  const post = useCallback(
+    (m: Parameters<typeof pageMessage>[0]) => {
+      frame.current?.contentWindow?.postMessage(pageMessage(m) satisfies PageMessage, siteOrigin)
+    },
+    [siteOrigin]
   )
-  const frameMoved = loads > 1
+
+  const go = useCallback(
+    (next: string) => {
+      const target = reviewTarget(next)
+      setDraftPath(targetString(target))
+      post({ type: 'navigate', path: targetString(target) })
+    },
+    [post]
+  )
+
+  const select = useCallback(
+    (id: string | null) => {
+      setSelectedId(id)
+      if (!id) return
+      const thread = threads.find(t => t.comment.id === id)
+      if (!thread) return
+      const { anchor, path } = thread.comment
+      const target = { path, hash: anchor?.hash ?? '' }
+      const here = atRef.current
+      if (path !== here.path || (anchor && target.hash !== here.hash)) go(targetString(target))
+      if (anchor) post({ type: 'focusPin', id })
+    },
+    [threads, go, post]
+  )
+
+  // The shell's messages: only from the site's origin, only from this frame, only well-formed.
+  const handlers = useRef<(m: ReturnType<typeof ShellMessageSchema.parse>) => void>(() => {})
+  handlers.current = m => {
+    switch (m.type) {
+      case 'ready':
+        setReady(true)
+        break
+      case 'location': {
+        const next = { path: m.path, hash: m.hash }
+        setAt(next)
+        setDraftPath(targetString(next))
+        // Follow the frame without a history entry per step inside the site.
+        setParams(next.path === '/' && !next.hash ? {} : { path: targetString(next) }, {
+          replace: true,
+        })
+        break
+      }
+      case 'pinPlaced':
+        setPin({ anchor: m.anchor, at: atRef.current })
+        setPlacing(false)
+        break
+      case 'pinCancelled':
+        setPlacing(false)
+        break
+      case 'pinClicked': {
+        if (m.id === NEW_PIN) break
+        const thread = threads.find(t => t.comment.id === m.id)
+        if (!thread) break
+        if (scope === 'page' && thread.comment.path !== at.path) setScope('all')
+        if (thread.comment.resolvedAt !== null) setShowResolved(true)
+        setSelectedId(m.id)
+        break
+      }
+      case 'cursor':
+        live.sendCursor(atRef.current, m.anchor)
+        break
+      case 'blocked':
+        showToast(`That link leaves the site: ${linkHost(m.href)}`, 'info', 8000, {
+          action: { label: 'Open in new tab', href: m.href },
+        })
+        break
+      case 'escape':
+        setSelectedId(null)
+        setPlacing(false)
+        break
+    }
+  }
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== siteOrigin || e.source !== frame.current?.contentWindow) return
+      const parsed = ShellMessageSchema.safeParse(e.data)
+      if (parsed.success) handlers.current(parsed.data)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [siteOrigin])
+
+  // What the shell draws, sent whenever it changes (and when the shell says it is ready).
+  const pins = useMemo(() => {
+    if (!showPins) return []
+    const list = pinsFor(threads, at, { showResolved, selectedId })
+    if (pin && pin.at.path === at.path && pin.at.hash === at.hash) {
+      list.push({
+        id: NEW_PIN,
+        n: threads.length + 1,
+        anchor: pin.anchor,
+        selected: true,
+        resolved: false,
+      })
+    }
+    return list
+  }, [threads, at, showResolved, selectedId, showPins, pin])
+  const cursors = useMemo(() => cursorsAt(live.peers, at), [live.peers, at])
+  useEffect(() => {
+    if (ready) post({ type: 'pins', pins })
+  }, [ready, pins, post])
+  useEffect(() => {
+    if (ready) post({ type: 'cursors', cursors })
+  }, [ready, cursors, post])
+  useEffect(() => {
+    if (ready) post({ type: 'placing', on: placing })
+  }, [ready, placing, post])
+
+  // A pin belongs to the page it was placed on: moving on drops it.
+  useEffect(() => {
+    setPin(p => (p && (p.at.path !== at.path || p.at.hash !== at.hash) ? null : p))
+  }, [at])
 
   useEffect(() => {
-    if (!placing) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPlacing(false)
+      if (e.key !== 'Escape') return
+      setPlacing(false)
+      setSelectedId(null)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [placing])
+  }, [])
 
-  const go = (next: string) => {
-    const normalized = reviewPath(next)
-    setDraftPath(normalized)
-    setParams(normalized === '/' ? {} : { path: normalized }, { replace: false })
-    setLoads(0)
-    setReloadKey(k => k + 1)
-    setPin(null)
-  }
+  useEffect(() => {
+    if (selectedId) {
+      document
+        .getElementById(`thread-${selectedId}`)
+        ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [selectedId])
 
   return (
-    <div className="review-shell app-canvas">
+    <div className="review-layout app-canvas">
       <header className="app-header flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <Link to="/" className="btn btn-ghost btn-sm btn-square" aria-label="Back to your sites">
           <ArrowLeftIcon className="h-4 w-4" aria-hidden />
@@ -156,12 +316,12 @@ function ReviewSession({ name, list }: { name: string; list: CommentList }) {
           className="btn btn-ghost btn-sm btn-square"
           aria-label="Reload the page"
           title="Reload the page"
-          onClick={() => go(path)}
+          onClick={() => post({ type: 'reload' })}
         >
           <ArrowPathIcon className="h-4 w-4" aria-hidden />
         </button>
         <a
-          href={frameUrl(list.site.url, path)}
+          href={frameUrl(list.site.url, targetString(at))}
           target="_blank"
           rel="noreferrer"
           className="btn btn-ghost btn-sm"
@@ -170,74 +330,28 @@ function ReviewSession({ name, list }: { name: string; list: CommentList }) {
           Open
           <span className="sr-only">(opens in a new tab)</span>
         </a>
+        <Presence live={live} at={at} />
       </header>
 
       <div className="review-body">
         <div className="review-frame">
           <iframe
-            key={reloadKey}
-            title={`${list.site.name}${path}`}
-            src={frameUrl(list.site.url, path)}
+            ref={frame}
+            title={`${list.site.name}${at.path}`}
+            src={shellSrc}
             // Another origin, so allow-same-origin gives it nothing of the app's; without
             // allow-top-navigation the site can't navigate the review page away.
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads"
             referrerPolicy="strict-origin-when-cross-origin"
-            onLoad={() => setLoads(n => n + 1)}
           />
-          {showPins && !placing && (
-            <div className="review-pins" aria-hidden>
-              {pinned.map(t => (
-                <span
-                  key={t.comment.id}
-                  className="review-pin"
-                  style={{
-                    insetInlineStart: `${t.comment.anchor?.x}%`,
-                    insetBlockStart: `${t.comment.anchor?.y}%`,
-                  }}
-                  title={t.comment.body}
-                >
-                  {threads.indexOf(t) + 1}
-                </span>
-              ))}
-              {pin && (
-                <span
-                  className="review-pin review-pin-new"
-                  style={{ insetInlineStart: `${pin.x}%`, insetBlockStart: `${pin.y}%` }}
-                />
-              )}
-            </div>
-          )}
-          {placing && (
-            <button
-              type="button"
-              className="review-placer"
-              aria-label="Click where your comment is about"
-              onClick={e => {
-                setPin(anchorAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY))
-                setPlacing(false)
-              }}
-            >
-              <span className="review-placer-hint">Click where your comment is about · Esc</span>
-            </button>
-          )}
         </div>
 
         <aside className="review-aside" aria-label="Comments">
-          {frameMoved && (
-            <div role="status" className="alert alert-warning alert-soft text-sm">
-              <ExclamationTriangleIcon className="h-4 w-4 shrink-0" aria-hidden />
-              <span>
-                The page moved on inside the frame. This page can't see where to (the site is
-                another origin): type its path above and press Go, so your comments land on it.
-              </span>
-            </div>
-          )}
-
           <Composer
             name={name}
-            path={path}
+            path={at.path}
             canCreate={list.can.create}
-            pin={pin}
+            pin={pin?.anchor ?? null}
             placing={placing}
             onPlace={() => setPlacing(p => !p)}
             onClearPin={() => setPin(null)}
@@ -285,7 +399,9 @@ function ReviewSession({ name, list }: { name: string; list: CommentList }) {
           {shown.length === 0 ? (
             <div className="space-y-2 py-6 text-center text-sm text-secondary">
               <ChatBubbleLeftRightIcon className="mx-auto h-6 w-6 text-muted" aria-hidden />
-              <p>{scope === 'page' ? `No open comments on ${path}.` : 'No open comments yet.'}</p>
+              <p>
+                {scope === 'page' ? `No open comments on ${at.path}.` : 'No open comments yet.'}
+              </p>
               {scope === 'page' && counts.size > 0 && (
                 <p>
                   Other pages have some:{' '}
@@ -310,8 +426,9 @@ function ReviewSession({ name, list }: { name: string; list: CommentList }) {
                   thread={t}
                   number={threads.indexOf(t) + 1}
                   list={list}
-                  onPage={t.comment.path === path}
-                  onGo={() => go(t.comment.path)}
+                  onPage={t.comment.path === at.path}
+                  selected={t.comment.id === selectedId}
+                  onSelect={() => select(t.comment.id)}
                 />
               ))}
             </ol>
@@ -319,6 +436,108 @@ function ReviewSession({ name, list }: { name: string; list: CommentList }) {
         </aside>
       </div>
     </div>
+  )
+}
+
+/**
+ * Who has the review open: a row of overlapping circles (picture or initials, in their colour),
+ * you first, one per person however many tabs; people on other pages dimmed; past five, a "+N"
+ * that lists everyone. Circles emerge as people arrive and shrink away as they leave.
+ */
+function Presence({ live, at }: { live: Live; at: FrameLocation }) {
+  const { you, peers } = live
+  const circles = useMemo(
+    () => (you ? presenceCircles({ you, peers }, at) : { shown: [], more: [] }),
+    [you, peers, at]
+  )
+  const [drawn, setDrawn] = useState<ShownCircle[]>([])
+  const [listing, setListing] = useState(false)
+  useEffect(() => setDrawn(d => reconcileCircles(d, circles.shown)), [circles.shown])
+  // Drop leaving circles even if their animation never reports its end (a hidden tab).
+  const leaving = drawn.some(d => d.phase === 'exit')
+  useEffect(() => {
+    if (!leaving) return
+    const t = setTimeout(() => setDrawn(d => d.filter(x => x.phase !== 'exit')), 1000)
+    return () => clearTimeout(t)
+  }, [leaving])
+
+  const everyone = [...circles.shown, ...circles.more]
+  return (
+    <div className="review-presence ms-auto">
+      <p className="sr-only" aria-live="polite">
+        {live.announcement}
+      </p>
+      <ul className="flex items-center" aria-label="Reviewing now">
+        {drawn.map(d => (
+          <li
+            key={d.circle.key}
+            className={`review-avatar-slot is-${d.phase}`}
+            style={{ '--delay': `${d.delay}ms`, '--peer': d.circle.colour } as CSSProperties}
+            onAnimationEnd={e => {
+              if (d.phase === 'exit' && e.target === e.currentTarget) {
+                setDrawn(x => dropExited(x, d.circle.key))
+              }
+            }}
+          >
+            <Avatar circle={d.circle} />
+          </li>
+        ))}
+        {circles.more.length > 0 && (
+          <li className="review-avatar-slot relative">
+            <button
+              type="button"
+              className="review-avatar review-avatar-more"
+              aria-expanded={listing}
+              aria-label={`${circles.more.length} more: show everyone`}
+              title="Everyone reviewing"
+              onClick={() => setListing(l => !l)}
+              onFocus={() => setListing(true)}
+              onBlur={() => setListing(false)}
+            >
+              +{circles.more.length}
+            </button>
+            {listing && (
+              <ul className="review-presence-list surface-panel">
+                {everyone.map(c => (
+                  <li key={c.key} className="flex items-center gap-2">
+                    <span
+                      className="review-presence-dot"
+                      style={{ backgroundColor: c.colour }}
+                      aria-hidden
+                    />
+                    {circleLabel(c)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+const circleLabel = (c: PresenceCircle) =>
+  `${c.name}${c.you ? ' (you)' : ''}${c.page ? ` · on ${c.page}` : ''}`
+
+function Avatar({ circle }: { circle: PresenceCircle }) {
+  const [broken, setBroken] = useState(false)
+  const label = circleLabel(circle)
+  const picture = circle.picture && !broken ? circle.picture : null
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={`review-avatar ${circle.here ? '' : 'is-away'} ${picture ? 'has-picture' : ''}`}
+      style={{ backgroundColor: circle.colour }}
+    >
+      {picture ? (
+        <img src={picture} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} />
+      ) : (
+        initials(circle.name)
+      )}
+    </span>
   )
 }
 
@@ -390,7 +609,7 @@ function Composer({
             className={`btn btn-ghost btn-xs ${placing ? 'btn-active' : ''}`}
             aria-pressed={placing}
             onClick={onPlace}
-            title="Point at a spot in the page as it is shown now (the pin doesn't follow scrolling)"
+            title="Point at a spot in the page: the pin stays on that element as the page scrolls"
           >
             <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pin to a spot
           </button>
@@ -413,14 +632,16 @@ function Thread({
   number,
   list,
   onPage,
-  onGo,
+  selected,
+  onSelect,
 }: {
   name: string
   thread: CommentThread
   number: number
   list: CommentList
   onPage: boolean
-  onGo: () => void
+  selected: boolean
+  onSelect: () => void
 }) {
   const { comment, replies } = thread
   const actions = useCommentActions(name)
@@ -444,21 +665,35 @@ function Thread({
   }
 
   return (
-    <li className={`surface-panel space-y-2 !p-3 ${resolved ? 'opacity-70' : ''}`}>
+    <li
+      id={`thread-${comment.id}`}
+      className={`review-thread surface-panel space-y-2 !p-3 ${resolved ? 'opacity-70' : ''} ${selected ? 'review-thread-selected' : ''}`}
+    >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-secondary">
-        <span className="review-number">
+        <button
+          type="button"
+          className="review-number"
+          aria-pressed={selected}
+          title={comment.anchor ? 'Show its pin' : 'Select this thread'}
+          onClick={onSelect}
+        >
           <span className="sr-only">Thread </span>
           {number}
-        </span>
+        </button>
         {!onPage && (
-          <button type="button" className="link font-mono" onClick={onGo}>
+          <button type="button" className="link font-mono" onClick={onSelect}>
             {comment.path}
           </button>
         )}
         {comment.anchor && (
-          <span className="inline-flex items-center gap-0.5" title="Pinned to a spot in the page">
+          <button
+            type="button"
+            className="inline-flex items-center gap-0.5 hover:underline"
+            title="Show its pin in the page"
+            onClick={onSelect}
+          >
             <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pinned
-          </span>
+          </button>
         )}
         {resolved && (
           <span className="badge badge-xs badge-ghost gap-1">

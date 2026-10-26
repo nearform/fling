@@ -123,7 +123,13 @@ describe('/mcp tools', () => {
       fileCount: 2,
       warnings: [],
     })
-    expect(r.content[0]?.text).toContain('https://q3-report.fling.test/')
+    const lines = (r.content[0]?.text ?? '').split('\n')
+    expect(lines[0]).toBe('Published 2 files.')
+    expect(lines[1]).toMatch(
+      /^Share for feedback: https:\/\/fling\.test\/review\/q3-report \(reviewers sign in/
+    )
+    expect(lines[2]).toMatch(/^Site: https:\/\/q3-report\.fling\.test\/ \(private\)\./)
+    expect(r.structuredContent.reviewUrl).toBe('https://fling.test/review/q3-report')
     expect(r.content[0]?.text).toContain('fling_files')
     const kvs = JSON.parse(env.routeTable.data.get(siteKvsKey('q3-report')) ?? '{}')
     expect(kvs.v).toBe(r.structuredContent.versionId)
@@ -556,5 +562,11 @@ describe('/mcp comment tools', () => {
       })
     )
     expect(init.result.instructions).not.toContain('fling_comments_list')
+    const pub = await callTool(env, off, 'fling_publish', {
+      name: 'quiet',
+      files: [{ path: 'index.html', content: page('Hi') }],
+    })
+    expect(pub.content[0]?.text).toMatch(/^Published 1 file: https:\/\/quiet\.fling\.test\//)
+    expect(pub.structuredContent.reviewUrl).toBeUndefined()
   })
 })

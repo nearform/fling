@@ -1,7 +1,17 @@
-import { INSTANCE_METADATA_PATH, InstanceMetadataSchema } from '@fling/shared'
+import { CORE_CAPABILITIES, INSTANCE_METADATA_PATH, InstanceMetadataSchema } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import { loadBaseConfig } from '../src/config.ts'
 import { setup } from './helpers.ts'
+
+const PROD = {
+  APP_ENV: 'production',
+  APP_ORIGIN: 'https://fling.example.test',
+  SITES_DOMAIN: 'fling.example.test',
+  ALLOWED_EMAIL_DOMAINS: 'example.test',
+  STORE_DRIVER: 'memory',
+  STORAGE_DRIVER: 'fs',
+  KVS_DRIVER: 'memory',
+}
 
 describe('GET /.well-known/fling', () => {
   it('describes the instance from config: public, cacheable, readable cross-origin', async () => {
@@ -25,16 +35,23 @@ describe('GET /.well-known/fling', () => {
         emailDomains: ['example.test'],
       },
       brand: { colors: {} },
-      capabilities: {
-        remoteMcp: true,
-        shareLinks: true,
-        publicSites: true,
-        archive: true,
-        rollback: true,
-        comments: true,
-      },
+      capabilities: expect.objectContaining({ ...CORE_CAPABILITIES, comments: true }),
       installCommand: expect.stringMatching(/^npm install -g \S+$/),
     })
+  })
+
+  it('advertises live rooms only with LIVE_URL, comments on and LIVE not off', async () => {
+    const live = (env: Record<string, string>) => loadBaseConfig({ ...PROD, ...env }).live
+    expect(live({})).toBe(false)
+    expect(live({ LIVE_URL: 'wss://live.example.test/live' })).toBe(true)
+    expect(live({ LIVE_URL: 'wss://live.example.test/live', LIVE: 'off' })).toBe(false)
+    expect(live({ LIVE_URL: 'wss://live.example.test/live', COMMENTS: 'false' })).toBe(false)
+    expect(() => live({ LIVE_URL: 'ws://live.example.test/live' })).toThrow(/wss/)
+    expect(() => live({ LIVE_URL: 'https://live.example.test/live' })).toThrow()
+    const env = setup({ live: true, liveUrl: 'wss://live.example.test/live' })
+    const body = await (await env.app.request(INSTANCE_METADATA_PATH)).json()
+    expect(body.capabilities.live).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('live.example.test')
   })
 
   it('says there are invited addresses, never which', async () => {

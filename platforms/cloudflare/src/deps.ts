@@ -1,6 +1,6 @@
 /**
  * The Cloudflare adapters for the drivers config selects (`d1`, `r2`, `workers-kv`; the Worker
- * defaults to them), handed to the core's buildDeps. Any other driver is the core's own
+ * defaults to them), and the live rooms' Durable Objects, handed to the core's buildDeps. Any other driver is the core's own
  * memory/fs adapter.
  */
 import type { Config } from '@fling/api/config'
@@ -10,6 +10,7 @@ import { Records } from '@fling/api/store/records'
 import type { Deps } from '@fling/api/types'
 import { R2Blobs } from './blobs/r2.ts'
 import type { Bindings } from './env.ts'
+import { DurableObjectLiveHub } from './live.ts'
 import { CachedRouteTable } from './route-table/cached.ts'
 import { WorkersKvRouteTable } from './route-table/kv.ts'
 import { D1Table } from './table/d1.ts'
@@ -37,6 +38,7 @@ export function buildCloudflareDeps(config: Config, env: Bindings): Deps {
       config.kvsDriver === 'workers-kv'
         ? new CachedRouteTable(new WorkersKvRouteTable(env.ROUTES), new TableRouteTable(table))
         : undefined,
+    live: new DurableObjectLiveHub(env.LIVE_ROOMS),
   })
   return {
     ...deps,

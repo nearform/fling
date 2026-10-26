@@ -31,6 +31,7 @@ import {
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
   reviewUrl,
+  shareForFeedback,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -122,7 +123,7 @@ export const mcpLocalInstructions = (w: McpWording, opts: { comments?: boolean }
     'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
     NEVER_PUBLISHED,
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
-    `Sites are private (only ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. Always give the user the URL that comes back.`,
+    `Sites are private (only ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
   ].join('\n\n')
 
@@ -254,10 +255,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             result.url,
             local.files.map(f => f.path)
           )
+    const instance = deps.instance
+    const review =
+      instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
+    const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
+    const head = review
+      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${result.url} (${result.site.visibility})`
+      : `${what}: ${result.url} (${result.site.visibility})${listing}`
     return {
       kind: 'deployed',
       summary:
-        `${what}: ${result.url} (${result.site.visibility})${generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''}${warnings}${skippedNote}${edge.note}` +
+        `${head}${warnings}${skippedNote}${edge.note}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
@@ -266,6 +274,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
         site: result.site,
+        ...(review ? { reviewUrl: review } : {}),
         generatedIndex,
         warnings: result.warnings,
         skipped: local.skipped,

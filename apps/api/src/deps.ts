@@ -1,6 +1,6 @@
 /**
  * Build deps from config. The core only knows the dev/test adapters (Records on a memory table,
- * fs blobs, memory route table); a platform entry (e.g. platforms/aws) passes its own adapters for the
+ * fs blobs, memory route table, no live hub); a platform entry (e.g. platforms/aws) passes its own adapters for the
  * drivers config selects. A cloud driver with no adapter supplied is an error, never a silent
  * fall back to memory.
  */
@@ -9,6 +9,7 @@ import { identityProviderFor } from './auth/oidc.ts'
 import { FsBlobs } from './blobs/fs.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
+import { type LiveHub, noLiveHub } from './live.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
 import type { RouteTable } from './route-table/types.ts'
 import { Records } from './store/records.ts'
@@ -21,6 +22,8 @@ export interface Adapters {
   blobs?: Blobs
   routeTable?: RouteTable
   identity?: IdentityProvider | null
+  /** the live rooms' hub; without one (or with live rooms off) publishing does nothing */
+  live?: LiveHub
 }
 
 const missing = (driver: string): never => {
@@ -47,5 +50,6 @@ export function buildDeps(
     opts.routeTable ??
     (config.kvsDriver === 'memory' ? new MemoryRouteTable() : missing(config.kvsDriver))
   const identity = opts.identity !== undefined ? opts.identity : identityProviderFor(config)
-  return { config, store, blobs, routeTable, identity, clock: systemClock }
+  const live = config.live ? (opts.live ?? noLiveHub) : noLiveHub
+  return { config, store, blobs, routeTable, identity, live, clock: systemClock }
 }

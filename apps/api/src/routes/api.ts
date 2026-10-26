@@ -7,6 +7,7 @@ import {
   CreateCommentRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
+  LiveTicketSchema,
   MeSchema,
   NameCheckSchema,
   OAuthDecisionSchema,
@@ -27,6 +28,7 @@ import { requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
+import { issueLiveTicket } from '../live.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
 import { userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
@@ -258,4 +260,10 @@ apiRoutes.delete('/sites/:name/comments/:id', async c => {
     c.req.param('id')
   )
   return c.body(null, 204)
+})
+
+/** A ticket into the site's live room (`live` capability): connect to `${url}?ticket=…` within `expiresIn`. */
+apiRoutes.post('/sites/:name/live', async c => {
+  const ticket = await issueLiveTicket(c.get('deps'), userActor(c.get('user')), c.req.param('name'))
+  return c.json(LiveTicketSchema.parse(ticket))
 })

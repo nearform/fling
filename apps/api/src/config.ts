@@ -99,6 +99,14 @@ const envSchema = z.object({
   OIDC_SCOPES: optionalString,
   OIDC_ASSUME_EMAIL_VERIFIED: flag,
   COMMENTS: flagDefaultOn,
+  LIVE: flagDefaultOn,
+  LIVE_URL: z.preprocess(
+    blank,
+    z
+      .url()
+      .refine(v => /^wss?:\/\//.test(v), 'must be a ws:// or wss:// URL')
+      .optional()
+  ),
 })
 
 /**
@@ -190,6 +198,15 @@ export interface Config {
    * `comments` capability; off, the comment routes and tools don't exist.
    */
   comments: boolean
+  /**
+   * Live rooms (review mode's realtime: who else is looking, their pointers, comment changes as
+   * they happen). On when comments are, `LIVE` is not off and the platform gave `LIVE_URL`, the
+   * WebSocket clients connect to (`wss://<app host>/api/live` on Cloudflare, the API Gateway stage
+   * on AWS, the dev server's own locally). Advertised as the `live` capability.
+   */
+  live: boolean
+  /** `LIVE_URL`: where clients open the live room's socket (`${liveUrl}?ticket=…`) */
+  liveUrl?: string
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -211,6 +228,9 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     throw new Error(
       'ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS is required in production (e.g. example.test or you@example.test)'
     )
+  }
+  if (production && e.LIVE_URL && !e.LIVE_URL.startsWith('wss://')) {
+    throw new Error('LIVE_URL must be a wss:// URL in production')
   }
   if (Boolean(e.OIDC_ISSUER) !== Boolean(e.OIDC_CLIENT_ID)) {
     throw new Error('OIDC_ISSUER and OIDC_CLIENT_ID go together')
@@ -264,6 +284,8 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     kvsDriver: e.KVS_DRIVER ?? (production ? 'cloudfront' : 'memory'),
     fsRoot: e.FS_ROOT,
     comments: e.COMMENTS,
+    live: e.COMMENTS && e.LIVE && e.LIVE_URL !== undefined,
+    liveUrl: e.LIVE_URL,
     devLogin,
     secureCookies: appOrigin.startsWith('https:'),
     oauthRedirectAllowlist: e.OAUTH_REDIRECT_ALLOWLIST

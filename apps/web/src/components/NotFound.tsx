@@ -2,7 +2,9 @@
  * The 404: the animated thread full-screen, a big "404", a randomly chosen line and a way home.
  * One component in two places — the SPA's catch-all route (`homeHref` `/`) and the standalone
  * `404.html` the sites distribution serves on every site host (`homeHref` the app's absolute URL).
- * It deliberately uses a plain `<a>` and no router, so the standalone bundle stays small.
+ * It deliberately uses a plain `<a>` and no router, so the standalone bundle stays small. The
+ * standalone page in a frame (a site's page in review mode) passes the site's own home instead, so
+ * following it keeps the frame on the site.
  */
 import { ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
@@ -27,7 +29,14 @@ export function pickMessage(random: () => number = Math.random): string {
   return NOT_FOUND_MESSAGES[Math.floor(random() * NOT_FOUND_MESSAGES.length)]
 }
 
-export function NotFound({ homeHref = '/' }: { homeHref?: string }) {
+export function NotFound({
+  homeHref = '/',
+  homeLabel,
+}: {
+  homeHref?: string
+  /** the button's words; default "Back to <instance> home" */
+  homeLabel?: string
+}) {
   const [message] = useState(pickMessage)
   const tone = useThreadTone()
   const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
@@ -57,7 +66,7 @@ export function NotFound({ homeHref = '/' }: { homeHref?: string }) {
           </p>
           <a href={homeHref} className="btn btn-primary mt-8">
             <ArrowLeftIcon className="h-4 w-4" />
-            Back to {name} home
+            {homeLabel ?? `Back to ${name} home`}
           </a>
         </div>
       </main>

@@ -5,7 +5,8 @@
  *
  *   metadata → whoami → deploy v1 (public) → view → 404 / trailing-slash → deploy v2 → view →
  *   rollback to v1 → private: anonymous redirect to sign-in, member view (with a site cookie) →
- *   share link → comments (owner and member; anonymous refused) → admin (the users list;
+ *   share link → comments (owner and member; anonymous refused) → live room (two peers: pointers,
+ *   comment changes) → admin (the users list;
  *   impersonating the owner: their sites, no API key, stop) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
@@ -17,7 +18,12 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type InstanceMetadata, InstanceMetadataSchema, instanceMetadataUrl } from '@fling/shared'
+import {
+  type InstanceMetadata,
+  InstanceMetadataSchema,
+  instanceMetadataUrl,
+  type LiveServerMessage,
+} from '@fling/shared'
 import { runCli } from './cli.ts'
 import { cookiePairs, type Session } from './sign-in.ts'
 
@@ -184,6 +190,18 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       !home.headers.get('x-frame-options') && !/frame-ancestors/i.test(csp),
       `site responses refuse framing: x-frame-options ${home.headers.get('x-frame-options')}, csp ${csp}`
     )
+    // The review shell review mode frames, on the site's own origin: served, filled in, frameable.
+    const shell = await get(`${siteUrl}_fling/review.html?path=%2F`)
+    const shellCsp = shell.headers.get('content-security-policy') ?? ''
+    check(
+      shell.status === 200 &&
+        /text\/html/.test(shell.headers.get('content-type') ?? '') &&
+        shell.text.includes(`content="${meta.appOrigin}"`) &&
+        !shell.headers.get('x-frame-options') &&
+        !/frame-ancestors/i.test(shellCsp),
+      `review shell: ${shell.status} ${shell.headers.get('content-type')}, x-frame-options ${shell.headers.get('x-frame-options')}, csp ${shellCsp}`
+    )
+    step('review shell served on the site host, frameable')
 
     const css = await get(`${siteUrl}style.css`)
     check(css.status === 200 && css.text.includes('rebeccapurple'), `style.css: ${css.status}`)
@@ -253,6 +271,14 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       await commentsStep({ appOrigin, name, v1Id, fling, opts, step })
     } else {
       step('comments: turned off on this instance (skipped)')
+    }
+
+    // Live rooms (review mode's realtime): two people in the site's room. Only where the instance
+    // has them.
+    if (meta.capabilities.live === true) {
+      await liveStep({ appOrigin, name, opts, step })
+    } else {
+      step('live rooms: turned off on this instance (skipped)')
     }
 
     // Admins: the users list, and acting as the owner (who isn't an admin) through impersonation.
@@ -473,6 +499,123 @@ async function commentsStep(ctx: {
   const after = (await fling('comments', name, '--all')) as { comments: CommentJson[] }
   check(after.comments.length === 0, `after deleting the thread: ${JSON.stringify(after.comments)}`)
   step('resolved (CLI), listed (CLI and MCP), deleted with its reply (CLI)')
+}
+
+/** A live room socket that keeps what it hears, for the scenario to wait on. */
+interface LiveClient {
+  heard: LiveServerMessage[]
+  send(message: object): void
+  /** the first message of `type` not taken yet, waiting for one (fails after a while) */
+  next<K extends LiveServerMessage['type']>(
+    type: K
+  ): Promise<Extract<LiveServerMessage, { type: K }>>
+  close(): void
+}
+
+async function liveClient(appOrigin: string, name: string, session: Session): Promise<LiveClient> {
+  const res = await fetch(`${appOrigin}/api/sites/${name}/live`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
+  })
+  check(res.status === 200, `live ticket for ${session.email}: ${res.status}`)
+  const { url, ticket } = (await res.json()) as { url: string; ticket: string }
+  const ws = new WebSocket(`${url}?ticket=${encodeURIComponent(ticket)}`)
+  const heard: LiveClient['heard'] = []
+  let wake: () => void = () => {}
+  ws.addEventListener('message', e => {
+    heard.push(JSON.parse(String(e.data)))
+    wake()
+  })
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener('open', () => resolve())
+    ws.addEventListener('error', () => reject(new ScenarioError(`live socket ${url} failed`)))
+  })
+  const taken = new Set<number>()
+  return {
+    heard,
+    send: m => ws.send(JSON.stringify(m)),
+    async next(type: LiveServerMessage['type']) {
+      const deadline = Date.now() + 10_000
+      for (;;) {
+        const i = heard.findIndex((m, n) => !taken.has(n) && m.type === type)
+        if (i >= 0) {
+          taken.add(i)
+          return heard[i] as never
+        }
+        check(
+          Date.now() < deadline,
+          `live: no ${type} for ${session.email}: ${JSON.stringify(heard)}`
+        )
+        await new Promise<void>(r => {
+          wake = r
+          setTimeout(r, 250)
+        })
+      }
+    },
+    close: () => ws.close(1000),
+  }
+}
+
+async function liveStep(ctx: {
+  appOrigin: string
+  name: string
+  opts: ScenarioOptions
+  step: (line: string) => void
+}) {
+  const { appOrigin, name, opts, step } = ctx
+  // Without a second user, the owner in two tabs: still two peers.
+  const other = opts.member ?? opts.session
+  const anonymous = await fetch(`${appOrigin}/api/sites/${name}/live`, { method: 'POST' })
+  check(anonymous.status === 401, `anonymous live ticket: ${anonymous.status}`)
+
+  const a = await liveClient(appOrigin, name, opts.session)
+  const b = await liveClient(appOrigin, name, other)
+  try {
+    a.send({ type: 'hello' })
+    const welcomeA = await a.next('welcome')
+    const joined = await a.next('join')
+    b.send({ type: 'hello' })
+    const welcomeB = await b.next('welcome')
+    check(
+      joined.peer.id === welcomeB.you.id && welcomeB.peers.some(p => p.id === welcomeA.you.id),
+      `live welcome/join: ${JSON.stringify({ welcomeA, joined, welcomeB })}`
+    )
+
+    const cursor = { type: 'cursor', path: '/docs/', hash: '', anchor: { x: 10, y: 20 } }
+    a.send(cursor)
+    a.send({ type: 'ping' })
+    const seen = await b.next('cursor')
+    check(
+      seen.peerId === welcomeA.you.id && seen.path === '/docs/',
+      `live cursor at the other peer: ${JSON.stringify(seen)}`
+    )
+    await a.next('pong')
+    check(!a.heard.some(m => m.type === 'cursor'), 'live: a pointer came back to its sender')
+
+    const added = await fetch(`${appOrigin}/api/sites/${name}/comments`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${opts.session.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ body: 'Live', path: '/' }),
+    })
+    check(added.status === 201, `live: adding a comment: ${added.status}`)
+    const { id } = (await added.json()) as { id: string }
+    await Promise.all([a.next('comments'), b.next('comments')])
+    await fetch(`${appOrigin}/api/sites/${name}/comments/${id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${opts.session.apiKey}` },
+    })
+
+    a.close()
+    const left = await b.next('leave')
+    check(left.peerId === welcomeA.you.id, `live leave: ${JSON.stringify(left)}`)
+    step('live room: welcome and join, a pointer reaches the other peer only, comments, leave')
+  } finally {
+    a.close()
+    b.close()
+  }
 }
 
 /** Replace a Cookie header's pairs with the ones a response set (an emptied one is dropped). */

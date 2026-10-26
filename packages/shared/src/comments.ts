@@ -2,12 +2,11 @@
 // client and the API agree on, and the threading the web, the CLI and the MCP servers show.
 // Browser-safe (zod only).
 //
-// A comment is made in review mode, an app-origin page that iframes the site. The frame is
-// another origin, so the review page cannot see which page the frame is on: it owns the path (a
-// path bar it navigates the frame with) and a comment attaches to `{ path, versionId }`, the
-// version being served when it was made. An optional `anchor` is where on the frame's viewport the
-// reviewer pointed (percentages), not a point in the document: the frame's scroll is invisible
-// to the page too.
+// A comment is made in review mode: an app-origin page that frames the review shell, a page on the
+// site's own origin that frames the site and reports what it sees (review-bridge.ts). A comment
+// attaches to `{ path, versionId }`, the page the frame was showing and the version being served
+// when it was made. An optional `anchor` is the spot the reviewer pinned, with enough context
+// (element, document point, scroll, viewport, SPA hash route) to find it again on another screen.
 
 import { z } from 'zod'
 
@@ -28,10 +27,32 @@ export const CommentAuthorSchema = z.discriminatedUnion('kind', [
 ])
 export type CommentAuthor = z.infer<typeof CommentAuthorSchema>
 
-/** Where in the frame's viewport the reviewer pointed, as percentages of its width and height. */
+/** Characters in an anchor's CSS selector. */
+export const ANCHOR_SELECTOR_MAX = 512
+
+const px = z.number().finite().min(-1e7).max(1e7)
+const percent = z.number().min(0).max(100)
+
+/**
+ * A spot on a page. `x`/`y` (percentages of the frame's viewport) are always there and are the last
+ * resort; the review shell finds the spot again by, in order: `selector` plus `ex`/`ey` (the
+ * element and the point inside it, as percentages of its box), then `docX`/`docY` (document
+ * pixels), then `x`/`y`. `scrollX`/`scrollY` and `vw`/`vh` record the scroll and viewport the pin
+ * was placed with; `hash` is the page's fragment, the route of a hash-routed single-page app.
+ */
 export const CommentAnchorSchema = z.object({
-  x: z.number().min(0).max(100),
-  y: z.number().min(0).max(100),
+  x: percent,
+  y: percent,
+  selector: z.string().min(1).max(ANCHOR_SELECTOR_MAX).optional(),
+  ex: percent.optional(),
+  ey: percent.optional(),
+  docX: px.optional(),
+  docY: px.optional(),
+  scrollX: px.optional(),
+  scrollY: px.optional(),
+  vw: z.number().finite().min(0).max(1e5).optional(),
+  vh: z.number().finite().min(0).max(1e5).optional(),
+  hash: z.string().max(COMMENT_PATH_MAX).optional(),
 })
 export type CommentAnchor = z.infer<typeof CommentAnchorSchema>
 

@@ -3,7 +3,13 @@
  * vars (the same env-style keys @fling/api/config reads on every platform) and its secrets
  * (`SESSION_SECRET`, `SITE_HMAC_KEY`, `OIDC_CLIENT_SECRET`; `wrangler secret put`).
  */
-import type { D1Database, Fetcher, KVNamespace, R2Bucket } from '@cloudflare/workers-types'
+import type {
+  D1Database,
+  DurableObjectNamespace,
+  Fetcher,
+  KVNamespace,
+  R2Bucket,
+} from '@cloudflare/workers-types'
 
 export interface Bindings {
   /** D1: the Table (migrations/*.sql) */
@@ -14,6 +20,8 @@ export interface Bindings {
   ROUTES: KVNamespace
   /** Static Assets: the web UI build, plus `_fling/404.html` (scripts/build.mjs) */
   ASSETS: Fetcher
+  /** Durable Objects: the live rooms, one per site (src/live.ts) */
+  LIVE_ROOMS: DurableObjectNamespace
 }
 
 export type Env = Bindings & Record<string, unknown>

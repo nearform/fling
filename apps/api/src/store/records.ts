@@ -12,6 +12,12 @@
  *   SITE#<siteId>          COMMENT#<commentId>           comment (parentId, path, versionId, body,
  *                                                        author, resolvedAt, …); ids sort by time,
  *                                                        so the partition lists them oldest first
+ *   SITE#<siteId>          LIVE#<connectionId>           a connection to the site's live room (peer,
+ *                                                        connectedAt) — 2 h; only hubs that keep
+ *                                                        connections in the store write them
+ *   LIVE#<connectionId>    LIVE                          live connection lookup → the same record,
+ *                                                        written with it (a hub knows only the
+ *                                                        connection id when it closes)
  *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
  *                                                        projection), so a user's sites are one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
@@ -89,6 +95,7 @@ import {
   type AuthCodeRecord,
   type CommentRecord,
   type GrantRecord,
+  type LiveConnectionRecord,
   type NameClaim,
   type OAuthClientRecord,
   type OAuthRequestRecord,
@@ -119,6 +126,11 @@ const key = {
   siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
   comment: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `COMMENT#${id}` }),
+  live: (siteId: string, connectionId: string) => ({
+    pk: sitePk(siteId),
+    sk: `LIVE#${connectionId}`,
+  }),
+  liveRef: (connectionId: string) => ({ pk: `LIVE#${connectionId}`, sk: 'LIVE' }),
   /** LEGACY (expand phase): where versions lived before the site-centric keys */
   legacyVersion: (email: string, siteId: string, id: string) => ({
     pk: userPk(email),
@@ -469,6 +481,34 @@ export class Records implements Store {
     }
     const { pk, sk } = key.comment(siteId, id)
     return (await this.table.delete(pk, sk)) !== null
+  }
+
+  // --- live rooms ---
+
+  async putLiveConnection(c: LiveConnectionRecord) {
+    await this.table.transact([
+      { put: encode('live', key.live(c.siteId, c.connectionId), c) },
+      { put: encode('liveref', key.liveRef(c.connectionId), c) },
+    ])
+  }
+
+  getLiveConnection(connectionId: string) {
+    return this.read<LiveConnectionRecord>('liveref', key.liveRef(connectionId))
+  }
+
+  listLiveConnections(siteId: string) {
+    return this.list<LiveConnectionRecord>('live', sitePk(siteId), 'LIVE#')
+  }
+
+  async deleteLiveConnection(connectionId: string) {
+    const c = await this.getLiveConnection(connectionId)
+    if (!c) return null
+    // The room's item first: a lookup left behind by an interrupted delete expires on its own.
+    const room = key.live(c.siteId, connectionId)
+    const ref = key.liveRef(connectionId)
+    await this.table.delete(room.pk, room.sk)
+    await this.table.delete(ref.pk, ref.sk)
+    return c
   }
 
   // --- OAuth ---

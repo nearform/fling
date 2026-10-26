@@ -173,7 +173,9 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 
 People review a site on its review page (`<your Fling>/review/<name>`, the **Review** button on the
 sites page): the site beside its comments. Anyone signed in who can open the site can comment; the
-CLI reads and writes the same threads.
+CLI reads and writes the same threads. On a Fling with comments, `fling deploy` (and the MCP
+server's `fling_deploy` / `fling_publish`) also prints the review page as the link to share for
+feedback (`reviewUrl` in `--json`); reviewers sign in to use it.
 
 | Command | |
 |---|---|

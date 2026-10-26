@@ -111,24 +111,7 @@ export async function fetchInstance(origin = ''): Promise<InstanceMetadata> {
   return InstanceMetadataSchema.parse(await res.json())
 }
 
-/**
- * The standalone 404's app origin: the `fling-app-origin` meta the deploy fills in, or — when it
- * was never filled (`__APP_ORIGIN__`) — the site host's parent (`https://x.sites.example.test` →
- * `https://sites.example.test`). Pure.
- */
-export function notFoundAppOrigin(meta: string | null | undefined, location: Location | URL) {
-  const value = meta?.trim()
-  if (value && !value.startsWith('__')) {
-    try {
-      return new URL(value).origin
-    } catch {
-      // fall through to the host's parent
-    }
-  }
-  const host = location.host
-  const dot = host.indexOf('.')
-  return `${location.protocol}//${dot > 0 ? host.slice(dot + 1) : host}`
-}
+export { notFoundAppOrigin } from './app-origin'
 
 /** `npx <package>` when the install command is a plain global npm install, else null. */
 export function npxCommandFor(installCommand: string): string | null {

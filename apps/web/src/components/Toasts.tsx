@@ -34,10 +34,30 @@ export function Toasts() {
           <div
             key={toast.id}
             className={`alert ${alertClass[toast.type]} toast-in`}
-            role={toast.type === 'error' ? 'alert' : 'status'}
+            role={toast.dot ? undefined : toast.type === 'error' ? 'alert' : 'status'}
           >
-            <Icon className="h-5 w-5 shrink-0" />
+            {toast.dot ? (
+              <span
+                className="toast-dot"
+                style={{ backgroundColor: toast.dot }}
+                aria-hidden="true"
+              />
+            ) : (
+              <Icon className="h-5 w-5 shrink-0" />
+            )}
             <span className="text-sm">{toast.message}</span>
+            {toast.action && (
+              <a
+                href={toast.action.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-sm"
+                onClick={() => dismissToast(toast.id)}
+              >
+                {toast.action.label}
+                <span className="sr-only">(opens in a new tab)</span>
+              </a>
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-xs"

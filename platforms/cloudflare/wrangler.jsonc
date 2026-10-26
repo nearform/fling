@@ -35,6 +35,9 @@
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "fling-sites" }],
   "kv_namespaces": [{ "binding": "ROUTES", "id": "00000000000000000000000000000000" }],
+  // The live rooms (review mode's realtime): one Durable Object per site, src/live.ts.
+  "durable_objects": { "bindings": [{ "name": "LIVE_ROOMS", "class_name": "LiveRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveRoom"] }],
   // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
   "triggers": { "crons": ["17 * * * *"] },
   "secrets": { "required": ["SESSION_SECRET", "SITE_HMAC_KEY"] },
@@ -47,6 +50,7 @@
     "SITES_DOMAIN": "flingcf.lvh.me:47103",
     "SITE_SCHEME": "http",
     "SITE_COOKIE_DOMAIN": "flingcf.lvh.me",
+    "LIVE_URL": "ws://flingcf.lvh.me:47103/api/live",
     "STORE_DRIVER": "d1",
     "STORAGE_DRIVER": "r2",
     "KVS_DRIVER": "workers-kv"

@@ -1,11 +1,14 @@
 import type { Comment, CommentThread } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import {
-  anchorAt,
   frameUrl,
+  linkHost,
   openCountsByPath,
+  pinsFor,
   reviewHref,
   reviewPath,
+  reviewTarget,
+  targetString,
   visibleThreads,
 } from '../src/lib/review'
 
@@ -31,21 +34,28 @@ describe('review helpers', () => {
     )
   })
 
-  it('turns a click into a pin: percent of the frame, one decimal, clamped', () => {
-    const rect = { left: 100, top: 50, width: 800, height: 600 }
-    expect(anchorAt(rect, 500, 350)).toEqual({ x: 50, y: 50 })
-    expect(anchorAt(rect, 101, 51)).toEqual({ x: 0.1, y: 0.2 })
-    expect(anchorAt(rect, 0, 9999)).toEqual({ x: 0, y: 100 })
-    expect(anchorAt({ ...rect, width: 0, height: 0 }, 1, 1)).toEqual({ x: 0, y: 0 })
+  it('reads the page and its hash route from ?path=', () => {
+    expect(reviewTarget(null)).toEqual({ path: '/', hash: '' })
+    expect(reviewTarget('/app/index.html#/settings?tab=2')).toEqual({
+      path: '/app/',
+      hash: '#/settings?tab=2',
+    })
+    expect(reviewTarget('/docs/#')).toEqual({ path: '/docs/', hash: '' })
+    expect(targetString(reviewTarget('/a/#x'))).toBe('/a/#x')
   })
 
-  const thread = (id: string, path: string, resolved = false): CommentThread => ({
+  const thread = (
+    id: string,
+    path: string,
+    resolved = false,
+    anchor: Comment['anchor'] = null
+  ): CommentThread => ({
     comment: {
       id,
       parentId: null,
       path,
       versionId: null,
-      anchor: null,
+      anchor,
       body: id,
       author: { kind: 'user', email: 'a@example.test' },
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -66,5 +76,35 @@ describe('review helpers', () => {
       ['/', 1],
       ['/docs/', 1],
     ])
+  })
+
+  it("pins the threads on the frame's page and hash route, numbered as listed", () => {
+    const threads = [
+      thread('a', '/', false, { x: 1, y: 2 }),
+      thread('b', '/', false, { x: 3, y: 4, hash: '#/x' }),
+      thread('c', '/', true, { x: 5, y: 6 }),
+      thread('d', '/docs/', false, { x: 7, y: 8 }),
+      thread('e', '/'),
+    ]
+    const at = (path: string, hash: string, showResolved = false) =>
+      pinsFor(threads, { path, hash }, { showResolved, selectedId: 'c' }).map(p => [
+        p.id,
+        p.n,
+        p.selected,
+        p.resolved,
+      ])
+    expect(at('/', '')).toEqual([['a', 1, false, false]])
+    expect(at('/', '', true)).toEqual([
+      ['a', 1, false, false],
+      ['c', 3, true, true],
+    ])
+    expect(at('/', '#/x')).toEqual([['b', 2, false, false]])
+    expect(at('/docs/', '')).toEqual([['d', 4, false, false]])
+  })
+
+  it('names where a stopped link goes by its host', () => {
+    expect(linkHost('https://example.com/a?b')).toBe('example.com')
+    expect(linkHost('http://fling.lvh.me:47100/')).toBe('fling.lvh.me:47100')
+    expect(linkHost('not a url')).toBe('not a url')
   })
 })

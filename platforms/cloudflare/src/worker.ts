@@ -4,6 +4,8 @@
  * - The app origin (APP_ORIGIN's host): the API core (Hono: /api, /auth, /mcp, /oauth,
  *   /.well-known, /healthz), the signed upload route R2Blobs presigns (`PUT /blob-upload/<key>`),
  *   and the web UI from Static Assets (index.html for client-side routes; hashed files immutable).
+ * - The live rooms (src/live.ts): `GET /api/live?ticket=` WebSocket upgrades on the app origin go
+ *   to the site's `LiveRoom` Durable Object, exported from here for the LIVE_ROOMS binding.
  * - The sites host (`*.<SITES_DOMAIN>`): the shared routing decision over the route table and R2
  *   (sites.ts).
  * - `scheduled` (the cron in wrangler.jsonc): deletes expired items from D1. Reads already ignore
@@ -23,8 +25,11 @@ import type { Deps } from '@fling/api/types'
 import { R2Blobs, UPLOAD_ROUTE } from './blobs/r2.ts'
 import { buildCloudflareDeps, CLOUDFLARE_DRIVERS } from './deps.ts'
 import { type Env, stringVars } from './env.ts'
+import { handleLiveUpgrade, LIVE_PATH } from './live.ts'
 import { handleSiteRequest } from './sites.ts'
 import { D1Table } from './table/d1.ts'
+
+export { LiveRoom } from './live.ts'
 
 /** The app paths the API answers (the rest is the web UI): the same list as the AWS module's. */
 export function isApiPath(path: string): boolean {
@@ -99,6 +104,14 @@ export default {
       const path = new URL(request.url).pathname
       if (path.startsWith(`${UPLOAD_ROUTE}/`) && deps.blobs instanceof R2Blobs) {
         return deps.blobs.handleUpload(request)
+      }
+      if (path === LIVE_PATH && config.live) {
+        return handleLiveUpgrade(
+          request,
+          env.LIVE_ROOMS,
+          config.secrets.sessionSecret,
+          deps.clock.now()
+        )
       }
       if (isApiPath(path)) return app.fetch(request, env, ctx as never)
       return serveUi(request, env, config.secureCookies)

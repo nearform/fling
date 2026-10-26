@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0
+
 - **Several Flings.** The CLI remembers every Fling you sign in to, each with its own API key, and
   uses the current one. `fling login <url>` and `fling setup <url>` add a Fling (or refresh its
   login) and make it current without signing you out of the others. `fling use` lists them, with

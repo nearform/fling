@@ -46,11 +46,15 @@ import {
 } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ConfirmModal } from '../components/ConfirmModal'
+import { LogoMark } from '../components/LogoMark'
+import ThemeToggle from '../components/ThemeToggle'
+import { UserMenu } from '../components/UserMenu'
 import { useInstance } from '../hooks/instance'
 import { useCommentActions, useComments } from '../hooks/queries'
 import { type Live, useLive } from '../hooks/useLive'
 import { ApiError, errorMessage } from '../lib/api'
 import { fullDate, shortVersion, timeAgo } from '../lib/format'
+import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import {
   cursorsAt,
   dropExited,
@@ -280,12 +284,20 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
     }
   }, [selectedId])
 
+  const instanceName = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
+
   return (
     <div className="review-layout app-canvas">
       <header className="app-header flex flex-wrap items-center gap-2 border-b px-3 py-2">
-        <Link to="/" className="btn btn-ghost btn-sm btn-square" aria-label="Back to your sites">
-          <ArrowLeftIcon className="h-4 w-4" aria-hidden />
+        <Link
+          to="/"
+          className="btn btn-ghost btn-sm gap-2 px-2"
+          aria-label={`${instanceName}: back to your sites`}
+        >
+          <LogoMark className="w-6 h-6" />
+          <span className="hidden sm:inline font-semibold tracking-tight">{instanceName}</span>
         </Link>
+        <span className="h-5 border-s border-[var(--border-default)]" aria-hidden />
         <h1 className="min-w-0 truncate text-base">
           Review <span className="font-mono text-sm">{list.site.name}</span>
         </h1>
@@ -331,6 +343,8 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
           <span className="sr-only">(opens in a new tab)</span>
         </a>
         <Presence live={live} at={at} />
+        <UserMenu />
+        <ThemeToggle />
       </header>
 
       <div className="review-body">

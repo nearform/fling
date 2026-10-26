@@ -18,6 +18,8 @@ import {
   type Connection,
   ConnectionListSchema,
   ErrorEnvelopeSchema,
+  type LiveTicket,
+  LiveTicketSchema,
   type Me,
   MeSchema,
   OAuthDecisionSchema,
@@ -163,6 +165,9 @@ export const api = {
       method: 'PATCH',
       body: { resolved },
     }),
+  /** Where to join the site's live room, and the short-lived ticket to join with. */
+  liveTicket: (name: string): Promise<LiveTicket> =>
+    request(`${site(name)}/live`, LiveTicketSchema, { method: 'POST' }),
   deleteComment: (name: string, id: string) =>
     request(`${site(name)}/comments/${encodeURIComponent(id)}`, ignoreBody, { method: 'DELETE' }),
   async listKeys(): Promise<ApiKey[]> {

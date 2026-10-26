@@ -2,6 +2,7 @@ import type { IdentityProvider } from './auth/identity.ts'
 import type { SessionClaims } from './auth/session.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
+import type { LiveHub } from './live.ts'
 import type { RouteTable } from './route-table/types.ts'
 import type { Store, User } from './store/types.ts'
 
@@ -17,6 +18,11 @@ export interface Deps {
   clock: Clock
   /** The instance's sign-in (generic OIDC, from config); null/absent → none (dev-login only). */
   identity?: IdentityProvider | null
+  /**
+   * The live rooms' hub (live.ts): what the core publishes to a site's room through. Absent: an
+   * instance without live rooms, where publishing does nothing.
+   */
+  live?: LiveHub
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

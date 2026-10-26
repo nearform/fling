@@ -5,7 +5,8 @@
 // and turn the decision into their runtime's response.
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
-//   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile)
+//   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile);
+//     NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie), 301 to add a trailing slash (extensionless path, not an SPA).
 //
@@ -20,7 +21,7 @@
 //
 // Contracts: route-keys.ts (keys), site-labels.ts (labels), site-cookie.ts (the cookie format).
 
-import { MISSING_KEY, NOT_FOUND_PAGE, shareKvsKey, siteKvsKey } from './route-keys.ts'
+import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL, shareKvsKey, siteKvsKey } from './route-keys.ts'
 import { parseLabel } from './site-labels.ts'
 
 /** A request to a sites host, as the shell read it. */
@@ -58,7 +59,7 @@ export interface SiteResponse {
   headers: Record<string, string>
 }
 
-/** Serve this object key (`/sites/<id>/<v>/<path>`, MISSING_KEY or NOT_FOUND_PAGE). */
+/** Serve this object key (`/sites/<id>/<v>/<path>`, MISSING_KEY, NOT_FOUND_PAGE or REVIEW_SHELL). */
 export interface SiteRewrite {
   action: 'rewrite'
   uri: string
@@ -145,7 +146,9 @@ export async function routeSiteRequest(
       headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
     }
   }
-  if (uri === NOT_FOUND_PAGE) return { action: 'rewrite', uri: uri }
+  // Static pages that hold no site data, on any host: the 404 page, and the review shell (the
+  // site it frames is requested separately and goes through the checks below).
+  if (uri === NOT_FOUND_PAGE || uri === REVIEW_SHELL) return { action: 'rewrite', uri: uri }
 
   const host = req.host.toLowerCase()
   const target = routeKeyForHost(host)

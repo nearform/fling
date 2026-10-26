@@ -7,6 +7,9 @@
  * What a comment is attached to (contract and limitation in @fling/shared/comments): a page path
  * and the version being served when it was made. Comments outlive versions; deleting the site
  * deletes them with its partition.
+ *
+ * Every change (add, resolve, reopen, delete) tells the site's live room `comments`, so open
+ * review pages refetch the list (through policy) at once.
  */
 import {
   COMMENTS_PER_SITE_MAX,
@@ -21,6 +24,7 @@ import {
 } from '@fling/shared'
 import { ApiError, badRequest, forbidden, notFound } from './lib/errors.ts'
 import { newCommentId } from './lib/ids.ts'
+import { publishQuietly } from './live.ts'
 import { type Action, type Actor, can, canDeleteComment } from './policy.ts'
 import type { CommentRecord, SiteRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
@@ -136,6 +140,7 @@ export async function addComment(
     resolvedBy: null,
   }
   if (!(await deps.store.createComment(record))) throw new Error('comment id collision')
+  await publishQuietly(deps, site.id, { type: 'comments' })
   return toComment(actor, site, record)
 }
 
@@ -158,6 +163,7 @@ export async function resolveComment(
       : { resolvedAt: null, resolvedBy: null }
   )
   if (!updated) throw notFound(`No comment ${id} on "${name}"`)
+  await publishQuietly(deps, site.id, { type: 'comments' })
   return toComment(actor, site, updated)
 }
 
@@ -170,4 +176,5 @@ export async function deleteComment(deps: Deps, actor: Actor, name: string, id: 
     throw forbidden('Only its author or the site owner can delete a comment')
   }
   await deps.store.deleteComment(site.id, id)
+  await publishQuietly(deps, site.id, { type: 'comments' })
 }

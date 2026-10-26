@@ -43,7 +43,10 @@ Not for servers or anything needing a backend at runtime — Fling serves files 
 4. **If the name is taken** (someone else owns it), the tool fails and lists free suggestions
    (the name plus the user's initials, e.g. `my-app-cc`). Ask the user to pick one or give another
    name, then deploy again with `name`. Never silently pick a different name.
-5. **Report the URL** the tool returns and whether it is private or public, plus any `warnings`.
+5. **Report the links** the tool returns and whether the site is private or public, plus any
+   `warnings`. When the Fling has comments, the result leads with the review link (`reviewUrl`):
+   give it first, as the link to share for feedback (reviewers sign in to the Fling to see the
+   site and comment), then the site URL.
 
 Notes:
 

@@ -24,13 +24,14 @@ $APP_DOMAIN       CloudFront ─┬─ /api/*, /auth/*, /healthz,
                               └─ everything else          → S3 UI bucket (SPA)
 *.$SITES_DOMAIN   CloudFront ── site router (CloudFront Function + KeyValueStore)
                               └─ S3 sites bucket
+wss://…execute-api…/live  API Gateway WebSocket API ── Lambda $FUNCTION (live rooms)
 DynamoDB $TABLE, SSM parameters $SSM_PREFIX*
 ```
 
 | Who | Owns |
 | --- | --- |
 | Terraform ([`infra`](infra), from your root module) | Buckets, table, distributions, DNS, certificate, roles, the function's configuration and environment, which secrets exist |
-| This repo, `deploy.yml` | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` in the sites bucket, the site router's code |
+| This repo, `deploy.yml` | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` and `_fling/review.html` in the sites bucket, the site router's code |
 | The API at runtime | Table items, KeyValueStore keys, site files under `sites/`, chunked MCP upload staging under `uploads/` |
 
 ## Infrastructure: the Terraform module
@@ -55,6 +56,11 @@ module "fling" {
 }
 ```
 
+It also creates the live rooms' API Gateway WebSocket API ([`live.tf`](infra/live.tf): routes
+`$connect`, `$default` and `$disconnect` to the same function, stage `live`, and lets the function
+post to its connections); the function gets its `wss://` URL as `LIVE_URL` (output `live_url`).
+Connections are table items that expire after 2 hours, API Gateway's own limit.
+
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
 provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
 resources with the providers' `default_tags`.
@@ -70,7 +76,7 @@ resources with the providers' `default_tags`.
 | `github` | (required) | `{ owner, owner_id, repo, repo_id, environment = "production" }`: who may assume the deploy role. Ids are numeric (`gh api repos/<owner>/<repo> --jq '.owner.id, .id'`), so a renamed or re-created repository can't inherit trust |
 | `github_oidc_provider_arn` | looked up | The account's IAM OIDC provider for `token.actions.githubusercontent.com` (one per account, so the module never creates it; create it once if you have none) |
 | `instance` | `{}` | The [instance configuration](#instance-configuration), passed through as `INSTANCE` in the `deploy` output |
-| `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, the drivers and `NODE_OPTIONS` from `hostname`, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
+| `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, the drivers and `NODE_OPTIONS` from `hostname`, `LIVE_URL` from the WebSocket stage, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
 | `manual_secrets` | `["oidc-client-secret"]` | SSM parameters created as `unset`, for you to fill (see [Secrets](#secrets)) |
 | `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
@@ -133,7 +139,7 @@ Values reach the function two ways, and the function's own environment wins:
 
 1. **The function's environment**, from the module (the deployment plumbing: `APP_ORIGIN`,
    `SITES_DOMAIN`, `SITE_COOKIE_DOMAIN`, `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX`,
-   `APP_ENV=production`; anything in its `environment` input).
+   `LIVE_URL`, `APP_ENV=production`; anything in its `environment` input).
 2. **`instance.json` in `lambda.zip`**, written at deploy time from the `INSTANCE` object in
    `AWS_DEPLOY_CONFIG` (the module's `instance` input). Use it for the instance's identity: changing
    it needs a deploy, not an apply.
@@ -148,6 +154,8 @@ Values reach the function two ways, and the function's own environment wins:
 | `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else the issuer's host) | What the button says: "Sign in with …". |
 | `OIDC_SCOPES` | no (`openid email profile`) | Space- or comma-separated scopes; must include `openid` and give an `email` claim. |
 | `OIDC_ASSUME_EMAIL_VERIFIED` | no (`false`) | `true` treats an ID token *without* `email_verified` as verified. See [Sign-in](#sign-in-openid-connect). |
+| `LIVE` | no (on) | `false` turns review mode's live rooms off (who else is looking, their pointers, comments appearing without a refresh). They also need comments on and `LIVE_URL`. |
+| `LIVE_URL` | set by the platform | Where review pages open the live room's WebSocket, a `wss://` URL. The module sets it to the WebSocket API's stage (`live_url` output; [live.tf](infra/live.tf)); on Cloudflare the deploy sets `wss://<app host>/api/live`. Advertised only as the `live` capability, never published itself. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |
 | `BRAND_PRIMARY` | no | Hex colour behind primary buttons and active states, e.g. `#4f46e5`. |
@@ -289,7 +297,11 @@ and, with the deploy role over OIDC:
    leaves it alone and it is served at `https://$APP_DOMAIN/downloads/fling.mcpb`.
 3. Fills `__APP_ORIGIN__` in `apps/web/dist-404/404.html` and uploads it to
    `s3://<sites bucket>/_fling/404.html`. The sites distribution answers every S3 403 or 404 with it,
-   as a 404; the page links home and brands itself from the app's `/.well-known/fling`.
+   as a 404; the page links home and brands itself from the app's `/.well-known/fling`. It does the
+   same for the review shell (`apps/web/dist-review/review-shell.html` → `_fling/review.html`,
+   `no-cache`), the page review mode frames on each site's own origin. The sites distribution's
+   `_fling/*` behaviour serves both from the bucket without the site router and without a response
+   headers policy, so nothing stops the app from framing the shell.
 4. Builds the site router (`edge/dist/site-router.js`: the shared routing decision,
    `packages/shared/src/site-routing.ts`, in a CloudFront Function shell), fills its
    `__APP_ORIGIN__` and `__SITE_SCHEME__`, updates the CloudFront Function (keeping its KeyValueStore association) and publishes it to LIVE.
@@ -469,4 +481,11 @@ also needs the copy the site router reads from the KeyValueStore updated by the 
 About $0 when idle. Lambda, CloudFront (PriceClass_100), DynamoDB on demand, the KeyValueStore,
 CloudFront Functions and standard SSM parameters cost nothing or pennies at internal scale. The ACM
 certificate is free. The only steady cost is S3 storage of site versions, about $0.023 per GB-month.
+
+Live rooms are the one part billed per message. API Gateway WebSockets charge for connection
+minutes and messages (about $0.25 per million minutes and $1 per million messages), and every
+message a client sends, plus every connect and disconnect, is one Lambda invocation with a few
+DynamoDB reads; relaying it to the others is a message each. Pointers are throttled in the client
+to about 12 a second while someone moves the mouse over a reviewed page, so a busy review session
+of a few people is thousands of invocations an hour. `LIVE=false` turns the rooms off.
 Logs are kept for 30 days.

@@ -8,6 +8,7 @@ import { defaultSiteName, deploy, NameTakenError, resolveSiteName } from '../src
 import {
   captureError,
   headersOf,
+  INSTANCE,
   jsonResponse,
   loggedInStore,
   mockFetch,
@@ -262,7 +263,10 @@ describe('fling [dir] command', () => {
     const store = await loggedInStore()
     const human = await testContext({ store, fetch: m.fetch })
     await runDeploy(human.ctx, dir, {})
-    expect(human.out.content()).toContain(site().url)
+    expect(human.out.content().split('\n')[0]).toContain(site().url)
+    expect(human.out.content()).toContain(
+      `Share for feedback (reviewers sign in to ${INSTANCE.name}): ${SERVER}/review/my-app`
+    )
     expect(human.log.lines.join('\n')).toMatch(/Unchanged/)
 
     const json = await testContext({ store, fetch: m.fetch, json: true })
@@ -270,9 +274,29 @@ describe('fling [dir] command', () => {
     expect(JSON.parse(json.out.content())).toEqual({
       status: 'unchanged',
       site: site(),
+      reviewUrl: `${SERVER}/review/my-app`,
       ready: true,
       skipped: { dotfiles: [], gitignored: [] },
     })
+  })
+
+  it('without comments on the instance there is no review link', async () => {
+    const dir = await folder()
+    const m = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse({ status: 'unchanged', versionId: VERSION, site: site() }),
+    })
+    const store = await loggedInStore()
+    await store.save({
+      ...(await store.load()),
+      instance: { ...INSTANCE, capabilities: { comments: false } },
+    })
+    const human = await testContext({ store, fetch: m.fetch })
+    await runDeploy(human.ctx, dir, {})
+    expect(human.out.content()).not.toContain('/review/')
+    const json = await testContext({ store, fetch: m.fetch, json: true })
+    await runDeploy(json.ctx, dir, {})
+    expect(JSON.parse(json.out.content()).reviewUrl).toBeUndefined()
   })
 
   it('a path that does not exist is an error: the CLI never looks in Downloads', async () => {

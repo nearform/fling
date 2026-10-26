@@ -35,7 +35,7 @@ run(process.execPath, [join(ROOT, 'scripts', 'build.mjs'), '--assets-only'])
 run(bin('wrangler'), ['d1', 'migrations', 'apply', 'DB', '--local', '--persist-to', persistTo])
 run(bin('tsx'), [join(ROOT, 'scripts', 'migrate.ts'), '--local', '--persist-to', persistTo])
 
-const vars = { APP_ORIGIN: `http://${host}`, SITES_DOMAIN: host }
+const vars = { APP_ORIGIN: `http://${host}`, SITES_DOMAIN: host, LIVE_URL: `ws://${host}/api/live` }
 if (process.env.SESSION_SECRET && process.env.SITE_HMAC_KEY) {
   vars.SESSION_SECRET = process.env.SESSION_SECRET
   vars.SITE_HMAC_KEY = process.env.SITE_HMAC_KEY

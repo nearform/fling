@@ -26,7 +26,8 @@ data "archive_file" "placeholder" {
 # The function's environment: the deployment plumbing, from the module's inputs. The instance's own
 # values (ALLOWED_EMAIL_DOMAINS, OIDC_*, INSTANCE_NAME, BRAND_*) usually travel in the deploy
 # config's INSTANCE object instead (var.instance), so changing them needs no infrastructure change;
-# var.environment can still set or override any key here except the four the module owns.
+# var.environment can still set or override any key here except the four the module owns. LIVE_URL
+# is the live rooms' WebSocket stage (live.tf); the instance turns them off with LIVE=false.
 locals {
   environment = merge(
     {
@@ -38,6 +39,7 @@ locals {
       STORE_DRIVER       = "dynamo"
       STORAGE_DRIVER     = "s3"
       KVS_DRIVER         = "cloudfront"
+      LIVE_URL           = local.live_url
       NODE_OPTIONS       = "--enable-source-maps"
     },
     var.environment,

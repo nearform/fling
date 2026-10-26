@@ -456,7 +456,10 @@ export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean 
     NEVER_PUBLISHED,
     `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
       '`append` for big files) and fling_upload_finish.',
-    'Always give the user the URL that comes back. Use fling_list / fling_info to find existing sites, fling_rollback ' +
+    (opts.comments
+      ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL. '
+      : 'Always give the user the URL that comes back. ') +
+      'Use fling_list / fling_info to find existing sites, fling_rollback ' +
       'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
       'exactly which files a site has (e.g. when the user reports a 404).',
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
@@ -464,9 +467,18 @@ export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean 
 
 /** What the servers say about comments, when the instance has them. */
 export const COMMENTS_NOTE = (w: McpWording) =>
-  `People review sites at ${w.reviewPattern} and leave comments on its pages. fling_comments_list shows them; ` +
+  `People review sites at ${w.reviewPattern} and leave comments on its pages. Publishing returns this review link ` +
+  '(`reviewUrl`): it is the one to share when the user wants feedback; reviewers sign in to use it. ' +
+  'fling_comments_list shows the comments; ' +
   'after acting on feedback, resolve the threads with fling_comment_resolve. Only post (fling_comment_add) or ' +
   'delete (fling_comment_delete) comments when the user asks.'
+
+/**
+ * The line a publish result leads with when the instance has comments (both servers): the review
+ * page is the link to share for feedback, and reviewers sign in to use it.
+ */
+export const shareForFeedback = (reviewPage: string, instanceName: string) =>
+  `Share for feedback: ${reviewPage} (reviewers sign in to ${instanceName} to see the site and comment).`
 
 /** Max files listed in a fling_files text result (structured data always has them all). */
 export const MCP_FILES_LISTED = 200

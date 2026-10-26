@@ -84,12 +84,15 @@ export function useSiteActions(name: string) {
   }
 }
 
-/** A site's comments, refetched now and then so a review session sees other people's. */
-export function useComments(name: string) {
+/**
+ * A site's comments, refetched now and then so a review session sees other people's: every 30 s,
+ * or every 5 minutes as a safety net while the live room (useLive) signals each change.
+ */
+export function useComments(name: string, opts: { live?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.comments(name),
     queryFn: () => api.listComments(name),
-    refetchInterval: 30_000,
+    refetchInterval: opts.live ? 300_000 : 30_000,
   })
 }
 

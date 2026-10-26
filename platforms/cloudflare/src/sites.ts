@@ -4,11 +4,13 @@
  * object from R2. This file only adapts: it reads the request, provides the lookups and turns the
  * decision into a response. Unknown hosts, archived sites and missing files get the sites' 404
  * page (`_fling/404.html` from the Worker's assets, its `__APP_ORIGIN__` filled in), never cached.
+ * The review shell (`_fling/review.html`) comes from the assets the same way, revalidated on every
+ * use and with no header that would stop the app from framing it.
  */
 import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
 import type { RouteTable } from '@fling/api/route-table'
-import { MISSING_KEY, NOT_FOUND_PAGE } from '@fling/shared/route-keys'
+import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL } from '@fling/shared/route-keys'
 import { normalizeQuery, routeSiteRequest } from '@fling/shared/site-routing'
 import type { Bindings } from './env.ts'
 
@@ -34,22 +36,40 @@ function cookieValue(header: string | null, name: string): string | null {
   return null
 }
 
-let notFoundPage: { origin: string; html: string } | undefined
+const pages = new Map<string, { origin: string; html: string | null }>()
 
-/** The sites' 404 page, filled for this instance (cached per isolate). */
-async function notFound(opts: SitesOptions, status: number, method: string): Promise<Response> {
-  if (notFoundPage?.origin !== opts.appOrigin) {
-    // `/_fling/404` (no extension): Static Assets serves 404.html for it without a redirect.
-    const res = await opts.assets.fetch('https://assets.invalid/_fling/404')
-    const html = res.ok ? await res.text() : 'Not found'
-    notFoundPage = {
+/** A page from the Worker's assets with this instance's app origin filled in (cached per isolate). */
+async function assetPage(opts: SitesOptions, asset: string): Promise<string | null> {
+  let page = pages.get(asset)
+  if (page?.origin !== opts.appOrigin) {
+    const res = await opts.assets.fetch(`https://assets.invalid${asset}`)
+    const html = res.ok ? await res.text() : null
+    page = {
       origin: opts.appOrigin,
-      html: html.replaceAll('__APP_ORIGIN__', opts.appOrigin),
+      html: html?.replaceAll('__APP_ORIGIN__', opts.appOrigin) ?? null,
     }
+    pages.set(asset, page)
   }
-  return new Response(method === 'HEAD' ? null : notFoundPage.html, {
+  return page.html
+}
+
+/** The sites' 404 page, filled for this instance. */
+async function notFound(opts: SitesOptions, status: number, method: string): Promise<Response> {
+  // `/_fling/404` (no extension): Static Assets serves 404.html for it without a redirect.
+  const html = (await assetPage(opts, '/_fling/404')) ?? 'Not found'
+  return new Response(method === 'HEAD' ? null : html, {
     status,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+  })
+}
+
+/** The review shell, filled for this instance. */
+async function reviewShell(opts: SitesOptions, method: string): Promise<Response> {
+  const html = await assetPage(opts, '/_fling/review')
+  if (html === null) return notFound(opts, 404, method)
+  return new Response(method === 'HEAD' ? null : html, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
   })
 }
 
@@ -112,6 +132,7 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
     return new Response(null, { status: decision.status, headers: decision.headers })
   }
   if (decision.uri === NOT_FOUND_PAGE) return notFound(opts, 200, request.method)
+  if (decision.uri === REVIEW_SHELL) return reviewShell(opts, request.method)
   if (decision.uri === MISSING_KEY) return notFound(opts, 404, request.method)
   let key: string
   try {

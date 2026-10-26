@@ -5,6 +5,9 @@
 - Comments: `fling comments`, `fling comment` (and `--reply`), `fling resolve`, `fling uncomment`;
   the local MCP server gains `fling_comments_list`, `fling_comment_add`, `fling_comment_resolve`
   and `fling_comment_delete` on an instance with the `comments` capability.
+- On an instance with comments, a deploy (`fling deploy`, and the MCP server's `fling_deploy` and
+  `fling_publish`) also gives the review page, the link to share for feedback: in the output box,
+  as `reviewUrl` in `--json` and in the MCP result, where it leads.
 
 ## 0.3.0
 

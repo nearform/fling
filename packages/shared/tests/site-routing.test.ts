@@ -3,7 +3,7 @@
 // function's contract: lookups made, decisions returned.
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { MISSING_KEY, SITE_HMAC_KVS_KEY } from '../src/route-keys.ts'
+import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL, SITE_HMAC_KVS_KEY } from '../src/route-keys.ts'
 import { signSiteCookie } from '../src/site-cookie.ts'
 import {
   normalizeQuery,
@@ -46,6 +46,19 @@ const req = (over: Partial<SiteRequest>): SiteRequest => ({
 })
 
 describe('routeSiteRequest', () => {
+  it('serves the 404 page and the review shell on any host without a lookup', async () => {
+    for (const uri of [NOT_FOUND_PAGE, REVIEW_SHELL]) {
+      for (const host of ['priv.sites.example.test', 'nope.sites.example.test', '']) {
+        const lookups: string[] = []
+        expect(await routeSiteRequest(req({ host, uri }), ctx(lookups))).toEqual({
+          action: 'rewrite',
+          uri,
+        })
+        expect(lookups).toEqual([])
+      }
+    }
+  })
+
   it('rewrites a public site to its object key', async () => {
     expect(await routeSiteRequest(req({ uri: '/a/' }), ctx())).toEqual({
       action: 'rewrite',

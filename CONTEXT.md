@@ -51,17 +51,50 @@ missing site (404).
 
 **Comment** — a note on one page of a site (`COMMENT#<id>` in the site's partition, ids sortable by
 time): a **thread** or a one-level **reply** to one. It records the page **path** and the version
-being served when it was written, so it outlives new versions; an optional **pin** is a point in
-the frame's viewport (percentages), not in the document. Owners and members read, write and
+being served when it was written, so it outlives new versions; an optional **pin** marks the spot
+it is about, recorded as an anchor. Owners and members read, write and
 resolve; authors delete their own, owners any. The author is a user (`{ kind: 'user', email }`) or,
 later, a **guest** (`{ kind: 'guest', name }`, a share-link viewer with a signed per-site cookie).
 
-**Review mode** — `/review/<name>` on the app origin: the site in an iframe, untouched (the edge
-only rewrites), beside its comments. The frame is another origin, so the page owns the path the
-comments attach to (its path bar) and cannot follow the frame's navigation or scroll. It needs
-the sites domain under the app's registrable domain: the `fling_site` cookie is on that parent, a
-same-site frame sends it, and nothing in front of the sites may forbid framing (the e2e checks).
-`COMMENTS=false` turns comments off (the `comments` capability).
+**Review mode** — `/review/<name>` on the app origin (`apps/web/src/pages/Review.tsx`): the site,
+untouched (the edge only rewrites), in a frame beside its comments. The frame holds the review
+shell, which reports where the frame is; comments attach to that path and the path bar follows it.
+Clicking a pin selects its thread, and selecting a thread scrolls to its pin. With a live room,
+the header shows who else is reviewing (one circle per person, you first) and the shell draws
+their pointers on the same page. It needs the sites
+domain under the app's registrable domain: the `fling_site` cookie is on that parent, a same-site
+frame sends it, and nothing in front of the sites may forbid framing (the e2e checks).
+`COMMENTS=false` turns comments off (the `comments` capability). Publish results (CLI, both MCP
+servers) lead with the review page as the link to share for feedback (`reviewUrl`).
+
+**Review shell** — `/_fling/review.html`, a static page served on every sites host
+(`apps/web/src/review-shell-main.ts`; `routeSiteRequest` passes it through like the 404 page). It
+frames the site on the site's own origin, so it can see what the app can't: the path and hash
+route (SPA navigation included), scroll and the element under a click. It keeps the frame on the
+site (an other-origin link or form is stopped and the review page offers to open it in a new
+tab), turns a click into an anchor, and draws pins
+and other reviewers' pointers. It talks to the review page over the **review bridge**
+(`packages/shared/src/review-bridge.ts`), postMessage with each side accepting only the other's
+origin; the shell holds no data.
+
+**Anchor** — where a pin points (`CommentAnchorSchema`, `packages/shared/src/comments.ts`):
+viewport percentages (`x`, `y`, always present, the last resort), and when the shell made it, a
+CSS selector for the element plus the point inside it, the document point, the scroll and
+viewport at the time, and the page's hash route. The shell resolves it in that order
+(`apps/web/src/lib/review-shell.ts`), so a pin lands on the same element on another screen size.
+
+**Live room** — a site's realtime channel in review mode (`apps/api/src/live.ts`, protocol in
+`packages/shared/src/review-live.ts`): everyone with the site's review page open is a **peer**
+(`{id, name, colour}`; one per connection, named from their profile, coloured from their email)
+who sees the others' pointers and hears `comments` when any comment changes, then refetches the
+list through policy. A **live ticket** (`POST /api/sites/:name/live`, `comment.read`) is a 60-second
+HMAC-signed pass naming the room and the peer; the client opens `${url}?ticket=…`, says `hello`
+and is answered `welcome`. The core publishes through the **LiveHub** port (`publish(siteId,
+message)`); the room logic (`relay`, `joinRoom`, `receive`, `leaveRoom`) is the core's and every
+hub only keeps connections: in memory locally (`live-memory.ts`), a Durable Object per site on
+Cloudflare, API Gateway WebSockets with live connection records (`SITE#<id>/LIVE#<connectionId>`)
+on AWS. `LIVE_URL` says where clients connect; `LIVE=false` turns rooms off (the `live`
+capability).
 
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three

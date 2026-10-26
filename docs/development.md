@@ -42,10 +42,21 @@ There are two local runtimes, and each serves the whole product:
 does. Node keeps its state in `.fling-dev/` and wrangler in `platforms/cloudflare/.wrangler/`.
 Delete either folder to start over.
 
+**Pages on site hosts.** The sites' 404 page and the review shell (`/_fling/review.html`, the page
+review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
+`vite.review-shell.config.ts`), served on every site host by both runtimes. Run
+`pnpm --filter @fling/web build` before trying them locally, and again after changing them.
+
 **Signing in.** Local dev uses a dev login form: any `@example.test` address gets in, and
 `admin@example.test` is an admin. To try a real provider, set `OIDC_ISSUER`, `OIDC_CLIENT_ID` and
 `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client.
+
+**Live rooms locally.** Review mode's realtime runs on both runtimes. The Node dev server keeps
+the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets itself at
+`ws://fling.lvh.me:47101/api/live` (its `LIVE_URL`, so the UI dev server needn't proxy sockets);
+`wrangler dev` runs the `LiveRoom` Durable Objects locally at `ws://flingcf.lvh.me:47103/api/live`.
+Open the same review page in two browser profiles to see each other's pointers.
 
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
 `pnpm cli deploy <folder>`. To keep this config away from your real one, set
@@ -112,6 +123,11 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 A platform is `platforms/<cloud>/` with:
 - an entry point that builds `Deps` (`buildDeps` with its own adapters);
 - adapters for `Table`, `Blobs` and `RouteTable` that pass `packages/conformance`;
+- a `LiveHub` for the live rooms (`apps/api/src/live.ts`): something that keeps a site's sockets
+  and runs the core's room functions (`joinRoom`, `receive`, `leaveRoom`, `broadcast`) over them,
+  plus a `LIVE_URL` where clients connect. A hub whose connections outlive one process keeps them
+  as live connection records through the `Store` (as AWS does). Without one, leave `LIVE_URL` unset
+  and the `live` capability is off;
 - a sites host that calls `routeSiteRequest`;
 - infrastructure and deploy scripts, plus a `DEPLOY.md`;
 - a local runtime added to `packages/e2e/src/local.ts`.
@@ -123,7 +139,7 @@ Differences between platforms are capability flags, never `if (platform === …)
 - `main` is protected. Open a PR, wait for the **Gate** check, then rebase-merge
   (`gh pr merge --rebase`).
 - A merge to `main` deploys the AWS production instance (`deploy.yml` runs after CI passes). That
-  deploy covers the API, data migrations, the smoke check, the UI, the 404 page and the site router.
+  deploy covers the API, data migrations, the smoke check, the UI, the 404 page, the review shell and the site router.
 - The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow, or
   locally with `pnpm --filter @fling/platform-cloudflare run deploy`. It ends with the e2e smoke
   test.

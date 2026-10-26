@@ -17,12 +17,15 @@ The examples use these placeholders; substitute your own:
 ```
 $APP_HOST        Worker Custom Domain ─┬─ /api/*, /auth/*, /healthz, /mcp, /oauth/*,
                                        │  /.well-known/*       → the API core (Hono)
+                                       ├─ GET /api/live        → the site's LiveRoom Durable
+                                       │                         Object (WebSocket, live rooms)
                                        ├─ PUT /blob-upload/*   → signed uploads into R2
                                        └─ everything else      → the web UI (Static Assets)
 *.$SITES_DOMAIN  Worker route ───────── the shared site routing decision
                                         (route table: KV, D1 on a miss) → R2
 cron (hourly)    Worker scheduled ───── delete expired D1 items
-D1 $WORKER, R2 $WORKER-sites, KV $WORKER-routes; secrets on the Worker
+D1 $WORKER, R2 $WORKER-sites, KV $WORKER-routes, Durable Object class LiveRoom; secrets on the
+Worker
 ```
 
 The sites host runs the same routing function as the AWS CloudFront Function
@@ -75,9 +78,10 @@ version's file, a sign-in redirect or the 404 page.
    asked for; `''` removes them) makes those users the instance's admins (`ADMIN_EMAILS`).
 
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
-   namespace unless they exist, writes the deploy config to
-   `platforms/cloudflare/deploy-config.json` (gitignored; nothing in it is secret) and the
-   deployable `dist/wrangler.jsonc`, applies the D1 schema, and sets the Worker's missing secrets:
+   namespace unless they exist, writes the deploy config to `--out` (nothing in it is secret, but
+   it is the instance's, not Fling's: point `--out` at the instance's own private repository, e.g.
+   `--out ../my-instance-infra/cloudflare/deploy-config.json`; the default,
+   `platforms/cloudflare/deploy-config.json`, is gitignored) and the deployable `dist/wrangler.jsonc`, applies the D1 schema, and sets the Worker's missing secrets:
    `SESSION_SECRET` and `SITE_HMAC_KEY` (random) and `OIDC_CLIENT_SECRET` (asked for, never echoed;
    leave it blank to set it later with `wrangler secret put OIDC_CLIENT_SECRET --config
    dist/wrangler.jsonc`). Secrets are only ever added: rerunning it keeps the existing ones.
@@ -90,7 +94,7 @@ version's file, a sign-in redirect or the 404 page.
 5. **Sign-in**: register the OIDC client (next section) and put its secret on the Worker.
 6. **GitHub** (repository → Settings → Environments → `cloudflare`, or repository-level):
    - variable `CF_DEPLOY_CONFIG`: the contents of `deploy-config.json`
-     (`gh variable set CF_DEPLOY_CONFIG < platforms/cloudflare/deploy-config.json`);
+     (`gh variable set CF_DEPLOY_CONFIG < <path to deploy-config.json>`);
    - secret `CLOUDFLARE_API_TOKEN`: an account API token (My Profile or Manage Account → API
      Tokens) with **Account**: Workers Scripts Edit, D1 Edit, Workers KV Storage Edit, Workers R2
      Storage Edit, Account Settings Read; **Zone** (`$ZONE`): Workers Routes Edit, DNS Edit (the
@@ -101,8 +105,7 @@ version's file, a sign-in redirect or the 404 page.
 
    ```bash
    pnpm install && pnpm --filter "@fling/web..." build
-   CF_DEPLOY_CONFIG="$(cat platforms/cloudflare/deploy-config.json)" \
-     pnpm --filter @fling/platform-cloudflare run deploy
+   pnpm --filter @fling/platform-cloudflare run deploy -- --config-file "$PWD/<path to deploy-config.json>"
    ```
 
 Then open `https://$APP_HOST`, sign in, and `fling login https://$APP_HOST`.
@@ -127,8 +130,15 @@ Nothing in it is secret.
 
 The rendered config replaces the template's local-development vars wholesale: production gets
 `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME=https`, `SITE_COOKIE_DOMAIN` (the
-domain the app and the sites share), the `d1`/`r2`/`workers-kv` drivers, and `INSTANCE`, never the
-dev login. Changing an instance value is a deploy.
+domain the app and the sites share), `LIVE_URL=wss://$APP_HOST/api/live` (the live rooms, below),
+the `d1`/`r2`/`workers-kv` drivers, and `INSTANCE`, never the dev login. `LIVE=false` in `INSTANCE`
+turns the live rooms off.
+
+**Live rooms** (review mode's realtime) are a Durable Object per site, `LiveRoom` (binding
+`LIVE_ROOMS`), declared with its SQLite migration in `wrangler.jsonc`: the first deploy creates the
+class, nothing to set up. The Worker checks the socket's ticket and hands it to the site's object,
+which keeps it with the WebSocket hibernation API, so an idle room costs nothing while sockets stay
+open. Changing an instance value is a deploy.
 
 ## Sign-in (OpenID Connect)
 
@@ -149,7 +159,8 @@ pnpm exec wrangler secret put OIDC_CLIENT_SECRET --config dist/wrangler.jsonc
 
 1. renders `dist/wrangler.jsonc` from the template and `CF_DEPLOY_CONFIG`;
 2. assembles `dist/assets`: the web UI (`apps/web/dist`), the sites' 404 page at `_fling/404.html`
-   (the Worker fills its `__APP_ORIGIN__` when serving it) and, when built,
+   and the review shell at `_fling/review.html` (the Worker fills their `__APP_ORIGIN__` when
+   serving them) and, when built,
    `downloads/fling.mcpb`; then bundles the Worker without deploying it and checks the bundle (no
    AWS SDK, under 10 MB);
 3. applies the D1 schema migrations (`migrations/*.sql`, `wrangler d1 migrations apply --remote`).
@@ -232,7 +243,8 @@ pnpm --filter @fling/platform-cloudflare dev
 `scripts/dev.mjs` applies the D1 schema and the data migrations to local state
 (`.wrangler/state`), then runs `wrangler dev`: the app at `http://flingcf.lvh.me:47103`, sites at
 `http://<name>.flingcf.lvh.me:47103`, dev login on, local D1/R2/KV (nothing touches your account).
-Secrets come from `.dev.vars`, created with random values the first time. `pnpm e2e` (part of
+Secrets come from `.dev.vars`, created with random values the first time. The live rooms run in
+local Durable Objects at `ws://flingcf.lvh.me:47103/api/live`. `pnpm e2e` (part of
 `pnpm gate`) runs the scenario here and on the AWS-flavoured dev server.
 
 ## Costs
@@ -243,4 +255,6 @@ Certificate Manager ($10/month). Every site and UI request is a Worker request (
 first), plus a KV read per site request. D1, R2 and KV are billed by use beyond generous included
 amounts: D1 by rows read and written and storage, R2 by storage (about $0.015 per GB-month, the main
 variable cost: every site version is kept) and operations, with no egress fees; KV by reads and
-writes. Check Cloudflare's current pricing pages before relying on these numbers.
+writes. Live rooms are Durable Object requests (each socket message, each publish when a comment
+changes) and duration, which hibernation keeps to the moments a room is busy. Check Cloudflare's
+current pricing pages before relying on these numbers.

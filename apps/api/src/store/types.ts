@@ -1,5 +1,5 @@
 /** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
-import type { CommentAnchor, CommentAuthor, Visibility } from '@fling/shared'
+import type { CommentAnchor, CommentAuthor, LivePeer, Visibility } from '@fling/shared'
 
 export interface User {
   email: string
@@ -114,6 +114,20 @@ export interface CommentRecord {
   createdAt: string
   resolvedAt: string | null
   resolvedBy: CommentAuthor | null
+}
+
+/**
+ * A connection to a site's live room (live.ts), kept for hubs whose connections outlive any one
+ * process (API Gateway WebSockets on AWS); in-process hubs keep theirs in memory. It expires with
+ * the longest a connection may last, so one whose goodbye was lost disappears on its own.
+ */
+export interface LiveConnectionRecord {
+  siteId: string
+  /** the hub's id for the connection */
+  connectionId: string
+  peer: LivePeer
+  connectedAt: string
+  expiresAt: string
 }
 
 /** An OAuth client registered through DCR (RFC 7591). CIMD clients are fetched, not stored. */
@@ -277,6 +291,16 @@ export interface Store {
   ): Promise<CommentRecord | null>
   /** Delete a comment and, for a thread, its replies. false when it didn't exist. */
   deleteComment(siteId: string, id: string): Promise<boolean>
+
+  // --- live rooms (hubs that keep connections in the store) ---
+  /** Store a connection (replacing one with its id). */
+  putLiveConnection(connection: LiveConnectionRecord): Promise<void>
+  /** A connection by its id, whichever room it is in. */
+  getLiveConnection(connectionId: string): Promise<LiveConnectionRecord | null>
+  /** The site's room: its live connections, in connection-id byte order. */
+  listLiveConnections(siteId: string): Promise<LiveConnectionRecord[]>
+  /** Forget a connection; returns it, or null when it was unknown. */
+  deleteLiveConnection(connectionId: string): Promise<LiveConnectionRecord | null>
 
   // --- OAuth (remote MCP connector) ---
   putOAuthClient(client: OAuthClientRecord): Promise<void>

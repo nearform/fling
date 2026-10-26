@@ -49,7 +49,8 @@ export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken'>
  *   share.read       fling_share returning the existing link
  *   share.create     POST …/share (create or rotate), fling_share (refresh)
  *   share.revoke     DELETE …/share, fling_share (revoke)
- *   comment.read        GET …/comments, fling_comments_list (and the review page)
+ *   comment.read        GET …/comments, fling_comments_list (and the review page); POST …/live,
+ *                       a ticket into the site's live room (live.ts)
  *   comment.create      POST …/comments, fling_comment_add (a thread or a reply)
  *   comment.resolve     PATCH …/comments/:id { resolved }, fling_comment_resolve (any thread)
  *   comment.delete      DELETE …/comments/:id, fling_comment_delete: anyone's comment

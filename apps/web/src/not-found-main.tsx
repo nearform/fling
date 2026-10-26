@@ -23,6 +23,9 @@ const appOrigin = notFoundAppOrigin(
   window.location
 )
 
+// In a frame (review mode) home is the site's own, so the frame never leaves the site.
+const framed = window.top !== window.self
+
 function Page() {
   const [instance, setInstance] = useState<InstanceMetadata | null>(
     () => readBrandCache()?.metadata ?? null
@@ -37,7 +40,11 @@ function Page() {
   }, [])
   return (
     <InstanceProvider value={instance}>
-      <NotFound homeHref={`${instance?.appOrigin ?? appOrigin}/`} />
+      {framed ? (
+        <NotFound homeHref="/" homeLabel="Back to the site's home page" />
+      ) : (
+        <NotFound homeHref={`${instance?.appOrigin ?? appOrigin}/`} />
+      )}
     </InstanceProvider>
   )
 }

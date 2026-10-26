@@ -161,6 +161,14 @@ describe('unknown hosts', () => {
     )
   })
 
+  it('passes the review shell through unchanged, on any host and without a cookie', async () => {
+    for (const host of ['x.fling.example.test', PRIVATE, PUBLIC]) {
+      expect((await asRequest({ host, path: '/_fling/review.html' })).uri).toBe(
+        '/_fling/review.html'
+      )
+    }
+  })
+
   it('refuses dot segments', async () => {
     for (const path of ['/../S9/V9/a.html', '/a/./b.html', '/%2e%2E/x.html']) {
       expect((await asRequest({ host: PUBLIC, path })).uri).toBe('/_fling/missing')

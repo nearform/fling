@@ -11,3 +11,5 @@ export const SITE_HMAC_KVS_KEY = 'cfg:site-hmac'
 /** Object key that never exists; the edge rewrites unknown hosts here so S3 404s into the error page. */
 export const MISSING_KEY = '/_fling/missing'
 export const NOT_FOUND_PAGE = '/_fling/404.html'
+/** The review shell (review-bridge.ts): a static page on every sites host that frames the site. */
+export const REVIEW_SHELL = '/_fling/review.html'

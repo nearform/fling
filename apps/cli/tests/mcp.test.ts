@@ -127,6 +127,32 @@ describe('MCP server', () => {
     expect(text(res)).toMatch(/^Unchanged — already live: https:\/\/my-app\.sites\.example\.test/)
   })
 
+  it('with comments on, a deploy leads with the review link to share, then the site URL', async () => {
+    const store = await loggedInStore()
+    const cwd = await tempDir()
+    await writeTree(join(cwd, 'proj'), { 'index.html': 'hi' })
+    const m = mockFetch({
+      'POST /api/sites/proj/deploys': () =>
+        jsonResponse({ status: 'unchanged', versionId: '0123456789abcdef', site: site() }),
+    })
+    const client = await connect(store, m.fetch, cwd, { instance: INSTANCE })
+    expect(client.getInstructions()).toContain('the review link first')
+    const res = await client.callTool({ name: 'fling_deploy', arguments: { path: 'proj' } })
+    const lines = text(res).split('\n')
+    expect(lines[0]).toBe('Unchanged — already live.')
+    expect(lines[1]).toBe(
+      `Share for feedback: ${SERVER}/review/proj (reviewers sign in to ${INSTANCE.name} to see the site and comment).`
+    )
+    expect(lines[2]).toMatch(/^Site: https:\/\/my-app\.sites\.example\.test\/ \(private\)/)
+    expect(text(res)).toContain(`"reviewUrl": "${SERVER}/review/proj"`)
+
+    const off = await connect(store, m.fetch, cwd, {
+      instance: { ...INSTANCE, capabilities: { comments: false } },
+    })
+    const plain = await off.callTool({ name: 'fling_deploy', arguments: { path: 'proj' } })
+    expect(text(plain)).not.toContain('/review/')
+  })
+
   it('fling_deploy without index.html asks for a listHtml decision, then lists or not', async () => {
     const store = await loggedInStore()
     const cwd = await tempDir()

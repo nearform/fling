@@ -1,6 +1,7 @@
 # Two roles:
 # - api: what the function's code can do. Its table, the sites bucket (it signs the CLI's uploads),
-#   the KeyValueStore the site router reads, and its own SSM parameters. Nothing else.
+#   the KeyValueStore the site router reads, its own SSM parameters and the live rooms' WebSocket
+#   connections. Nothing else.
 # - deploy: what the repository's deploy workflow can do, from GitHub Actions over OIDC.
 #
 # enable_data_migrations adds what the deploy's migrate step needs: the deploy role may invoke the
@@ -79,6 +80,13 @@ data "aws_iam_policy_document" "api" {
       "cloudfront-keyvaluestore:UpdateKeys",
     ]
     resources = [aws_cloudfront_key_value_store.sites.arn]
+  }
+
+  # The live rooms: post to (and drop) this API's WebSocket connections (live.tf).
+  statement {
+    sid       = "LiveConnections"
+    actions   = ["execute-api:ManageConnections"]
+    resources = ["${aws_apigatewayv2_api.live.execution_arn}/${local.live_stage}/*/@connections/*"]
   }
 
   # GetParametersByPath is authorised on the path itself, GetParameter(s) on each parameter.

@@ -10,6 +10,7 @@
     "./config": "./src/config.ts",
     "./deps": "./src/deps.ts",
     "./types": "./src/types.ts",
+    "./live": "./src/live.ts",
     "./blobs": "./src/blobs/types.ts",
     "./blobs/fs": "./src/blobs/fs.ts",
     "./blobs/signed-upload": "./src/blobs/signed-upload.ts",
@@ -40,8 +41,10 @@
   "devDependencies": {
     "@fling/edge": "workspace:*",
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "ws": "^8.21.0"
   }
 }

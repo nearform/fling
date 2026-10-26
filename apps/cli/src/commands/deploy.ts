@@ -22,6 +22,7 @@ import {
   type InstanceMetadata,
   isValidSiteName,
   privateAudience,
+  reviewUrl,
   SITE_NAME_MAX,
 } from '@fling/shared'
 import chalk from 'chalk'
@@ -40,7 +41,7 @@ import {
   withHtmlListing,
 } from '../manifest.ts'
 import { waitWithSpinner } from '../ready.ts'
-import { checkName, type SitesBase, sitesBaseOf, siteUrlFor } from '../sites.ts'
+import { checkName, commentsEnabled, type SitesBase, sitesBaseOf, siteUrlFor } from '../sites.ts'
 import { box, brand } from '../ui/theme.ts'
 import { formatBytes } from '../utils/output.ts'
 
@@ -164,15 +165,34 @@ async function deployPrepared(
 
   const who = instance ? `only ${privateAudience(instance)} can open it` : 'sign-in required'
   const privateNote = `Private: ${who}. Share publicly with \`${ctx.binName} share ${result.name}\`.`
-  ctx.out.data({ status: result.status, site: result.site, ready, skipped: local.skipped }, () => {
+  // With comments on, the review page is the link to share for feedback; the site URL follows.
+  const review =
+    instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
+  const reviewNote = instance
+    ? `Share for feedback (reviewers sign in to ${instance.name}):`
+    : 'Share for feedback:'
+  const data = {
+    status: result.status,
+    site: result.site,
+    ...(review ? { reviewUrl: review } : {}),
+    ready,
+    skipped: local.skipped,
+  }
+  ctx.out.data(data, () => {
     const isPrivate = result.site.visibility === 'private'
-    // On a terminal the URL gets a box; piped, it stays a bare line so `fling deploy … | pbcopy` works.
+    // On a terminal the URLs get a box; piped, the site URL stays the first line on its own so
+    // `fling deploy … | pbcopy` works.
     if (ctx.out.tty)
       return box(
-        [brand.url(result.url), ...(isPrivate ? [chalk.dim(privateNote)] : [])],
+        [
+          ...(review ? [chalk.dim(reviewNote), brand.url(review), '', chalk.dim('Site:')] : []),
+          brand.url(result.url),
+          ...(isPrivate ? [chalk.dim(privateNote)] : []),
+        ],
         isPrivate ? chalk.bold('flung · private') : chalk.bold('flung · public')
       )
     const lines = [chalk.bold(result.url)]
+    if (review) lines.push(chalk.dim(`${reviewNote} ${review}`))
     if (isPrivate) lines.push(chalk.dim(privateNote))
     return lines.join('\n')
   })

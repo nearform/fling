@@ -10,6 +10,13 @@ export interface Toast {
   id: number
   message: string
   type: ToastType
+  /**
+   * A colour shown as a dot instead of the icon (a person, in review mode). Such a toast is not
+   * a live region itself: the page that shows it announces the message in its own.
+   */
+  dot?: string
+  /** a link the reader may follow, opened in a new tab (http and https only) */
+  action?: { label: string; href: string }
 }
 
 let toasts: Toast[] = []
@@ -25,9 +32,18 @@ export function dismissToast(id: number): void {
   emit()
 }
 
-export function showToast(message: string, type: ToastType = 'success', duration = 4000): void {
+export function showToast(
+  message: string,
+  type: ToastType = 'success',
+  duration = 4000,
+  opts: { dot?: string; action?: { label: string; href: string } } = {}
+): void {
   const id = nextId++
-  toasts = [...toasts, { id, message, type }]
+  const action = opts.action && /^https?:\/\//i.test(opts.action.href) ? opts.action : undefined
+  toasts = [
+    ...toasts,
+    { id, message, type, ...(opts.dot ? { dot: opts.dot } : {}), ...(action ? { action } : {}) },
+  ]
   emit()
   if (duration > 0) setTimeout(() => dismissToast(id), duration)
 }

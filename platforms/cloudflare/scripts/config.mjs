@@ -144,6 +144,8 @@ export function renderWranglerConfig(template, config, outDir) {
       SITES_DOMAIN: config.SITES_DOMAIN,
       SITE_SCHEME: 'https',
       SITE_COOKIE_DOMAIN: commonParent(appHost, config.SITES_DOMAIN),
+      // The live rooms' sockets are the Worker's own (src/live.ts); INSTANCE.LIVE=false turns them off.
+      LIVE_URL: `wss://${appHost}/api/live`,
       STORE_DRIVER: 'd1',
       STORAGE_DRIVER: 'r2',
       KVS_DRIVER: 'workers-kv',

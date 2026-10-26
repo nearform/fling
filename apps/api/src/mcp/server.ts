@@ -19,6 +19,7 @@ import {
   readinessWaitDisabled,
   reviewUrl,
   type Site,
+  shareForFeedback,
   waitUntilReachable,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -140,14 +141,19 @@ async function publishResult(
     status === 'unchanged'
       ? { ready: true, note: '' }
       : await edgeReady(deps, site.url, outcome.paths)
+  const review = deps.config.comments ? reviewUrl(deps.config.appOrigin, site.name) : undefined
+  const head = review
+    ? `${what}${extra}.\n${shareForFeedback(review, deps.config.instanceName)}\nSite: ${site.url} (${site.visibility}).`
+    : `${what}${extra}: ${site.url} (${site.visibility}).`
   return {
     text:
-      `${what}${extra}: ${site.url} (${site.visibility}).${privacy}${edge.note}${warnings}` +
+      `${head}${privacy}${edge.note}${warnings}` +
       `\nTo check exactly which files the site has, call fling_files with name "${site.name}".`,
     data: {
       status,
       name: site.name,
       url: site.url,
+      ...(review ? { reviewUrl: review } : {}),
       visibility: site.visibility,
       spa: site.spa,
       shareUrl: site.shareUrl,

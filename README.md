@@ -10,6 +10,10 @@ email domains.
 
 Anyone signed in can **review** a site they can open: `<app>/review/<name>` shows the site in a
 frame beside its comments, threads per page that can be replied to, resolved and deleted. The
+frame follows the site's own navigation (single-page apps included) and stays on the site: a link
+elsewhere is stopped, with an offer to open it in a new tab. Pins stick to the element they point at, whatever the reviewer's
+scroll or screen size; clicking one opens its thread and the other way round. Deploying and
+publishing give the review link first, as the one to share for feedback. The
 CLI (`fling comments`, `fling comment`), the MCP tools (`fling_comments_list`, …) and the web all
 use the same API. An instance turns comments off with `COMMENTS=false`; its metadata then lacks
 the `comments` capability and every client hides them.

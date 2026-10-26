@@ -1,10 +1,9 @@
 /**
- * Review mode, the parts that need no React: the frame's URL, where a pin lands, which threads
- * a page shows. The review page iframes the site, another origin, so it never learns the frame's
- * path or scroll position: the page owns the path (its path bar), and a pin is a point in the
- * frame's viewport, not in the document.
+ * Review mode, the parts that need no React: the review page's URL, the page the frame is asked
+ * for, which threads a page shows and which pins the review shell draws. The shell (on the site's
+ * origin) reports where the frame is; these turn that into what the page shows.
  */
-import { type CommentAnchor, type CommentThread, normalizeCommentPath } from '@fling/shared'
+import { type BridgePin, type CommentThread, normalizeCommentPath } from '@fling/shared'
 
 /** The app route of a site's review page. */
 export function reviewHref(name: string, path?: string): string {
@@ -17,20 +16,55 @@ export function reviewPath(raw: string | null): string {
   return normalizeCommentPath(raw) ?? '/'
 }
 
-/** The URL the frame loads for a page of the site. */
-export function frameUrl(siteUrl: string, path: string): string {
-  return new URL(path.replace(/^\/+/, ''), siteUrl).toString()
+/** The URL of a page of the site on its own (the "Open" link): `target` may carry a hash. */
+export function frameUrl(siteUrl: string, target: string): string {
+  return new URL(target.replace(/^\/+/, ''), siteUrl).toString()
 }
 
-/** A click in the pin layer as percentages of the frame's viewport, to one decimal. */
-export function anchorAt(
-  rect: { left: number; top: number; width: number; height: number },
-  clientX: number,
-  clientY: number
-): CommentAnchor {
-  const pct = (offset: number, size: number) =>
-    size > 0 ? Math.round(Math.min(100, Math.max(0, (offset / size) * 100)) * 10) / 10 : 0
-  return { x: pct(clientX - rect.left, rect.width), y: pct(clientY - rect.top, rect.height) }
+/** Where the frame is: a comment path (normalised) and the fragment, '' or `#…`. */
+export interface FrameLocation {
+  path: string
+  hash: string
+}
+
+/**
+ * The page a `?path=` (or the path bar) asks for: its comment path, plus its `#…` fragment so a
+ * hash-routed single-page app reopens on the same view. Anything unusable is the home page.
+ */
+export function reviewTarget(raw: string | null): FrameLocation {
+  const value = (raw ?? '').trim()
+  const i = value.indexOf('#')
+  const hash = i >= 0 ? value.slice(i, i + 1024) : ''
+  return { path: reviewPath(i >= 0 ? value.slice(0, i) : value), hash: hash === '#' ? '' : hash }
+}
+
+/** A location as the path bar and `?path=` show it. */
+export const targetString = (loc: FrameLocation) => `${loc.path}${loc.hash}`
+
+/**
+ * The pins the shell draws on the page the frame is on: threads with an anchor on that path and
+ * hash route (an anchor without a hash is on the page's plain view), open ones, and resolved ones
+ * when they are shown; numbered as in the list.
+ */
+export function pinsFor(
+  threads: readonly CommentThread[],
+  at: FrameLocation,
+  opts: { showResolved: boolean; selectedId: string | null }
+): BridgePin[] {
+  const pins: BridgePin[] = []
+  threads.forEach((t, i) => {
+    const { anchor, path, resolvedAt, id } = t.comment
+    if (!anchor || path !== at.path || (anchor.hash ?? '') !== at.hash) return
+    if (resolvedAt !== null && !opts.showResolved) return
+    pins.push({
+      id,
+      n: i + 1,
+      anchor,
+      selected: id === opts.selectedId,
+      resolved: resolvedAt !== null,
+    })
+  })
+  return pins
 }
 
 /** The threads to show: one page's (or every page's, `path` null), resolved ones on request. */
@@ -54,4 +88,13 @@ export function openCountsByPath(threads: readonly CommentThread[]): Map<string,
     }
   }
   return counts
+}
+
+/** Where a link the shell stopped goes, for a toast: its host, or the link itself if unparsable. */
+export function linkHost(href: string): string {
+  try {
+    return new URL(href).host || href
+  } catch {
+    return href
+  }
 }

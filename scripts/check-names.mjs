@@ -25,6 +25,8 @@ const ALLOWED = {
   'apps/cli/README.md': [PACKAGE, REPO],
   'README.md': [PACKAGE, REPO],
   '.github/workflows/release-cli.yml': [PACKAGE, REPO],
+  // The "Why Fling?" page, a static site published with Fling itself.
+  'why/index.html': [PACKAGE, REPO],
 }
 
 /** Matches that are neither name, by file and line pattern. */

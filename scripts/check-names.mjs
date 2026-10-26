@@ -32,7 +32,7 @@ const ALLOWED = {
 /** Matches that are neither name, by file and line pattern. */
 const EXCEPTIONS = {
   // The README links to the "Why Fling?" deck where it is published.
-  'README.md': [/^\*\*Why Fling\?\*\* See the deck/],
+  'README.md': [/^<https:\/\/why-fling\.fling\.labs\.[a-z]+\.com\/>$/],
 }
 
 let out = ''

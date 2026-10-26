@@ -13,3 +13,6 @@ coverage/
 .dev.vars
 .wrangler/
 platforms/cloudflare/deploy-config.json
+
+# Agent worktrees
+.claude/worktrees/

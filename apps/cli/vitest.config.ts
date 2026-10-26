@@ -1,5 +1,4 @@
 import { defineConfig } from 'vitest/config'
+import { sharedTest } from '../../vitest.shared.ts'
 
-export default defineConfig({
-  test: { environment: 'node', include: ['tests/**/*.test.ts'], watch: false },
-})
+export default defineConfig({ test: { ...sharedTest, watch: false } })

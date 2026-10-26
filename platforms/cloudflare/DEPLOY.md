@@ -158,7 +158,9 @@ pnpm exec wrangler secret put OIDC_CLIENT_SECRET --config dist/wrangler.jsonc
 `scripts/deploy.mjs`, in this order, so nothing is served that points at something missing:
 
 1. renders `dist/wrangler.jsonc` from the template and `CF_DEPLOY_CONFIG`, and builds the Claude
-   Desktop extension (`apps/cli` `build:mcpb`) with the instance's address filled in;
+   Desktop extension (`apps/cli` `build:mcpb`) with the instance's address baked in
+   (`FLING_MCPB_SERVER_URL`): the extension adds this Fling to the ones it knows when it starts. It
+   is the same extension whichever Fling serves it, so installing it from another updates it;
 2. assembles `dist/assets`: the web UI (`apps/web/dist`), the sites' 404 page at `_fling/404.html`
    and the review shell at `_fling/review.html` (the Worker fills their `__APP_ORIGIN__` when
    serving them) and the extension at `downloads/fling.mcpb` (a deploy without it stops here);

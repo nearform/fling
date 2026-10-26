@@ -1,17 +1,19 @@
 /**
  * `fling mcp` (and the Claude Desktop extension, mcp-entry.ts) — a stdio MCP server exposing the
- * same operations as the CLI, for agents. It reuses the CLI's stored logins (`~/.fling/config.json`
- * or `FLING_API_KEY`), re-read on every call so a `fling login` or `fling use` in another terminal
- * takes effect without a restart. It talks to the CLI's current server unless `FLING_URL` (the
- * extension's setting) or `--server` names one, with that server's stored key. `fling_login` runs
- * the same browser sign-in itself, and makes its server current only when none other is.
+ * same operations as the CLI, for agents. It knows every Fling the CLI remembers
+ * (`~/.fling/config.json`), re-read on every call so a `fling login` or `fling use` in another
+ * terminal takes effect without a restart. Each call goes to the Fling its `server` argument names,
+ * with that Fling's stored key; mcp-servers.ts decides what happens without one (the only Fling, the
+ * pinned one, or, with several, a request to settle which). `fling_servers` lists them and switches
+ * the current one; `fling_login` signs in to a known or new Fling.
  *
  * Tools shared with the remote connector (fling_publish, fling_list, …) take their names,
- * descriptions and schemas from `@fling/shared` mcp-tools. Descriptions name the instance the CLI is
- * logged in to (its stored `/.well-known/fling`), read when the server starts; before any login
- * they stay generic. Local extras: fling_deploy (a file,
- * zip or folder on this computer, found by name in Downloads etc. — see locate.ts / inputs.ts),
- * fling_find_files and fling_login. Never relies on Claude's sandbox paths or network.
+ * descriptions and schemas from `@fling/shared` mcp-tools, plus `server`. Descriptions and
+ * instructions are written when the server starts: with one Fling they name it (its stored
+ * `/.well-known/fling`), with none they stay generic, and with several they list them by host.
+ * Local extras: fling_deploy (a file, zip or folder on this computer, found by name in Downloads
+ * etc. — see locate.ts / inputs.ts), fling_find_files, fling_servers and fling_login. Never relies
+ * on Claude's sandbox paths or network.
  *
  * stdout carries only the MCP protocol: nothing here logs, and errors become tool results.
  */
@@ -41,7 +43,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { type ApiClient, CliApiError, createApiClient, type FetchLike } from './api.ts'
 import { type LoginResult, loginFlow } from './auth.ts'
-import { type ConfigStore, createConfigStore, systemLocateOptions } from './config.ts'
+import {
+  type ConfigStore,
+  createConfigStore,
+  matchServer,
+  type ResolvedConfig,
+  serverToAdd,
+  systemLocateOptions,
+} from './config.ts'
 import type { OpenLike } from './context.ts'
 import { deploy, NameTakenError, resolveSiteName } from './deploy.ts'
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
@@ -62,6 +71,20 @@ import {
   SecretFilesError,
   withHtmlListing,
 } from './manifest.ts'
+import {
+  addServerOnStart,
+  describeServer,
+  isPinned,
+  type KnownServer,
+  knownServers,
+  knownServersOf,
+  rememberedServer,
+  ServerNeededError,
+  serverArgDescription,
+  serverLabel,
+  serversInstructions,
+  serverToolNote,
+} from './mcp-servers.ts'
 import { NPX_COMMAND, VERSION } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
@@ -104,19 +127,26 @@ export interface McpDeps {
   loginTimeoutMs?: number
   /** Waits for a new site / share link to reach the edge (default: real polling, skipped by FLING_NO_WAIT and in tests). */
   waitReady?: ReadyWaiter
-  /** The instance the descriptions name (runMcpServer reads the stored one); none → generic. */
-  instance?: InstanceMetadata | null
+  /**
+   * The Flings the descriptions name (runMcpServer reads them at start): one → its instance, none →
+   * generic wording, several → listed by host.
+   */
+  servers?: KnownServer[]
 }
 
 export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens the browser to sign in), or ask the user to run \`${NPX_COMMAND} login\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login\`), then try again.`
 
 /** No server configured: only the user knows their Fling's address. */
-export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask the user for their Fling's address and to run \`${NPX_COMMAND} login <url>\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login <url>\`), then try again.`
+export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask the user for their Fling's address, then call fling_login with it as \`server\` (or ask them to run \`${NPX_COMMAND} login <url>\` in a terminal; in Claude Code: \`! ${NPX_COMMAND} login <url>\`), then try again.`
 
 /** Sent at `initialize`: how to use this (local) server. */
-export const mcpLocalInstructions = (w: McpWording, opts: { comments?: boolean } = {}) =>
+export const mcpLocalInstructions = (
+  w: McpWording,
+  opts: { comments?: boolean; servers?: readonly KnownServer[] } = {}
+) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
+    ...[serversInstructions(opts.servers ?? [])].filter(p => p !== undefined),
     'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
       'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
     'A file or folder the user has on this computer (a downloaded .html, a .zip, a build folder): call fling_deploy with its path, or just its file name (e.g. "Pitch Deck.html") — ' +
@@ -129,16 +159,22 @@ export const mcpLocalInstructions = (w: McpWording, opts: { comments?: boolean }
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
   ].join('\n\n')
 
-const toolDef = <S extends z.ZodRawShape>(def: McpToolDef<S>) => ({
-  title: def.title,
-  description: def.description,
-  inputSchema: def.inputSchema,
-  annotations: def.annotations,
-})
-
 type DeployOutcome =
   | { kind: 'needs_decision'; summary: string; data: unknown }
   | { kind: 'deployed'; summary: string; data: unknown }
+
+/** The Fling a call goes to. */
+interface Target {
+  client: ApiClient
+  url: string
+  config: ResolvedConfig
+  /** Its `/.well-known/fling` (stored; fetched once if missing). Null when it can't be had. */
+  instance(): Promise<InstanceMetadata | null>
+}
+
+/** The line a result naming URLs ends with: which Fling it went to. */
+const onFling = (url: string, instance: InstanceMetadata | null) =>
+  `\nFling: ${serverLabel(url)}${instance ? ` (${instance.name})` : ''}`
 
 export function createMcpServer(deps: McpDeps = {}): McpServer {
   const store = deps.store ?? createConfigStore()
@@ -146,8 +182,23 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   const cwd = deps.cwd ?? process.cwd()
   const locate: LocateOptions = deps.locate ?? { ...systemLocateOptions(), cwd }
   const waitReady: ReadyWaiter = deps.waitReady ?? createReadyWaiter()
-  const wording = mcpWording(deps.instance)
+  const servers = deps.servers ?? []
+  const several = servers.length > 1
+  const wording = mcpWording(several ? null : servers[0]?.instance)
   const mcpTools = mcpToolsFor(wording)
+  const serverArg = z.string().min(1).max(500).optional().describe(serverArgDescription(servers))
+  const note = serverToolNote(servers)
+
+  /** A shared tool definition, with `server` and the note on choosing one. */
+  const serverTool = <S extends z.ZodRawShape>(
+    def: McpToolDef<S>,
+    description = def.description
+  ) => ({
+    title: def.title,
+    description: `${description}${note}`,
+    inputSchema: { ...def.inputSchema, server: serverArg },
+    annotations: def.annotations,
+  })
 
   /** Wait for the edge; never throws. `ready: false` → append the "reload" note. */
   async function edgeReady(url: string, paths: readonly string[]) {
@@ -158,34 +209,56 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
   }
 
-  async function client(): Promise<ApiClient> {
-    const config = await store.resolve({ serverUrl: deps.server })
+  /**
+   * The resolved config for a call: the Fling `server` names, else the pinned one, else the only
+   * one. With several and no `server`, the call is refused with the list (ServerNeededError).
+   */
+  async function choose(server: string | undefined, tool: string): Promise<ResolvedConfig> {
+    if (server !== undefined)
+      return store.resolve({ serverUrl: rememberedServer(await store.load(), server) })
+    const resolved = await store.resolve({ serverUrl: deps.server })
+    if (isPinned(resolved)) return resolved
+    const config = await store.load()
+    const known = knownServersOf(config)
+    if (known.length > 1) throw new ServerNeededError(known, tool)
+    const only = known[0]
+    return !resolved.serverUrl && only ? store.resolve({ serverUrl: only.url }) : resolved
+  }
+
+  async function target(server: string | undefined, tool: string): Promise<Target> {
+    const config = await choose(server, tool)
     if (!config.serverUrl) throw new NoServerError('fling')
     if (!config.apiKey) throw new CliError('Not logged in', { exitCode: EXIT_NOT_LOGGED_IN })
-    return createApiClient({ serverUrl: config.serverUrl, apiKey: config.apiKey, fetch: fetchImpl })
+    const url = config.serverUrl
+    let instance: Promise<InstanceMetadata | null> | undefined
+    return {
+      client: createApiClient({ serverUrl: url, apiKey: config.apiKey, fetch: fetchImpl }),
+      url,
+      config,
+      instance: () => {
+        instance ??= loadInstance(store, config, fetchImpl)
+        return instance
+      },
+    }
   }
 
-  /** Where sites are served, from the instance logged in to (stored; fetched once if missing). */
-  async function sitesBase() {
-    const config = await store.resolve({ serverUrl: deps.server })
-    return sitesBaseOf(await loadInstance(store, config, fetchImpl))
-  }
-
-  /** Run an operation and shape its outcome as a tool result. */
+  /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
   async function run(
-    op: (c: ApiClient) => Promise<{ summary: string; data: unknown }>
+    tool: string,
+    server: string | undefined,
+    op: (t: Target) => Promise<{ summary: string; data: unknown }>
   ): Promise<CallToolResult> {
     try {
-      const { summary, data } = await op(await client())
-      return { content: [{ type: 'text', text: `${summary}\n\n${JSON.stringify(data, null, 2)}` }] }
+      const { summary, data } = await op(await target(server, tool))
+      return textResult(`${summary}\n\n${JSON.stringify(data, null, 2)}`)
     } catch (error) {
-      return { isError: true, content: [{ type: 'text', text: describeError(error) }] }
+      return failure(error)
     }
   }
 
   /** Deploy a prepared folder: the listing decision, the deploy, and the name-taken message. */
   async function deployFolder(
-    c: ApiClient,
+    t: Target,
     dir: string,
     opts: {
       name: string
@@ -230,7 +303,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       }
     }
     const result = await deploy(
-      { client: c, fetch: fetchImpl },
+      { client: t.client, fetch: fetchImpl },
       { dir, name: opts.name, manifest: local, spa: opts.spa, public: opts.public }
     ).catch((error: unknown) => {
       if (!(error instanceof NameTakenError)) throw error
@@ -239,7 +312,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         ? ` Free alternatives: ${error.suggestions.join(', ')}.`
         : ''
       throw new CliError(
-        `Not deployed: the site name "${error.siteName}"${how} is taken by someone else.${pick} ` +
+        `Not deployed: the site name "${error.siteName}"${how} is taken by someone else on ${serverLabel(t.url)}.${pick} ` +
           `Ask the user which name to use (one of these or their own), then call ${opts.retryWith} again with \`name\`.`
       )
     })
@@ -257,7 +330,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             result.url,
             local.files.map(f => f.path)
           )
-    const instance = deps.instance
+    const instance = await t.instance()
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
     const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
@@ -267,11 +340,12 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     return {
       kind: 'deployed',
       summary:
-        `${head}${warnings}${skippedNote}${edge.note}` +
+        `${head}${warnings}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
         ready: edge.ready,
+        server: t.url,
         name: result.name,
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
@@ -288,7 +362,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     { name: 'fling', version: VERSION },
     {
       instructions: mcpLocalInstructions(wording, {
-        comments: commentsEnabled(deps.instance),
+        comments: servers.some(s => commentsEnabled(s.instance)),
+        servers,
       }),
     }
   )
@@ -313,7 +388,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
         `Re-deploying identical content is a no-op. Sites are private (only ${wording.privateAudience}) unless \`public\` is set. ` +
-        NEVER_PUBLISHED,
+        `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
           .string()
@@ -330,11 +405,12 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         spa,
         public: isPublic,
         listHtml,
+        server: serverArg,
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     args =>
-      run(async c => {
+      run('fling_deploy', args.server, async t => {
         const located = await resolveInput(args.path, locate)
         const prepared = await prepareInput(located.path)
         try {
@@ -342,7 +418,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             args.name !== undefined
               ? resolveSiteName(prepared.dir, args.name)
               : prepared.defaultName
-          const outcome = await deployFolder(c, prepared.dir, {
+          const outcome = await deployFolder(t, prepared.dir, {
             name,
             nameGiven: args.name !== undefined,
             nameFrom: prepared.kind === 'folder' ? 'the folder' : 'the file name',
@@ -414,11 +490,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           searched: searched.map(r => ({ label: r.label, path: r.path })),
           ...(complete ? {} : { truncated: true }),
         }
-        return {
-          content: [{ type: 'text', text: `${summary}\n\n${JSON.stringify(data, null, 2)}` }],
-        }
+        return textResult(`${summary}\n\n${JSON.stringify(data, null, 2)}`)
       } catch (error) {
-        return { isError: true, content: [{ type: 'text', text: describeError(error) }] }
+        return failure(error)
       }
     }
   )
@@ -426,21 +500,21 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   const publishDef = mcpTools.publish
   server.registerTool(
     publishDef.name,
-    {
-      ...toolDef(publishDef),
+    serverTool(
+      publishDef,
       // This server has no chunked upload tools; big sites go through fling_deploy instead.
-      description: publishDef.description.replace(
+      publishDef.description.replace(
         /\(whole site, up to [^;]*; bigger sites: fling_upload_begin \/ fling_upload_file \/ fling_upload_finish\)/,
         '(whole site; for a big site that is already on this computer, use fling_deploy with its folder)'
-      ),
-    },
+      )
+    ),
     args =>
-      run(async c => {
+      run(publishDef.name, args.server, async t => {
         const name = resolveSiteName('.', args.name)
         const tmp = await mkdtemp(join(tmpdir(), 'fling-publish-'))
         try {
           const { skippedDotfiles } = await writeInlineFiles(tmp, args.files)
-          const outcome = await deployFolder(c, tmp, {
+          return await deployFolder(t, tmp, {
             skippedDotfiles,
             name,
             nameGiven: true,
@@ -449,7 +523,6 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             listHtml: args.listHtml,
             retryWith: 'fling_publish',
           })
-          return outcome
         } finally {
           await rm(tmp, { recursive: true, force: true })
         }
@@ -459,20 +532,21 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   server.registerTool(
     'fling_check_name',
     {
-      ...toolDef(mcpTools.checkName),
+      ...serverTool(mcpTools.checkName),
       description:
         `${mcpTools.checkName.description} Pass \`path\` instead of \`name\` to see the name fling_deploy would ` +
-        'generate for a file or folder on this computer (same lookup as fling_deploy), so you can confirm it with the user.',
+        `generate for a file or folder on this computer (same lookup as fling_deploy), so you can confirm it with the user.${note}`,
       inputSchema: {
         name: z.string().min(1).max(200).optional().describe('Site name to check'),
         path: z
           .string()
           .optional()
           .describe('File or folder whose generated default name to check (path or file name)'),
+        server: serverArg,
       },
     },
     args =>
-      run(async c => {
+      run('fling_check_name', args.server, async t => {
         if (args.name === undefined && args.path === undefined)
           throw new CliError('Pass `name` or `path`')
         let name = args.name
@@ -481,8 +555,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           source = await resolveInput(args.path as string, locate)
           name = defaultNameFor(source.path, source.isDirectory)
         }
-        const check = await checkName(c, name)
-        const base = check.status === 'invalid' ? null : await sitesBase()
+        const check = await checkName(t.client, name)
+        const base = check.status === 'invalid' ? null : sitesBaseOf(await t.instance())
         const url = base ? siteUrlFor(name, base) : null
         const suggestions = check.suggestions.length
           ? ` Suggestions: ${check.suggestions.join(', ')}.`
@@ -498,6 +572,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           data: {
             ...check,
             url,
+            server: t.url,
             ...(source
               ? { generated: true, source: { path: source.path, foundIn: source.foundIn } }
               : {}),
@@ -506,60 +581,89 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       })
   )
 
-  let pendingLogin: { url?: string; done: Promise<LoginResult> } | undefined
+  /** Sign-ins waiting for the browser, by server. */
+  const pendingLogins = new Map<string, { url?: string; done: Promise<LoginResult> }>()
 
   server.registerTool(
     'fling_login',
     {
       title: 'Sign in to Fling',
       description:
-        `Sign the user in to ${wording.name}: opens their browser to sign in with ${wording.signIn} and stores ` +
+        `Sign the user in to ${several ? 'a Fling' : wording.name}: opens their browser to sign in with ${wording.signIn} and stores ` +
         'the key on this computer (shared with the fling CLI). Waits up to ~30 seconds; if sign-in is not finished by ' +
         'then, it keeps waiting in the background for up to 5 minutes — tell the user to finish signing in in the ' +
-        'browser, then retry what you were doing. Call it when another tool says the user is not logged in.',
-      inputSchema: {},
+        'browser, then retry what you were doing. Call it when another tool says the user is not logged in. ' +
+        'Pass `server` (its address) to sign in to another Fling, including one not set up on this computer yet: it is ' +
+        'remembered, and becomes the current one only when none is.' +
+        note,
+      inputSchema: {
+        server: z
+          .string()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe(
+            `The Fling to sign in to: its address (e.g. "https://fling.example.com"), or the host of one set up on this computer. ${
+              several
+                ? `Required while several Flings are set up (${servers.map(s => serverLabel(s.url)).join(', ')})`
+                : `Omit it to use ${servers[0] ? serverLabel(servers[0].url) : 'the one this computer knows'}`
+            }`
+          ),
+      },
       annotations: { readOnlyHint: false, openWorldHint: true },
     },
-    async () => {
+    async args => {
       try {
-        const config = await store.resolve({ serverUrl: deps.server })
-        const serverUrl = config.serverUrl
-        if (!serverUrl) throw new NoServerError('fling')
-        if (config.apiKey && !pendingLogin) {
-          const me = await whoami(
-            createApiClient({
-              serverUrl,
-              apiKey: config.apiKey,
-              fetch: fetchImpl,
+        let serverUrl: string | undefined
+        if (args.server !== undefined) {
+          const config = await store.load()
+          try {
+            serverUrl = matchServer(Object.keys(config.servers), args.server, { loose: true }).url
+          } catch (error) {
+            const known = knownServersOf(config).map(s => `- ${describeServer(s)}`)
+            throw new CliError((error as Error).message, {
+              hint: known.length ? `The Flings set up on this computer:\n${known.join('\n')}` : '',
             })
-          ).catch(() => null)
-          if (me) return textResult(`Already signed in to ${config.serverUrl} as ${me.email}.`)
+          }
+        } else {
+          serverUrl = (await choose(undefined, 'fling_login')).serverUrl
         }
-        if (!pendingLogin) {
-          const login: { url?: string; done: Promise<LoginResult> } = {
+        if (!serverUrl) throw new NoServerError('fling')
+        const config = await store.resolve({ serverUrl })
+        let login = pendingLogins.get(serverUrl)
+        if (config.apiKey && !login) {
+          const me = await whoami(
+            createApiClient({ serverUrl, apiKey: config.apiKey, fetch: fetchImpl })
+          ).catch(() => null)
+          if (me) return textResult(`Already signed in to ${serverUrl} as ${me.email}.`)
+        }
+        if (!login) {
+          const started: { url?: string; done: Promise<LoginResult> } = {
             done: Promise.resolve() as unknown as Promise<LoginResult>,
           }
-          login.done = loginFlow({
+          started.done = loginFlow({
             serverUrl,
             store,
             log: silentLogger,
             open: deps.open ?? (async url => (await import('open')).default(url)),
             fetch: fetchImpl,
             timeoutMs: deps.loginTimeoutMs,
-            // Signing in to the extension's server leaves the CLI's current server as it is.
+            // Signing in to another Fling leaves the CLI's current server as it is.
             makeCurrent: !config.current || config.current === serverUrl,
             onAuthUrl: url => {
-              login.url = url
+              started.url = url
             },
           })
-          login.done
+          const key = serverUrl
+          started.done
             .catch(() => {})
             .finally(() => {
-              if (pendingLogin === login) pendingLogin = undefined
+              if (pendingLogins.get(key) === started) pendingLogins.delete(key)
             })
-          pendingLogin = login
+          pendingLogins.set(serverUrl, started)
+          login = started
         }
-        const current = pendingLogin
+        const current = login
         const waited = await Promise.race([
           current.done.then(
             r => ({ ok: true as const, r }),
@@ -573,31 +677,92 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
               `(The sign-in page is open; if it did not open, visit: ${current.url ?? 'the Fling site'} — this stays valid for 5 minutes.)`
           )
         if (!waited.ok) throw waited.e
-        return textResult(`Signed in as ${waited.r.user.email} (${waited.r.serverUrl}).`)
+        return textResult(
+          `Signed in as ${waited.r.user.email} (${waited.r.serverUrl}, ${waited.r.instance.name}).`
+        )
       } catch (error) {
-        return { isError: true, content: [{ type: 'text', text: describeError(error) }] }
+        return failure(error)
+      }
+    }
+  )
+
+  server.registerTool(
+    'fling_servers',
+    {
+      title: 'List the Flings on this computer',
+      description:
+        'List the Flings set up on this computer, read now: each one\'s address, name, who is signed in (or "signed ' +
+        'out") and which is current, the user\'s usual one. Call it when unsure which Fling the user means or which ' +
+        'exist; the list may have changed since this conversation started. Pass `use` to make one the current Fling, the ' +
+        `same as running \`${NPX_COMMAND} use <server>\`: it changes the default of the fling CLI too, so only do it when ` +
+        'the user asks. It does not replace passing `server` to the other tools while several Flings are set up.',
+      inputSchema: {
+        use: z
+          .string()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe(
+            'Make this Fling current (address, host or unique part of it), like `fling use`'
+          ),
+      },
+      annotations: { readOnlyHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async args => {
+      try {
+        let switched = ''
+        if (args.use !== undefined) {
+          const url = rememberedServer(await store.load(), args.use)
+          await store.setCurrent(url)
+          switched = `Now using ${serverLabel(url)} as the current Fling (as \`fling use\` does).\n`
+        }
+        const config = await store.load()
+        const known = knownServersOf(config)
+        const pinned = await store.resolve({ serverUrl: deps.server })
+        const summary = known.length
+          ? `${switched}${known.length} Fling(s) set up on this computer:\n${known.map(s => `- ${describeServer(s)}`).join('\n')}` +
+            (isPinned(pinned) && pinned.serverUrl
+              ? `\nCalls without \`server\` go to ${serverLabel(pinned.serverUrl)} (set by this server's configuration).`
+              : known.length > 1
+                ? '\nPass `server` on every call: the Fling settled on for this conversation.'
+                : '')
+          : NO_SERVER_HINT
+        const data = {
+          current: config.current ?? null,
+          servers: known.map(s => ({
+            url: s.url,
+            host: serverLabel(s.url),
+            instance: s.instance?.name ?? null,
+            signedIn: s.signedIn,
+            email: s.email ?? null,
+            current: s.current,
+          })),
+        }
+        return textResult(`${summary}\n\n${JSON.stringify(data, null, 2)}`)
+      } catch (error) {
+        return failure(error)
       }
     }
   )
 
   const t = mcpTools
-  server.registerTool(t.list.name, toolDef(t.list), args =>
-    run(async c => {
-      const sites = await listSites(c, { archived: args.archived })
-      return { summary: `${sites.length} site(s)`, data: { sites } }
+  server.registerTool(t.list.name, serverTool(t.list), args =>
+    run(t.list.name, args.server, async ({ client, url }) => {
+      const sites = await listSites(client, { archived: args.archived })
+      return { summary: `${sites.length} site(s) on ${serverLabel(url)}`, data: { sites } }
     })
   )
 
-  server.registerTool(t.info.name, toolDef(t.info), args =>
-    run(async c => {
-      const site = await getSite(c, args.name)
+  server.registerTool(t.info.name, serverTool(t.info), args =>
+    run(t.info.name, args.server, async ({ client }) => {
+      const site = await getSite(client, args.name)
       return { summary: `${site.name}: ${site.url}`, data: site }
     })
   )
 
-  server.registerTool(t.files.name, toolDef(t.files), args =>
-    run(async c => {
-      const result = await versionFiles(c, args.name, args.versionId)
+  server.registerTool(t.files.name, serverTool(t.files), args =>
+    run(t.files.name, args.server, async ({ client }) => {
+      const result = await versionFiles(client, args.name, args.versionId)
       return {
         summary: describeVersionFiles(result.name, result, {
           current: result.current,
@@ -608,15 +773,15 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
-  server.registerTool(t.share.name, toolDef(t.share), args =>
-    run(async c => {
+  server.registerTool(t.share.name, serverTool(t.share), args =>
+    run(t.share.name, args.server, async ({ client }) => {
       if (args.refresh && args.revoke) throw new CliError('Use either refresh or revoke, not both')
-      const result = await share(c, args.name, args)
+      const result = await share(client, args.name, args)
       if (result.action === 'revoked')
         return { summary: `Share link for ${args.name} revoked`, data: result }
       let edge = { ready: true, note: '' }
       if (result.action !== 'existing') {
-        const files = await versionFiles(c, args.name).catch(() => null)
+        const files = await versionFiles(client, args.name).catch(() => null)
         edge = await edgeReady(result.shareUrl, files?.files.map(f => f.path) ?? [])
       }
       return {
@@ -626,30 +791,30 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
-  server.registerTool(t.setVisibility.name, toolDef(t.setVisibility), args =>
-    run(async c => {
-      const site = await setVisibility(c, args.name, args.visibility)
+  server.registerTool(t.setVisibility.name, serverTool(t.setVisibility), args =>
+    run(t.setVisibility.name, args.server, async ({ client }) => {
+      const site = await setVisibility(client, args.name, args.visibility)
       return { summary: `${site.name} is now ${site.visibility}: ${site.url}`, data: site }
     })
   )
 
-  server.registerTool(t.archive.name, toolDef(t.archive), args =>
-    run(async c => {
-      const site = await archiveSite(c, args.name, { unarchive: args.unarchive })
+  server.registerTool(t.archive.name, serverTool(t.archive), args =>
+    run(t.archive.name, args.server, async ({ client }) => {
+      const site = await archiveSite(client, args.name, { unarchive: args.unarchive })
       return { summary: `${site.name} ${args.unarchive ? 'restored' : 'archived'}`, data: site }
     })
   )
 
-  server.registerTool(t.delete.name, toolDef(t.delete), args =>
-    run(async c => {
-      const result = await deleteSite(c, args.name)
-      return { summary: `${args.name} deleted`, data: result }
+  server.registerTool(t.delete.name, serverTool(t.delete), args =>
+    run(t.delete.name, args.server, async ({ client, url }) => {
+      const result = await deleteSite(client, args.name)
+      return { summary: `${args.name} deleted from ${serverLabel(url)}`, data: result }
     })
   )
 
-  server.registerTool(t.rollback.name, toolDef(t.rollback), args =>
-    run(async c => {
-      const site = await rollback(c, args.name, args.versionId)
+  server.registerTool(t.rollback.name, serverTool(t.rollback), args =>
+    run(t.rollback.name, args.server, async ({ client }) => {
+      const site = await rollback(client, args.name, args.versionId)
       return {
         summary: `${site.name} now serves version ${site.currentVersionId}: ${site.url}`,
         data: site,
@@ -657,43 +822,52 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
-  // Comments: only when the instance logged in to has them (its stored metadata says so).
-  if (deps.instance && commentsEnabled(deps.instance)) {
-    const appOrigin = deps.instance.appOrigin
-    const review = (name: string) => reviewUrl(appOrigin, name)
+  // Comments: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => commentsEnabled(s.instance))) {
+    /** The review page of `name` on the call's Fling; refuses when that Fling has no comments. */
+    async function reviewOn(target: Target) {
+      const instance = await target.instance()
+      if (instance?.capabilities.comments === false)
+        throw new CliError(`${instance.name} (${serverLabel(target.url)}) has comments turned off`)
+      const appOrigin = instance?.appOrigin ?? target.url
+      return {
+        review: (name: string) => reviewUrl(appOrigin, name),
+        fling: onFling(target.url, instance),
+      }
+    }
 
-    server.registerTool(t.commentsList.name, toolDef(t.commentsList), args =>
-      run(async c => {
-        const list = await listComments(c, args.name, { path: args.path })
+    server.registerTool(t.commentsList.name, serverTool(t.commentsList), args =>
+      run(t.commentsList.name, args.server, async target => {
+        const { review, fling } = await reviewOn(target)
+        const list = await listComments(target.client, args.name, { path: args.path })
         const reviewPage = review(list.site.name)
         return {
-          summary: describeComments(list, {
-            includeResolved: args.includeResolved,
-            reviewUrl: reviewPage,
-          }),
+          summary: `${describeComments(list, { includeResolved: args.includeResolved, reviewUrl: reviewPage })}${fling}`,
           data: { ...list, reviewUrl: reviewPage },
         }
       })
     )
 
-    server.registerTool(t.commentAdd.name, toolDef(t.commentAdd), args =>
-      run(async c => {
-        const comment = await addComment(c, args.name, {
+    server.registerTool(t.commentAdd.name, serverTool(t.commentAdd), args =>
+      run(t.commentAdd.name, args.server, async target => {
+        const { review, fling } = await reviewOn(target)
+        const comment = await addComment(target.client, args.name, {
           body: args.body,
           path: args.path,
           parentId: args.replyTo,
         })
         const what = comment.parentId ? `Replied to thread ${comment.parentId}` : 'Comment added'
         return {
-          summary: `${what} on ${args.name} (${comment.path}, id ${comment.id}). Review page: ${review(args.name)}`,
+          summary: `${what} on ${args.name} (${comment.path}, id ${comment.id}). Review page: ${review(args.name)}${fling}`,
           data: comment,
         }
       })
     )
 
-    server.registerTool(t.commentResolve.name, toolDef(t.commentResolve), args =>
-      run(async c => {
-        const comment = await resolveComment(c, args.name, args.id, !args.reopen)
+    server.registerTool(t.commentResolve.name, serverTool(t.commentResolve), args =>
+      run(t.commentResolve.name, args.server, async target => {
+        await reviewOn(target)
+        const comment = await resolveComment(target.client, args.name, args.id, !args.reopen)
         return {
           summary: `Thread ${comment.id} on ${args.name} ${args.reopen ? 'reopened' : 'resolved'}`,
           data: comment,
@@ -701,21 +875,23 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       })
     )
 
-    server.registerTool(t.commentDelete.name, toolDef(t.commentDelete), args =>
-      run(async c => {
-        const result = await deleteComment(c, args.name, args.id)
+    server.registerTool(t.commentDelete.name, serverTool(t.commentDelete), args =>
+      run(t.commentDelete.name, args.server, async target => {
+        await reviewOn(target)
+        const result = await deleteComment(target.client, args.name, args.id)
         return { summary: `Comment ${args.id} on ${args.name} deleted`, data: result }
       })
     )
   }
 
-  server.registerTool(t.whoami.name, toolDef(t.whoami), () =>
-    run(async c => {
-      const me = await whoami(c)
-      const base = await sitesBase()
+  server.registerTool(t.whoami.name, serverTool(t.whoami), args =>
+    run(t.whoami.name, args.server, async target => {
+      const me = await whoami(target.client)
+      const instance = await target.instance()
+      const base = sitesBaseOf(instance)
       return {
-        summary: `Signed in as ${me.email} (sites are served at ${sitesPattern(base)})`,
-        data: me,
+        summary: `Signed in to ${serverLabel(target.url)}${instance ? ` (${instance.name})` : ''} as ${me.email} (sites are served at ${sitesPattern(base)})`,
+        data: { ...me, server: target.url },
       }
     })
   )
@@ -769,6 +945,28 @@ export async function writeInlineFiles(
   return { skippedDotfiles }
 }
 
+/**
+ * An error as a tool result. A call that needs `server` is not a failure: it answers with the list
+ * of Flings so the model can ask the user.
+ */
+function failure(error: unknown): CallToolResult {
+  if (error instanceof ServerNeededError) {
+    const data = {
+      status: 'needs_server',
+      servers: error.servers.map(s => ({
+        url: s.url,
+        host: serverLabel(s.url),
+        instance: s.instance?.name ?? null,
+        signedIn: s.signedIn,
+        email: s.email ?? null,
+        current: s.current,
+      })),
+    }
+    return textResult(`${error.message}\n\n${JSON.stringify(data, null, 2)}`)
+  }
+  return { isError: true, content: [{ type: 'text', text: describeError(error) }] }
+}
+
 function describeError(error: unknown): string {
   if (error instanceof NoServerError) return NO_SERVER_HINT
   if (error instanceof CliError && error.exitCode === EXIT_NOT_LOGGED_IN) return LOGIN_HINT
@@ -780,13 +978,12 @@ function describeError(error: unknown): string {
 
 export async function runMcpServer(deps: McpDeps = {}): Promise<void> {
   const store = deps.store ?? createConfigStore()
-  // The descriptions name the stored instance; never fail to start over it.
-  const instance =
-    deps.instance ??
-    (await store
-      .resolve({ serverUrl: deps.server })
-      .then(config => loadInstance(store, config, deps.fetch ?? ((i, init) => fetch(i, init))))
-      .catch(() => null))
-  const server = createMcpServer({ ...deps, store, instance })
+  const fetchImpl: FetchLike = deps.fetch ?? ((i, init) => fetch(i, init))
+  // Remember the Fling the extension came from, and read the known ones for the descriptions;
+  // never fail to start over either.
+  await addServerOnStart(store, serverToAdd(), fetchImpl).catch(() => {})
+  const servers =
+    deps.servers ?? (await knownServers(store, fetchImpl, deps.server).catch(() => []))
+  const server = createMcpServer({ ...deps, store, servers })
   await server.connect(new StdioServerTransport())
 }

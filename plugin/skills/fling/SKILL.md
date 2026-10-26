@@ -21,6 +21,26 @@ content is a no-op; older content is restored instantly.
 
 Not for servers or anything needing a backend at runtime — Fling serves files only.
 
+## Which Fling
+
+The user may be signed in to several Flings (each has its own sites, sign-in and sites domain).
+The MCP tools know all of them; every tool that talks to a Fling takes `server` (an address, host
+or unique part of it, e.g. `fling.example.com`).
+
+- **One Fling (or none):** leave `server` out; the tools use it.
+- **Several:** the instructions and tool descriptions list them by host, marking the current one.
+  Settle which Fling this conversation uses **before anything else**: from the user's words ("on
+  fling.example.com", "on the Example one") or, if they don't say, by asking them (suggest
+  the current one, their usual choice). Say which one you're using, then pass it as `server` on
+  every call for the rest of the conversation, reads included. Switch only when the user asks.
+  A call without `server` doesn't run: it returns the list of Flings so you can ask.
+- `fling_servers` lists the Flings live (the list in the descriptions was read at startup), with
+  who is signed in; `fling_servers { use }` makes one current, the same as `fling use`. Only switch
+  the current Fling when the user asks: it changes the CLI's default too.
+- Results that give URLs end with the Fling they went to; tell the user which one.
+- With the CLI instead of the MCP tools, `fling --server <host> …` targets a Fling for one
+  command; without it, commands use the current one.
+
 ## How to deploy
 
 1. **Build first.** Run the project's build (e.g. `npm run build`) and find the output folder
@@ -97,9 +117,10 @@ Notes:
   curl or upload from it. That machine can't reach Fling. Publish what you wrote with
   `fling_publish`. For a file the user downloaded, use its name with `fling_deploy`.
 - **Claude Desktop (including Cowork)** gets these tools from the Fling extension. Download it from
-  the Get started page of the user's Fling (`https://<their Fling>/downloads/fling.mcpb`), then
-  double-click it, drag it into Claude, or go to Settings → Extensions → Advanced settings →
-  Install Extension.
+  the Get started page of any of the user's Flings (`https://<their Fling>/downloads/fling.mcpb`),
+  then double-click it, drag it into Claude, or go to Settings → Extensions → Advanced settings →
+  Install Extension. One extension serves every Fling: installing from another Fling updates it
+  and adds that Fling.
 
 ## Not logged in
 
@@ -117,9 +138,8 @@ their shell):
 `fling login` alone signs in to the same one. If a tool says no Fling server is set up, this is
 what to do. (If `fling` isn't installed, use `! npx @nearform/fling login <url>`.)
 
-The CLI can be signed in to several Flings and uses the current one. If the user means a different
-Fling than the one the tools talk to, `! fling use` lists them and `! fling use <url>` switches;
-the tools pick up the change on the next call.
+To sign in to another Fling, or one not set up yet, call `fling_login { server: "<its address>" }`.
+It is remembered, and becomes the current one only if none is.
 
 `fling_whoami` checks the login.
 

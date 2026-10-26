@@ -2,7 +2,7 @@
 // missing. Used by .github/workflows/deploy-cloudflare.yml and by hand (DEPLOY.md):
 //
 //   1. dist/wrangler.jsonc from wrangler.jsonc + CF_DEPLOY_CONFIG (render-config.mjs);
-//   1b. the Claude Desktop extension (apps/cli build:mcpb) with this instance's address filled in,
+//   1b. the Claude Desktop extension (apps/cli build:mcpb) with this instance's address baked in,
 //      so a deploy by hand serves the same download as the workflow's;
 //   2. dist/assets and a dry-run bundle check (build.mjs --require-mcpb; build apps/web first);
 //   3. the D1 schema: `wrangler d1 migrations apply --remote` (additive, before the code);

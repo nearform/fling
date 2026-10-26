@@ -5,8 +5,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { FetchLike } from '../src/api.ts'
-import { type ConfigStore, createConfigStore } from '../src/config.ts'
+import { type ConfigStore, createConfigStore, serverToAdd } from '../src/config.ts'
 import { createMcpServer, type McpDeps } from '../src/mcp.ts'
+import { addServerOnStart, type KnownServer, knownServers } from '../src/mcp-servers.ts'
 import { NPX_COMMAND } from '../src/package-info.ts'
 import {
   INSTANCE,
@@ -46,6 +47,18 @@ async function connect(
   return client
 }
 
+/** A Fling the descriptions name, as runMcpServer reads it at start. */
+const known = (instance = INSTANCE, url = SERVER): KnownServer => ({
+  url,
+  instance,
+  current: true,
+  signedIn: true,
+})
+
+/** The description of a listed tool's `server` argument. */
+const serverArgOf = (tool: { inputSchema: { properties?: Record<string, unknown> } } | undefined) =>
+  (tool?.inputSchema.properties?.server as { description?: string } | undefined)?.description
+
 const text = (r: unknown) => (r as { content: { text: string }[] }).content[0]?.text ?? ''
 const dataOf = (r: unknown) => JSON.parse(text(r).slice(text(r).indexOf('\n\n') + 2))
 const manifestPaths = (m: ReturnType<typeof mockFetch>, i = 0) =>
@@ -54,6 +67,53 @@ const manifestPaths = (m: ReturnType<typeof mockFetch>, i = 0) =>
       path: string
     }[]
   ).map(f => f.path)
+
+const OTHER = 'https://fling.other.test'
+const OTHER_KEY = 'fling_other_key_0123456789'
+const OTHER_INSTANCE = { ...INSTANCE, name: 'Other Fling', appOrigin: OTHER }
+const NEW_KEY = 'fling_k_0123456789abcdefghij'
+
+/** SERVER (current) and OTHER, both signed in. */
+async function twoFlings() {
+  const { store } = await tempStore()
+  await store.putServer(SERVER, {
+    instance: INSTANCE,
+    apiKey: TEST_KEY,
+    user: { email: 'ada@example.test' },
+  })
+  await store.putServer(OTHER, {
+    instance: OTHER_INSTANCE,
+    apiKey: OTHER_KEY,
+    user: { email: 'ada@other.test' },
+  })
+  return store
+}
+
+const meFetch = () =>
+  mockFetch({
+    'GET /api/me': () =>
+      jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
+  })
+
+/** Where the last /api/me call went, and with which key. */
+function lastMe(m: ReturnType<typeof mockFetch>) {
+  const me = m.calls.filter(c => c.url.pathname === '/api/me').at(-1)
+  return {
+    origin: me?.url.origin,
+    auth: (me?.init.headers as Record<string, string> | undefined)?.Authorization,
+  }
+}
+
+/** A stand-in for the browser: completes the sign-in with `key`. */
+function browserGiving(key: string) {
+  return async (url: string) => {
+    const u = new URL(url)
+    const cb = new URL(u.searchParams.get('redirect_uri') as string)
+    cb.searchParams.set('key', key)
+    cb.searchParams.set('state', u.searchParams.get('state') as string)
+    await fetch(cb)
+  }
+}
 
 describe('MCP server', () => {
   it('lists the tools', async () => {
@@ -72,6 +132,7 @@ describe('MCP server', () => {
       'fling_login',
       'fling_publish',
       'fling_rollback',
+      'fling_servers',
       'fling_set_visibility',
       'fling_share',
       'fling_whoami',
@@ -82,9 +143,10 @@ describe('MCP server', () => {
     // Shared with the remote connector: same description and shape.
     const publish = tools.find(t => t.name === 'fling_publish')
     expect(publish?.inputSchema.required).toEqual(['name', 'files'])
-    expect(Object.keys(publish?.inputSchema.properties ?? {})).toEqual(
-      Object.keys(mcpTools.publish.inputSchema)
-    )
+    expect(Object.keys(publish?.inputSchema.properties ?? {})).toEqual([
+      ...Object.keys(mcpTools.publish.inputSchema),
+      'server',
+    ])
     expect(publish?.description).not.toMatch(/fling_upload_begin/)
     expect(tools.find(t => t.name === 'fling_list')?.description).toBe(mcpTools.list.description)
     expect(client.getInstructions()).toMatch(/never pass file paths from your sandbox/i)
@@ -125,7 +187,10 @@ describe('MCP server', () => {
     const client = await connect(store, m.fetch, cwd)
     const res = await client.callTool({ name: 'fling_deploy', arguments: { path: 'proj/dist' } })
     expect(res.isError).toBeFalsy()
-    expect(text(res)).toMatch(/^Unchanged — already live: https:\/\/my-app\.sites\.example\.test/)
+    expect(text(res)).toMatch(/^Unchanged — already live\./)
+    expect(text(res)).toContain('Site: https://my-app.sites.example.test/ (private)')
+    expect(text(res)).toContain('\nFling: server.test (Example Fling)')
+    expect(dataOf(res)).toMatchObject({ server: SERVER })
   })
 
   it('with comments on, a deploy leads with the review link to share, then the site URL', async () => {
@@ -136,7 +201,7 @@ describe('MCP server', () => {
       'POST /api/sites/proj/deploys': () =>
         jsonResponse({ status: 'unchanged', versionId: '0123456789abcdef', site: site() }),
     })
-    const client = await connect(store, m.fetch, cwd, { instance: INSTANCE })
+    const client = await connect(store, m.fetch, cwd, { servers: [known(INSTANCE)] })
     expect(client.getInstructions()).toContain('the review link first')
     const res = await client.callTool({ name: 'fling_deploy', arguments: { path: 'proj' } })
     const lines = text(res).split('\n')
@@ -147,9 +212,8 @@ describe('MCP server', () => {
     expect(lines[2]).toMatch(/^Site: https:\/\/my-app\.sites\.example\.test\/ \(private\)/)
     expect(text(res)).toContain(`"reviewUrl": "${SERVER}/review/proj"`)
 
-    const off = await connect(store, m.fetch, cwd, {
-      instance: { ...INSTANCE, capabilities: { comments: false } },
-    })
+    await store.putServer(SERVER, { instance: { ...INSTANCE, capabilities: { comments: false } } })
+    const off = await connect(store, m.fetch, cwd)
     const plain = await off.callTool({ name: 'fling_deploy', arguments: { path: 'proj' } })
     expect(text(plain)).not.toContain('/review/')
   })
@@ -295,7 +359,7 @@ describe('MCP server', () => {
       },
     })
     expect(res.isError).toBeFalsy()
-    expect(text(res)).toMatch(/^Deployed 2 files \(uploaded 2\): https:\/\//)
+    expect(text(res)).toMatch(/^Deployed 2 files \(uploaded 2\)\.\n/)
     expect(puts.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
       { path: 'img/a.txt', body: 'binary!' },
       { path: 'index.html', body: '<h1>Report</h1>' },
@@ -336,7 +400,7 @@ describe('MCP server', () => {
       cb.searchParams.set('state', u.searchParams.get('state') as string)
       await fetch(cb)
     }
-    // The server comes from the extension's setting (FLING_URL) or `fling mcp --server`.
+    // `fling mcp --server` (or FLING_URL) pins the server.
     const client = await connect(store, m.fetch, undefined, { open, server: SERVER })
     const res = await client.callTool({ name: 'fling_login', arguments: {} })
     expect(text(res)).toMatch(/^Signed in as me@example\.test/)
@@ -348,37 +412,177 @@ describe('MCP server', () => {
     expect(text(again)).toMatch(/^Already signed in .* as me@example\.test/)
   })
 
-  it('uses the current server, re-read on every call, unless FLING_URL names one', async () => {
+  it('with one Fling, uses it without `server`, re-read on every call', async () => {
     const other = 'https://fling.other.test'
     const { store } = await tempStore()
     await store.putServer(SERVER, { instance: INSTANCE, apiKey: TEST_KEY })
-    await store.putServer(other, { apiKey: 'fling_other_key_0123456789' })
+    const m = meFetch()
+    const client = await connect(store, m.fetch)
+    const res = await client.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(text(res)).toMatch(/^Signed in to server\.test \(Example Fling\) as me@example\.test/)
+    expect(lastMe(m)).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
+
+    // `fling logout <url>` of it and `fling login` elsewhere in a terminal: the next call follows.
+    await store.removeServer(SERVER)
+    await store.putServer(other, { apiKey: OTHER_KEY })
+    await client.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastMe(m)).toEqual({ origin: other, auth: `Bearer ${OTHER_KEY}` })
+  })
+
+  it('with several Flings, a call without `server` does not run and lists them', async () => {
+    const store = await twoFlings()
+    const m = meFetch()
+    const client = await connect(store, m.fetch)
+    for (const name of ['fling_whoami', 'fling_list', 'fling_login']) {
+      const res = await client.callTool({ name, arguments: {} })
+      expect(res.isError).toBeFalsy()
+      expect(text(res)).toMatch(new RegExp(`^Not run: several Flings .* ${name} needs \`server\``))
+      expect(text(res)).toContain(
+        "- server.test (Example Fling; signed in as ada@example.test; current: the user's usual one)"
+      )
+      expect(text(res)).toContain('- fling.other.test (Other Fling; signed in as ada@other.test)')
+      expect(text(res)).toMatch(/ask the user/)
+      expect(dataOf(res)).toMatchObject({
+        status: 'needs_server',
+        servers: [
+          { url: SERVER, current: true, signedIn: true },
+          { url: OTHER, current: false, instance: 'Other Fling' },
+        ],
+      })
+    }
+    expect(m.calls).toHaveLength(0)
+  })
+
+  it('a `server` argument routes the call to that Fling with its key', async () => {
+    const store = await twoFlings()
+    const m = meFetch()
+    const client = await connect(store, m.fetch)
+    for (const server of ['fling.other.test', OTHER, 'other.test', `${OTHER}/`]) {
+      await client.callTool({ name: 'fling_whoami', arguments: { server } })
+      expect(lastMe(m)).toEqual({ origin: OTHER, auth: `Bearer ${OTHER_KEY}` })
+    }
+    await client.callTool({ name: 'fling_whoami', arguments: { server: 'server.test' } })
+    expect(lastMe(m)).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
+    // The current Fling is untouched.
+    expect((await store.load()).current).toBe(SERVER)
+  })
+
+  it('an unknown or ambiguous `server` fails and lists the Flings', async () => {
+    const store = await twoFlings()
+    const m = meFetch()
+    const client = await connect(store, m.fetch)
+    const unknown = await client.callTool({
+      name: 'fling_list',
+      arguments: { server: 'fling.nowhere.test' },
+    })
+    expect(unknown.isError).toBe(true)
+    expect(text(unknown)).toMatch(/^"fling\.nowhere\.test" is not a Fling set up on this computer/)
+    expect(text(unknown)).toContain('- fling.other.test (Other Fling')
+    expect(text(unknown)).toMatch(/call fling_login with its address/)
+
+    await store.putServer('https://fling.third.test', {})
+    const ambiguous = await client.callTool({ name: 'fling_list', arguments: { server: 'fling' } })
+    expect(ambiguous.isError).toBe(true)
+    expect(text(ambiguous)).toMatch(/matches more than one server/)
+    expect(text(ambiguous)).toContain('- fling.third.test (signed out)')
+    expect(m.calls).toHaveLength(0)
+  })
+
+  it('fling_servers lists the Flings live and switches the current one like `fling use`', async () => {
+    const store = await twoFlings()
+    const client = await connect(store, meFetch().fetch)
+    const listed = await client.callTool({ name: 'fling_servers', arguments: {} })
+    expect(text(listed)).toMatch(/^2 Fling\(s\) set up on this computer:/)
+    expect(text(listed)).toMatch(/Pass `server` on every call/)
+    expect(dataOf(listed)).toEqual({
+      current: SERVER,
+      servers: [
+        {
+          url: SERVER,
+          host: 'server.test',
+          instance: 'Example Fling',
+          signedIn: true,
+          email: 'ada@example.test',
+          current: true,
+        },
+        {
+          url: OTHER,
+          host: 'fling.other.test',
+          instance: 'Other Fling',
+          signedIn: true,
+          email: 'ada@other.test',
+          current: false,
+        },
+      ],
+    })
+    // Read live: a Fling added since start shows up.
+    await store.putServer('https://fling.third.test', {})
+    const used = await client.callTool({ name: 'fling_servers', arguments: { use: 'other.test' } })
+    expect(text(used)).toMatch(/^Now using fling\.other\.test as the current Fling/)
+    expect(text(used)).toContain('- fling.third.test (signed out)')
+    expect((await store.load()).current).toBe(OTHER)
+    const bad = await client.callTool({ name: 'fling_servers', arguments: { use: 'nowhere.test' } })
+    expect(bad.isError).toBe(true)
+  })
+
+  it('FLING_URL or --server pins the Fling calls without `server` go to', async () => {
+    const store = await twoFlings()
+    const m = meFetch()
+    const pinned = await connect(
+      createConfigStore({ dir: store.dir, env: { FLING_URL: `${OTHER}/` } }),
+      m.fetch
+    )
+    await pinned.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastMe(m)).toEqual({ origin: OTHER, auth: `Bearer ${OTHER_KEY}` })
+    const flag = await connect(store, m.fetch, undefined, { server: 'other.test' })
+    await flag.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastMe(m)).toEqual({ origin: OTHER, auth: `Bearer ${OTHER_KEY}` })
+    // An unsubstituted extension placeholder pins nothing.
+    const placeholder = await connect(
+      createConfigStore({
+        dir: store.dir,
+        env: { FLING_URL: ['$', '{user_config.server_url}'].join('') },
+      }),
+      m.fetch
+    )
+    const refused = await placeholder.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(dataOf(refused)).toMatchObject({ status: 'needs_server' })
+  })
+
+  it('fling_login with `server` signs in to a new Fling without making it current', async () => {
+    const { store } = await tempStore()
+    await store.putServer(OTHER, { apiKey: OTHER_KEY })
     const m = mockFetch({
+      ...instanceRoute,
       'GET /api/me': () =>
         jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
     })
-    const lastCall = () => {
-      const me = m.calls.filter(c => c.url.pathname === '/api/me').at(-1)
-      return {
-        origin: me?.url.origin,
-        auth: (me?.init.headers as Record<string, string> | undefined)?.Authorization,
-      }
-    }
-    const client = await connect(store, m.fetch)
-    await client.callTool({ name: 'fling_whoami', arguments: {} })
-    expect(lastCall()).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
-    await store.setCurrent(other)
-    await client.callTool({ name: 'fling_whoami', arguments: {} })
-    expect(lastCall()).toEqual({ origin: other, auth: 'Bearer fling_other_key_0123456789' })
-
-    // The Claude Desktop extension sets FLING_URL from its settings.
-    const extension = createConfigStore({ dir: store.dir, env: { FLING_URL: `${SERVER}/` } })
-    const pinned = await connect(extension, m.fetch)
-    await pinned.callTool({ name: 'fling_whoami', arguments: {} })
-    expect(lastCall()).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
+    const client = await connect(store, m.fetch, undefined, { open: browserGiving(NEW_KEY) })
+    const res = await client.callTool({ name: 'fling_login', arguments: { server: SERVER } })
+    expect(text(res)).toBe(`Signed in as me@example.test (${SERVER}, Example Fling).`)
+    const config = await store.load()
+    expect(config.current).toBe(OTHER)
+    expect(config.servers[SERVER]).toMatchObject({ instance: INSTANCE, apiKey: NEW_KEY })
+    expect(config.servers[OTHER]?.apiKey).toBe(OTHER_KEY)
   })
 
-  it("fling_login for the extension's server keeps the current server", async () => {
+  it('fling_login with `server` and no Fling current makes it current', async () => {
+    const { store } = await tempStore()
+    const client = await connect(
+      store,
+      mockFetch({
+        ...instanceRoute,
+        'GET /api/me': () =>
+          jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
+      }).fetch,
+      undefined,
+      { open: browserGiving(NEW_KEY) }
+    )
+    await client.callTool({ name: 'fling_login', arguments: { server: 'server.test' } })
+    expect((await store.load()).current).toBe('https://server.test')
+  })
+
+  it('fling_login for the pinned server keeps the current server', async () => {
     const other = 'https://fling.other.test'
     const { store } = await tempStore()
     await store.putServer(other, { apiKey: 'fling_other_key_0123456789' })
@@ -432,7 +636,9 @@ describe('MCP server', () => {
   })
 
   it('names the logged-in instance in its descriptions, and stays generic before a login', async () => {
-    const named = await connect(await loggedInStore(), undefined, undefined, { instance: INSTANCE })
+    const named = await connect(await loggedInStore(), undefined, undefined, {
+      servers: [known(INSTANCE)],
+    })
     expect(named.getInstructions()).toMatch(
       /^Example Fling publishes static sites .* at https:\/\/<name>\.sites\.example\.test\./
     )
@@ -443,6 +649,77 @@ describe('MCP server', () => {
     expect(tools.find(t => t.name === 'fling_login')?.description).toContain('Example SSO account')
     const generic = await connect((await tempStore()).store)
     expect(generic.getInstructions()).toContain('https://<name>.<sites domain>')
+  })
+
+  it('with several Flings, the instructions and descriptions list them and say to settle one first', async () => {
+    const store = await twoFlings()
+    const servers = await knownServers(store, meFetch().fetch)
+    const client = await connect(store, undefined, undefined, { servers })
+    const instructions = client.getInstructions() ?? ''
+    expect(instructions).toContain('Several Flings are set up on this computer:')
+    expect(instructions).toContain(
+      "- server.test (Example Fling; signed in as ada@example.test; current: the user's usual one)"
+    )
+    expect(instructions).toContain('- fling.other.test (Other Fling; signed in as ada@other.test)')
+    expect(instructions).toMatch(/Settle which one this conversation uses before anything else/)
+    expect(instructions).toMatch(/suggest server\.test, their usual one/)
+    expect(instructions).toMatch(/pass it as `server` on every call/)
+    expect(instructions).toMatch(/switch only when the user asks/)
+    expect(instructions).toMatch(/call fling_servers/)
+    // Instance names can be the same, so the generic wording, and hosts, not names.
+    expect(instructions).toMatch(/^Fling publishes static sites/)
+    const tools = (await client.listTools()).tools
+    const list = tools.find(t => t.name === 'fling_list')
+    expect(list?.description).toContain('several Flings are set up (server.test, fling.other.test)')
+    expect(serverArgOf(list)).toMatch(/^Which Fling: server\.test, fling\.other\.test .*Required/)
+    expect(
+      tools.find(t => t.name === 'fling_find_files')?.inputSchema.properties
+    ).not.toHaveProperty('server')
+  })
+
+  it('with one Fling, the wording stays as simple as before', async () => {
+    const store = await loggedInStore()
+    const client = await connect(store, undefined, undefined, {
+      servers: await knownServers(store, meFetch().fetch),
+    })
+    expect(client.getInstructions()).not.toMatch(/Several Flings/)
+    expect(client.getInstructions()).toMatch(/^Example Fling publishes static sites/)
+    const list = (await client.listTools()).tools.find(t => t.name === 'fling_list')
+    expect(list?.description).toBe(mcpTools.list.description)
+    expect(serverArgOf(list)).toMatch(/Omit it to use server\.test$/)
+  })
+
+  it('on start, remembers the Fling the extension came from without taking over current', async () => {
+    const { store } = await tempStore()
+    await store.putServer(OTHER, { apiKey: OTHER_KEY })
+    const m = mockFetch(instanceRoute)
+    await addServerOnStart(store, serverToAdd({ FLING_ADD_SERVER: SERVER }), m.fetch)
+    let config = await store.load()
+    expect(config.current).toBe(OTHER)
+    expect(config.servers[SERVER]).toEqual({ instance: INSTANCE })
+
+    // Known already: its entry (and key) is left alone, and nothing is fetched.
+    await store.putServer(SERVER, { apiKey: TEST_KEY })
+    const calls = m.calls.length
+    await addServerOnStart(store, `${SERVER}/`, m.fetch)
+    expect((await store.load()).servers[SERVER]).toEqual({ instance: INSTANCE, apiKey: TEST_KEY })
+    expect(m.calls).toHaveLength(calls)
+
+    // With none current it becomes current; unreachable, it is still remembered.
+    const fresh = (await tempStore()).store
+    await addServerOnStart(fresh, OTHER, async () => {
+      throw new Error('offline')
+    })
+    config = await fresh.load()
+    expect(config).toEqual({ current: OTHER, servers: { [OTHER]: {} } })
+  })
+
+  it('ignores an unsubstituted FLING_ADD_SERVER placeholder', async () => {
+    expect(serverToAdd({ FLING_ADD_SERVER: ['$', '{user_config.server_url}'].join('') })).toBe(
+      undefined
+    )
+    expect(serverToAdd({ FLING_ADD_SERVER: '  ' })).toBe(undefined)
+    expect(serverToAdd({})).toBe(undefined)
   })
 
   it('fling_deploy with a taken generated name errors with suggestions and asks to choose', async () => {

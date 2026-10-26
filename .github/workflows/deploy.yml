@@ -105,7 +105,7 @@ jobs:
         env:
           # lambda.zip carries the instance's values as instance.json (platforms/aws/scripts/build.mjs).
           FLING_INSTANCE_CONFIG: ${{ steps.config.outputs.INSTANCE }}
-          # The extension this instance serves defaults to this instance.
+          # The extension this instance serves adds this instance to the Flings it knows.
           FLING_MCPB_SERVER_URL: ${{ steps.config.outputs.APP_ORIGIN }}
         run: |
           set -euo pipefail

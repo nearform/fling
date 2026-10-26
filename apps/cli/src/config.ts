@@ -11,10 +11,11 @@
  * `user` at the top level, written by 0.3) reads as one entry, which is current; the next save
  * writes the shape above. Entries it cannot read are left out, never fatal.
  *
- * Env overrides (for CI and the Claude Desktop extension): `FLING_URL` picks a server for one run
- * (a remembered one brings its key), `FLING_API_KEY` overrides the key, `FLING_CONFIG_DIR`
- * relocates the directory. `FLING_DEBUG` enables debug lines. This is the only module that reads
- * `process.env`.
+ * Env overrides (for CI): `FLING_URL` picks a server for one run (a remembered one brings its key),
+ * `FLING_API_KEY` overrides the key, `FLING_CONFIG_DIR` relocates the directory. `FLING_DEBUG`
+ * enables debug lines. `FLING_ADD_SERVER` (the Claude Desktop extension a Fling serves sets it to
+ * that Fling's address) is a server for the local MCP server to remember when it starts. This is the
+ * only module that reads `process.env`.
  */
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -33,6 +34,8 @@ export const ENV = {
   debug: 'FLING_DEBUG',
   /** Where to look for files given by name (the .mcpb extension sets it from its settings). */
   downloadsDir: 'FLING_DOWNLOADS_DIR',
+  /** A server the local MCP server adds to the remembered ones on start (the .mcpb bakes it in). */
+  addServer: 'FLING_ADD_SERVER',
 } as const
 
 /** One remembered server. Each field is read on its own: one this CLI can't read is dropped. */
@@ -69,6 +72,11 @@ export function systemLocateOptions(env: Env = process.env) {
 function fromEnv(value: string | undefined): string | undefined {
   const v = value?.trim()
   return v && !v.startsWith('${') ? v : undefined
+}
+
+/** The server `FLING_ADD_SERVER` names, if any (an unsubstituted placeholder counts as none). */
+export function serverToAdd(env: Env = process.env): string | undefined {
+  return fromEnv(env[ENV.addServer])
 }
 
 export function resolveConfigDir(env: Env = process.env): string {

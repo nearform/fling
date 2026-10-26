@@ -35,19 +35,21 @@ export async function fetchInstance(
 }
 
 /**
- * The instance for `config`: the stored copy, else fetched — and stored when `serverUrl` is the
- * configured one (not a one-off `--server` / FLING_URL). Null when it can't be had; never throws.
+ * The instance for `config`: the stored copy, else fetched — and stored when `serverUrl` is a
+ * remembered server (not a one-off `--server` / FLING_URL address). Null when it can't be had;
+ * never throws.
  */
 export async function loadInstance(
   store: ConfigStore,
-  config: Pick<ResolvedConfig, 'serverUrl' | 'serverUrlSource' | 'instance'>,
+  config: Pick<ResolvedConfig, 'serverUrl' | 'remembered' | 'instance'>,
   fetch: FetchLike
 ): Promise<InstanceMetadata | null> {
   if (config.instance) return config.instance
   if (!config.serverUrl) return null
   try {
     const instance = await fetchInstance(config.serverUrl, fetch)
-    if (config.serverUrlSource === 'config') await store.update({ instance })
+    if (config.remembered)
+      await store.putServer(config.serverUrl, { instance }, { makeCurrent: false })
     return instance
   } catch {
     return null

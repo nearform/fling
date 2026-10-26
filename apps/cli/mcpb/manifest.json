@@ -61,7 +61,7 @@
     "server_url": {
       "type": "string",
       "title": "Fling server",
-      "description": "Your Fling's address, e.g. https://fling.example.com. Leave empty to use the one the fling CLI is logged in to. The extension a Fling serves for download has it filled in.",
+      "description": "Your Fling's address, e.g. https://fling.example.com. Leave empty to use the fling CLI's current one (`fling use`). The extension a Fling serves for download has it filled in.",
       "required": false
     },
     "downloads_dir": {

@@ -141,10 +141,14 @@ describe('loginFlow', () => {
     )
     expect(result.instance).toEqual(INSTANCE)
     expect(await store.load()).toEqual({
-      serverUrl: SERVER,
-      instance: INSTANCE,
-      apiKey: TEST_KEY,
-      user: { email: ME.email, name: ME.name, userSlug: ME.userSlug },
+      current: SERVER,
+      servers: {
+        [SERVER]: {
+          instance: INSTANCE,
+          apiKey: TEST_KEY,
+          user: { email: ME.email, name: ME.name, userSlug: ME.userSlug },
+        },
+      },
     })
     expect(log.lines.join('\n')).not.toContain(TEST_KEY)
   })
@@ -177,7 +181,7 @@ describe('loginFlow', () => {
       })
     )
     expect(e2.message).toMatch(/state mismatch/)
-    expect(await store.load()).toEqual({})
+    expect(await store.load()).toEqual({ servers: {} })
   })
 
   it('refuses a server that is not a Fling, before opening the browser', async () => {
@@ -196,6 +200,6 @@ describe('loginFlow', () => {
       'https://example.test does not look like a Fling server (no valid https://example.test/.well-known/fling)'
     )
     expect(b.seen).toHaveLength(0)
-    expect(await store.load()).toEqual({})
+    expect(await store.load()).toEqual({ servers: {} })
   })
 })

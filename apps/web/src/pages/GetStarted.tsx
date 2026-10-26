@@ -52,6 +52,10 @@ export function QuickStart() {
           offers to add Fling to them too.
         </p>
         <CommandLine command={setup} />
+        <p className="text-xs text-muted">
+          Already signed in to another Fling? <code>{setup}</code> adds this one and keeps the
+          other; <code>fling use</code> switches between them.
+        </p>
       </Step>
       <Step n={3} title="Fling a folder">
         <p className="text-sm text-secondary">

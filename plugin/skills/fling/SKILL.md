@@ -117,6 +117,10 @@ their shell):
 `fling login` alone signs in to the same one. If a tool says no Fling server is set up, this is
 what to do. (If `fling` isn't installed, use `! npx @nearform/fling login <url>`.)
 
+The CLI can be signed in to several Flings and uses the current one. If the user means a different
+Fling than the one the tools talk to, `! fling use` lists them and `! fling use <url>` switches;
+the tools pick up the change on the next call.
+
 `fling_whoami` checks the login.
 
 ## Sharing and visibility

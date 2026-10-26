@@ -30,6 +30,7 @@ import {
   TEST_KEY,
   tempStore,
   testContext,
+  writeConfig,
 } from './helpers.ts'
 
 afterEach(runCleanups)
@@ -272,10 +273,10 @@ describe('sites base (for showing URLs before a deploy)', () => {
 
   it('fetches and stores the metadata for a 0.2 config that has a server but none stored', async () => {
     const { store } = await tempStore()
-    await store.save({ serverUrl: SERVER, apiKey: TEST_KEY })
+    await writeConfig(store, { serverUrl: SERVER, apiKey: TEST_KEY })
     const m = mockFetch(instanceRoute)
     expect(await loadInstance(store, await store.resolve(), m.fetch)).toEqual(INSTANCE)
-    expect((await store.load()).instance).toEqual(INSTANCE)
+    expect((await store.load()).servers[SERVER]?.instance).toEqual(INSTANCE)
     // Stored now: no second fetch.
     expect(await loadInstance(store, await store.resolve(), m.fetch)).toEqual(INSTANCE)
     expect(m.calls).toHaveLength(1)
@@ -283,7 +284,7 @@ describe('sites base (for showing URLs before a deploy)', () => {
 
   it('is null (not an error) when the server has no metadata', async () => {
     const { store } = await tempStore()
-    await store.save({ serverUrl: SERVER })
+    await store.putServer(SERVER, {})
     expect(await loadInstance(store, await store.resolve(), mockFetch({}).fetch)).toBeNull()
   })
 })
@@ -298,7 +299,7 @@ describe('package identity', () => {
 describe('no default server', () => {
   it('a config with a key but no server (or no config at all) says to run fling login <url>', async () => {
     const { store } = await tempStore()
-    await store.save({ apiKey: TEST_KEY })
+    await writeConfig(store, { apiKey: TEST_KEY })
     const { ctx } = await testContext({ store })
     const error = await captureError(Promise.resolve().then(() => requireClient(ctx)))
     expect(error).toBeInstanceOf(NoServerError)

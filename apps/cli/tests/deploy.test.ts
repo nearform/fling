@@ -287,10 +287,7 @@ describe('fling [dir] command', () => {
         jsonResponse({ status: 'unchanged', versionId: VERSION, site: site() }),
     })
     const store = await loggedInStore()
-    await store.save({
-      ...(await store.load()),
-      instance: { ...INSTANCE, capabilities: { comments: false } },
-    })
+    await store.putServer(SERVER, { instance: { ...INSTANCE, capabilities: { comments: false } } })
     const human = await testContext({ store, fetch: m.fetch })
     await runDeploy(human.ctx, dir, {})
     expect(human.out.content()).not.toContain('/review/')

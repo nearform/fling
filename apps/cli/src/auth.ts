@@ -5,7 +5,8 @@
  * `<server>/auth/cli?redirect_uri=<callback>&hostname=<host>&state=<random>` in the browser, and the
  * server — after sign-in — redirects back with `?key=<api key>` (or `?error=<code>`). If the
  * server echoes `state`, it must match. The callback answers a tiny self-closing page, the CLI
- * verifies the key with `GET /api/me`, and writes the config. Five-minute timeout. The key is never
+ * verifies the key with `GET /api/me`, and stores it in that server's entry of the config (other
+ * servers' entries are kept). Five-minute timeout. The key is never
  * printed in full.
  */
 import { randomBytes } from 'node:crypto'
@@ -37,6 +38,8 @@ export interface LoginOptions {
   hostname?: string
   /** Called with the sign-in URL before the browser is opened (the MCP server reports it). */
   onAuthUrl?: (url: string) => void
+  /** Make the server current once signed in (default: yes). */
+  makeCurrent?: boolean
 }
 
 export interface LoginResult {
@@ -67,12 +70,15 @@ export async function loginFlow(options: LoginOptions): Promise<LoginResult> {
     const client = createApiClient({ serverUrl, apiKey: key, fetch: options.fetch })
     const user = await client.request('GET', '/api/me', { schema: MeSchema })
 
-    await store.update({
+    await store.putServer(
       serverUrl,
-      instance,
-      apiKey: key,
-      user: { email: user.email, name: user.name, userSlug: user.userSlug },
-    })
+      {
+        instance,
+        apiKey: key,
+        user: { email: user.email, name: user.name, userSlug: user.userSlug },
+      },
+      { makeCurrent: options.makeCurrent ?? true }
+    )
     const keyPrefix = redactKey(key)
     log.success(`Signed in as ${user.email}`)
     log.hint(`Server: ${serverUrl}`)

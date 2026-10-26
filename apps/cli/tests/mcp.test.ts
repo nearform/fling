@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { FetchLike } from '../src/api.ts'
-import type { ConfigStore } from '../src/config.ts'
+import { type ConfigStore, createConfigStore } from '../src/config.ts'
 import { createMcpServer, type McpDeps } from '../src/mcp.ts'
 import { NPX_COMMAND } from '../src/package-info.ts'
 import {
@@ -17,6 +17,7 @@ import {
   runCleanups,
   SERVER,
   site,
+  TEST_KEY,
   tempDir,
   tempStore,
   writeTree,
@@ -339,10 +340,69 @@ describe('MCP server', () => {
     const client = await connect(store, m.fetch, undefined, { open, server: SERVER })
     const res = await client.callTool({ name: 'fling_login', arguments: {} })
     expect(text(res)).toMatch(/^Signed in as me@example\.test/)
-    expect((await store.load()).instance).toEqual(INSTANCE)
-    expect((await store.load()).apiKey).toBe('fling_k_0123456789abcdefghij')
+    expect((await store.load()).servers[SERVER]).toMatchObject({
+      instance: INSTANCE,
+      apiKey: 'fling_k_0123456789abcdefghij',
+    })
     const again = await client.callTool({ name: 'fling_login', arguments: {} })
     expect(text(again)).toMatch(/^Already signed in .* as me@example\.test/)
+  })
+
+  it('uses the current server, re-read on every call, unless FLING_URL names one', async () => {
+    const other = 'https://fling.other.test'
+    const { store } = await tempStore()
+    await store.putServer(SERVER, { instance: INSTANCE, apiKey: TEST_KEY })
+    await store.putServer(other, { apiKey: 'fling_other_key_0123456789' })
+    const m = mockFetch({
+      'GET /api/me': () =>
+        jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
+    })
+    const lastCall = () => {
+      const me = m.calls.filter(c => c.url.pathname === '/api/me').at(-1)
+      return {
+        origin: me?.url.origin,
+        auth: (me?.init.headers as Record<string, string> | undefined)?.Authorization,
+      }
+    }
+    const client = await connect(store, m.fetch)
+    await client.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastCall()).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
+    await store.setCurrent(other)
+    await client.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastCall()).toEqual({ origin: other, auth: 'Bearer fling_other_key_0123456789' })
+
+    // The Claude Desktop extension sets FLING_URL from its settings.
+    const extension = createConfigStore({ dir: store.dir, env: { FLING_URL: `${SERVER}/` } })
+    const pinned = await connect(extension, m.fetch)
+    await pinned.callTool({ name: 'fling_whoami', arguments: {} })
+    expect(lastCall()).toEqual({ origin: SERVER, auth: `Bearer ${TEST_KEY}` })
+  })
+
+  it("fling_login for the extension's server keeps the current server", async () => {
+    const other = 'https://fling.other.test'
+    const { store } = await tempStore()
+    await store.putServer(other, { apiKey: 'fling_other_key_0123456789' })
+    const m = mockFetch({
+      ...instanceRoute,
+      'GET /api/me': () =>
+        jsonResponse({ email: 'me@example.test', name: 'Me', picture: null, userSlug: 'me' }),
+    })
+    const open = async (url: string) => {
+      const u = new URL(url)
+      const cb = new URL(u.searchParams.get('redirect_uri') as string)
+      cb.searchParams.set('key', 'fling_k_0123456789abcdefghij')
+      cb.searchParams.set('state', u.searchParams.get('state') as string)
+      await fetch(cb)
+    }
+    const extension = createConfigStore({ dir: store.dir, env: { FLING_URL: SERVER } })
+    const client = await connect(extension, m.fetch, undefined, { open })
+    expect(text(await client.callTool({ name: 'fling_login', arguments: {} }))).toMatch(
+      /^Signed in as me@example\.test/
+    )
+    const config = await store.load()
+    expect(config.current).toBe(other)
+    expect(config.servers[SERVER]?.apiKey).toBe('fling_k_0123456789abcdefghij')
+    expect(config.servers[other]?.apiKey).toBe('fling_other_key_0123456789')
   })
 
   it('fling_login returns after the wait and keeps listening in the background', async () => {

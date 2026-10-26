@@ -60,8 +60,14 @@ export async function tempStore(env: Record<string, string | undefined> = {}) {
 
 export async function loggedInStore() {
   const { store } = await tempStore()
-  await store.save({ serverUrl: SERVER, instance: INSTANCE, apiKey: TEST_KEY })
+  await store.putServer(SERVER, { instance: INSTANCE, apiKey: TEST_KEY })
   return store
+}
+
+/** Write a config file as-is (an older shape, or a broken one). */
+export async function writeConfig(store: ConfigStore, json: unknown) {
+  await mkdir(store.dir, { recursive: true })
+  await writeFile(store.file, typeof json === 'string' ? json : JSON.stringify(json))
 }
 
 export function jsonResponse(body: unknown, status = 200): Response {

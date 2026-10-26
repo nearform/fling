@@ -1,15 +1,27 @@
 /**
- * CLI config: `~/.fling/config.json` (dir 0700, file 0600) holding the server URL, the instance's
- * metadata (`/.well-known/fling`, stored at login), the API key and the signed-in user. There is no
- * default server: `fling login <url>` picks one. Env overrides (for CI): `FLING_API_KEY`,
- * `FLING_URL`, and `FLING_CONFIG_DIR` to relocate the directory. `FLING_DEBUG` enables debug lines.
- * This is the only module that reads `process.env`.
+ * CLI config: `~/.fling/config.json` (dir 0700, file 0600) remembering every Fling server signed in
+ * to, keyed by its normalised address, and which one is current:
+ *
+ *   { "current": "https://fling.example.com",
+ *     "servers": { "https://fling.example.com": { "instance": {…}, "apiKey": "…", "user": {…} } } }
+ *
+ * Each entry holds what the server said about itself at login (`/.well-known/fling`), its API key
+ * and the signed-in user. There is no default server: `fling login <url>` adds one and makes it
+ * current, `fling use <url>` switches. A single-server file (`serverUrl`, `instance`, `apiKey` and
+ * `user` at the top level, written by 0.3) reads as one entry, which is current; the next save
+ * writes the shape above. Entries it cannot read are left out, never fatal.
+ *
+ * Env overrides (for CI and the Claude Desktop extension): `FLING_URL` picks a server for one run
+ * (a remembered one brings its key), `FLING_API_KEY` overrides the key, `FLING_CONFIG_DIR`
+ * relocates the directory. `FLING_DEBUG` enables debug lines. This is the only module that reads
+ * `process.env`.
  */
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { type InstanceMetadata, InstanceMetadataSchema } from '@fling/shared'
 import { z } from 'zod'
+import { CliError } from './errors.ts'
 
 export const CONFIG_DIR_NAME = '.fling'
 export const CONFIG_FILE_NAME = 'config.json'
@@ -23,20 +35,28 @@ export const ENV = {
   downloadsDir: 'FLING_DOWNLOADS_DIR',
 } as const
 
-export const cliConfigSchema = z.object({
-  serverUrl: z.string().url().optional(),
-  /** What `serverUrl` said about itself at login. A copy a newer CLI can't read is just refetched. */
+/** One remembered server. Each field is read on its own: one this CLI can't read is dropped. */
+export const serverEntrySchema = z.object({
+  /** What the server said about itself at login. A copy this CLI can't read is just refetched. */
   instance: InstanceMetadataSchema.optional().catch(undefined),
-  apiKey: z.string().min(1).optional(),
+  apiKey: z.string().min(1).optional().catch(undefined),
   user: z
     .object({
       email: z.string().optional(),
       name: z.string().optional(),
       userSlug: z.string().optional(),
     })
-    .optional(),
+    .optional()
+    .catch(undefined),
 })
-export type CliConfig = z.infer<typeof cliConfigSchema>
+export type ServerEntry = z.infer<typeof serverEntrySchema>
+
+export interface CliConfig {
+  /** The server commands use unless `--server` or `FLING_URL` picks another. */
+  current?: string
+  /** Keyed by normalised server address (`normalizeServerUrl`). */
+  servers: Record<string, ServerEntry>
+}
 
 export type Env = Record<string, string | undefined>
 
@@ -59,11 +79,15 @@ export interface ResolvedConfig {
   /** Unset until `fling login <url>` (or FLING_URL / --server). */
   serverUrl?: string
   serverUrlSource: 'flag' | 'env' | 'config' | 'none'
-  /** The stored metadata, when it belongs to `serverUrl`. */
+  /** The current server; `serverUrl` differs from it when `--server` or FLING_URL picks another. */
+  current?: string
+  /** Whether `serverUrl` has an entry in the config. */
+  remembered: boolean
+  /** The stored metadata of `serverUrl`. */
   instance?: InstanceMetadata
   apiKey?: string
   apiKeySource: 'env' | 'config' | 'none'
-  user?: CliConfig['user']
+  user?: ServerEntry['user']
   debug: boolean
 }
 
@@ -72,11 +96,59 @@ export interface ConfigStore {
   readonly file: string
   load(): Promise<CliConfig>
   save(config: CliConfig): Promise<void>
-  update(patch: Partial<CliConfig>): Promise<CliConfig>
-  /** Remove the key and user, keep `serverUrl` and `instance`. */
-  clearCredentials(): Promise<void>
+  /**
+   * Add a server, or merge `patch` into its entry. It becomes current when `makeCurrent` says so
+   * or, by default, when no server is current.
+   */
+  putServer(
+    serverUrl: string,
+    patch: ServerEntry,
+    options?: { makeCurrent?: boolean }
+  ): Promise<CliConfig>
+  /** Make a server current (with an empty entry if it has none). */
+  setCurrent(serverUrl: string): Promise<void>
+  /** Remove a server's key and user; keep the server and its instance. */
+  clearCredentials(serverUrl: string): Promise<void>
+  /** Forget a server. Forgetting the current one leaves no server current. */
+  removeServer(serverUrl: string): Promise<void>
   /** Merge file + env + an optional `--server` flag into what a command should use. */
   resolve(overrides?: { serverUrl?: string }): Promise<ResolvedConfig>
+}
+
+function safeNormalize(input: unknown): string | undefined {
+  if (typeof input !== 'string') return undefined
+  try {
+    return normalizeServerUrl(input)
+  } catch {
+    return undefined
+  }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** A config file's JSON, in either shape. Throws only when it is not a JSON object. */
+export function parseConfig(json: unknown): CliConfig {
+  if (!isObject(json)) throw new Error('expected a JSON object')
+  const servers: Record<string, ServerEntry> = {}
+  let current: string | undefined
+  if ('servers' in json) {
+    if (isObject(json.servers)) {
+      for (const [key, value] of Object.entries(json.servers)) {
+        const url = safeNormalize(key)
+        const entry = isObject(value) ? serverEntrySchema.safeParse(value) : undefined
+        if (url && entry?.success) servers[url] = { ...servers[url], ...entry.data }
+      }
+    }
+    current = safeNormalize(json.current)
+  } else {
+    // The single-server shape: its server is the one entry, and current.
+    current = safeNormalize(json.serverUrl)
+    if (current) servers[current] = serverEntrySchema.parse(json)
+  }
+  if (current && !servers[current]) servers[current] = {}
+  return current ? { current, servers } : { servers }
 }
 
 export function createConfigStore(options: { dir?: string; env?: Env } = {}): ConfigStore {
@@ -89,7 +161,7 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
     try {
       raw = await readFile(file, 'utf8')
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { servers: {} }
       throw error
     }
     let json: unknown
@@ -98,19 +170,27 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
     } catch {
       throw new Error(`Config file ${file} is not valid JSON`)
     }
-    const parsed = cliConfigSchema.safeParse(json)
-    if (!parsed.success) {
-      throw new Error(`Config file ${file} is invalid: ${parsed.error.issues[0]?.message}`)
+    try {
+      return parseConfig(json)
+    } catch (error) {
+      throw new Error(`Config file ${file} is invalid: ${(error as Error).message}`)
     }
-    return parsed.data
   }
 
   async function save(config: CliConfig): Promise<void> {
     await mkdir(dir, { recursive: true, mode: 0o700 })
     await chmod(dir, 0o700).catch(() => {})
-    await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 })
+    const body = { current: config.current, servers: config.servers }
+    await writeFile(file, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 })
     // `mode` only applies on creation; tighten an existing file too.
     await chmod(file, 0o600)
+  }
+
+  async function edit(change: (config: CliConfig) => void): Promise<CliConfig> {
+    const config = await load()
+    change(config)
+    await save(config)
+    return config
   }
 
   return {
@@ -118,14 +198,33 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
     file,
     load,
     save,
-    async update(patch) {
-      const next = { ...(await load()), ...patch }
-      await save(next)
-      return next
+    putServer(serverUrl, patch, opts = {}) {
+      const url = normalizeServerUrl(serverUrl)
+      return edit(config => {
+        config.servers[url] = { ...config.servers[url], ...patch }
+        if (opts.makeCurrent ?? !config.current) config.current = url
+      })
     },
-    async clearCredentials() {
-      const { serverUrl, instance } = await load()
-      await save({ serverUrl, instance })
+    async setCurrent(serverUrl) {
+      const url = normalizeServerUrl(serverUrl)
+      await edit(config => {
+        config.servers[url] ??= {}
+        config.current = url
+      })
+    },
+    async clearCredentials(serverUrl) {
+      const url = normalizeServerUrl(serverUrl)
+      await edit(config => {
+        const entry = config.servers[url]
+        if (entry) config.servers[url] = entry.instance ? { instance: entry.instance } : {}
+      })
+    },
+    async removeServer(serverUrl) {
+      const url = normalizeServerUrl(serverUrl)
+      await edit(config => {
+        delete config.servers[url]
+        if (config.current === url) config.current = undefined
+      })
     },
     async resolve(overrides = {}) {
       const config = await load()
@@ -136,27 +235,78 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
           ? [overrides.serverUrl, 'flag']
           : envUrl
             ? [envUrl, 'env']
-            : config.serverUrl
-              ? [config.serverUrl, 'config']
+            : config.current
+              ? [config.current, 'config']
               : [undefined, 'none']
-      const serverUrl = rawUrl === undefined ? undefined : normalizeServerUrl(rawUrl)
+      const serverUrl =
+        rawUrl === undefined
+          ? undefined
+          : matchServer(Object.keys(config.servers), rawUrl, { loose: true }).url
+      const entry = serverUrl === undefined ? undefined : config.servers[serverUrl]
       const [apiKey, apiKeySource]: [string | undefined, ResolvedConfig['apiKeySource']] = envKey
         ? [envKey, 'env']
-        : config.apiKey
-          ? [config.apiKey, 'config']
+        : entry?.apiKey
+          ? [entry.apiKey, 'config']
           : [undefined, 'none']
-      const stored = config.serverUrl && normalizeServerUrl(config.serverUrl)
       return {
         serverUrl,
         serverUrlSource,
-        instance: serverUrl && stored === serverUrl ? config.instance : undefined,
+        current: config.current,
+        remembered: entry !== undefined,
+        instance: entry?.instance,
         apiKey,
         apiKeySource,
-        user: config.user,
+        user: entry?.user,
         debug: Boolean(env[ENV.debug]),
       }
     },
   }
+}
+
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+
+/**
+ * Which server `input` names, given the remembered ones. An address that normalises to a
+ * remembered one is that one. Without a scheme, `input` may also name one by host
+ * (`localhost:47101`, whatever its scheme) and, when `loose`, by the start of its address or a
+ * parent domain (`example.com` for `https://fling.example.com`), as long as only one matches.
+ * Anything else is the address as given, not remembered. Throws when `input` is not an address or
+ * matches several servers.
+ */
+export function matchServer(
+  remembered: readonly string[],
+  input: string,
+  options: { loose?: boolean } = {}
+): { url: string; remembered: boolean } {
+  const trimmed = input.trim()
+  const normalized = safeNormalize(trimmed)
+  if (normalized && remembered.includes(normalized)) return { url: normalized, remembered: true }
+  if (!HAS_SCHEME.test(trimmed)) {
+    const bare = trimmed.replace(/\/+$/, '').toLowerCase()
+    const parts = remembered.map(url => {
+      const u = new URL(url)
+      return { url, host: u.host, hostname: u.hostname, address: `${u.host}${u.pathname}` }
+    })
+    const tiers = [
+      parts.filter(p => p.host === bare || p.address === bare),
+      options.loose && bare
+        ? parts.filter(p => p.address.startsWith(bare) || p.hostname.endsWith(`.${bare}`))
+        : [],
+    ]
+    for (const found of tiers) {
+      const [only] = found
+      if (only && found.length === 1) return { url: only.url, remembered: true }
+      if (found.length > 1)
+        throw new CliError(`"${input}" matches more than one server you have signed in to`, {
+          hint: `Use the full address: ${found.map(p => p.url).join(', ')}`,
+        })
+    }
+  }
+  if (!normalized)
+    throw new CliError(`"${input}" is not a server address`, {
+      hint: "Use your Fling's address, e.g. https://fling.example.com.",
+    })
+  return { url: normalized, remembered: false }
 }
 
 /**
@@ -165,7 +315,7 @@ export function createConfigStore(options: { dir?: string; env?: Env } = {}): Co
  */
 export function normalizeServerUrl(input: string): string {
   const trimmed = input.trim()
-  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  const withScheme = HAS_SCHEME.test(trimmed) ? trimmed : `https://${trimmed}`
   const url = new URL(withScheme)
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error(`Not an http(s) URL: ${input}`)

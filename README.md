@@ -11,12 +11,20 @@ email domains.
 Anyone signed in can **review** a site they can open: `<app>/review/<name>` shows the site in a
 frame beside its comments, threads per page that can be replied to, resolved and deleted. The
 frame follows the site's own navigation (single-page apps included) and stays on the site: a link
-elsewhere is stopped, with an offer to open it in a new tab. Pins stick to the element they point at, whatever the reviewer's
-scroll or screen size; clicking one opens its thread and the other way round. Deploying and
-publishing give the review link first, as the one to share for feedback. The
+elsewhere is stopped, with an offer to open it in a new tab. Pins stick to the element they point
+at, whatever the reviewer's scroll or screen size; clicking one opens its thread and the other way
+round. Deploying and publishing give the review link first, as the one to share for feedback. The
 CLI (`fling comments`, `fling comment`), the MCP tools (`fling_comments_list`, …) and the web all
 use the same API. An instance turns comments off with `COMMENTS=false`; its metadata then lacks
 the `comments` capability and every client hides them.
+
+Review is **live**: everyone with a site's review page open is in that site's room. New comments,
+replies and resolutions appear without a refresh, each reviewer's pointer moves on the others'
+screens with their name, and a row of avatars (profile picture or initials) shows who is there,
+dimmed when they are on another page. The room is one WebSocket protocol on every platform: a
+Durable Object on Cloudflare, an API Gateway WebSocket API on AWS. An instance without it
+(`LIVE=false`, or no `LIVE_URL`) lacks the `live` capability, and review works as before, refreshing
+comments every 30 seconds.
 
 - **CLI**: `npm install -g @nearform/fling`, then `fling setup <your Fling's address>` (sign in, plus
   the Claude Code plugin and Claude Desktop extension) and `fling deploy ./dist`. Or run it without

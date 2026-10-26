@@ -1,40 +1,64 @@
 # Fling
 
-**Why Fling?** See the deck, published with Fling itself: <https://why-fling.fling.labs.nearform.com/>
+**Throw it. Get a link.** Fling turns a folder, an HTML file or a zip, made by you or by any agent,
+into `https://<name>.<your Fling>`: private to your team, live in seconds.
 
-Throw a folder of static files at a Fling server and get a link back:
-`https://<name>.<sites domain>`. Sites are private to people signed in to that Fling by default;
-share links open them to anyone with the link. Each deployment (an *instance*) has its own name,
-domains, sign-in and look, which it publishes at `/.well-known/fling`; the CLI, the MCP servers and
-the web UI read it from there, so none of them is tied to one instance. People sign in through the
-instance's OpenID Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its
-email domains.
+```sh
+npm install -g @nearform/fling
+fling setup https://<your Fling>     # sign in, add Fling to Claude Code and Claude Desktop
+fling deploy ./dist --name demo      # → https://demo.<your Fling>/
+```
 
-Anyone signed in can **review** a site they can open: `<app>/review/<name>` shows the site in a
-frame beside its comments, threads per page that can be replied to, resolved and deleted. The
-frame follows the site's own navigation (single-page apps included) and stays on the site: a link
-elsewhere is stopped, with an offer to open it in a new tab. Pins stick to the element they point
-at, whatever the reviewer's scroll or screen size; clicking one opens its thread and the other way
-round. Deploying and publishing give the review link first, as the one to share for feedback. The
-CLI (`fling comments`, `fling comment`), the MCP tools (`fling_comments_list`, …) and the web all
-use the same API. An instance turns comments off with `COMMENTS=false`; its metadata then lacks
-the `comments` capability and every client hides them.
+**Why Fling?** Click through the deck, flung with Fling itself:
+<https://why-fling.fling.labs.nearform.com/>
 
-Review is **live**: everyone with a site's review page open is in that site's room. New comments,
-replies and resolutions appear without a refresh, each reviewer's pointer moves on the others'
-screens with their name, and a row of avatars (profile picture or initials) shows who is there,
-dimmed when they are on another page. The room is one WebSocket protocol on every platform: a
-Durable Object on Cloudflare, an API Gateway WebSocket API on AWS. An instance without it
-(`LIVE=false`, or no `LIVE_URL`) lacks the `live` capability, and review works as before, refreshing
-comments every 30 seconds.
+- **From anywhere.** The CLI, Claude Code (plugin), Claude Desktop (extension), Claude on the web
+  and mobile (connector `https://<your Fling>/mcp`), and any script, CI job or background agent
+  with an API key.
+- **Private by default.** Visitors sign in with your identity provider. Share links, public sites,
+  archive and delete are one command each. Secrets and dotfiles never ship.
+- **Every deploy is a version.** Same link, new contents; roll back instantly.
+- **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
+  agents read the feedback and act on it.
+- **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.
 
-- **CLI**: `npm install -g @nearform/fling`, then `fling setup <your Fling's address>` (sign in, plus
-  the Claude Code plugin and Claude Desktop extension) and `fling deploy ./dist`. Or run it without
-  installing via `npx @nearform/fling`. See [apps/cli](apps/cli/README.md).
+## Use it
+
+- **CLI**: `npm install -g @nearform/fling` (or `npx @nearform/fling`), then
+  `fling setup <your Fling's address>` and `fling deploy ./dist`. Signed in to several Flings,
+  `fling use` switches between them. See [apps/cli](apps/cli/README.md).
 - **Claude (Desktop, web, mobile)**: add the connector `https://<your Fling>/mcp` under
   Settings → Connectors, or install the Claude Desktop extension from the Get started page.
 - **Claude Code**: `fling setup`, or `/plugin marketplace add nearform/fling`, then
   `/plugin install fling@fling`.
+
+## How it works
+
+**Instances.** Each deployment of Fling (an *instance*) has its own name, domains, sign-in and look,
+which it publishes at `/.well-known/fling`. The CLI, the MCP servers and the web UI read it from
+there, so none of them is tied to one instance. People sign in through the instance's OpenID
+Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. Sites
+are private to them by default; share links open a site to anyone with the link.
+
+**Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
+in a frame beside its comments, threads per page that can be replied to, resolved and deleted.
+- The frame follows the site's own navigation (single-page apps included) and stays on the site:
+  a link elsewhere is stopped, with an offer to open it in a new tab.
+- Pins stick to the element they point at, whatever the reviewer's scroll or screen size; clicking
+  one opens its thread and the other way round.
+- Deploying and publishing give the review link first, as the one to share for feedback.
+- The CLI (`fling comments`, `fling comment`), the MCP tools (`fling_comments_list`, …) and the web
+  all use the same API.
+- An instance turns comments off with `COMMENTS=false`; its metadata then lacks the `comments`
+  capability and every client hides them.
+
+**Live review.** Everyone with a site's review page open is in that site's room. New comments,
+replies and resolutions appear without a refresh, each reviewer's pointer moves on the others'
+screens with their name, and a row of avatars (profile picture or initials) shows who is there,
+dimmed when they are on another page. The room is one WebSocket protocol on every platform: a
+Durable Object on Cloudflare, an API Gateway WebSocket API on AWS. An instance without it
+(`LIVE=false`, or no `LIVE_URL`) lacks the `live` capability, and review works as before,
+refreshing comments every 30 seconds.
 
 ## Layout
 

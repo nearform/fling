@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- **One MCP server for every Fling.** The local MCP server (`fling mcp` and the Claude Desktop
+  extension) knows every Fling the CLI remembers. Every tool that talks to a Fling takes an
+  optional `server` (an address, host or unique part of it), and calls use that Fling's own key.
+  An unknown or ambiguous `server` fails with the list of Flings.
+- **The server is chosen explicitly when there are several.** With one Fling (or none) nothing
+  changes: calls go to it. With several, the instructions and tool descriptions list them by host
+  and mark the current one, and tell Claude to settle at the start of a conversation which Fling it
+  uses (from your words, or by asking you, suggesting your current one), say so, and pass it as
+  `server` on every call. A call without `server`, reads included, doesn't run: it answers with the
+  list so Claude can ask. `fling mcp --server` and `FLING_URL` still pin one. The CLI's commands
+  are unchanged and follow `fling use`.
+- `fling_servers` lists the Flings on this computer (address, name, who is signed in, which is
+  current), read when called; `{use: <server>}` makes one current, as `fling use` does.
+- `fling_login` takes `server` to sign in to another Fling, including a new one. It becomes the
+  current Fling only when none is.
+- Deploy, publish and comment results end with the Fling they went to.
+- **One extension.** The extension has the same identity whichever Fling serves it, so installing
+  it from another Fling updates it in place. The address a Fling bakes in (`FLING_MCPB_SERVER_URL`
+  at build time, `FLING_ADD_SERVER` in the extension) is added to the remembered Flings when the
+  server starts, if it isn't there yet; it never replaces a stored key and becomes current only
+  when none is. The extension's **Fling server** setting is gone.
+- Upgrading: remove older Fling extensions from Claude Desktop (Settings → Extensions), then
+  install it once from any of your Flings. Earlier extensions were each tied to one Fling.
+
 ## 0.4.0
 
 - **Several Flings.** The CLI remembers every Fling you sign in to, each with its own API key, and

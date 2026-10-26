@@ -207,7 +207,8 @@ Global options: `--json` prints machine-readable output, and `--server <url>` po
 another server (a remembered one brings its key; see [Several Flings](#several-flings)). Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
-(where the MCP server looks for files given by name first), `FLING_NO_WAIT=1` (after a deploy or a new share
+(where the MCP server looks for files given by name first), `FLING_ADD_SERVER` (a Fling the MCP
+server adds to the remembered ones when it starts), `FLING_NO_WAIT=1` (after a deploy or a new share
 link, don't wait the few seconds it takes to reach every edge).
 
 ## Claude Code plugin and MCP
@@ -227,9 +228,23 @@ Or install it by hand in Claude Code:
 ```
 
 Log in once with `fling login <url>` (or `npx @nearform/fling login <url>` if it is not installed).
-The MCP server reuses that login, and its tool descriptions name your Fling and where its sites
-live. It re-reads the config on every call, so after `fling use <url>` it talks to the new current
-Fling without a restart.
+The MCP server reuses your logins. It re-reads the config on every call, so a `fling login` or
+`fling use` in a terminal takes effect without a restart.
+
+**Several Flings.** The MCP server knows every Fling the CLI remembers, and every tool that talks to
+a Fling takes an optional `server`: its address, host or a unique part of it (as `fling use`
+accepts).
+
+- With one Fling (or none), calls go to it and `server` can be left out. The tool descriptions
+  name that Fling and where its sites live.
+- With several, the server is chosen explicitly. The instructions and descriptions list the Flings
+  by host and mark the current one. Claude settles which Fling the conversation uses at the start,
+  from your words ("on the other one", "on fling.example.com") or by asking you, with your current
+  Fling as the suggestion. It says which one it is using and passes it as `server` on every call,
+  switching only when you ask. A call without `server` (reads included) does not run: it answers
+  with the list of Flings so Claude can ask.
+- `fling mcp --server <url>` (or `FLING_URL`) pins the server: calls without `server` go there.
+- The CLI itself is unchanged: `fling use` and the current Fling govern CLI commands.
 
 The MCP tools:
 
@@ -240,9 +255,15 @@ The MCP tools:
 - `fling_find_files`: recent `.html`/`.zip` files and folders with an `index.html` in those folders,
   newest first (last 14 days by default).
 - `fling_login`: opens the browser sign-in. If you haven't finished after about 30 seconds it returns
-  and keeps waiting in the background for up to 5 minutes.
-- `fling_check_name`, `fling_list`, `fling_info`, `fling_share`, `fling_set_visibility`,
-  `fling_archive`, `fling_rollback`, `fling_delete` (needs `confirm: true`) and `fling_whoami`.
+  and keeps waiting in the background for up to 5 minutes. With `server` it signs in to another
+  Fling, including a new one, which becomes current only if none is.
+- `fling_servers`: lists the Flings on this computer (address, name, who is signed in, which is
+  current), read when called. `{use: <server>}` makes one current, the same as `fling use`.
+- `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
+  `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
+  `confirm: true`), `fling_whoami`, and the comment tools when a Fling has comments.
+
+Results that give URLs (deploys, publishes, comments) end with the Fling they went to.
 
 The MCP server never prompts:
 
@@ -259,23 +280,27 @@ For Claude Desktop (including Cowork), install the one-click extension. It runs 
 on your computer, so Claude can fling files you downloaded or that Claude Desktop saved, by name,
 without uploading anything from Claude's sandbox.
 
-1. Download `fling.mcpb` from your Fling (Get started → Download, or `https://<your Fling>/downloads/fling.mcpb`).
+1. Download `fling.mcpb` from any Fling (Get started → Download, or `https://<your Fling>/downloads/fling.mcpb`).
 2. Double-click it, or drag it into Claude Desktop, or go to **Settings → Extensions → Advanced
    settings → Install Extension…** and pick the file.
-3. Optional settings: **Fling server** (filled in with the Fling you downloaded it from; empty means
-   the one the CLI is logged in to) and **Downloads folder** (default `~/Downloads`).
+3. Optional setting: **Downloads folder** (default `~/Downloads`).
 4. Ask Claude to "fling Pitch Deck.html from my Downloads". If you're not signed in, Claude calls
    `fling_login` and your browser opens. The extension and the CLI share the logins in
-   `~/.fling/config.json`. With **Fling server** set, the extension always uses that Fling (and its
-   stored key), whichever one the CLI is using; signing in from the extension doesn't change the
-   CLI's current Fling.
+   `~/.fling/config.json`.
+
+There is one extension for every Fling. When it starts, it adds the Fling you downloaded it from to
+the ones this computer knows (if it isn't there yet) without changing the current one, unless none
+is current. Installing a copy from another Fling updates the same extension in place. To use
+another Fling, ask Claude to sign in to it (`fling_login` with its address) or run
+`fling login <url>`. With several Flings, Claude agrees with you which one to use, as described in
+[Several Flings](#claude-code-plugin-and-mcp) above.
 
 It needs Node.js 20 or later, which Claude Desktop provides, on macOS or Windows.
 
 Build it with `pnpm --filter ./apps/cli build:mcpb`. That bundles `src/mcp-entry.ts` and every
 dependency into one file, then validates and packs `mcpb/manifest.json` into `dist/fling.mcpb`
-(`FLING_MCPB_SERVER_URL` sets the **Fling server** default). A deploy publishes it at
-`/downloads/fling.mcpb`.
+(with `FLING_MCPB_SERVER_URL` set, its origin is baked into the extension's env as
+`FLING_ADD_SERVER`, the Fling added on start). A deploy publishes it at `/downloads/fling.mcpb`.
 
 To use the MCP server in another client, run it over stdio:
 

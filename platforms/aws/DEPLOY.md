@@ -291,7 +291,8 @@ and, with the deploy role over OIDC:
 2. Syncs `apps/web/dist` to the UI bucket: `assets/` first (hashed, cached for a year, never deleted,
    so open tabs keep working), then the other files, then `index.html` (`no-cache`) last.
    It also uploads the Claude Desktop extension, built by `pnpm --filter ./apps/cli build:mcpb`
-   with `APP_ORIGIN` as its **Fling server** default, to `downloads/fling.mcpb`:
+   with `FLING_MCPB_SERVER_URL=APP_ORIGIN` (the extension adds this Fling to the ones it knows when
+   it starts; it is the same extension whichever Fling serves it), to `downloads/fling.mcpb`:
    `application/octet-stream`, served as an attachment, 5-minute cache. The UI sync excludes
    `downloads/*` so it doesn't delete the extension. The file has an extension, so the SPA function
    leaves it alone and it is served at `https://$APP_DOMAIN/downloads/fling.mcpb`.

@@ -137,7 +137,8 @@ describe('fling comments / comment / resolve / uncomment', () => {
 describe('MCP comment tools', () => {
   async function connect(instance: typeof INSTANCE | null, fetchImpl = mockFetch({}).fetch) {
     const store = await loggedInStore()
-    const server = createMcpServer({ store, fetch: fetchImpl, instance })
+    const servers = instance ? [{ url: SERVER, instance, current: true, signedIn: true }] : []
+    const server = createMcpServer({ store, fetch: fetchImpl, servers })
     const [clientT, serverT] = InMemoryTransport.createLinkedPair()
     const client = new Client({ name: 'test', version: '0.0.0' })
     await Promise.all([server.connect(serverT), client.connect(clientT)])

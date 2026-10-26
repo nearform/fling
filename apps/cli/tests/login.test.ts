@@ -97,7 +97,8 @@ describe('callback server', () => {
     const a = await startCallbackServer({ timeoutMs: 5_000 })
     const b = await startCallbackServer({ timeoutMs: 5_000 })
     try {
-      expect(b.port).toBe(a.port + 1)
+      // Another test file may hold the port right after `a`: `b` takes the next free one.
+      expect(b.port).toBeGreaterThan(a.port)
       expect((await fetch(`http://127.0.0.1:${a.port}/other`)).status).toBe(404)
       const res = await fetch(`${a.url}?error=domain_not_allowed`)
       expect(res.status).toBe(400)

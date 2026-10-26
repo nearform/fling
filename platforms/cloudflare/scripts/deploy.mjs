@@ -2,7 +2,9 @@
 // missing. Used by .github/workflows/deploy-cloudflare.yml and by hand (DEPLOY.md):
 //
 //   1. dist/wrangler.jsonc from wrangler.jsonc + CF_DEPLOY_CONFIG (render-config.mjs);
-//   2. dist/assets and a dry-run bundle check (build.mjs; build apps/web first);
+//   1b. the Claude Desktop extension (apps/cli build:mcpb) with this instance's address filled in,
+//      so a deploy by hand serves the same download as the workflow's;
+//   2. dist/assets and a dry-run bundle check (build.mjs --require-mcpb; build apps/web first);
 //   3. the D1 schema: `wrangler d1 migrations apply --remote` (additive, before the code);
 //   4. the Worker, its assets included: `wrangler deploy`;
 //   5. Fling's data migrations (migrate.ts --remote), after the code, as on AWS;
@@ -40,6 +42,7 @@ const env = {
   CF_DEPLOY_CONFIG: JSON.stringify(config),
   CLOUDFLARE_ACCOUNT_ID: config.CLOUDFLARE_ACCOUNT_ID,
   FLING_WRANGLER_CONFIG: rendered,
+  FLING_MCPB_SERVER_URL: appOrigin,
   WRANGLER_SEND_METRICS: 'false',
 }
 const run = (title, cmd, argv) => {
@@ -48,7 +51,16 @@ const run = (title, cmd, argv) => {
 }
 
 run('Render the Worker config', process.execPath, [join(ROOT, 'scripts', 'render-config.mjs')])
-run('Build the assets and check the bundle', process.execPath, [join(ROOT, 'scripts', 'build.mjs')])
+run('Build the Claude Desktop extension', 'pnpm', [
+  '--dir',
+  join(ROOT, '..', '..', 'apps', 'cli'),
+  'run',
+  'build:mcpb',
+])
+run('Build the assets and check the bundle', process.execPath, [
+  join(ROOT, 'scripts', 'build.mjs'),
+  '--require-mcpb',
+])
 run('Apply the D1 schema', bin('wrangler'), [
   'd1',
   'migrations',

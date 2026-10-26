@@ -35,6 +35,7 @@ This does everything a new machine needs:
 1. **Signs you in.** The CLI reads the server's `/.well-known/fling` (its name, where its sites
    live, how people sign in) and remembers it. Your browser opens for sign-in and an API key is
    stored in `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
+   The server becomes your current one; logins to other Flings are kept.
 2. **Adds Fling to Claude Code.** If `claude` is on your PATH, setup installs the Fling plugin
    (skill + MCP server) from the `nearform/fling` marketplace, or updates it if it's already
    installed. `--scope project|local` installs it for this project only (default `user`).
@@ -45,8 +46,25 @@ On a terminal it asks before steps 2 and 3. With `--yes` it does them without as
 
 To sign in only, use `fling login <url>` (the URL is remembered: later `fling login` needs none).
 There is no default server: until you log in, commands say to run `fling login <url>`.
-`fling whoami` shows who you are, and `fling logout` removes the key (and keeps the server). For CI,
-set `FLING_URL` and `FLING_API_KEY` instead.
+`fling whoami` shows who you are and which server is current. For CI, set `FLING_URL` and
+`FLING_API_KEY` instead.
+
+### Several Flings
+
+The CLI remembers every Fling you sign in to, each with its own key, and uses the current one.
+`fling login <url>` or `fling setup <url>` adds a Fling (or signs in to it again) and makes it
+current; the others stay signed in.
+
+```sh
+fling use                              # list them: * marks the current one, with its name and your email
+fling use other.example.com            # switch: a full address, its host, or the start of it
+fling --server other.example.com ls    # one command against another Fling, with its own key
+```
+
+`FLING_URL` picks a Fling the same way for every command run with it, and `FLING_API_KEY`
+overrides the stored key. `fling logout` removes the current Fling's key and keeps it current (a
+bare `fling login` signs in again); `fling logout <url>` signs out of another Fling and forgets
+it.
 
 ## Deploy
 
@@ -186,7 +204,7 @@ feedback (`reviewUrl` in `--json`); reviewers sign in to use it.
 | `fling uncomment <name> <id> [--yes]` | delete a comment (a thread with its replies): your own, or any on your site |
 
 Global options: `--json` prints machine-readable output, and `--server <url>` points one command at
-another server. Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
+another server (a remembered one brings its key; see [Several Flings](#several-flings)). Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
 (where the MCP server looks for files given by name first), `FLING_NO_WAIT=1` (after a deploy or a new share
@@ -210,7 +228,8 @@ Or install it by hand in Claude Code:
 
 Log in once with `fling login <url>` (or `npx @nearform/fling login <url>` if it is not installed).
 The MCP server reuses that login, and its tool descriptions name your Fling and where its sites
-live.
+live. It re-reads the config on every call, so after `fling use <url>` it talks to the new current
+Fling without a restart.
 
 The MCP tools:
 
@@ -246,8 +265,10 @@ without uploading anything from Claude's sandbox.
 3. Optional settings: **Fling server** (filled in with the Fling you downloaded it from; empty means
    the one the CLI is logged in to) and **Downloads folder** (default `~/Downloads`).
 4. Ask Claude to "fling Pitch Deck.html from my Downloads". If you're not signed in, Claude calls
-   `fling_login` and your browser opens. The extension and the CLI share the login in
-   `~/.fling/config.json`.
+   `fling_login` and your browser opens. The extension and the CLI share the logins in
+   `~/.fling/config.json`. With **Fling server** set, the extension always uses that Fling (and its
+   stored key), whichever one the CLI is using; signing in from the extension doesn't change the
+   CLI's current Fling.
 
 It needs Node.js 20 or later, which Claude Desktop provides, on macOS or Windows.
 

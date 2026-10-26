@@ -59,8 +59,9 @@ the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets its
 Open the same review page in two browser profiles to see each other's pointers.
 
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
-`pnpm cli deploy <folder>`. To keep this config away from your real one, set
-`FLING_CONFIG_DIR=$(mktemp -d)`.
+`pnpm cli deploy <folder>`. The CLI remembers it beside any other Fling you are signed in to:
+`pnpm cli use` lists them and `pnpm cli use <url>` switches back. To keep a throwaway login away
+from your real config altogether, set `FLING_CONFIG_DIR=$(mktemp -d)`.
 
 **The e2e scenario.** Run `pnpm build && pnpm e2e` (or `pnpm --filter @fling/e2e e2e aws` for one
 runtime). It starts each runtime on free ports with fresh state, runs

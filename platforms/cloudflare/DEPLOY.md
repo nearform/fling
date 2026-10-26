@@ -203,8 +203,8 @@ deploys of one name (conditional writes: exactly one site), an MCP publish, then
 three sites it made (`e2e-<random>…`).
 
 It signs in with an API key: as a test user that `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` admits, run
-`FLING_CONFIG_DIR=$(mktemp -d) fling login https://$APP_HOST` and take `apiKey` from the
-`config.json` in that directory (revoke it any time on the web UI's API keys page), and store it as
+`FLING_CONFIG_DIR=$(mktemp -d) fling login https://$APP_HOST` and take the server's `apiKey`
+(under `servers`) from the `config.json` in that directory (revoke it any time on the web UI's API keys page), and store it as
 the `FLING_E2E_API_KEY` secret. Without it the deploy warns and skips the test. By hand:
 
 ```bash

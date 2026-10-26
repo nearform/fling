@@ -116,8 +116,7 @@ describe('fling comments / comment / resolve / uncomment', () => {
 
   it('says so when the instance has comments turned off', async () => {
     const { store } = await tempStore()
-    await store.save({
-      serverUrl: SERVER,
+    await store.putServer(SERVER, {
       apiKey: TEST_KEY,
       instance: { ...INSTANCE, capabilities: { comments: false } },
     })

@@ -1,8 +1,10 @@
 /**
  * `fling mcp` (and the Claude Desktop extension, mcp-entry.ts) — a stdio MCP server exposing the
- * same operations as the CLI, for agents. It reuses the CLI's stored login (`~/.fling/config.json`
- * or `FLING_API_KEY`), re-read on every call so a `fling login` in another terminal takes effect
- * without a restart; `fling_login` runs the same browser sign-in itself.
+ * same operations as the CLI, for agents. It reuses the CLI's stored logins (`~/.fling/config.json`
+ * or `FLING_API_KEY`), re-read on every call so a `fling login` or `fling use` in another terminal
+ * takes effect without a restart. It talks to the CLI's current server unless `FLING_URL` (the
+ * extension's setting) or `--server` names one, with that server's stored key. `fling_login` runs
+ * the same browser sign-in itself, and makes its server current only when none other is.
  *
  * Tools shared with the remote connector (fling_publish, fling_list, …) take their names,
  * descriptions and schemas from `@fling/shared` mcp-tools. Descriptions name the instance the CLI is
@@ -544,6 +546,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             open: deps.open ?? (async url => (await import('open')).default(url)),
             fetch: fetchImpl,
             timeoutMs: deps.loginTimeoutMs,
+            // Signing in to the extension's server leaves the CLI's current server as it is.
+            makeCurrent: !config.current || config.current === serverUrl,
             onAuthUrl: url => {
               login.url = url
             },

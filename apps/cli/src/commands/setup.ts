@@ -2,7 +2,8 @@
  * `fling setup [url] [--yes] [--scope user|project|local]` — get a machine ready in one go:
  *
  *   1. Sign in, to the Fling at `url` (needed the first time: there is no default server); skipped
- *      when the stored key for that server still works.
+ *      when the stored key for that server still works. Either way it becomes the current server,
+ *      and the logins to other servers are kept.
  *   2. Claude Code: install the Fling plugin (skill + MCP server) through the `claude` CLI, or
  *      update it when it is already installed. Skipped, with a hint, when `claude` is missing.
  *   3. Claude Desktop (macOS / Windows, when it is installed): download fling.mcpb and open it;
@@ -26,18 +27,17 @@ import {
   runClaude,
   updatePlugin,
 } from '../claude.ts'
-import { normalizeServerUrl } from '../config.ts'
 import { type CommandContext, requireClient, requireServer } from '../context.ts'
 import { CliError, exitCodeFor } from '../errors.ts'
 import { whoami } from '../sites.ts'
 import { logo } from '../ui/theme.ts'
 import { createLogger } from '../utils/logger.ts'
-import { runLogin } from './auth.ts'
+import { loginServer, runLogin } from './auth.ts'
 
 export interface SetupOptions {
   yes?: boolean
   scope?: string
-  /** The Fling to sign in to; default: the one logged in to before. */
+  /** The Fling to sign in to; default: the current one. */
   url?: string
 }
 
@@ -78,14 +78,16 @@ export async function runSetup(
     intro(chalk.bold(' fling setup '), { output: process.stderr })
   }
 
+  const login = await stepLogin(ctx, opts.url)
   const results: Record<'login' | 'claudeCode' | 'claudeDesktop', StepResult> = {
-    login: await stepLogin(ctx, opts.url),
+    login: login.result,
     claudeCode: 'skipped',
     claudeDesktop: 'skipped',
   }
-  // A login stores the server (and may have changed it): read the config again.
-  const after: CommandContext =
-    results.login === 'done' ? { ...ctx, config: await ctx.store.resolve() } : ctx
+  // The later steps use the server signed in to, with what the login stored.
+  const after: CommandContext = login.serverUrl
+    ? { ...ctx, config: await ctx.store.resolve({ serverUrl: login.serverUrl }) }
+    : ctx
   results.claudeCode = await stepClaudeCode(after, run, scope, ask, fancy)
   results.claudeDesktop = await stepClaudeDesktop(after, deps, ask, fancy)
 
@@ -101,12 +103,31 @@ export async function runSetup(
   if (failed) process.exitCode = 1
 }
 
-async function stepLogin(ctx: CommandContext, url: string | undefined): Promise<StepResult> {
-  // A different server than the stored one: always sign in to it.
-  const sameServer = url === undefined || safeNormalize(url) === ctx.config.serverUrl
-  if (ctx.config.apiKey && sameServer) {
+/**
+ * Sign in to `url` (default: the server this command uses) unless its stored key still works.
+ * Either way the server becomes current. Returns the server, when there is one.
+ */
+async function stepLogin(
+  ctx: CommandContext,
+  url: string | undefined
+): Promise<{ result: StepResult; serverUrl?: string }> {
+  let serverUrl: string
+  let target: CommandContext
+  try {
+    serverUrl = await loginServer(ctx, url)
+    target = { ...ctx, config: await ctx.store.resolve({ serverUrl }) }
+  } catch (error) {
+    ctx.log.error(error instanceof Error ? error.message : String(error))
+    return { result: 'failed' }
+  }
+  return { result: await signIn(target, serverUrl), serverUrl }
+}
+
+async function signIn(ctx: CommandContext, serverUrl: string): Promise<StepResult> {
+  if (ctx.config.apiKey) {
     try {
       const me = await whoami(requireClient(ctx))
+      if (ctx.config.remembered) await ctx.store.setCurrent(serverUrl)
       ctx.log.success(`Signed in as ${chalk.bold(me.name)} ${chalk.dim(`<${me.email}>`)}`)
       return 'already'
     } catch (error) {
@@ -119,19 +140,11 @@ async function stepLogin(ctx: CommandContext, url: string | undefined): Promise<
   }
   try {
     // runLogin prints JSON under --json; setup prints one summary instead.
-    await runLogin({ ...ctx, json: false }, url)
+    await runLogin({ ...ctx, json: false }, serverUrl)
     return 'done'
   } catch (error) {
     ctx.log.error(error instanceof Error ? error.message : String(error))
     return 'failed'
-  }
-}
-
-function safeNormalize(url: string): string | undefined {
-  try {
-    return normalizeServerUrl(url)
-  } catch {
-    return undefined
   }
 }
 

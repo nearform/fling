@@ -6,7 +6,7 @@
  */
 import chalk from 'chalk'
 import { Command } from 'commander'
-import { runLogin, runLogout, runWhoami } from './commands/auth.ts'
+import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
 import { runSetup } from './commands/setup.ts'
@@ -41,7 +41,10 @@ program
   .name(BIN_NAME)
   .description('Fling a folder of static files at Fling and get a link back')
   .version(VERSION)
-  .option('--server <url>', `server URL (default: $${ENV.url}, else the one you logged in to)`)
+  .option(
+    '--server <url>',
+    `server for this command: a URL, or the host of one you signed in to (default: $${ENV.url}, else the current one)`
+  )
   .option('--json', 'print JSON instead of human output', false)
   .showHelpAfterError()
   .configureHelp({
@@ -61,6 +64,7 @@ program
 ${chalk.bold(brand.primary('Examples:'))}
   $ ${BIN_NAME} login https://fling.example.com  sign in to your Fling (once; there is no default)
   $ ${BIN_NAME} setup                      sign in and add Fling to Claude Code / Claude Desktop
+  $ ${BIN_NAME} use                        list the Flings you signed in to; \`use <url>\` switches
   $ ${BIN_NAME} deploy ./dist --name my-app → https://my-app.<your sites domain>
   $ ${BIN_NAME} ./dist                     the same: an existing path deploys
   $ ${BIN_NAME} ./dist --yes               no prompts (CI): use the generated name, fail if it is taken
@@ -150,7 +154,7 @@ program
   .command('setup [url]')
   .helpGroup('Setup:')
   .description(
-    'sign in (to the Fling at url, the first time), then add the Fling plugin to Claude Code and the extension to Claude Desktop'
+    'sign in (to the Fling at url, which becomes current), then add the Fling plugin to Claude Code and the extension to Claude Desktop'
   )
   .option('-y, --yes', 'do every step without asking')
   .option('-s, --scope <scope>', 'Claude Code plugin scope: user, project or local', 'user')
@@ -163,7 +167,7 @@ program
   .command('login [url]')
   .helpGroup('Setup:')
   .description(
-    'sign in through the browser to the Fling at url (remembered; later logins can omit it) and store an API key'
+    'sign in through the browser to the Fling at url and store an API key; it becomes the current server (default: the current one)'
   )
   .action(
     action(async (ctx, url: string | undefined) => {
@@ -172,14 +176,23 @@ program
     })
   )
 program
-  .command('logout')
+  .command('use [url]')
   .helpGroup('Setup:')
-  .description('remove the stored API key')
-  .action(action(ctx => runLogout(ctx)))
+  .description(
+    'switch to another Fling you signed in to (a URL or its host); without url, list them'
+  )
+  .action(action((ctx, url: string | undefined) => runUse(ctx, url)))
+program
+  .command('logout [url]')
+  .helpGroup('Setup:')
+  .description(
+    "remove a server's API key (default: the current server's, which stays current); any other server is forgotten"
+  )
+  .action(action((ctx, url: string | undefined) => runLogout(ctx, url)))
 program
   .command('whoami')
   .helpGroup('Setup:')
-  .description('show the signed-in user')
+  .description('show the signed-in user and the current server')
   .action(action(ctx => runWhoami(ctx)))
 // `help` sits with the setup commands instead of under its own "Commands:" heading.
 program.commandsGroup('Setup:').helpCommand('help [command]', 'show help for a command')

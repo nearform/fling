@@ -18,6 +18,10 @@ paths:
   Node built-ins besides `crypto` and a small code-size limit). That is why they have their own Biome
   overrides. Keep them dependency-free, and run `pnpm --filter @fling/edge build` and its tests
   after a change.
+- Node is more permissive than that runtime, so local tests can pass on code CloudFront rejects. For
+  example, `await` must be a whole statement or assignment, never inside call arguments or a
+  ternary. `edge/build.mjs` checks what it can. The deploy runs the function in CloudFront
+  (`test-function`) before publishing it, because an error there takes every site down.
 - The edge enforces `site.view` from the visibility stored in the route table, and the API keeps
   the route table in step on every write. `apps/api/tests/policy.test.ts` keeps the edge and
   `policy.ts` in agreement.

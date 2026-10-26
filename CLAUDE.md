@@ -10,8 +10,8 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
   releasing): [docs/development.md](docs/development.md).
 - Deploying an instance: [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md),
   [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md).
-- Rules for agents: [.claude/rules/](.claude/rules/). Some always load; the rest load when you touch
-  the paths they name.
+- Area rules: [.claude/rules/](.claude/rules/), each loaded when you touch the paths it names
+  (persistence and migrations, access and auth, config and branding, site routing, testing).
 
 ## Layout
 
@@ -41,6 +41,44 @@ pnpm gate                                       # lint, terraform, typecheck, te
 
 Run `pnpm gate` before every commit. CI runs exactly that command and adds only DynamoDB Local and
 MinIO. Those suites skip locally unless you start the services (`platforms/aws/tests/services.ts`).
+
+## Architecture rules
+
+Fling runs on several clouds and is not tied to any one instance. Every change keeps it that way.
+
+- **The core is cloud-agnostic.** `apps/api` and `packages/shared` never import a cloud SDK; Biome
+  enforces this. Cloud code lives in `platforms/<cloud>/`, behind the core's ports: `Table`,
+  `Blobs`, `RouteTable` and `IdentityProvider`. A new storage need extends a port and every
+  adapter, and the conformance suite proves they agree.
+- **Write once.** Domain logic, Records, migrations, policy and the sites' routing decision exist
+  once. Platforms only adapt. If you are writing the same logic in two platforms, move it into the
+  core.
+- **Capabilities, never platform checks.** When instances differ, the core advertises a flag in
+  `/.well-known/fling` (`capabilities`, `apps/api/src/instance.ts`). Clients read the flag; nothing
+  checks which cloud it is on.
+- **The edge only rewrites.** The CloudFront Function and the Worker's sites host map
+  `routeSiteRequest` (`packages/shared/src/site-routing.ts`) onto their runtime.
+- **Authorization goes through `policy.ts`** (`can`, `canInstance`). Nothing else decides access.
+- **Instance-agnostic artifacts.** The CLI, plugin, MCP servers and web UI learn everything about an
+  instance from `/.well-known/fling`. No instance's domain, email, logo or colour appears in the
+  code.
+- **Every platform passes everything.** A feature is done when the conformance suites pass on every
+  adapter and the e2e scenario (`packages/e2e/src/scenario.ts`) covers it on both local runtimes.
+
+## Writing code, comments and docs
+
+- **Describe what is, not what was.** Comments, docs and test names state the current behaviour and
+  why. No "previously", "used to", "no longer", "the old X", phase numbers or who asked for it:
+  history belongs in git and PR descriptions. Exceptions: migration headers (the data they
+  rewrite) and upgrade notes in `apps/cli/CHANGELOG.md`.
+- Match the surrounding code. File headers explain the module's job and constraints; inline
+  comments explain why, never what.
+- Use CONTEXT.md's terms. When you add a concept, add it there: a bold term, a short definition and
+  the file that owns it.
+- Prose is British English (behaviour, colour), plain and direct. Formatting is Biome's
+  (`pnpm lint:fix`).
+- When behaviour changes, update its docs in the same change: README, CONTEXT.md,
+  `docs/development.md`, the deploy guides, `apps/cli/README.md`, the plugin's `SKILL.md`.
 
 ## Shipping
 

@@ -30,3 +30,5 @@ paths:
   Run them locally (see `services.ts`) before you push such a change.
 - API tests use the helpers in `apps/api/tests/helpers.ts`, and `tests/idp.ts` for a fake OIDC
   provider. Never call a real provider or cloud in a unit test.
+- Timeouts and the test include pattern come from `vitest.shared.ts`. CI runners are slow, so don't
+  lower the timeouts per test.

@@ -12,8 +12,11 @@
 // SYNTAX. This file runs in the CloudFront Functions runtime (cloudfront-js-2.0: ES5.1 plus
 // const/let, arrow functions, template literals, async/await on function declarations). So: no
 // destructuring, spread, default parameters, for-of, optional chaining, `??`, classes or async
-// arrow functions/expressions, and only built-ins that runtime has. edge/build.mjs refuses a
-// bundle that needed any syntax lowered, and edge's tests run the bundle in a harness.
+// arrow functions/expressions, and only built-ins that runtime has. `await` only as a statement
+// or a declaration's whole initializer (`x = await f()`), never inside a call's arguments or another
+// expression: the runtime rejects that ("await in arguments not supported"). edge/build.mjs
+// refuses a bundle that needed any syntax lowered or nests an await, and edge's tests run the
+// bundle in a harness.
 //
 // Contracts: route-keys.ts (keys), site-labels.ts (labels), site-cookie.ts (the cookie format).
 
@@ -146,14 +149,17 @@ export async function routeSiteRequest(
 
   const host = req.host.toLowerCase()
   const target = routeKeyForHost(host)
-  const site = parseRoute(target ? await ctx.getRoute(target.key) : null)
+  let raw: string | null = null
+  if (target) raw = await ctx.getRoute(target.key)
+  const site = parseRoute(raw)
   if (!target || !site || !site.id || !site.v || DOT_SEGMENT_RE.test(uri)) {
     return { action: 'rewrite', uri: MISSING_KEY }
   }
 
   if (site.vis !== 'public' && !target.share) {
     const cookie = req.cookie
-    const key = cookie !== null ? await ctx.getCookieKey() : null
+    let key: string | null = null
+    if (cookie !== null) key = await ctx.getCookieKey()
     if (!key || !validSiteCookie(cookie || '', key, ctx.nowSeconds, ctx.hmac)) {
       const back = `${ctx.siteScheme}://${host}${uri}${req.query}`
       return redirect(302, `${ctx.appOrigin}/auth/login?return=${encodeURIComponent(back)}`, true)

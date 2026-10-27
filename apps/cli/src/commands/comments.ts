@@ -55,6 +55,7 @@ export async function runComments(
       }
       const state = c.resolvedAt ? chalk.green(' ✓ resolved') : ''
       lines.push(`${chalk.dim(c.id)}${state}  ${describe(c, list.site.currentVersionId)}`)
+      if (c.anchor?.quote) lines.push(chalk.dim(`  > ${c.anchor.quote}`))
       lines.push(...c.body.split('\n').map(l => `  ${l}`))
       for (const r of replies) {
         lines.push(`  ${chalk.dim('↳')} ${describe(r, list.site.currentVersionId)}`)

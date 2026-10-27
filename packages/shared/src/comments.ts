@@ -5,8 +5,9 @@
 // A comment is made in review mode: an app-origin page that frames the review shell, a page on the
 // site's own origin that frames the site and reports what it sees (review-bridge.ts). A comment
 // attaches to `{ path, versionId }`, the page the frame was showing and the version being served
-// when it was made. An optional `anchor` is the spot the reviewer pinned, with enough context
-// (element, document point, scroll, viewport, SPA hash route) to find it again on another screen.
+// when it was made. An optional `anchor` is the spot the reviewer pinned (a point, a box they drew
+// or text they selected), with enough context (element, document point, scroll, viewport, SPA hash
+// route, the quoted text) to find it again on another screen.
 
 import { z } from 'zod'
 
@@ -29,6 +30,8 @@ export type CommentAuthor = z.infer<typeof CommentAuthorSchema>
 
 /** Characters in an anchor's CSS selector. */
 export const ANCHOR_SELECTOR_MAX = 512
+/** Characters of selected text an anchor quotes. */
+export const ANCHOR_QUOTE_MAX = 500
 
 const px = z.number().finite().min(-1e7).max(1e7)
 const percent = z.number().min(0).max(100)
@@ -39,6 +42,11 @@ const percent = z.number().min(0).max(100)
  * element and the point inside it, as percentages of its box), then `docX`/`docY` (document
  * pixels), then `x`/`y`. `scrollX`/`scrollY` and `vw`/`vh` record the scroll and viewport the pin
  * was placed with; `hash` is the page's fragment, the route of a hash-routed single-page app.
+ *
+ * An area (a box the reviewer drew, or text they selected) has the spot as its top-left corner and
+ * a size: `ew`/`eh` (percentages of the element's box) and `docW`/`docH` (document pixels). Selected
+ * text also has its `quote`, which the shell finds again inside the element before falling back to
+ * the box.
  */
 export const CommentAnchorSchema = z.object({
   x: percent,
@@ -53,6 +61,11 @@ export const CommentAnchorSchema = z.object({
   vw: z.number().finite().min(0).max(1e5).optional(),
   vh: z.number().finite().min(0).max(1e5).optional(),
   hash: z.string().max(COMMENT_PATH_MAX).optional(),
+  ew: percent.optional(),
+  eh: percent.optional(),
+  docW: z.number().finite().min(0).max(1e7).optional(),
+  docH: z.number().finite().min(0).max(1e7).optional(),
+  quote: z.string().min(1).max(ANCHOR_QUOTE_MAX).optional(),
 })
 export type CommentAnchor = z.infer<typeof CommentAnchorSchema>
 

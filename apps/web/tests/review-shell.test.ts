@@ -5,6 +5,7 @@ import {
   buildSelector,
   framedPath,
   leavesSite,
+  locateQuote,
   resolveAnchor,
   type SelectorNode,
 } from '../src/lib/review-shell'
@@ -118,12 +119,97 @@ describe('anchors', () => {
     })
   })
 
+  it('records an area as its top-left spot and its size, in the element and the document', () => {
+    const anchor = anchorFor(
+      { clientX: 250, clientY: 100, width: 100, height: 25 },
+      view,
+      '',
+      { selector: '#card', box: { left: 200, top: 50, width: 200, height: 100 } },
+      '  The   heading\n is too big '
+    )
+    expect(anchor).toMatchObject({
+      ex: 25,
+      ey: 50,
+      ew: 50,
+      eh: 25,
+      docX: 250,
+      docY: 1300,
+      docW: 100,
+      docH: 25,
+      quote: 'The heading is too big',
+    })
+    expect(CommentAnchorSchema.parse(anchor)).toEqual(anchor)
+    expect(
+      anchorFor({ clientX: 1, clientY: 1 }, view, '', null, 'x'.repeat(900)).quote
+    ).toHaveLength(500)
+  })
+
+  it('resolves an area through the element, scaling with it, then the document', () => {
+    const anchor = anchorFor({ clientX: 250, clientY: 100, width: 100, height: 25 }, view, '', {
+      selector: '#card',
+      box: { left: 200, top: 50, width: 200, height: 100 },
+    })
+    const now = { width: 400, height: 800, scrollX: 0, scrollY: 0 }
+    expect(
+      resolveAnchor(anchor, now, () => ({ left: 0, top: 600, width: 400, height: 200 }))
+    ).toEqual({
+      x: 100,
+      y: 700,
+      inDocument: true,
+      rects: [{ left: 100, top: 700, width: 200, height: 50 }],
+    })
+    expect(resolveAnchor(anchor, { ...now, scrollY: 1000 }, () => null)).toEqual({
+      x: 250,
+      y: 300,
+      inDocument: true,
+      rects: [{ left: 250, top: 300, width: 100, height: 25 }],
+    })
+  })
+
+  it('resolves quoted text to its lines first, and to the area when the text has changed', () => {
+    const anchor = anchorFor(
+      { clientX: 250, clientY: 100, width: 100, height: 25 },
+      view,
+      '',
+      { selector: '#card', box: { left: 200, top: 50, width: 200, height: 100 } },
+      'is too big'
+    )
+    const card = () => ({ left: 200, top: 50, width: 200, height: 100 })
+    const lines = [
+      { left: 210, top: 60, width: 80, height: 16 },
+      { left: 200, top: 76, width: 30, height: 16 },
+    ]
+    expect(resolveAnchor(anchor, view, card, () => lines)).toEqual({
+      x: 210,
+      y: 60,
+      inDocument: true,
+      rects: lines,
+    })
+    expect(resolveAnchor(anchor, view, card, () => null).rects).toEqual([
+      { left: 250, top: 100, width: 100, height: 25 },
+    ])
+  })
+
   it('places an x/y-only anchor in the viewport', () => {
     expect(resolveAnchor({ x: 50, y: 10 }, view, () => null)).toEqual({
       x: 500,
       y: 50,
       inDocument: false,
     })
+  })
+})
+
+describe('locateQuote', () => {
+  it('finds a quote across text nodes, ignoring how whitespace differs', () => {
+    // <p>The <em>quick</em></p><p>brown fox</p>: the selection reads "quick\n\nbrown"
+    const texts = ['The ', 'quick', 'brown fox']
+    expect(locateQuote(texts, 'quick\n\nbrown')).toEqual({ start: [1, 0], end: [2, 5] })
+    expect(locateQuote(texts, 'fox')).toEqual({ start: [2, 6], end: [2, 9] })
+  })
+
+  it('is null for text that is not there, or only whitespace', () => {
+    expect(locateQuote(['The quick'], 'slow')).toBeNull()
+    expect(locateQuote(['The quick'], ' \n ')).toBeNull()
   })
 })
 

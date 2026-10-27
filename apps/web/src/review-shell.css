@@ -73,6 +73,31 @@ body {
 .pin.resolved {
   opacity: 0.55;
 }
+
+/* The selected pin's area: the box drawn for it, or a highlight per line of the text it quotes. */
+.area i,
+#marquee {
+  position: absolute;
+  inset: 0 auto auto 0;
+  box-sizing: border-box;
+}
+.area.box i {
+  border: 2px solid var(--pin-selected);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--pin-selected) 12%, transparent);
+}
+.area.quote i {
+  background: color-mix(in srgb, var(--pin-selected) 32%, transparent);
+  border-block-end: 2px solid color-mix(in srgb, var(--pin-selected) 70%, transparent);
+}
+.area.resolved {
+  opacity: 0.4;
+}
+#marquee {
+  border: 2px dashed var(--placer);
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, var(--placer) 12%, transparent);
+}
 .pin.selected {
   background: var(--pin-selected);
   color: #1c1c3a;

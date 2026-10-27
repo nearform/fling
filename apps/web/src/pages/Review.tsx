@@ -7,8 +7,9 @@
  * The frame holds the review shell (`/_fling/review.html` on the site's origin), which frames the
  * site and talks to this page over the review bridge (@fling/shared/review-bridge). The shell
  * reports where the frame is (path and hash route, through SPA navigation), keeps it on the site,
- * turns a click into an anchor when placing a pin, draws the pins and other reviewers' pointers,
- * and says when a pin is clicked. This page owns the data: new comments attach to the path the
+ * turns a click or a drag into an anchor when placing a pin, reports text the reviewer selects
+ * (which pins the new comment to it, unless they placed a pin), draws the pins and other
+ * reviewers' pointers, and says when a pin is clicked. This page owns the data: new comments attach to the path the
  * shell reports, and the path bar and `?path=` follow it. With the `live` capability, the site's
  * live room (useLive) shows who else is reviewing, where they point, and refetches comments as
  * soon as anyone changes them.
@@ -140,7 +141,12 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
   const [showResolved, setShowResolved] = useState(false)
   const [showPins, setShowPins] = useState(true)
   const [placing, setPlacing] = useState(false)
-  const [pin, setPin] = useState<{ anchor: CommentAnchor; at: FrameLocation } | null>(null)
+  // The new comment's pin: placed (a spot or a box), or taken from text selected in the page.
+  const [pin, setPin] = useState<{
+    anchor: CommentAnchor
+    at: FrameLocation
+    from: 'placed' | 'selection'
+  } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const threads = useMemo(() => commentThreads(list.comments), [list.comments])
@@ -196,8 +202,15 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
         break
       }
       case 'pinPlaced':
-        setPin({ anchor: m.anchor, at: atRef.current })
+        setPin({ anchor: m.anchor, at: atRef.current, from: 'placed' })
         setPlacing(false)
+        break
+      case 'textSelected':
+        // Selecting text pins the new comment to it, but never moves a pin the reviewer placed.
+        if (!list.can.create) break
+        setPin(p =>
+          p?.from === 'placed' ? p : { anchor: m.anchor, at: atRef.current, from: 'selection' }
+        )
         break
       case 'pinCancelled':
         setPlacing(false)
@@ -606,8 +619,17 @@ function Composer({
       />
       <div className="flex flex-wrap items-center gap-2">
         {pin ? (
-          <span className="badge badge-sm tone-primary gap-1">
-            <MapPinIcon className="h-3 w-3" aria-hidden /> Pinned
+          <span className="badge badge-sm tone-primary h-auto min-w-0 max-w-full gap-1">
+            <MapPinIcon className="h-3 w-3 shrink-0" aria-hidden />
+            {pin.quote ? (
+              <span className="truncate" title={pin.quote}>
+                “{pin.quote}”
+              </span>
+            ) : (
+              <span>
+                {pin.ew !== undefined || pin.docW !== undefined ? 'Pinned box' : 'Pinned'}
+              </span>
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-xs btn-square h-4 min-h-4 w-4"
@@ -623,7 +645,7 @@ function Composer({
             className={`btn btn-ghost btn-xs ${placing ? 'btn-active' : ''}`}
             aria-pressed={placing}
             onClick={onPlace}
-            title="Point at a spot in the page: the pin stays on that element as the page scrolls"
+            title="Click a spot or drag a box in the page (or select text in it): the pin stays on that element as the page scrolls"
           >
             <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pin to a spot
           </button>
@@ -715,6 +737,18 @@ function Thread({
           </span>
         )}
       </div>
+      {comment.anchor?.quote && (
+        <blockquote className="review-quote text-sm text-secondary">
+          <button
+            type="button"
+            className="text-start"
+            title="Show it in the page"
+            onClick={onSelect}
+          >
+            {comment.anchor.quote}
+          </button>
+        </blockquote>
+      )}
       <CommentBody comment={comment} list={list} onDelete={() => setDeleting(comment)} />
       {replies.length > 0 && (
         <ol className="review-replies space-y-2">

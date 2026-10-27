@@ -1,7 +1,7 @@
 // The review bridge: the postMessage protocol between the review page (app origin) and the review
 // shell (`/_fling/review.html` on the site's own origin). The shell frames the site same-origin,
 // so it sees what the review page can't: the page and hash route the frame is on, its scroll, the
-// element under a click. It keeps the frame on the site, places and draws pins and cursors, and
+// element under a click, the text the reviewer selects. It keeps the frame on the site, places and draws pins and cursors, and
 // reports to the page. The page owns the data (comments, the live room) and tells the shell what
 // to draw. Browser-safe (zod only).
 //
@@ -44,7 +44,10 @@ export const ShellMessageSchema = z.discriminatedUnion('type', [
   z.object({ ...tag, type: z.literal('ready') }),
   /** the frame is on `path` (normalised, see normalizeCommentPath) with fragment `hash` ('' or '#…') */
   z.object({ ...tag, type: z.literal('location'), path, hash, title: z.string().max(300) }),
+  /** a pin placed while placing: a click (a spot) or a drag (a box) */
   z.object({ ...tag, type: z.literal('pinPlaced'), anchor: CommentAnchorSchema }),
+  /** the reviewer selected text in the page: an anchor on it, with its quote */
+  z.object({ ...tag, type: z.literal('textSelected'), anchor: CommentAnchorSchema }),
   z.object({ ...tag, type: z.literal('pinCancelled') }),
   z.object({ ...tag, type: z.literal('pinClicked'), id: z.string() }),
   /** this reviewer's pointer on the page; null when it left the frame */

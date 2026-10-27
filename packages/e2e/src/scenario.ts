@@ -437,6 +437,21 @@ async function commentsStep(ctx: {
   const anonymous = await call(null, 'GET', '')
   check(anonymous.status === 401, `anonymous comments list: ${anonymous.status}`)
 
+  // A thread pinned to text selected in the page keeps its area and quote.
+  const anchor = { x: 10, y: 20, selector: 'h1', ex: 0, ey: 0, ew: 80, eh: 100, quote: 'Docs' }
+  const pinned = await call(opts.session, 'POST', '', { body: 'Rename', path: '/docs/', anchor })
+  check(pinned.status === 201, `comment pinned to text: ${pinned.status}`)
+  const pinnedId = ((await pinned.json()) as CommentJson).id
+  const reread = (await (await call(opts.session, 'GET', '?path=/docs/')).json()) as {
+    comments: (CommentJson & { anchor: unknown })[]
+  }
+  const stored = reread.comments.find(c => c.id === pinnedId)?.anchor
+  const sorted = (o: unknown) => JSON.stringify(Object.entries(o ?? {}).sort())
+  check(sorted(stored) === sorted(anchor), `pinned anchor: ${JSON.stringify(stored)}`)
+  const unpinned = await call(opts.session, 'DELETE', `/${pinnedId}`)
+  check(unpinned.status === 204, `deleting the pinned comment: ${unpinned.status}`)
+  step('a thread pinned to selected text keeps its quote and area')
+
   let replyId: string | null = null
   if (opts.member) {
     const listed = await call(opts.member, 'GET', '?path=/docs/')

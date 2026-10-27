@@ -38,7 +38,12 @@ const comment = (id: string, over: Partial<Comment> = {}): Comment => ({
 const LIST: CommentList = {
   site: { name: 'deck', url: 'https://deck.sites.example.test/', currentVersionId: 'v2' },
   comments: [
-    comment('t1', { path: '/docs/', versionId: 'v1', body: 'Typo here' }),
+    comment('t1', {
+      path: '/docs/',
+      versionId: 'v1',
+      body: 'Typo here',
+      anchor: { x: 10, y: 20, quote: 'teh quick fox' },
+    }),
     comment('t2', { resolvedAt: '2026-10-02T10:00:00.000Z' }),
     comment('r1', { parentId: 't1', body: 'Fixed', author: { kind: 'user', email: 'a@x.test' } }),
   ],
@@ -57,6 +62,7 @@ describe('fling comments / comment / resolve / uncomment', () => {
     expect(text).toContain('/docs/')
     expect(text).toContain('t1')
     expect(text).toContain('(on version v1)')
+    expect(text).toContain('  > teh quick fox')
     expect(text).toContain('  Typo here')
     expect(text).toContain('↳')
     expect(text).toContain('    Fixed')

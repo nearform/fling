@@ -10,8 +10,12 @@
  *   (`blocked`; the page offers to open it in a new tab, on the reviewer's own click), same-origin
  *   `_top`/`_parent` links stay in the frame, and a load it cannot read (another origin) or of the
  *   shell itself is undone;
- * - pins: placed on a click (the element under it, as an anchor), drawn where their anchors
- *   resolve now, following scroll, resizes and DOM changes; clicking one tells the page;
+ * - pins: placed on a click (the element under it, as an anchor) or a drag (a box, on the
+ *   element that holds it), drawn where their anchors resolve now, following scroll, resizes and
+ *   DOM changes; the selected one also outlines its area or highlights its quoted text; clicking
+ *   one tells the page;
+ * - text the reviewer selects in the page, as an anchor with its quote (`textSelected`; the page
+ *   decides whether it becomes the new comment's pin);
  * - this reviewer's pointer, as an anchor, and other reviewers' pointers, drawn like pins.
  *
  * It trusts only messages from the app origin its `fling-app-origin` meta names, and talks only to
@@ -33,6 +37,7 @@ import {
   buildSelector,
   framedPath,
   leavesSite,
+  locateQuote,
   resolveAnchor,
   type Viewport,
 } from './lib/review-shell'
@@ -48,6 +53,7 @@ const start = framedPath(new URLSearchParams(window.location.search).get('path')
 const frame = document.getElementById('site') as HTMLIFrameElement
 const overlay = document.getElementById('overlay') as HTMLDivElement
 const placer = document.getElementById('placer') as HTMLButtonElement
+const marquee = document.getElementById('marquee') as HTMLDivElement
 
 let pins: BridgePin[] = []
 let cursors: BridgeCursor[] = []
@@ -56,6 +62,7 @@ let lastGood = start
 let undone = 0
 let pendingFocus: string | null = null
 const pinEls = new Map<string, HTMLButtonElement>()
+const areaEls = new Map<string, HTMLDivElement>()
 const cursorEls = new Map<string, HTMLDivElement>()
 
 const post = (m: Parameters<typeof shellMessage>[0]) =>
@@ -106,16 +113,90 @@ function unique(doc: Document) {
   }
 }
 
+/** The boxes of `quote`'s lines inside the element `selector` finds; null when it isn't there. */
+function quoteFinder(doc: Document) {
+  return (selector: string, quote: string): Box[] | null => {
+    let root: Element | null
+    try {
+      root = doc.querySelector(selector)
+    } catch {
+      return null
+    }
+    if (!root) return null
+    const nodes: Text[] = []
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text)
+    const found = locateQuote(
+      nodes.map(n => n.data),
+      quote
+    )
+    if (!found) return null
+    const range = doc.createRange()
+    const [startNode, endNode] = [nodes[found.start[0]], nodes[found.end[0]]]
+    if (!startNode || !endNode) return null
+    range.setStart(startNode, found.start[1])
+    range.setEnd(endNode, found.end[1])
+    const rects = [...range.getClientRects()]
+      .filter(r => r.width > 0 && r.height > 0)
+      .slice(0, 100)
+      .map(r => ({ left: r.left, top: r.top, width: r.width, height: r.height }))
+    return rects.length ? rects : null
+  }
+}
+
+/** The element and selector an anchor records, unless it is the document itself. */
+function described(doc: Document, el: Element | null) {
+  const selector = el && el !== doc.documentElement ? buildSelector(el, unique(doc)) : undefined
+  return el && selector ? { selector, box: boxOf(el) } : null
+}
+
 /** The anchor for a point in the frame's viewport: the element under it, its box and the view. */
 function anchorAt(win: Window, clientX: number, clientY: number) {
   const doc = win.document
-  const el = doc.elementFromPoint(clientX, clientY)
-  const selector = el && el !== doc.documentElement ? buildSelector(el, unique(doc)) : undefined
   return anchorFor(
     { clientX, clientY },
     viewOf(win),
     win.location.hash,
-    el && selector ? { selector, box: boxOf(el) } : null
+    described(doc, doc.elementFromPoint(clientX, clientY))
+  )
+}
+
+const holds = (outer: Box, inner: Box) =>
+  outer.left <= inner.left &&
+  outer.top <= inner.top &&
+  outer.left + outer.width >= inner.left + inner.width &&
+  outer.top + outer.height >= inner.top + inner.height
+
+/** The anchor for a box drawn in the frame's viewport: on the innermost element that holds it. */
+function anchorForBox(win: Window, box: Box) {
+  const doc = win.document
+  let el = doc.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+  while (el && el !== doc.body && !holds(boxOf(el), box)) el = el.parentElement
+  return anchorFor(
+    { clientX: box.left, clientY: box.top, width: box.width, height: box.height },
+    viewOf(win),
+    win.location.hash,
+    described(doc, el)
+  )
+}
+
+/** The anchor for the text selected in the page, with its quote; null when nothing is. */
+function selectionAnchor(win: Window) {
+  const selection = win.getSelection()
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null
+  const quote = selection.toString()
+  if (!quote.trim()) return null
+  const range = selection.getRangeAt(0)
+  const r = range.getBoundingClientRect()
+  if (r.width === 0 && r.height === 0) return null
+  const common = range.commonAncestorContainer
+  const el = common.nodeType === Node.ELEMENT_NODE ? (common as Element) : common.parentElement
+  return anchorFor(
+    { clientX: r.left, clientY: r.top, width: r.width, height: r.height },
+    viewOf(win),
+    win.location.hash,
+    described(win.document, el),
+    quote
   )
 }
 
@@ -166,6 +247,25 @@ function onSubmit(e: SubmitEvent) {
   }
 }
 
+// --- selecting text -----------------------------------------------------------------------------
+
+let lastQuote = ''
+let selectionTimer: ReturnType<typeof setTimeout> | undefined
+
+/** Report a finished text selection (after the pointer or a key lets go), once per selection. */
+function checkSelection() {
+  clearTimeout(selectionTimer)
+  selectionTimer = setTimeout(() => {
+    const win = site()
+    if (!win || placing) return
+    const anchor = selectionAnchor(win)
+    const key = anchor ? `${anchor.selector}|${anchor.quote}|${anchor.docX},${anchor.docY}` : ''
+    if (key === lastQuote) return
+    lastQuote = key
+    if (anchor) post({ type: 'textSelected', anchor })
+  }, 50)
+}
+
 function onKey(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (placing) {
@@ -192,6 +292,8 @@ function attach(win: Window) {
   doc.addEventListener('click', onClick, true)
   doc.addEventListener('submit', onSubmit, true)
   doc.addEventListener('keydown', onKey)
+  doc.addEventListener('pointerup', checkSelection)
+  doc.addEventListener('keyup', checkSelection)
   doc.addEventListener('pointermove', e => trackCursor(e.clientX, e.clientY), { passive: true })
   doc.documentElement.addEventListener('pointerleave', () => trackCursor(null))
   const RO = (win as unknown as typeof globalThis).ResizeObserver
@@ -239,14 +341,43 @@ function place(el: HTMLElement, x: number, y: number, view: Viewport) {
   el.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
 }
 
+/** Outline a pin's area (a drawn box, or one box per line of quoted text); none: remove it. */
+function drawArea(pin: BridgePin, rects: Box[] | undefined) {
+  let el = areaEls.get(pin.id)
+  if (!rects?.length) {
+    el?.remove()
+    areaEls.delete(pin.id)
+    return
+  }
+  if (!el) {
+    el = document.createElement('div')
+    overlay.prepend(el)
+    areaEls.set(pin.id, el)
+  }
+  el.className = `area ${pin.anchor.quote ? 'quote' : 'box'}`
+  el.classList.toggle('resolved', pin.resolved)
+  while (el.children.length > rects.length) el.lastElementChild?.remove()
+  while (el.children.length < rects.length) el.append(document.createElement('i'))
+  rects.forEach((r, i) => {
+    const part = el.children[i] as HTMLElement
+    part.style.transform = `translate(${Math.round(r.left)}px, ${Math.round(r.top)}px)`
+    part.style.width = `${Math.round(r.width)}px`
+    part.style.height = `${Math.round(r.height)}px`
+  })
+}
+
 function draw() {
   const win = site()
   if (!win) {
-    for (const el of [...pinEls.values(), ...cursorEls.values()]) el.hidden = true
+    for (const el of [...pinEls.values(), ...areaEls.values(), ...cursorEls.values()]) {
+      el.hidden = true
+    }
     return
   }
   const view = viewOf(win)
   const find = finder(win.document)
+  const findQuote = quoteFinder(win.document)
+  for (const el of areaEls.values()) el.hidden = false
 
   const seen = new Set<string>()
   for (const pin of pins) {
@@ -265,13 +396,21 @@ function draw() {
     el.classList.toggle('selected', pin.selected)
     el.classList.toggle('resolved', pin.resolved)
     el.setAttribute('aria-label', `Comment ${pin.n}`)
-    const at = resolveAnchor(pin.anchor, view, find)
+    const at = resolveAnchor(pin.anchor, view, find, findQuote)
     place(el, at.x, at.y, view)
+    // Only the selected pin shows its area: a page full of boxes and highlights hides the site.
+    drawArea(pin, pin.selected ? at.rects : undefined)
   }
   for (const [id, el] of pinEls) {
     if (!seen.has(id)) {
       el.remove()
       pinEls.delete(id)
+    }
+  }
+  for (const [id, el] of areaEls) {
+    if (!seen.has(id)) {
+      el.remove()
+      areaEls.delete(id)
     }
   }
 
@@ -315,7 +454,7 @@ function focusPin(id: string): boolean {
   const pin = pins.find(p => p.id === id)
   if (!win || !pin) return false
   const view = viewOf(win)
-  const at = resolveAnchor(pin.anchor, view, finder(win.document))
+  const at = resolveAnchor(pin.anchor, view, finder(win.document), quoteFinder(win.document))
   if (at.inDocument && (at.y < 0 || at.y > view.height || at.x < 0 || at.x > view.width)) {
     win.scrollTo({
       left: Math.max(0, view.scrollX + at.x - view.width / 2),
@@ -358,18 +497,63 @@ function trackCursor(x: number | null, y?: number) {
 
 // --- placing a pin ------------------------------------------------------------------------------
 
+/** How far the pointer moves, in CSS px, before a click becomes a drawn box. */
+const DRAG_MIN = 6
+
+let dragFrom: { x: number; y: number } | null = null
+
 function setPlacing(on: boolean) {
   placing = on
   placer.hidden = !on
+  dragFrom = null
+  marquee.hidden = true
   if (on) placer.focus()
 }
 
-placer.addEventListener('click', e => {
+function dragBox(e: PointerEvent): Box | null {
+  if (!dragFrom) return null
+  const box = {
+    left: Math.min(dragFrom.x, e.clientX),
+    top: Math.min(dragFrom.y, e.clientY),
+    width: Math.abs(e.clientX - dragFrom.x),
+    height: Math.abs(e.clientY - dragFrom.y),
+  }
+  return box.width < DRAG_MIN && box.height < DRAG_MIN ? null : box
+}
+
+// A click places a spot; a drag draws a box.
+placer.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return
+  dragFrom = { x: e.clientX, y: e.clientY }
+  placer.setPointerCapture(e.pointerId)
+})
+placer.addEventListener(
+  'pointermove',
+  e => {
+    trackCursor(e.clientX, e.clientY)
+    const box = dragBox(e)
+    marquee.hidden = !box
+    if (box) {
+      marquee.style.transform = `translate(${Math.round(box.left)}px, ${Math.round(box.top)}px)`
+      marquee.style.width = `${Math.round(box.width)}px`
+      marquee.style.height = `${Math.round(box.height)}px`
+    }
+  },
+  { passive: true }
+)
+placer.addEventListener('pointerup', e => {
+  if (!dragFrom) return
+  const box = dragBox(e)
   const win = site()
   setPlacing(false)
-  if (win) post({ type: 'pinPlaced', anchor: anchorAt(win, e.clientX, e.clientY) })
+  if (!win) return
+  const anchor = box ? anchorForBox(win, box) : anchorAt(win, e.clientX, e.clientY)
+  post({ type: 'pinPlaced', anchor })
 })
-placer.addEventListener('pointermove', e => trackCursor(e.clientX, e.clientY), { passive: true })
+placer.addEventListener('pointercancel', () => {
+  dragFrom = null
+  marquee.hidden = true
+})
 document.addEventListener('keydown', onKey)
 
 // --- the page's messages ------------------------------------------------------------------------

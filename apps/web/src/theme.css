@@ -659,6 +659,18 @@
     padding-inline-start: 0.75rem;
     border-inline-start: 2px solid var(--border-subtle);
   }
+  /* The text a thread is pinned to, quoted above it. */
+  .review-quote {
+    padding-inline-start: 0.625rem;
+    border-inline-start: 3px solid var(--tone-primary-surface);
+    font-style: italic;
+    overflow-wrap: break-word;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
   .review-text {
     white-space: pre-wrap;
     overflow-wrap: break-word;

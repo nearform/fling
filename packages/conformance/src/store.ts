@@ -489,7 +489,18 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createSite(s)
         await store.createSite(other)
         const first = comment(s.id, 1, {
-          anchor: { x: 12.5, y: 80 },
+          anchor: {
+            x: 12.5,
+            y: 80,
+            selector: '#intro > p:nth-of-type(2)',
+            ex: 10,
+            ey: 0,
+            ew: 62.5,
+            eh: 40,
+            docW: 300,
+            docH: 24,
+            quote: 'The heading “is” too big',
+          },
           author: { kind: 'guest', name: 'Pat' },
         })
         const second = comment(s.id, 2, { path: '/docs/', versionId: null })

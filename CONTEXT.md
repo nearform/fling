@@ -72,7 +72,9 @@ servers) lead with the review page as the link to share for feedback (`reviewUrl
 frames the site on the site's own origin, so it can see what the app can't: the path and hash
 route (SPA navigation included), scroll and the element under a click. It keeps the frame on the
 site (an other-origin link or form is stopped and the review page offers to open it in a new
-tab), turns a click into an anchor, and draws pins
+tab), turns a click (a spot) or a drag (a box) into an anchor while placing a pin, reports text the
+reviewer selects as an anchor with its quote (the review page pins the new comment to it unless a
+pin was placed), and draws pins (the selected one with its area)
 and other reviewers' pointers. It talks to the review page over the **review bridge**
 (`packages/shared/src/review-bridge.ts`), postMessage with each side accepting only the other's
 origin; the shell holds no data.
@@ -80,8 +82,11 @@ origin; the shell holds no data.
 **Anchor** — where a pin points (`CommentAnchorSchema`, `packages/shared/src/comments.ts`):
 viewport percentages (`x`, `y`, always present, the last resort), and when the shell made it, a
 CSS selector for the element plus the point inside it, the document point, the scroll and
-viewport at the time, and the page's hash route. The shell resolves it in that order
-(`apps/web/src/lib/review-shell.ts`), so a pin lands on the same element on another screen size.
+viewport at the time, and the page's hash route. An **area** (a drawn box or selected text) adds
+its size in the element and the document, with the spot as its top-left corner; selected text
+also keeps its **quote**, which the shell finds again inside the element first. The shell
+resolves it in that order (`apps/web/src/lib/review-shell.ts`), so a pin lands on the same element
+on another screen size.
 
 **Live room** — a site's realtime channel in review mode (`apps/api/src/live.ts`, protocol in
 `packages/shared/src/review-live.ts`): everyone with the site's review page open is a **peer**

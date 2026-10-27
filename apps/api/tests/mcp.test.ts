@@ -431,6 +431,29 @@ describe('/mcp tools', () => {
     expect(late.content[0]?.text).toMatch(/expire/)
   })
 
+  it('fling_list lists the last updated first, or in the order `sort` asks for', async () => {
+    for (const name of ['beta', 'alpha']) {
+      await callTool(env, bearer, 'fling_publish', {
+        name,
+        files: [{ path: 'index.html', content: name }],
+      })
+      env.advance(1000)
+    }
+    const names = async (args: Record<string, unknown>) =>
+      (await callTool(env, bearer, 'fling_list', args)).structuredContent.sites.map(
+        (s: { name: string }) => s.name
+      )
+    expect(await names({})).toEqual(['alpha', 'beta'])
+    expect(await names({ sort: 'created' })).toEqual(['alpha', 'beta'])
+    expect(await names({ sort: 'name' })).toEqual(['alpha', 'beta'])
+    await callTool(env, bearer, 'fling_publish', {
+      name: 'beta',
+      files: [{ path: 'index.html', content: 'beta v2' }],
+    })
+    expect(await names({ sort: 'updated' })).toEqual(['beta', 'alpha'])
+    expect(await names({ sort: 'created' })).toEqual(['alpha', 'beta'])
+  })
+
   it('manages sites: list, info, share, visibility, archive, rollback, delete', async () => {
     const v1 = await callTool(env, bearer, 'fling_publish', {
       name: 'm',

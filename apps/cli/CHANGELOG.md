@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `fling ls` lists the last updated site first. `--sort updated|created|name` picks the order
+  (`created`: newest first; `name`: A–Z). The MCP tool `fling_list` takes the same `sort`.
+
 ## 0.5.1
 
 - `fling comments` shows the text a thread is pinned to (`> …` under its header), when a reviewer

@@ -1,16 +1,20 @@
 /**
- * Home: a plain header (greeting, count, search), then your sites — active or archived — each as
- * a compact `SiteCard`, narrowed by a client-side search kept in `?q=`. No sites yet → the CLI
- * quick start.
+ * Home: a plain header (greeting, count, search, order), then your sites — active or archived —
+ * each as a compact `SiteCard` linking to its site page, narrowed by a client-side search kept in
+ * `?q=`. The order (`sortSites`, last updated first by default) is kept in `?sort=` and
+ * remembered in localStorage. No sites yet → the CLI quick start.
  */
+import { DEFAULT_SITE_SORT, SITE_SORTS, type SiteSort, sortSites } from '@fling/shared'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SiteCard } from '../components/SiteCard'
 import { SiteSearch } from '../components/SiteSearch'
 import { useMe, useSites } from '../hooks/queries'
+import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { errorMessage } from '../lib/api'
 import { countLabel, filterSites } from '../lib/search'
+import { chooseSiteSort, parseSiteSort, SITE_SORT_LABELS } from '../lib/sites'
 import { QuickStart } from './GetStarted'
 
 /** "Good morning" by the reader's local clock. */
@@ -21,15 +25,22 @@ export function greeting(hour: number): string {
   return 'Good evening'
 }
 
-/** A plain page header: greeting, title, the count (kept in step with the search), the search. */
+/**
+ * A plain page header: greeting, title, the count (kept in step with the search), the search and
+ * the order.
+ */
 function SitesHeader({
   count,
   query,
   onQueryChange,
+  sort,
+  onSortChange,
 }: {
   count: string
   query: string
   onQueryChange: (q: string) => void
+  sort: SiteSort
+  onSortChange: (sort: SiteSort) => void
 }) {
   const { data: me } = useMe()
   const firstName = me?.name?.split(/\s+/)[0]
@@ -48,7 +59,21 @@ function SitesHeader({
           </p>
         </div>
       </div>
-      <SiteSearch value={query} onChange={onQueryChange} className="w-full sm:w-72" />
+      <div className="flex w-full items-center gap-2 sm:w-auto">
+        <SiteSearch value={query} onChange={onQueryChange} className="min-w-0 flex-1 sm:w-72" />
+        <select
+          className="select select-sm w-auto shrink-0"
+          aria-label="Order sites by"
+          value={sort}
+          onChange={e => onSortChange(parseSiteSort(e.target.value))}
+        >
+          {SITE_SORTS.map(s => (
+            <option key={s} value={s}>
+              {SITE_SORT_LABELS[s]}
+            </option>
+          ))}
+        </select>
+      </div>
     </header>
   )
 }
@@ -58,11 +83,19 @@ export default function Sites() {
   const archived = params.get('view') === 'archived'
   const query = params.get('q') ?? ''
   const searching = query.trim() !== ''
+  const [savedSort, setSavedSort] = useLocalStoragePreference<string>(
+    'sitesSort',
+    DEFAULT_SITE_SORT
+  )
+  const sort = chooseSiteSort(params.get('sort'), savedSort)
   const active = useSites(false)
   const list = useSites(archived)
-  const shown = useMemo(() => filterSites(list.data ?? [], query), [list.data, query])
+  const shown = useMemo(
+    () => sortSites(filterSites(list.data ?? [], query), sort),
+    [list.data, query, sort]
+  )
 
-  const update = (key: 'view' | 'q', value: string | null) =>
+  const update = (key: 'view' | 'q' | 'sort', value: string | null) =>
     setParams(
       prev => {
         const next = new URLSearchParams(prev)
@@ -74,6 +107,10 @@ export default function Sites() {
     )
   const setView = (view: 'active' | 'archived') => update('view', view === 'archived' ? view : null)
   const setQuery = (q: string) => update('q', q || null)
+  const setSort = (next: SiteSort) => {
+    setSavedSort(next)
+    update('sort', next === DEFAULT_SITE_SORT ? null : next)
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -81,6 +118,8 @@ export default function Sites() {
         count={countLabel({ total: list.data?.length, shown: shown.length, archived, searching })}
         query={query}
         onQueryChange={setQuery}
+        sort={sort}
+        onSortChange={setSort}
       />
 
       <div role="tablist" className="tabs tabs-border" aria-label="Which sites">

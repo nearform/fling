@@ -105,6 +105,31 @@ describe('commands', () => {
     expect(out.content()).toContain('https://s-x.test/')
   })
 
+  it('ls lists the last updated first, or in the order --sort asks for', async () => {
+    const store = await loggedInStore()
+    const sites = [
+      site({
+        name: 'old',
+        createdAt: '2026-10-03T00:00:00.000Z',
+        updatedAt: '2026-10-04T00:00:00.000Z',
+      }),
+      site({
+        name: 'new',
+        createdAt: '2026-10-01T00:00:00.000Z',
+        updatedAt: '2026-10-05T00:00:00.000Z',
+      }),
+    ]
+    const m = mockFetch({ '/api/sites': () => jsonResponse({ sites }) })
+    const names = async (sort?: 'updated' | 'created' | 'name') => {
+      const { ctx, out } = await testContext({ store, fetch: m.fetch, json: true })
+      await runList(ctx, { sort })
+      return (JSON.parse(out.content()).sites as { name: string }[]).map(s => s.name)
+    }
+    expect(await names()).toEqual(['new', 'old'])
+    expect(await names('created')).toEqual(['old', 'new'])
+    expect(await names('name')).toEqual(['new', 'old'])
+  })
+
   it('versions marks the live version', async () => {
     const store = await loggedInStore()
     const detail = {

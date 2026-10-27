@@ -1,0 +1,84 @@
+/**
+ * One site, everything about it: the overview, who can open it (Access), its files and versions,
+ * and archive or delete (Danger zone). An unknown site, or one that isn't yours, is the 404 page,
+ * as the API answers both the same way. Archived sites are offline, so Access waits until they
+ * are unarchived.
+ */
+import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
+import { Link, useParams } from 'react-router-dom'
+import { NotFound } from '../components/NotFound'
+import { PageHeader } from '../components/PageHeader'
+import { SiteBadges } from '../components/site/badges'
+import { SiteAccess } from '../components/site/SiteAccess'
+import { SiteDangerZone } from '../components/site/SiteDangerZone'
+import { SiteOverview } from '../components/site/SiteOverview'
+import { SiteVersions } from '../components/site/SiteVersions'
+import { useInstance } from '../hooks/instance'
+import { useSiteDetail } from '../hooks/queries'
+import { ApiError, errorMessage } from '../lib/api'
+import { reviewHref } from '../lib/review'
+
+export default function Site() {
+  const { name = '' } = useParams()
+  const instance = useInstance()
+  const detail = useSiteDetail(name, name !== '')
+
+  if (detail.isPending) {
+    return (
+      <div className="grid place-items-center py-12">
+        <span
+          className="loading loading-spinner loading-md text-muted"
+          role="status"
+          aria-label="Loading"
+        />
+      </div>
+    )
+  }
+  if (detail.isError) {
+    if (detail.error instanceof ApiError && detail.error.status === 404) return <NotFound />
+    return (
+      <div className="mx-auto max-w-5xl">
+        <div className="alert alert-error text-sm" role="alert">
+          {errorMessage(detail.error)}
+          <button type="button" className="btn btn-sm" onClick={() => detail.refetch()}>
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const site = detail.data
+  const reviewable = instance?.capabilities.comments === true && !site.archived
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4">
+      <PageHeader
+        breadcrumbs={[{ to: '/', label: 'Sites' }]}
+        title={site.name}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <SiteBadges site={site} />
+            {site.spa && (
+              <span className="badge badge-sm badge-ghost" title="Unknown paths serve /index.html">
+                SPA
+              </span>
+            )}
+          </span>
+        }
+        actions={
+          reviewable && (
+            <Link to={reviewHref(site.name)} className="btn btn-sm">
+              <ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden />
+              Review
+            </Link>
+          )
+        }
+      />
+      <SiteOverview site={site} />
+      {!site.archived && <SiteAccess site={site} />}
+      <SiteVersions site={site} />
+      <SiteDangerZone site={site} />
+    </div>
+  )
+}

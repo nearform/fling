@@ -4,8 +4,9 @@
  * and `--json` apply to every command. Bare `fling` prints help; `fling <path>` deploys when the
  * path exists (route.ts).
  */
+import { DEFAULT_SITE_SORT, SITE_SORTS, type SiteSort } from '@fling/shared'
 import chalk from 'chalk'
-import { Command } from 'commander'
+import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
@@ -205,7 +206,12 @@ program
   .alias('list')
   .description('list your sites')
   .option('--archived', 'list archived sites')
-  .action(action((ctx, opts: { archived?: boolean }) => runList(ctx, opts)))
+  .addOption(
+    new Option('--sort <order>', 'updated (newest first), created (newest first) or name (A–Z)')
+      .choices(SITE_SORTS)
+      .default(DEFAULT_SITE_SORT)
+  )
+  .action(action((ctx, opts: { archived?: boolean; sort?: SiteSort }) => runList(ctx, opts)))
 program
   .command('info <name>')
   .helpGroup('Sites:')

@@ -20,6 +20,7 @@ import {
   reviewUrl,
   type Site,
   shareForFeedback,
+  sortSites,
   waitUntilReachable,
 } from '@fling/shared'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -201,7 +202,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   }))
 
   register(mcpTools.list, async args => {
-    const list = await sites.listSites(deps, user, Boolean(args.archived))
+    const list = sortSites(await sites.listSites(deps, user, Boolean(args.archived)), args.sort)
     const lines = list.map(s => `- ${s.name}: ${describeSite(s)}`).join('\n')
     return {
       text: list.length

@@ -341,6 +341,21 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     check(matches.length === 1, `${raceName} is listed ${matches.length} times`)
     step('conditional writes: 4 concurrent first deploys of one name → one site')
 
+    // `fling ls` lists the last updated first; `--sort name` lists A–Z.
+    const lsSites = async (...args: string[]) =>
+      ((await fling('ls', ...args)) as { sites: { name: string; updatedAt: string }[] }).sites
+    const byUpdated = await lsSites()
+    check(
+      byUpdated.every((s, i) => i === 0 || byUpdated[i - 1].updatedAt >= s.updatedAt),
+      `fling ls is not last updated first: ${byUpdated.map(s => s.name).join(', ')}`
+    )
+    const byName = (await lsSites('--sort', 'name')).map(s => s.name)
+    check(
+      byName.every((n, i) => i === 0 || byName[i - 1] <= n),
+      `fling ls --sort name is not A–Z: ${byName.join(', ')}`
+    )
+    step('fling ls: last updated first, --sort name A–Z')
+
     // The remote MCP connector publishes inline content.
     const mcp = await fetch(`${appOrigin}/mcp`, {
       method: 'POST',

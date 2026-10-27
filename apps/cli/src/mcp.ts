@@ -748,7 +748,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   const t = mcpTools
   server.registerTool(t.list.name, serverTool(t.list), args =>
     run(t.list.name, args.server, async ({ client, url }) => {
-      const sites = await listSites(client, { archived: args.archived })
+      const sites = await listSites(client, { archived: args.archived, sort: args.sort })
       return { summary: `${sites.length} site(s) on ${serverLabel(url)}`, data: { sites } }
     })
   )

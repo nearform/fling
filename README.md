@@ -69,7 +69,7 @@ refreshing comments every 30 seconds.
 | `apps/api` | The cloud-agnostic Hono API: sign-in, CLI keys, deploys, the instance metadata, the remote MCP server and its OAuth server |
 | `platforms/aws` | The API on AWS: Lambda entry point and the DynamoDB, S3, CloudFront KeyValueStore and SSM adapters; builds `lambda.zip`. Its Terraform module is `platforms/aws/infra` |
 | `platforms/cloudflare` | Fling on Cloudflare: one Worker (API, UI from Static Assets, sites) with the D1, R2 and Workers KV adapters; `wrangler.jsonc`, setup and deploy scripts |
-| `apps/web` | React UI (sites, connections, get started) and the 404 page, themed at runtime from the instance metadata |
+| `apps/web` | React UI (the site list, each site's page, connections, get started) and the 404 page, themed at runtime from the instance metadata |
 | `apps/cli` | `@nearform/fling` CLI, local MCP server and the `.mcpb` Claude Desktop extension |
 | `edge` | The CloudFront Function that routes `*.<sites domain>`: a generated shell around the shared routing decision |
 | `packages/shared` | Contracts shared by all of the above, including the sites' routing decision (`site-routing.ts`) every platform's edge runs |

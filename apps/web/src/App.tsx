@@ -14,6 +14,7 @@ import Authorize from './pages/Authorize'
 import GetStarted from './pages/GetStarted'
 import Login from './pages/Login'
 import Review from './pages/Review'
+import Site from './pages/Site'
 import Sites from './pages/Sites'
 
 const queryClient: QueryClient = new QueryClient({
@@ -83,6 +84,7 @@ export default function App() {
           <Routes>
             <Route element={<Authenticated />}>
               <Route index element={<Sites />} />
+              <Route path="sites/:name" element={<Site />} />
               <Route path="get-started" element={<GetStarted />} />
               <Route path="connections" element={<ApiKeys />} />
               <Route path="keys" element={<Navigate to="/connections" replace />} />

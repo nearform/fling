@@ -17,7 +17,9 @@ import {
   SiteDetailSchema,
   SiteListSchema,
   SiteSchema,
+  type SiteSort,
   siteUrl,
+  sortSites,
   type VersionFiles,
   VersionFilesSchema,
   type Visibility,
@@ -70,13 +72,13 @@ export function sitesPattern(base: SitesBase | null): string {
 
 export async function listSites(
   client: ApiClient,
-  opts: { archived?: boolean } = {}
+  opts: { archived?: boolean; sort?: SiteSort } = {}
 ): Promise<Site[]> {
   const res = await client.request('GET', '/api/sites', {
     schema: SiteListSchema,
     query: { archived: opts.archived ? 1 : undefined },
   })
-  return res.sites
+  return sortSites(res.sites, opts.sort)
 }
 
 export function getSite(client: ApiClient, name: string): Promise<SiteDetail> {

@@ -151,6 +151,11 @@ It is remembered, and becomes the current one only if none is.
 - `refresh: true` replaces the link (the old one stops working); `revoke: true` removes it.
 - `fling_set_visibility { name, visibility: "public" }` makes the main URL public; `"private"`
   puts it back behind sign-in. Prefer a share link over making a site public.
+- `fling_set_audience { name, add?, remove?, set?, clear? }` limits a private site to listed
+  people (addresses that can sign in to the Fling); `clear: true` opens it to everyone signed in
+  again. The owner always sees it. It only applies while the site is private, a share link still
+  opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 15
+  minutes. `fling_info` shows who can open a site.
 
 ## Archive vs delete
 
@@ -185,6 +190,6 @@ pages. When the Fling has comments, these tools exist:
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
 CLI equivalents: `fling ls`, `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
-[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling archive|unarchive <name>`,
+[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--clear]`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

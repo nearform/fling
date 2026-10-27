@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { ManifestSchema } from './manifest.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
@@ -29,10 +30,18 @@ export const SiteSchema = z.object({
   archived: z.boolean(),
   currentVersionId: z.string().nullable(),
   shareUrl: z.string().nullable(),
+  /** private with an audience: only the owner and the people in it can open it */
+  restricted: z.boolean().default(false),
+  /** how many addresses and groups the audience names (kept, and ignored, while public) */
+  audienceSize: z.number().default(0),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
 export type Site = z.infer<typeof SiteSchema>
+
+/** A site with its audience, for its owner (`audiences` capability; older servers omit it). */
+export const SiteWithAudienceSchema = SiteSchema.extend({ audience: AudienceSchema.optional() })
+export type SiteWithAudience = z.infer<typeof SiteWithAudienceSchema>
 
 export const VersionSchema = z.object({
   id: z.string(),
@@ -42,7 +51,7 @@ export const VersionSchema = z.object({
 })
 export type Version = z.infer<typeof VersionSchema>
 
-export const SiteDetailSchema = SiteSchema.extend({ versions: z.array(VersionSchema) })
+export const SiteDetailSchema = SiteWithAudienceSchema.extend({ versions: z.array(VersionSchema) })
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 
 export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
@@ -122,10 +131,15 @@ export const FinalizeResponseSchema = z.object({
 /** POST /api/sites/:name/current  { versionId } */
 export const RollbackRequestSchema = z.object({ versionId: z.string() })
 
-/** PATCH /api/sites/:name  { visibility?, spa? } */
+/**
+ * PATCH /api/sites/:name  { visibility?, spa?, audience? } → SiteWithAudienceSchema (the audience
+ * when the patch set one). An address the instance wouldn't let sign in is a 400
+ * `email_not_allowed`.
+ */
 export const UpdateSiteRequestSchema = z.object({
   visibility: VisibilitySchema.optional(),
   spa: z.boolean().optional(),
+  audience: AudienceInputSchema.optional(),
 })
 
 export const ApiKeySchema = z.object({

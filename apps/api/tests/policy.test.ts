@@ -1,16 +1,18 @@
 /**
- * policy.ts: the whole actor × action × visibility table, written out, so changing who may do
- * what means changing this file. Then the two places that enforce it: the edge (site.view, run
- * through the real site router) and every site route and MCP tool (a member gets exactly what a
- * stranger to the name gets).
+ * policy.ts: the whole actor × action × access table, written out, so changing who may do what
+ * means changing this file. Then the two places that enforce it: the edge (site.view, run through
+ * the real site router, with the site pass for restricted sites) and every site route and MCP tool
+ * (a member gets exactly what a stranger to the name gets).
  */
 
 import { createSiteRouter, isResponse, toCloudFrontEvent } from '@fling/edge'
 import { SITE_HMAC_KVS_KEY, siteKvsKey } from '@fling/shared'
-import { signSiteCookie } from '@fling/shared/site-cookie'
+import { signSiteCookie, signSitePass } from '@fling/shared/site-cookie'
 import { describe, expect, it } from 'vitest'
 import {
+  ACCESSES,
   ACTIONS,
+  type Access,
   type Action,
   type Actor,
   can,
@@ -28,45 +30,56 @@ import {
   type Role,
   roleOf,
 } from '../src/policy.ts'
-import { api, createUser, file, json, setup, upload } from './helpers.ts'
+import { api, cookiesOf, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
 
 const OWNER = 'owner@example.test'
+const VIEWER = 'viewer@example.test'
 const TOKEN = 'abcdefghij0123456789'
 
-const siteWith = (visibility: 'public' | 'private'): PolicySite => ({
+/**
+ * A site with each access. The audience names the viewer on the public and restricted ones (kept,
+ * and ignored, while public); a private site without one has no viewers, so they are a member.
+ */
+const siteWith = (access: Access): PolicySite => ({
   email: OWNER,
-  visibility,
+  visibility: access === 'public' ? 'public' : 'private',
   shareToken: TOKEN,
+  audience: { emails: access === 'private' ? [] : [VIEWER], groups: [] },
 })
 
 const actorFor: Record<Role, Actor> = {
   owner: { kind: 'user', email: OWNER },
+  viewer: { kind: 'user', email: VIEWER },
   member: { kind: 'user', email: 'member@example.test' },
   share: { kind: 'share', token: TOKEN },
   anonymous: { kind: 'anonymous' },
 }
 
-/** Allowed roles per action and visibility: o(wner) m(ember) s(hare) a(nonymous). */
-const EXPECTED: Record<Action, { public: string; private: string }> = {
-  'site.view': { public: 'omsa', private: 'oms' },
-  'site.read': { public: 'o', private: 'o' },
-  'version.list': { public: 'o', private: 'o' },
-  'version.read': { public: 'o', private: 'o' },
-  'site.deploy': { public: 'o', private: 'o' },
-  'site.rollback': { public: 'o', private: 'o' },
-  'site.settings': { public: 'o', private: 'o' },
-  'site.visibility': { public: 'o', private: 'o' },
-  'site.archive': { public: 'o', private: 'o' },
-  'site.delete': { public: 'o', private: 'o' },
-  'share.read': { public: 'o', private: 'o' },
-  'share.create': { public: 'o', private: 'o' },
-  'share.revoke': { public: 'o', private: 'o' },
-  'comment.read': { public: 'om', private: 'om' },
-  'comment.create': { public: 'om', private: 'om' },
-  'comment.resolve': { public: 'om', private: 'om' },
-  'comment.delete': { public: 'o', private: 'o' },
-  'comment.delete.own': { public: 'om', private: 'om' },
+const ownerOnly = { public: 'o', private: 'o', restricted: 'o' }
+const takesPart = { public: 'ovm', private: 'ovm', restricted: 'ov' }
+
+/** Allowed roles per action and access: o(wner) v(iewer) m(ember) s(hare) a(nonymous). */
+const EXPECTED: Record<Action, Record<Access, string>> = {
+  'site.view': { public: 'ovmsa', private: 'ovms', restricted: 'ovs' },
+  'site.read': ownerOnly,
+  'version.list': ownerOnly,
+  'version.read': ownerOnly,
+  'site.deploy': ownerOnly,
+  'site.rollback': ownerOnly,
+  'site.settings': ownerOnly,
+  'site.visibility': ownerOnly,
+  'site.audience': ownerOnly,
+  'site.archive': ownerOnly,
+  'site.delete': ownerOnly,
+  'share.read': ownerOnly,
+  'share.create': ownerOnly,
+  'share.revoke': ownerOnly,
+  'comment.read': takesPart,
+  'comment.create': takesPart,
+  'comment.resolve': takesPart,
+  'comment.delete': ownerOnly,
+  'comment.delete.own': takesPart,
 }
 
 describe('can', () => {
@@ -75,15 +88,24 @@ describe('can', () => {
   })
 
   for (const action of ACTIONS) {
-    for (const visibility of ['public', 'private'] as const) {
+    for (const access of ACCESSES) {
       for (const role of ROLES) {
-        const allowed = EXPECTED[action][visibility].includes(role[0] as string)
-        it(`${role} ${allowed ? 'may' : 'may not'} ${action} a ${visibility} site`, () => {
-          expect(can(actorFor[role], action, siteWith(visibility))).toBe(allowed)
+        const allowed = EXPECTED[action][access].includes(role[0] as string)
+        it(`${role} ${allowed ? 'may' : 'may not'} ${action} a ${access} site`, () => {
+          expect(can(actorFor[role], action, siteWith(access))).toBe(allowed)
         })
       }
     }
   }
+
+  it("a group in the audience makes its members viewers, once requireSite loads the user's groups", () => {
+    const site: PolicySite = { ...siteWith('restricted'), audience: { emails: [], groups: ['g1'] } }
+    const user = 'member@example.test'
+    expect(roleOf({ kind: 'user', email: user }, site)).toBe('member')
+    expect(roleOf({ kind: 'user', email: user, groups: ['g2'] }, site)).toBe('member')
+    expect(roleOf({ kind: 'user', email: user, groups: ['g1'] }, site)).toBe('viewer')
+    expect(can({ kind: 'user', email: user, groups: ['g1'] }, 'site.view', site)).toBe(true)
+  })
 })
 
 /** Allowed principal roles per instance action: a(dmin) t(oken: an admin's key) i(mpersonating) u(ser). */
@@ -148,9 +170,9 @@ describe('canInstance', () => {
     // `can` has no notion of admins; an admin's actor is a user like any other.
     const admin: Actor = { kind: 'user', email: principalFor.admin.email }
     for (const action of ACTIONS) {
-      for (const visibility of ['public', 'private'] as const) {
-        expect(can(admin, action, siteWith(visibility))).toBe(
-          can(actorFor.member, action, siteWith(visibility))
+      for (const access of ACCESSES) {
+        expect(can(admin, action, siteWith(access))).toBe(
+          can(actorFor.member, action, siteWith(access))
         )
       }
     }
@@ -167,6 +189,7 @@ describe('canDeleteComment', () => {
     const expected: Record<Role, [boolean, boolean, boolean]> = {
       // [the owner's comment, the member's comment, a guest's comment]
       owner: [true, true, true],
+      viewer: [false, false, false],
       member: [false, true, false],
       share: [false, false, false],
       anonymous: [false, false, false],
@@ -183,9 +206,11 @@ describe('canDeleteComment', () => {
 describe('roleOf', () => {
   const site = siteWith('private')
 
-  it('owner is the user holding the site; any other user is a member', () => {
+  it('owner is the user holding the site; one in its audience a viewer; any other a member', () => {
     expect(roleOf(actorFor.owner, site)).toBe('owner')
     expect(roleOf(actorFor.member, site)).toBe('member')
+    expect(roleOf(actorFor.viewer, siteWith('restricted'))).toBe('viewer')
+    expect(roleOf(actorFor.viewer, site)).toBe('member')
   })
 
   it("only the site's current share token makes a share actor", () => {
@@ -210,11 +235,20 @@ async function deploy(env: ReturnType<typeof setup>, key: string, name: string, 
 }
 
 describe('the edge agrees with site.view', () => {
-  it('for every role and visibility', async () => {
+  async function sites() {
     const env = setup()
     const owner = await createUser(env, 'alice@example.test')
+    const viewer = await createUser(env, 'bob@example.test')
+    const member = await createUser(env, 'carol@example.test')
     await deploy(env, owner.key, 'pub', { visibility: 'public' })
     await deploy(env, owner.key, 'priv', { visibility: 'private' })
+    for (const name of ['team', 'other']) {
+      await deploy(env, owner.key, name, { visibility: 'private' })
+      const res = await api(env, owner.key, 'PATCH', `/api/sites/${name}`, {
+        audience: { emails: ['bob@example.test'] },
+      })
+      expect(res.status).toBe(200)
+    }
     // The platform entry (lambda.ts, dev.ts) puts the cookie key where the edge reads it.
     await env.routeTable.put(SITE_HMAC_KVS_KEY, env.config.secrets.siteHmacKey)
     const now = env.deps.clock.now().getTime()
@@ -223,36 +257,124 @@ describe('the edge agrees with site.view', () => {
       appOrigin: env.config.appOrigin,
       now: () => now,
     })
-    const cookie = (email: string) =>
-      `fling_site=${signSiteCookie({ e: email, x: Math.floor(now / 1000) + 60 }, env.config.secrets.siteHmacKey)}`
+    const key = env.config.secrets.siteHmacKey
+    const x = Math.floor(now / 1000) + 60
+    const siteCookie = (email: string) => `fling_site=${signSiteCookie({ e: email, x }, key)}`
+    const pass = async (email: string, name: string, exp = x) => {
+      const site = (await env.store.findSite(name)) as PolicySite & { id: string }
+      return `fling_pass=${signSitePass({ s: site.id, e: email, x: exp }, key)}`
+    }
+    const served = async (host: string, cookieHeader?: string) => {
+      const result = await router(toCloudFrontEvent({ path: '/', host, cookieHeader }))
+      return !isResponse(result) && result.uri.startsWith('/sites/')
+    }
+    return { env, owner, viewer, member, router, siteCookie, pass, served }
+  }
 
-    for (const name of ['pub', 'priv']) {
+  it('for every role and access', async () => {
+    const { env, owner, siteCookie, pass, served } = await sites()
+    for (const name of ['pub', 'priv', 'team']) {
       const share = await json(await api(env, owner.key, 'POST', `/api/sites/${name}/share`))
       const shareHost = new URL(share.shareUrl).host
       const site = (await env.store.findSite(name)) as PolicySite
-      const requests: Record<Role, Parameters<typeof toCloudFrontEvent>[0]> = {
-        owner: { host: `${name}.fling.test`, cookieHeader: cookie('alice@example.test') },
-        member: { host: `${name}.fling.test`, cookieHeader: cookie('bob@example.test') },
-        share: { host: shareHost },
-        anonymous: { host: `${name}.fling.test` },
+      // What each role's browser holds: a site pass only where the API would hand one out.
+      const cookieOf = async (email: string) =>
+        can({ kind: 'user', email }, 'site.view', site) && name === 'team'
+          ? pass(email, name)
+          : siteCookie(email)
+      const requests: Record<Role, [string, string?]> = {
+        owner: [`${name}.fling.test`, await cookieOf('alice@example.test')],
+        viewer: [`${name}.fling.test`, await cookieOf('bob@example.test')],
+        member: [`${name}.fling.test`, await cookieOf('carol@example.test')],
+        share: [shareHost],
+        anonymous: [`${name}.fling.test`],
       }
       const actors: Record<Role, Actor> = {
         owner: { kind: 'user', email: 'alice@example.test' },
-        member: { kind: 'user', email: 'bob@example.test' },
+        viewer: { kind: 'user', email: 'bob@example.test' },
+        member: { kind: 'user', email: 'carol@example.test' },
         share: { kind: 'share', token: shareHost.split('.')[0]?.slice(3) ?? '' },
         anonymous: { kind: 'anonymous' },
       }
       expect(env.routeTable.data.has(siteKvsKey(name))).toBe(true)
       for (const role of ROLES) {
-        const result = await router(toCloudFrontEvent({ path: '/', ...requests[role] }))
-        const served = !isResponse(result) && result.uri.startsWith('/sites/')
-        expect({ name, role, served }).toEqual({
+        expect({ name, role, served: await served(...requests[role]) }).toEqual({
           name,
           role,
           served: can(actors[role], 'site.view', site),
         })
       }
     }
+  })
+
+  it("a restricted site wants its own pass: not a member cookie, another site's pass or an expired one", async () => {
+    const { env, siteCookie, pass, served } = await sites()
+    expect(await served('team.fling.test', await pass('bob@example.test', 'team'))).toBe(true)
+    expect(await served('team.fling.test', siteCookie('bob@example.test'))).toBe(false)
+    expect(await served('team.fling.test', await pass('bob@example.test', 'other'))).toBe(false)
+    const now = Math.floor(env.deps.clock.now().getTime() / 1000)
+    expect(await served('team.fling.test', await pass('bob@example.test', 'team', now))).toBe(false)
+  })
+
+  it('/auth/login hands a viewer a pass the edge accepts, and anyone else the 404 page', async () => {
+    const { env, owner, viewer, member, router } = await sites()
+    const login = (session: string, ret: string) =>
+      env.app.request(`/auth/login?return=${encodeURIComponent(ret)}`, {
+        headers: { cookie: `__Host-fling_session=${session}` },
+      })
+    const ret = 'https://team.fling.test/docs/?q=1'
+    for (const who of [owner, viewer]) {
+      const res = await login(who.session, ret)
+      const location = new URL(res.headers.get('location') ?? '')
+      expect(`${location.origin}${location.pathname}`).toBe('https://team.fling.test/_fling-pass')
+      expect(location.searchParams.get('r')).toBe('/docs/?q=1')
+      // The edge turns the handoff into a pass, then serves the site with it.
+      const handoff = await router(
+        toCloudFrontEvent({
+          host: location.host,
+          path: location.pathname,
+          query: location.search.slice(1),
+        })
+      )
+      if (!isResponse(handoff)) throw new Error('expected a redirect')
+      expect(handoff.headers?.location?.value).toBe('/docs/?q=1')
+      const cookie = handoff.cookies?.fling_pass?.value
+      expect(cookie).toBeTruthy()
+      const page = await router(
+        toCloudFrontEvent({ host: location.host, path: '/', cookieHeader: `fling_pass=${cookie}` })
+      )
+      expect(!isResponse(page) && page.uri.startsWith('/sites/')).toBe(true)
+    }
+    const refused = await login(member.session, ret)
+    expect(refused.headers.get('location')).toBe('https://team.fling.test/_fling/404.html')
+    // Other sites go straight back, as ever.
+    const priv = await login(member.session, 'https://priv.fling.test/')
+    expect(priv.headers.get('location')).toBe('https://priv.fling.test/')
+    expect(cookiesOf(priv).fling_site).toBeDefined()
+  })
+
+  it('a handoff expires after 60 seconds', async () => {
+    const { env, viewer } = await sites()
+    const res = await env.app.request(
+      `/auth/login?return=${encodeURIComponent('https://team.fling.test/')}`,
+      { headers: { cookie: `__Host-fling_session=${viewer.session}` } }
+    )
+    const location = new URL(res.headers.get('location') ?? '')
+    await env.routeTable.put(SITE_HMAC_KVS_KEY, env.config.secrets.siteHmacKey)
+    const later = env.deps.clock.now().getTime() + 61_000
+    const router = createSiteRouter({
+      kvs: env.routeTable,
+      appOrigin: env.config.appOrigin,
+      now: () => later,
+    })
+    const result = await router(
+      toCloudFrontEvent({
+        host: location.host,
+        path: location.pathname,
+        query: location.search.slice(1),
+      })
+    )
+    expect(isResponse(result) && result.cookies).toBeFalsy()
   })
 })
 
@@ -277,6 +399,7 @@ describe("a member can't act on another user's site", () => {
       ['GET', `/api/sites/hello/versions/${versionId}/files`],
       ['PATCH', '/api/sites/hello', { visibility: 'private' }],
       ['PATCH', '/api/sites/hello', { spa: true }],
+      ['PATCH', '/api/sites/hello', { audience: { emails: ['bob@example.test'] } }],
       ['POST', `/api/sites/hello/deploys/${versionId}/finalize`],
       ['POST', '/api/sites/hello/current', { versionId }],
       ['POST', '/api/sites/hello/share'],
@@ -312,6 +435,7 @@ describe("a member can't act on another user's site", () => {
       ['fling_share', { name: 'hello', refresh: true }],
       ['fling_share', { name: 'hello', revoke: true }],
       ['fling_set_visibility', { name: 'hello', visibility: 'private' }],
+      ['fling_set_audience', { name: 'hello', add: ['bob@example.test'] }],
       ['fling_archive', { name: 'hello' }],
       ['fling_archive', { name: 'hello', unarchive: true }],
       ['fling_rollback', { name: 'hello', versionId }],

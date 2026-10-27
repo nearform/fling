@@ -9,8 +9,17 @@
  * Access: a site is found by its name (through the name claim, whoever owns it), then policy.ts
  * decides whether the user may do the action. Refusals look exactly like a missing site (404), so
  * the API never confirms that someone else's site exists beyond what `checkName` says.
+ *
+ * Audiences: the owner may limit a private site to listed addresses (`setAudience` through
+ * `updateSite`), each one the instance would let sign in. The route value then carries `r: 1`, and
+ * the edge wants a site pass, which `/auth/login` hands to whoever policy lets view it
+ * (`signedInReturn`).
  */
 import {
+  AUDIENCE_EMAILS_MAX,
+  type Audience,
+  type AudienceInput,
+  AudienceInputSchema,
   initialsFromEmail,
   isGeneratedListing,
   isValidSiteName,
@@ -18,7 +27,10 @@ import {
   type Manifest,
   type ManifestFile,
   type NameCheck,
+  NOT_FOUND_PAGE,
   nameSuggestions,
+  parseLabel,
+  SITE_PASS_PATH,
   type Site,
   type SiteDetail,
   shareKvsKey,
@@ -32,11 +44,13 @@ import {
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
+import { PASS_HANDOFF_TTL_SECONDS, signPassHandoff } from '@fling/shared/site-cookie'
+import { emailAllowed } from './auth/identity.ts'
 import { manifestKey } from './blobs/types.ts'
-import { conflict, notFound } from './lib/errors.ts'
+import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
-import { type Action, can, userActor } from './policy.ts'
-import type { SiteRecord, User } from './store/types.ts'
+import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
+import type { SiteAudience, SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
@@ -75,8 +89,19 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
     shareUrl: site.shareToken
       ? siteUrl(shareLabel(site.shareToken), sitesDomain, protocol(deps))
       : null,
+    restricted: isRestricted(site),
+    audienceSize: site.audience.emails.length + site.audience.groups.length,
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
+  }
+}
+
+/** The audience as its owner sees it: each address, and whether it has signed in yet. */
+export async function audienceOf(deps: Deps, site: SiteRecord): Promise<Audience> {
+  const known = await deps.store.knownEmails(site.audience.emails)
+  return {
+    emails: site.audience.emails.map(email => ({ email, known: known.has(email) })),
+    groups: [...site.audience.groups],
   }
 }
 
@@ -102,6 +127,7 @@ export async function syncRouteTable(
     v: site.currentVersionId,
     vis: site.visibility,
     spa: site.spa,
+    ...(isRestricted(site) ? { r: 1 as const } : {}),
   }
   const json = JSON.stringify(value)
   await routeTable.put(siteKvsKey(label), json)
@@ -163,26 +189,89 @@ export async function checkName(deps: Deps, user: User, name: string): Promise<N
 }
 
 /**
- * The site named `name`, if the user may do every one of `actions` to it; else 404, the same
- * answer as for a name nobody holds.
+ * The ids of the groups `email` belongs to. The one place policy's `groups` come from; there are
+ * no groups yet, so none.
  */
+async function groupsOf(_deps: Deps, _email: string): Promise<string[]> {
+  return []
+}
+
+/**
+ * The actor as policy needs them for this site: a user carries their groups on a restricted site,
+ * the only place policy reads them (so other sites cost no lookup).
+ */
+export async function actorOn(deps: Deps, actor: Actor, site: SiteRecord): Promise<Actor> {
+  if (actor.kind !== 'user' || !isRestricted(site)) return actor
+  return { ...actor, groups: await groupsOf(deps, actor.email) }
+}
+
+/**
+ * The site named `name` and the actor resolved against it, if the actor may do every one of
+ * `actions` to it; else 404, the same answer as for a name nobody holds.
+ */
+export async function resolveSite(
+  deps: Deps,
+  actor: Actor,
+  name: string,
+  ...actions: [Action, ...Action[]]
+): Promise<{ site: SiteRecord; actor: Actor }> {
+  const site = isValidSiteName(name) ? await deps.store.findSite(name) : null
+  const resolved = site ? await actorOn(deps, actor, site) : actor
+  if (!site || !actions.every(a => can(resolved, a, site))) {
+    throw notFound(`No site named "${name}"`)
+  }
+  return { site, actor: resolved }
+}
+
+/** The site named `name`, if the user may do every one of `actions` to it; else 404. */
 export async function requireSite(
   deps: Deps,
   user: User,
   name: string,
   ...actions: [Action, ...Action[]]
 ): Promise<SiteRecord> {
-  const site = isValidSiteName(name) ? await deps.store.findSite(name) : null
-  if (!site || !actions.every(a => can(userActor(user), a, site))) {
-    throw notFound(`No site named "${name}"`)
-  }
-  return site
+  return (await resolveSite(deps, userActor(user), name, ...actions)).site
 }
 
-export async function save(deps: Deps, user: User, site: SiteRecord, oldShareToken?: string) {
+/** Write the site and its routes; `before`: the audience it had, when the audience changed. */
+export async function save(
+  deps: Deps,
+  user: User,
+  site: SiteRecord,
+  oldShareToken?: string,
+  before?: SiteAudience
+) {
   site.updatedAt = deps.clock.now().toISOString()
-  await deps.store.putSite(site)
+  await deps.store.putSite(site, before)
   await syncRouteTable(deps, user, site, oldShareToken)
+}
+
+/**
+ * A new audience for the site, checked: every address one the instance would let sign in (an
+ * audience can't name someone who could never see it). Returns the audience it had.
+ */
+export function applyAudience(deps: Deps, site: SiteRecord, input: AudienceInput): SiteAudience {
+  const audience = AudienceInputSchema.parse(input)
+  const emails = [...new Set(audience.emails)]
+  if (emails.length > AUDIENCE_EMAILS_MAX) {
+    throw badRequest(`An audience holds at most ${AUDIENCE_EMAILS_MAX} addresses`)
+  }
+  const policy = {
+    allowedDomains: deps.config.allowedEmailDomains,
+    allowedEmails: deps.config.allowedEmails,
+  }
+  const refused = emails.filter(e => !/^[^@\s]+@[^@\s]+$/.test(e) || !emailAllowed(e, policy))
+  if (refused.length) {
+    throw new ApiError(
+      400,
+      'email_not_allowed',
+      `Not an address that can sign in to ${deps.config.instanceName}: ${refused.join(', ')}`,
+      { emails: refused }
+    )
+  }
+  const before = site.audience
+  site.audience = { emails, groups: [...audience.groups] }
+  return before
 }
 
 export function applySettings(site: SiteRecord, opts: { spa?: boolean; visibility?: Visibility }) {
@@ -198,10 +287,14 @@ export async function listSites(deps: Deps, user: User, archived: boolean): Prom
 }
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
-  const site = await requireSite(deps, user, name, 'site.read', 'version.list')
-  const versions = await deps.store.listVersions(site)
+  const site = await requireSite(deps, user, name, 'site.read', 'version.list', 'site.audience')
+  const [versions, audience] = await Promise.all([
+    deps.store.listVersions(site),
+    audienceOf(deps, site),
+  ])
   return {
     ...toSite(deps, user, site),
+    audience,
     versions: versions
       .filter(v => v.status === 'complete')
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -243,18 +336,23 @@ export async function updateSite(
   deps: Deps,
   user: User,
   name: string,
-  patch: { spa?: boolean; visibility?: Visibility }
-) {
-  const site = await requireSite(
-    deps,
-    user,
-    name,
-    patch.visibility === undefined ? 'site.settings' : 'site.visibility',
-    ...(patch.spa === undefined ? [] : (['site.settings'] as const))
-  )
+  patch: { spa?: boolean; visibility?: Visibility; audience?: AudienceInput }
+): Promise<Site & { audience?: Audience }> {
+  const actions: Action[] = [
+    ...(patch.visibility === undefined ? [] : (['site.visibility'] as const)),
+    ...(patch.spa === undefined ? [] : (['site.settings'] as const)),
+    ...(patch.audience === undefined ? [] : (['site.audience'] as const)),
+  ]
+  const [first = 'site.settings', ...rest] = actions
+  const site = await requireSite(deps, user, name, first, ...rest)
   applySettings(site, patch)
-  await save(deps, user, site)
-  return toSite(deps, user, site)
+  const before =
+    patch.audience === undefined ? undefined : applyAudience(deps, site, patch.audience)
+  await save(deps, user, site, undefined, before)
+  return {
+    ...toSite(deps, user, site),
+    ...(before ? { audience: await audienceOf(deps, site) } : {}),
+  }
 }
 
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
@@ -289,6 +387,34 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
   site.archived = archived
   await save(deps, user, site)
   return toSite(deps, user, site)
+}
+
+/**
+ * Where `/auth/login` sends a signed-in user (`ret`, already through safeReturnUrl). A restricted
+ * site's host is let in only through a site pass: someone policy lets view it goes by its
+ * `/_fling-pass` with a 60-second handoff naming them and the site; anyone else gets the sites'
+ * 404 page, as for a site that doesn't exist. Every other return URL is unchanged.
+ */
+export async function signedInReturn(deps: Deps, user: User, ret: string): Promise<string> {
+  const { config } = deps
+  const suffix = `.${config.sitesDomain}`
+  let url: URL
+  try {
+    url = new URL(ret)
+  } catch {
+    return ret
+  }
+  if (url.protocol !== `${config.siteScheme}:` || !url.host.endsWith(suffix)) return ret
+  const label = parseLabel(url.host.slice(0, -suffix.length))
+  if (label?.kind !== 'site') return ret
+  const site = await deps.store.findSite(label.name)
+  if (!site || !isRestricted(site)) return ret
+  const actor = await actorOn(deps, userActor(user), site)
+  if (!can(actor, 'site.view', site)) return `${url.origin}${NOT_FOUND_PAGE}`
+  const x = Math.floor(deps.clock.now().getTime() / 1000) + PASS_HANDOFF_TTL_SECONDS
+  const t = signPassHandoff({ s: site.id, e: user.email, x }, config.secrets.siteHmacKey)
+  const r = encodeURIComponent(`${url.pathname}${url.search}`)
+  return `${url.origin}${SITE_PASS_PATH}?t=${t}&r=${r}`
 }
 
 /**

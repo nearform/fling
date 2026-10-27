@@ -230,6 +230,12 @@ aliases of `/auth/login` and `/auth/callback`. To move to the new settings: add
 `${SSM_PREFIX}oidc-client-secret`, set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`, deploy, and
 then delete the two `google-client-*` parameters.
 
+**Restricted sites.** A private site with an audience is let in by a site pass, not the
+`fling_site` cookie: the API checks the audience at sign-in, then the site router sets a host-only
+`fling_pass` cookie (signed with the same key, good for 15 minutes) at `/_fling-pass` on the site's
+host. That path is outside `_fling/*`, so the site router handles it. Taking someone out of an
+audience shuts them out within 15 minutes; nothing else needs configuring.
+
 ## One-time setup
 
 1. **Infrastructure.** Call the module from your Terraform (see
@@ -321,6 +327,10 @@ Table items and KeyValueStore keys are not rolled back. Keep the data model back
 roll forward. Data migrations are written expand/contract so a rollback across one is survivable
 (see [Data migrations](#data-migrations)); the one exception is a contract step, which is run by
 hand and says so. A single site rolls back with `fling rollback <name> <versionId>`.
+
+Rolling back to a release from before audiences: its API and site router ignore an audience, so a
+restricted site is open to every signed-in member until you roll forward again (the audiences are
+kept).
 
 ## Data migrations
 

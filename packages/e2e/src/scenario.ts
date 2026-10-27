@@ -7,7 +7,8 @@
  *   rollback to v1 → private: anonymous redirect to sign-in, member view (with a site cookie) →
  *   share link → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list;
- *   impersonating the owner: their sites, no API key, stop) → conditional-write race (concurrent
+ *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
+ *   they get in through the site pass, an outsider finds nothing, the share link still serves) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
@@ -41,6 +42,11 @@ export interface ScenarioOptions {
    * and impersonation refused. Without one, skipped.
    */
   admin?: Session
+  /**
+   * A user outside a restricted site's audience. Without one, the admin plays the part (an admin
+   * has no rights over someone else's site); without either, the audience checks are skipped.
+   */
+  outsider?: Session
   /** how long a changed route may take to show (default 5 s locally; smoke tests pass more) */
   propagationMs?: number
   log?: (line: string) => void
@@ -296,6 +302,24 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       await adminStep({ appOrigin, name, opts, step })
     } else {
       step('admin: no admin session (skipped)')
+    }
+
+    // Audiences: the owner limits the private site to the member; the site pass lets them in.
+    if (meta.capabilities.audiences === true) {
+      await audienceStep({
+        appOrigin,
+        name,
+        siteUrl,
+        shareUrl: shared.shareUrl,
+        marker: `v1 ${nonce}`,
+        comments: meta.capabilities.comments === true,
+        fling,
+        opts,
+        step,
+        propagationMs,
+      })
+    } else {
+      step('audiences: not on this instance (skipped)')
     }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
@@ -672,6 +696,120 @@ function withCookies(cookie: string, res: Response): string {
     else jar.set(key, pair)
   }
   return [...jar.values()].join('; ')
+}
+
+interface CliAccess {
+  restricted: boolean
+  audience?: { emails: { email: string; known: boolean }[] }
+  warnings: string[]
+}
+
+async function audienceStep(ctx: {
+  appOrigin: string
+  name: string
+  siteUrl: string
+  shareUrl: string
+  marker: string
+  comments: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  opts: ScenarioOptions
+  step: (line: string) => void
+  propagationMs: number
+}) {
+  const { appOrigin, name, siteUrl, shareUrl, marker, fling, opts, step } = ctx
+  const viewer = opts.member
+  const outsider = opts.outsider ?? opts.admin
+  if (!viewer || !outsider) {
+    step('audience: needs two more users (skipped)')
+    return
+  }
+  const restricted = (await fling('access', name, '--add', viewer.email)) as CliAccess
+  check(
+    restricted.restricted && restricted.audience?.emails.some(e => e.email === viewer.email),
+    `fling access --add: ${JSON.stringify(restricted)}`
+  )
+  check(
+    restricted.warnings.some(w => /share link/i.test(w)),
+    `fling access warns of the share link: ${JSON.stringify(restricted.warnings)}`
+  )
+  step(`restricted ${name} to ${viewer.email}`)
+
+  // The API: the viewer takes part in the comments; the outsider finds no such site.
+  const asUser = (session: Session, path: string) =>
+    fetch(`${appOrigin}${path}`, {
+      headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
+    })
+  const outsiderSite = await asUser(outsider, `/api/sites/${name}`)
+  check(outsiderSite.status === 404, `outsider GET /api/sites/${name}: ${outsiderSite.status}`)
+  const outsiderComments = await asUser(outsider, `/api/sites/${name}/comments`)
+  check(outsiderComments.status === 404, `outsider comments: ${outsiderComments.status}`)
+  if (ctx.comments) {
+    const viewerComments = await asUser(viewer, `/api/sites/${name}/comments`)
+    check(viewerComments.status === 200, `viewer comments: ${viewerComments.status}`)
+  }
+  step('API: the viewer reads the comments; the outsider gets 404s, as for a missing site')
+
+  // The site host: a member cookie doesn't open it; the viewer gets in through sign-in and the
+  // site pass, the outsider is shown the sites' 404 page. Only with browser sessions.
+  if (viewer.cookie && viewer.siteCookie && outsider.cookie) {
+    const loginPrefix = `${appOrigin}/auth/login?return=`
+    const toSignIn = await eventually(
+      'restricted site sends a member to sign in',
+      siteUrl,
+      r => r.status === 302 && (r.location ?? '').startsWith(loginPrefix),
+      { timeoutMs: ctx.propagationMs, headers: { cookie: viewer.siteCookie } }
+    )
+    const signIn = toSignIn.location as string
+    const hop = await get(signIn, { cookie: viewer.cookie })
+    const passUrl = hop.location ?? ''
+    check(
+      hop.status === 302 && passUrl.startsWith(`${new URL(siteUrl).origin}/_fling-pass?t=`),
+      `viewer sign-in hop: ${hop.status} → ${passUrl}`
+    )
+    const pass = await get(passUrl)
+    const passCookie = pass.headers
+      .getSetCookie()
+      .map(c => c.split(';')[0] as string)
+      .find(c => c.startsWith('fling_pass='))
+    check(
+      pass.status === 302 && pass.location === '/' && passCookie,
+      `site pass: ${pass.status} → ${pass.location}, cookie ${passCookie ? 'set' : 'missing'}`
+    )
+    const viewed = await get(siteUrl, { cookie: passCookie })
+    check(viewed.status === 200 && viewed.text.includes(marker), `viewer view: ${viewed.status}`)
+    // Review mode frames the site: nothing on the way through the pass may forbid framing.
+    for (const r of [pass, viewed]) {
+      const csp = r.headers.get('content-security-policy') ?? ''
+      check(
+        !r.headers.get('x-frame-options') && !/frame-ancestors/i.test(csp),
+        `site pass responses refuse framing: x-frame-options ${r.headers.get('x-frame-options')}, csp ${csp}`
+      )
+    }
+    step('viewer: sign-in → site pass → served (frameable)')
+
+    const refused = await get(signIn, { cookie: outsider.cookie })
+    const notFoundUrl = `${new URL(siteUrl).origin}/_fling/404.html`
+    check(
+      refused.status === 302 && refused.location === notFoundUrl,
+      `outsider sign-in hop: ${refused.status} → ${refused.location}`
+    )
+    const page = await get(notFoundUrl)
+    const unknown = await get(siteUrl.replace(`//${name}.`, `//${name}-nobody.`))
+    check(
+      unknown.status === 404 && page.text === unknown.text,
+      `outsider is not shown the sites' 404 page (${page.status}, unknown site ${unknown.status})`
+    )
+    step("outsider: the sites' 404 page, as for a site that does not exist")
+  } else {
+    step('audience: no browser sessions, so the site host checks are skipped')
+  }
+
+  const viaShare = await get(shareUrl)
+  check(
+    viaShare.status === 200 && viaShare.text.includes(marker),
+    `share link on a restricted site: ${viaShare.status}`
+  )
+  step('the share link still serves the restricted site')
 }
 
 async function adminStep(ctx: {

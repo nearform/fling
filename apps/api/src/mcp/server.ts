@@ -5,8 +5,11 @@
  */
 import {
   type Comment,
+  changesAudience,
+  describeAudience,
   describeComments,
   describeVersionFiles,
+  editAudience,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
   mcpRemoteInstructions,
@@ -173,6 +176,7 @@ const visibilityOf = (pub: boolean | undefined) =>
 
 export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   const wording = mcpWording(instanceMetadata(deps.config))
+  const members = privateAudience(instanceMetadata(deps.config))
   const mcpTools = mcpToolsFor(wording)
   const server = new McpServer(
     { name: 'fling', title: deps.config.instanceName, version: SERVER_VERSION },
@@ -222,7 +226,9 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
       )
       .join('\n')
     return {
-      text: `${site.name}: ${describeSite(site)}\nVersions (newest first):\n${versions || '(none)'}`,
+      text:
+        `${site.name}: ${describeSite(site)}\n${describeAudience(site, members)}\n` +
+        `Versions (newest first):\n${versions || '(none)'}`,
       data: site,
     }
   })
@@ -355,6 +361,21 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   register(mcpTools.setVisibility, async args => {
     const site = await sites.updateSite(deps, user, args.name, { visibility: args.visibility })
     return { text: `${site.name} is now ${site.visibility}: ${site.url}`, data: site }
+  })
+
+  register(mcpTools.setAudience, async args => {
+    const change = { add: args.add, remove: args.remove, set: args.set, clear: args.clear }
+    if (!changesAudience(change)) {
+      throw new ApiError(400, 'bad_request', 'Pass `add`, `remove`, `set` or `clear`')
+    }
+    const current = await sites.requireSite(deps, user, args.name, 'site.audience')
+    const site = await sites.updateSite(deps, user, args.name, {
+      audience: {
+        emails: editAudience(current.audience.emails, change),
+        groups: current.audience.groups,
+      },
+    })
+    return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
   register(mcpTools.archive, async args => {

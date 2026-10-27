@@ -8,6 +8,7 @@ import {
   AdminUserListSchema,
   ApiKeyListSchema,
   type ApiKeySchema,
+  type AudienceInput,
   type AuditEntry,
   AuditListSchema,
   type Comment,
@@ -143,8 +144,10 @@ export const api = {
   /** The files in one version of a site, sorted by path. */
   versionFiles: (name: string, versionId: string): Promise<VersionFiles> =>
     request(`${site(name)}/versions/${encodeURIComponent(versionId)}/files`, VersionFilesSchema),
-  updateSite: (name: string, body: { visibility?: Visibility; spa?: boolean }) =>
-    request(site(name), ignoreBody, { method: 'PATCH', body }),
+  updateSite: (
+    name: string,
+    body: { visibility?: Visibility; spa?: boolean; audience?: AudienceInput }
+  ) => request(site(name), ignoreBody, { method: 'PATCH', body }),
   /** Creates the share link, or rotates it when one exists (the old link stops working). */
   share: (name: string) => request(`${site(name)}/share`, ShareResponseParser, { method: 'POST' }),
   revokeShare: (name: string) => request(`${site(name)}/share`, ignoreBody, { method: 'DELETE' }),

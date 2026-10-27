@@ -6,7 +6,7 @@
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { routeTableConformance } from '@fling/conformance'
 import { siteKvsKey } from '@fling/shared/route-keys'
-import { signSiteCookie } from '@fling/shared/site-cookie'
+import { signPassHandoff, signSiteCookie } from '@fling/shared/site-cookie'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CachedRouteTable } from '../src/route-table/cached.ts'
 import { WorkersKvRouteTable } from '../src/route-table/kv.ts'
@@ -61,6 +61,13 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     })
     await cf.bucket.put('sites/S1/V1/a b.txt', '0123456789', {
       httpMetadata: { contentType: 'text/plain' },
+    })
+    await table.put(
+      siteKvsKey('team'),
+      JSON.stringify({ id: 'S3', v: 'V3', vis: 'private', spa: false, r: 1 })
+    )
+    await cf.bucket.put('sites/S3/V3/index.html', 'team app', {
+      httpMetadata: { contentType: 'text/html' },
     })
     await cf.bucket.put('sites/S2/V2/index.html', 'private app', {
       httpMetadata: { contentType: 'text/html' },
@@ -136,6 +143,30 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     })
     expect(member.status).toBe(200)
     expect(await member.text()).toBe('private app')
+  })
+
+  it('lets a restricted site in only with its site pass, set from a handoff', async () => {
+    const member = signSiteCookie({ e: 'a@example.test', x: Date.now() / 1000 + 60 }, cf.siteKey)
+    const refused = await req('team.sites.example.test', '/', {
+      headers: { cookie: `fling_site=${member}` },
+    })
+    expect(refused.status).toBe(302)
+    const t = signPassHandoff(
+      { s: 'S3', e: 'a@example.test', x: Math.floor(Date.now() / 1000) + 60 },
+      cf.siteKey
+    )
+    const pass = await req('team.sites.example.test', `/_fling-pass?t=${t}&r=%2Fdocs%2F`)
+    expect(pass.status).toBe(302)
+    expect(pass.headers.get('location')).toBe('/docs/')
+    const setCookie = pass.headers.get('set-cookie') ?? ''
+    expect(setCookie).toMatch(
+      /^fling_pass=[^;]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=900$/
+    )
+    const served = await req('team.sites.example.test', '/', {
+      headers: { cookie: setCookie.split(';')[0] as string },
+    })
+    expect(served.status).toBe(200)
+    expect(await served.text()).toBe('team app')
   })
 
   it('refuses other methods', async () => {

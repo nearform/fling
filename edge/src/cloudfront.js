@@ -2,7 +2,7 @@
 // around the shared routing decision, @fling/shared/site-routing. It reads the request, looks
 // routes and the cookie key up in the associated KeyValueStore and turns the decision into a
 // rewritten request (an S3 object key; unknown hosts go to `/_fling/missing`, which S3 404s into
-// the error page) or a response.
+// the error page) or a response, with the cookies it sets (the site pass).
 //
 // edge/build.mjs bundles this into dist/site-router.js, the code deploy.yml publishes, after
 // filling `__APP_ORIGIN__` and `__SITE_SCHEME__`. Same syntax rules as site-routing.ts.
@@ -49,6 +49,7 @@ function queryString(qs) {
 async function handler(event) {
   const request = event.request
   const cookie = request.cookies && request.cookies.fling_site
+  const pass = request.cookies && request.cookies.fling_pass
   const decision = await routeSiteRequest(
     {
       method: request.method,
@@ -56,6 +57,7 @@ async function handler(event) {
       uri: request.uri,
       query: queryString(request.querystring),
       cookie: cookie ? cookie.value || '' : null,
+      pass: pass ? pass.value || '' : null,
     },
     {
       appOrigin: APP_ORIGIN,
@@ -74,11 +76,13 @@ async function handler(event) {
   Object.keys(decision.headers).forEach(name => {
     headers[name] = { value: decision.headers[name] }
   })
-  return {
+  const response = {
     statusCode: decision.status,
     statusDescription: decision.statusDescription,
     headers: headers,
   }
+  if (decision.cookies) response.cookies = decision.cookies
+  return response
 }
 
 // Stripped by build.mjs: CloudFront calls the top-level `handler`.

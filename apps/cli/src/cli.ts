@@ -12,6 +12,7 @@ import { runComment, runComments, runResolve, runUncomment } from './commands/co
 import { runDeploy } from './commands/deploy.ts'
 import { runSetup } from './commands/setup.ts'
 import {
+  runAccess,
   runArchive,
   runFiles,
   runInfo,
@@ -250,6 +251,18 @@ program
   .helpGroup('Sites:')
   .description('private (sign-in required) or public (anyone)')
   .action(action((ctx, name: string, visibility: string) => runVisibility(ctx, name, visibility)))
+program
+  .command('access <name>')
+  .helpGroup('Sites:')
+  .description('show who can open a private site, or limit it to listed people')
+  .option('--add <emails...>', 'let these addresses in (comma-separated or repeated)')
+  .option('--remove <emails...>', 'take these addresses out')
+  .option('--clear', 'empty the list: everyone signed in can open it again')
+  .action(
+    action((ctx, name: string, opts: { add?: string[]; remove?: string[]; clear?: boolean }) =>
+      runAccess(ctx, name, opts)
+    )
+  )
 program
   .command('archive <name>')
   .helpGroup('Sites:')

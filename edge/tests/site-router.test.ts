@@ -1,6 +1,11 @@
 import { parseLabel } from '@fling/shared/hosts'
 import { SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
-import { signSiteCookie } from '@fling/shared/site-cookie'
+import {
+  signPassHandoff,
+  signSiteCookie,
+  signSitePass,
+  verifySitePass,
+} from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   type CloudFrontRequest,
@@ -22,6 +27,8 @@ const PRIVATE = 'my-app.fling.example.test'
 const PUBLIC = 'pub.fling.example.test'
 const SPA = 'spa.fling.example.test'
 const SHARE = `s--${TOKEN}.fling.example.test`
+const RESTRICTED = 'team.fling.example.test'
+const RESTRICTED_SHARE = `s--${'r'.repeat(20)}.fling.example.test`
 
 const store = new Map<string, string>([
   [SITE_HMAC_KVS_KEY, HMAC],
@@ -31,6 +38,11 @@ const store = new Map<string, string>([
   [siteKvsKey('www'), JSON.stringify({ id: 'S9', v: 'V9', vis: 'public', spa: false })],
   [siteKvsKey('s'), JSON.stringify({ id: 'S9', v: 'V9', vis: 'public', spa: false })],
   [shareKvsKey(TOKEN), JSON.stringify({ id: 'S1', v: 'V1', vis: 'private', spa: false })],
+  [siteKvsKey('team'), JSON.stringify({ id: 'S7', v: 'V7', vis: 'private', spa: false, r: 1 })],
+  [
+    shareKvsKey('r'.repeat(20)),
+    JSON.stringify({ id: 'S7', v: 'V7', vis: 'private', spa: false, r: 1 }),
+  ],
 ])
 
 let router: SiteRouter
@@ -126,6 +138,135 @@ describe('auth for private sites', () => {
 
   it('serves share hosts without auth even when the site is private', async () => {
     expect((await asRequest({ host: SHARE, path: '/' })).uri).toBe('/sites/S1/V1/index.html')
+  })
+})
+
+describe('restricted sites and the site pass', () => {
+  const pass = (s = 'S7', x = NOW_S + 60, key = HMAC) =>
+    `fling_pass=${signSitePass({ s, e: 'bob@example.test', x }, key)}`
+  const handoff = (s = 'S7', x = NOW_S + 60) =>
+    signPassHandoff({ s, e: 'bob@example.test', x }, HMAC)
+  const login = (back: string) => `${APP}/auth/login?return=${encodeURIComponent(back)}`
+
+  it('serves with a valid pass for this site', async () => {
+    const req = await asRequest({ host: RESTRICTED, path: '/', cookieHeader: `a=b; ${pass()}` })
+    expect(req.uri).toBe('/sites/S7/V7/index.html')
+  })
+
+  it('sends everyone else to sign in: no pass, a member cookie, or a pass for another site', async () => {
+    for (const cookieHeader of [
+      undefined,
+      validCookie(),
+      pass('S1'),
+      pass('S7', NOW_S),
+      pass('S7', NOW_S + 60, 'other'),
+      `fling_pass=${handoff()}`,
+      'fling_pass=garbage',
+    ]) {
+      const res = await asResponse({
+        host: RESTRICTED,
+        path: '/a.html',
+        query: 'q=1',
+        cookieHeader,
+      })
+      expect({
+        cookieHeader,
+        status: res.statusCode,
+        location: res.headers?.location?.value,
+      }).toEqual({
+        cookieHeader,
+        status: 302,
+        location: login(`https://${RESTRICTED}/a.html?q=1`),
+      })
+    }
+  })
+
+  it('never takes a pass or a handoff as a member cookie', async () => {
+    for (const token of [
+      signSitePass({ s: 'S1', e: 'b@x.test', x: NOW_S + 60 }, HMAC),
+      handoff('S1'),
+    ]) {
+      const res = await asResponse({ host: PRIVATE, cookieHeader: `fling_site=${token}` })
+      expect(res.statusCode).toBe(302)
+    }
+  })
+
+  it('serves share hosts without a pass', async () => {
+    expect((await asRequest({ host: RESTRICTED_SHARE, path: '/' })).uri).toBe(
+      '/sites/S7/V7/index.html'
+    )
+  })
+
+  it('turns a valid handoff into a host-only pass and goes on to the path', async () => {
+    const r = encodeURIComponent('/docs/a.html?x=1&y=2')
+    const res = await asResponse({
+      host: RESTRICTED,
+      path: '/_fling-pass',
+      query: `t=${handoff()}&r=${r}`,
+    })
+    expect(res.statusCode).toBe(302)
+    expect(res.headers?.location?.value).toBe('/docs/a.html?x=1&y=2')
+    expect(res.headers?.['cache-control']?.value).toBe('no-store')
+    const cookie = res.cookies?.fling_pass
+    expect(cookie?.attributes).toBe('Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=900')
+    expect(cookie?.attributes).not.toMatch(/Domain/i)
+    expect(verifySitePass(cookie?.value ?? '', HMAC, 'pass', NOW_S)).toEqual({
+      s: 'S7',
+      e: 'bob@example.test',
+      x: NOW_S + 900,
+    })
+    // …which then opens the site.
+    const req = await asRequest({ host: RESTRICTED, cookieHeader: `fling_pass=${cookie?.value}` })
+    expect(req.uri).toBe('/sites/S7/V7/index.html')
+  })
+
+  it('leaves Secure off over plain http', async () => {
+    const dev = createSiteRouter({
+      kvs: { get: async key => store.get(key) },
+      appOrigin: 'http://localhost:47101',
+      siteScheme: 'http',
+      now: () => NOW_MS,
+    })
+    const res = (await dev(
+      toCloudFrontEvent({ host: RESTRICTED, path: '/_fling-pass', query: `t=${handoff()}&r=%2F` })
+    )) as CloudFrontResponse
+    expect(res.cookies?.fling_pass?.attributes).toBe('HttpOnly; SameSite=Lax; Path=/; Max-Age=900')
+  })
+
+  it('sets no pass for an expired, foreign or forged handoff, or a pass in its place', async () => {
+    const forged = `${handoff().split('.')[0]}.${'A'.repeat(43)}`
+    for (const t of [handoff('S7', NOW_S), handoff('S1'), forged, pass().slice(11), '']) {
+      const res = await asResponse({
+        host: RESTRICTED,
+        path: '/_fling-pass',
+        query: `t=${t}&r=%2Fx`,
+      })
+      expect({ t, status: res.statusCode, location: res.headers?.location?.value }).toEqual({
+        t,
+        status: 302,
+        location: '/x',
+      })
+      expect(res.cookies).toBeUndefined()
+    }
+  })
+
+  it('only goes on to a path on the same host', async () => {
+    for (const [r, location] of [
+      ['%2Fok', '/ok'],
+      ['https%3A%2F%2Fevil.test%2F', '/'],
+      ['%2F%2Fevil.test', '/'],
+      ['%2F%5Cevil.test', '/'],
+      ['%2Fa%0D%0ASet-Cookie%3A%20x', '/'],
+      ['%E0%A4%A', '/'],
+      ['', '/'],
+    ]) {
+      const res = await asResponse({
+        host: RESTRICTED,
+        path: '/_fling-pass',
+        query: `t=${handoff()}&r=${r}`,
+      })
+      expect({ r, location: res.headers?.location?.value }).toEqual({ r, location })
+    }
   })
 })
 

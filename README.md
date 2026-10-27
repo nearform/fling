@@ -15,8 +15,8 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 - **From anywhere.** The CLI, Claude Code (plugin), Claude Desktop (extension), Claude on the web
   and mobile (connector `https://<your Fling>/mcp`), and any script, CI job or background agent
   with an API key.
-- **Private by default.** Visitors sign in with your identity provider. Share links, public sites,
-  archive and delete are one command each. Secrets and dotfiles never ship.
+- **Private by default.** Visitors sign in with your identity provider, and a site can be limited
+  to the people you name. Share links, public sites, archive and delete are one command each. Secrets and dotfiles never ship.
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it.
@@ -39,6 +39,13 @@ which it publishes at `/.well-known/fling`. The CLI, the MCP servers and the web
 there, so none of them is tied to one instance. People sign in through the instance's OpenID
 Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. Sites
 are private to them by default; share links open a site to anyone with the link.
+
+**Audiences.** The owner can limit a private site to listed people (`fling access <site> --add
+a@example.test`, `fling_set_audience`, or the site's Access section in the web UI). Each address must
+be one that can sign in; the owner always sees the site, and share links still open it. The edge
+holds no access lists: the API checks the audience when someone signs in to the site and hands them
+a 15-minute site pass for that one host, renewed without a prompt. So removing someone takes effect
+within 15 minutes.
 
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.

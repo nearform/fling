@@ -50,7 +50,9 @@ export function useApiKeys() {
 function useSiteMutation<TVars, TResult>(
   name: string,
   fn: (vars: TVars) => Promise<TResult>,
-  success?: string | ((result: TResult) => string)
+  success?: string | ((result: TResult) => string),
+  /** false: the caller shows the failure itself, next to what failed */
+  toastErrors = true
 ) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -60,7 +62,9 @@ function useSiteMutation<TVars, TResult>(
       queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
       if (success) showToast(typeof success === 'string' ? success : success(result))
     },
-    onError: error => showToast(errorMessage(error), 'error'),
+    onError: error => {
+      if (toastErrors) showToast(errorMessage(error), 'error')
+    },
   })
 }
 
@@ -70,6 +74,13 @@ export function useSiteActions(name: string) {
       name,
       (visibility: Visibility) => api.updateSite(name, { visibility }),
       'Visibility updated'
+    ),
+    /** The audience's addresses (the whole list); refused addresses are the caller's to show. */
+    setAudience: useSiteMutation(
+      name,
+      (emails: string[]) => api.updateSite(name, { audience: { emails, groups: [] } }),
+      'Audience updated',
+      false
     ),
     share: useSiteMutation(name, () => api.share(name)),
     revokeShare: useSiteMutation(name, () => api.revokeShare(name), 'Share link revoked'),

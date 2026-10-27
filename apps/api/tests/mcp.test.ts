@@ -86,6 +86,7 @@ describe('/mcp tools', () => {
         'fling_list',
         'fling_publish',
         'fling_rollback',
+        'fling_set_audience',
         'fling_set_visibility',
         'fling_share',
         'fling_upload_begin',

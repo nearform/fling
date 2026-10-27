@@ -42,6 +42,7 @@ const req = (over: Partial<SiteRequest>): SiteRequest => ({
   uri: '/',
   query: '',
   cookie: null,
+  pass: null,
   ...over,
 })
 

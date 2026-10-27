@@ -124,6 +124,9 @@ sites.all('*', async c => {
   if (isResponse(result)) {
     const headers = new Headers()
     for (const [name, v] of Object.entries(result.headers ?? {})) headers.set(name, v.value)
+    for (const [name, v] of Object.entries(result.cookies ?? {})) {
+      headers.append('set-cookie', `${name}=${v.value}${v.attributes ? `; ${v.attributes}` : ''}`)
+    }
     return new Response(null, { status: result.statusCode, headers })
   }
   if (result.uri === REVIEW_SHELL_PATH) {

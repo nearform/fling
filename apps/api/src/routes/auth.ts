@@ -1,7 +1,9 @@
 /**
  * `/auth/*`: sign-in with the instance's OpenID Connect issuer (auth/oidc.ts). `/auth/login`
  * starts it (or, already signed in, refreshes `fling_site` and goes straight back: the edge sends
- * private-site visitors here) and the issuer returns to `/auth/callback`. State, nonce, the PKCE
+ * private-site visitors here) and the issuer returns to `/auth/callback`. Going back to a
+ * restricted site takes a site pass, so every way back from signing in goes through
+ * `signedInReturn` (sites.ts), which asks policy. State, nonce, the PKCE
  * verifier and the return URL travel in a short-lived `fling_oauth` cookie. `/auth/google` and
  * `/auth/google/callback` are the pre-OIDC paths, kept because existing Google OAuth clients
  * allow only that callback. Also logout, the CLI loopback login and the dev-only login.
@@ -19,6 +21,7 @@ import { safeReturnUrl } from '../auth/return-url.ts'
 import { endSession, setSiteCookie, startSession } from '../auth/session.ts'
 import { badRequest, forbidden, notFound } from '../lib/errors.ts'
 import { canInstance } from '../policy.ts'
+import { signedInReturn } from '../sites.ts'
 import type { AppEnv } from '../types.ts'
 
 const FLOW_COOKIE = 'fling_oauth'
@@ -113,7 +116,7 @@ async function login(c: Context<AppEnv>) {
   const session = await resolveSession(c)
   if (!session) return beginSignIn(c, ret)
   setSiteCookie(c, session.user.email)
-  return c.redirect(ret, 302)
+  return c.redirect(await signedInReturn(c.get('deps'), session.user, ret), 302)
 }
 
 /** The issuer's redirect back: check the flow, verify the identity, apply the email policy. */
@@ -145,7 +148,7 @@ async function callback(c: Context<AppEnv>) {
 
   const user = await upsertUser(c, admitted.email, admitted.name, admitted.picture)
   await startSession(c, user.email)
-  return c.redirect(safeReturnUrl(flow.ret, config), 302)
+  return c.redirect(await signedInReturn(c.get('deps'), user, safeReturnUrl(flow.ret, config)), 302)
 }
 
 authRoutes.get('/login', login)
@@ -237,5 +240,5 @@ authRoutes.get('/dev-login', async c => {
   if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw badRequest('Invalid email', 'invalid_email')
   const user = await upsertUser(c, email, email.split('@')[0] ?? email, null)
   await startSession(c, user.email)
-  return c.redirect(ret, 302)
+  return c.redirect(await signedInReturn(c.get('deps'), user, ret), 302)
 })

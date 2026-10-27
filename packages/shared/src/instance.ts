@@ -88,6 +88,8 @@ export const CORE_CAPABILITIES = {
   publicSites: true,
   archive: true,
   rollback: true,
+  /** a private site can be limited to listed people (its audience) */
+  audiences: true,
 } as const
 
 /** `https://<name>.sites.example.test/` — a site's URL on an instance. */

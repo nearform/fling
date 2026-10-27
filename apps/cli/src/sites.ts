@@ -3,10 +3,12 @@
  * print what these return; the MCP tools serialise it. Nothing here prints.
  */
 import {
+  type AudienceChange,
   type Comment,
   type CommentList,
   CommentListSchema,
   CommentSchema,
+  editAudience,
   type InstanceMetadata,
   type Me,
   MeSchema,
@@ -18,6 +20,8 @@ import {
   SiteListSchema,
   SiteSchema,
   type SiteSort,
+  type SiteWithAudience,
+  SiteWithAudienceSchema,
   siteUrl,
   sortSites,
   type VersionFiles,
@@ -133,6 +137,70 @@ export async function setVisibility(
 ): Promise<Site> {
   const raw = await client.request('PATCH', sitePath(name), { body: { visibility } })
   return siteAfter(client, name, raw)
+}
+
+/** The site with its audience; a server without audiences fails (it reports none). */
+export async function getAudience(client: ApiClient, name: string): Promise<SiteDetail> {
+  const site = await getSite(client, name)
+  if (!site.audience) throw noAudiences()
+  return site
+}
+
+const noAudiences = () =>
+  new CliError('This Fling does not support limiting a site to listed people', {
+    hint: 'Ask its operator to update it.',
+  })
+
+/**
+ * Change who can see a private site (`set`, `add`, `remove`, `clear`, as `editAudience`): PATCH
+ * the whole new audience, keeping its groups. Returns the site with its audience.
+ */
+export async function setAudience(
+  client: ApiClient,
+  name: string,
+  change: AudienceChange
+): Promise<SiteWithAudience & { audience: NonNullable<SiteWithAudience['audience']> }> {
+  const current = await getAudience(client, name)
+  const audience = current.audience as NonNullable<SiteDetail['audience']>
+  const emails = editAudience(
+    audience.emails.map(e => e.email),
+    change
+  )
+  const site = await client.request('PATCH', sitePath(name), {
+    schema: SiteWithAudienceSchema,
+    body: { audience: { emails, groups: audience.groups } },
+  })
+  if (!site.audience) throw noAudiences()
+  return site as typeof site & { audience: NonNullable<typeof site.audience> }
+}
+
+/**
+ * Warnings about who can still open a site, or why its audience doesn't apply: a share link on a
+ * restricted site, or an audience on a public one.
+ */
+export function audienceWarnings(site: SiteWithAudience): string[] {
+  const n = site.audience?.emails.length ?? site.audienceSize
+  if (site.visibility === 'public' && n > 0) {
+    return [
+      `${site.name} is public, so its audience doesn't apply yet; it does once the site is private: fling visibility ${site.name} private`,
+    ]
+  }
+  if (site.restricted && site.shareUrl) {
+    return [`${site.name} has a share link: anyone with it can still open the site`]
+  }
+  return []
+}
+
+/**
+ * Whether the instance can limit sites to listed people, by its stored metadata: its `audiences`
+ * capability, or — when the stored copy predates the flag — yes, and the server decides. No
+ * instance at all: no.
+ */
+export function audiencesEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  if (!instance) return false
+  return instance.capabilities.audiences ?? true
 }
 
 export async function archiveSite(

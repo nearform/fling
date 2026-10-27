@@ -56,6 +56,16 @@ export interface ApiKeyRecord {
   lastUsedAt: string | null
 }
 
+/**
+ * Who may see a private site besides its owner: addresses, and group ids. Empty: every member.
+ * Kept, and ignored, while the site is public.
+ */
+export interface SiteAudience {
+  /** lowercase, each admitted by the instance's email policy when it was added */
+  emails: string[]
+  groups: string[]
+}
+
 export interface SiteRecord {
   /** random siteId; S3 prefix `sites/<id>/` */
   id: string
@@ -66,8 +76,24 @@ export interface SiteRecord {
   archived: boolean
   currentVersionId: string | null
   shareToken: string | null
+  /** v2; older records read as the empty audience */
+  audience: SiteAudience
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A user's direct grant on someone else's site (`USER#<email>/SHARED#<siteId>`): written with the
+ * site while the email is in its audience, so the sites shared with a user are one query. A
+ * projection: the site's audience is what policy reads.
+ */
+export interface SiteGrantRecord {
+  email: string
+  siteId: string
+  /** the site's name and owner when the grant was written */
+  name: string
+  owner: string
+  grantedAt: string
 }
 
 /** What locates a site's versions. */
@@ -268,9 +294,17 @@ export interface Store {
    * the name.
    */
   createSite(site: SiteRecord): Promise<SiteRecord | null>
-  putSite(site: SiteRecord): Promise<void>
-  /** Delete the site with its versions, and release its name claim (if the claim is its). */
+  /**
+   * Write the site. With `before` (the audience it had), also the direct grants that changed:
+   * added emails gain one, removed ones lose it.
+   */
+  putSite(site: SiteRecord, before?: SiteAudience): Promise<void>
+  /** Delete the site with its versions and grants, and release its name claim (if the claim is its). */
   deleteSite(site: SiteRecord): Promise<void>
+  /** The sites shared with `email` directly (its grants), by site id. */
+  listSiteGrants(email: string): Promise<SiteGrantRecord[]>
+  /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
+  knownEmails(emails: readonly string[]): Promise<Set<string>>
 
   getVersion(site: SiteRef, id: string): Promise<VersionRecord | null>
   putVersion(site: SiteRef, version: VersionRecord): Promise<void>

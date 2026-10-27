@@ -17,7 +17,6 @@ import {
   type CommentAnchor,
   type CommentAuthor,
   type CommentList,
-  isValidSiteName,
   normalizeCommentPath,
   siteLabel,
   siteUrl,
@@ -26,6 +25,7 @@ import { ApiError, badRequest, forbidden, notFound } from './lib/errors.ts'
 import { newCommentId } from './lib/ids.ts'
 import { publishQuietly } from './live.ts'
 import { type Action, type Actor, can, canDeleteComment } from './policy.ts'
+import { resolveSite } from './sites.ts'
 import type { CommentRecord, SiteRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -34,12 +34,13 @@ export function requireComments(deps: Deps) {
   if (!deps.config.comments) throw notFound('Comments are turned off on this instance')
 }
 
-/** The site named `name`, if the actor may `action` its comments; else 404. */
-async function commentSite(deps: Deps, actor: Actor, name: string, action: Action) {
+/**
+ * The site named `name` and the actor as policy sees them there, if the actor may `action` its
+ * comments; else 404.
+ */
+function commentSite(deps: Deps, actor: Actor, name: string, action: Action) {
   requireComments(deps)
-  const site = isValidSiteName(name) ? await deps.store.findSite(name) : null
-  if (!site || !can(actor, action, site)) throw notFound(`No site named "${name}"`)
-  return site
+  return resolveSite(deps, actor, name, action)
 }
 
 const authorOf = (actor: Actor): CommentAuthor => {
@@ -77,7 +78,7 @@ export async function listComments(
   name: string,
   opts: { path?: string } = {}
 ): Promise<CommentList> {
-  const site = await commentSite(deps, actor, name, 'comment.read')
+  const { site, actor: who } = await commentSite(deps, actor, name, 'comment.read')
   const path = opts.path === undefined ? undefined : normalizeCommentPath(opts.path)
   if (path === null) throw badRequest(`"${opts.path}" is not a page path`)
   const all = await deps.store.listComments(site.id)
@@ -91,11 +92,11 @@ export async function listComments(
       url: siteUrl(siteLabel(site.name), deps.config.sitesDomain, `${deps.config.siteScheme}:`),
       currentVersionId: site.currentVersionId,
     },
-    comments: comments.map(c => toComment(actor, site, c)),
+    comments: comments.map(c => toComment(who, site, c)),
     can: {
-      create: can(actor, 'comment.create', site),
-      resolve: can(actor, 'comment.resolve', site),
-      deleteAny: can(actor, 'comment.delete', site),
+      create: can(who, 'comment.create', site),
+      resolve: can(who, 'comment.resolve', site),
+      deleteAny: can(who, 'comment.delete', site),
     },
   }
 }
@@ -107,7 +108,7 @@ export async function addComment(
   name: string,
   input: { body: string; path?: string; parentId?: string; anchor?: CommentAnchor }
 ): Promise<Comment> {
-  const site = await commentSite(deps, actor, name, 'comment.create')
+  const { site, actor: who } = await commentSite(deps, actor, name, 'comment.create')
   let path = normalizeCommentPath(input.path)
   if (path === null) throw badRequest(`"${input.path}" is not a page path`)
   let anchor = input.anchor ?? null
@@ -134,14 +135,14 @@ export async function addComment(
     versionId: site.currentVersionId,
     anchor,
     body: input.body.trim(),
-    author: authorOf(actor),
+    author: authorOf(who),
     createdAt: now.toISOString(),
     resolvedAt: null,
     resolvedBy: null,
   }
   if (!(await deps.store.createComment(record))) throw new Error('comment id collision')
   await publishQuietly(deps, site.id, { type: 'comments' })
-  return toComment(actor, site, record)
+  return toComment(who, site, record)
 }
 
 /** Resolve (or, `resolved: false`, reopen) a thread. */
@@ -152,27 +153,27 @@ export async function resolveComment(
   id: string,
   resolved: boolean
 ): Promise<Comment> {
-  const site = await commentSite(deps, actor, name, 'comment.resolve')
+  const { site, actor: who } = await commentSite(deps, actor, name, 'comment.resolve')
   const comment = await findComment(deps, site, id, name)
   if (comment.parentId !== null) throw badRequest('Only a thread is resolved, not a reply')
   const updated = await deps.store.resolveComment(
     site.id,
     id,
     resolved
-      ? { resolvedAt: deps.clock.now().toISOString(), resolvedBy: authorOf(actor) }
+      ? { resolvedAt: deps.clock.now().toISOString(), resolvedBy: authorOf(who) }
       : { resolvedAt: null, resolvedBy: null }
   )
   if (!updated) throw notFound(`No comment ${id} on "${name}"`)
   await publishQuietly(deps, site.id, { type: 'comments' })
-  return toComment(actor, site, updated)
+  return toComment(who, site, updated)
 }
 
 /** Delete a comment (a thread with its replies): the author's own, or any for the owner. */
 export async function deleteComment(deps: Deps, actor: Actor, name: string, id: string) {
-  const site = await commentSite(deps, actor, name, 'comment.read')
+  const { site, actor: who } = await commentSite(deps, actor, name, 'comment.read')
   const comment = await findComment(deps, site, id, name)
   // Someone who may read but not delete it is told so: the comment is visible to them anyway.
-  if (!canDeleteComment(actor, site, comment)) {
+  if (!canDeleteComment(who, site, comment)) {
     throw forbidden('Only its author or the site owner can delete a comment')
   }
   await deps.store.deleteComment(site.id, id)

@@ -184,8 +184,30 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
 | `fling visibility <name> private\|public` | require sign-in, or not |
+| `fling access <name> [--add <emails>] [--remove <emails>] [--clear]` | who can open a private site: everyone signed in, or only listed people |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
+
+### Who can open a private site
+
+A private site opens to everyone signed in to your Fling. `fling access` limits it to listed people
+(its audience); you, the owner, can always open it:
+
+```sh
+fling access my-app                                   # who can open it now
+fling access my-app --add bob@example.com,cat@example.com
+fling access my-app --remove bob@example.com
+fling access my-app --clear                           # everyone signed in again
+```
+
+Addresses are comma-separated or given after `--add` one by one, and each must be one that can sign
+in to the Fling. Someone who hasn't signed in yet is marked `(hasn't signed in yet)`; they can open
+the site once they do. The audience only applies while the site is private: on a public site it is
+kept for later and `fling access` says so. A share link still opens a restricted site to anyone who
+has it, and `fling access` warns while one exists. Removing someone shuts them out within 15
+minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups }`)
+and `warnings`; `fling info` shows the same line, and `fling ls --json` gives each site's
+`restricted` and `audienceSize`.
 
 ## Comments
 
@@ -261,7 +283,9 @@ The MCP tools:
   current), read when called. `{use: <server>}` makes one current, the same as `fling use`.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
-  `confirm: true`), `fling_whoami`, and the comment tools when a Fling has comments.
+  `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, and
+  `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site)
+  when it can limit sites to listed people.
 
 Results that give URLs (deploys, publishes, comments) end with the Fling they went to.
 

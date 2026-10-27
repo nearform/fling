@@ -33,7 +33,25 @@ one of your sites (overview, access, versions, archive and delete), in sections 
 (`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or
 name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `fling_list` `sort`.
 
-**Private** — visible to any signed-in member of the instance (not only the owner). **Public** — anyone.
+**Private** — visible to any signed-in member of the instance (not only the owner), unless it has
+an audience. **Public** — anyone.
+
+**Audience** — the people, besides its owner, who may see a private site: addresses (and, later,
+groups), each one the instance's email policy admits (`SiteRecord.audience`, `apps/api/src/sites.ts`;
+contract in `packages/shared/src/audience.ts`). Empty means every member. A private site with an
+audience is **restricted**: only its owner and audience see it, and only they take part in its
+comments. The audience is kept, and ignored, while the site is public. Each address also gets a
+**direct grant** (`USER#<email>/SHARED#<siteId>`), a projection for listing the sites shared with
+someone. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and `fling_set_audience`;
+the `audiences` capability.
+
+**Site pass** — how the edge lets someone into a restricted site without holding its audience: a
+host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
+for 15 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
+`/auth/login`, where the API asks policy and sends a viewer to `/_fling-pass?t=<handoff>` on the
+site's host (a 60-second signed **handoff**), and anyone else to the sites' 404 page. The edge turns
+the handoff into the pass. An expired pass renews through the same redirects, so taking someone out
+of an audience shuts them out within 15 minutes.
 
 **Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
 `IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
@@ -53,9 +71,11 @@ The `admin.*` actions are in `policy.ts` (`canAdmin`).
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
-**owner** (holds it), **member** (any other signed-in user), **share** (holds its current share
-link), **anonymous**. `site.view` and the comment actions reach beyond the owner. A refusal looks like a
-missing site (404).
+**owner** (holds it), **viewer** (a signed-in user in its audience), **member** (any other
+signed-in user), **share** (holds its current share link), **anonymous**. What a role may do depends
+on the site's access: public, private, or restricted. `site.view` and the comment actions reach
+beyond the owner (on a restricted site, only to its viewers and share-link holders). A refusal looks
+like a missing site (404).
 
 **Comment** — a note on one page of a site (`COMMENT#<id>` in the site's partition, ids sortable by
 time): a **thread** or a one-level **reply** to one. It records the page **path** and the version
@@ -71,7 +91,7 @@ Clicking a pin selects its thread, and selecting a thread scrolls to its pin. Wi
 the header shows who else is reviewing (one circle per person, you first) and the shell draws
 their pointers on the same page. It needs the sites
 domain under the app's registrable domain: the `fling_site` cookie is on that parent, a same-site
-frame sends it, and nothing in front of the sites may forbid framing (the e2e checks).
+frame sends it (and a restricted site's pass is set within the frame), and nothing in front of the sites may forbid framing (the e2e checks).
 `COMMENTS=false` turns comments off (the `comments` capability). Publish results (CLI, both MCP
 servers) lead with the review page as the link to share for feedback (`reviewUrl`).
 

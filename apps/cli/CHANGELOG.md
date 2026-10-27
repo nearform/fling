@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `fling access <name>` shows who can open a private site and, with `--add`, `--remove` or
+  `--clear`, limits it to listed people (its audience) or opens it to everyone signed in again.
+  It warns while a share link still opens a restricted site, and when the site is public (the
+  audience applies once it is private). `fling info` shows the same line.
+- The MCP tool `fling_set_audience` (`add`, `remove`, `set`, `clear`) does the same, on a Fling
+  that has the `audiences` capability, and `fling_info` says who can open the site.
+- Sites in `--json` output carry `restricted` (private with an audience) and `audienceSize`;
+  `fling info --json` adds the `audience` itself.
 - `fling ls` lists the last updated site first. `--sort updated|created|name` picks the order
   (`created`: newest first; `name`: A–Z). The MCP tool `fling_list` takes the same `sort`.
 

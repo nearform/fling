@@ -10,7 +10,13 @@
 import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
 import type { RouteTable } from '@fling/api/route-table'
-import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL } from '@fling/shared/route-keys'
+import {
+  MISSING_KEY,
+  NOT_FOUND_PAGE,
+  REVIEW_SHELL,
+  SITE_PASS_COOKIE_NAME,
+} from '@fling/shared/route-keys'
+import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
 import { normalizeQuery, routeSiteRequest } from '@fling/shared/site-routing'
 import type { Bindings } from './env.ts'
 
@@ -22,6 +28,8 @@ export interface SitesOptions {
   bucket: R2Bucket
   assets: Bindings['ASSETS']
   now?: () => number
+  /** how long a site pass lasts (default: the routing decision's, 15 minutes) */
+  passTtlSeconds?: number
 }
 
 const hmac = (key: string, data: string) =>
@@ -117,7 +125,8 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
       host: url.host,
       uri: url.pathname,
       query: normalizeQuery(url.search),
-      cookie: cookieValue(request.headers.get('cookie'), 'fling_site'),
+      cookie: cookieValue(request.headers.get('cookie'), SITE_COOKIE_NAME),
+      pass: cookieValue(request.headers.get('cookie'), SITE_PASS_COOKIE_NAME),
     },
     {
       appOrigin: opts.appOrigin,
@@ -126,10 +135,15 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
       getRoute: async key => (await opts.routeTable.get(key)) ?? null,
       getCookieKey: async () => opts.cookieKey,
       hmac,
+      passTtlSeconds: opts.passTtlSeconds,
     }
   )
   if (decision.action === 'respond') {
-    return new Response(null, { status: decision.status, headers: decision.headers })
+    const headers = new Headers(decision.headers)
+    for (const [name, cookie] of Object.entries(decision.cookies ?? {})) {
+      headers.append('set-cookie', `${name}=${cookie.value}; ${cookie.attributes}`)
+    }
+    return new Response(null, { status: decision.status, headers })
   }
   if (decision.uri === NOT_FOUND_PAGE) return notFound(opts, 200, request.method)
   if (decision.uri === REVIEW_SHELL) return reviewShell(opts, request.method)

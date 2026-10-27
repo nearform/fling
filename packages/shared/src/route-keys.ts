@@ -13,3 +13,13 @@ export const MISSING_KEY = '/_fling/missing'
 export const NOT_FOUND_PAGE = '/_fling/404.html'
 /** The review shell (review-bridge.ts): a static page on every sites host that frames the site. */
 export const REVIEW_SHELL = '/_fling/review.html'
+/**
+ * Where a restricted site's host turns a pass handoff into a site pass:
+ * `/_fling-pass?t=<handoff>&r=<path>` (site-cookie.ts, site-routing.ts). Not under `/_fling/`:
+ * on AWS that path is served from the bucket without the site router (the error page's behaviour).
+ */
+export const SITE_PASS_PATH = '/_fling-pass'
+/** The site pass cookie (host-only, on a restricted site's host). */
+export const SITE_PASS_COOKIE_NAME = 'fling_pass'
+/** How long a site pass lasts: the most a removed viewer keeps seeing the site. */
+export const SITE_PASS_TTL_SECONDS = 15 * 60

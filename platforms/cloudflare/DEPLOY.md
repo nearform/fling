@@ -217,6 +217,9 @@ FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
 `FLING_E2E_ADMIN_API_KEY`, a key of a user in `ADMIN_EMAILS`, adds the admin checks an API key
 can make (the users list; impersonation refused, as it is for any API key). Without it they are
 skipped; impersonation itself is covered by the local e2e, which has browser sessions.
+With it and `FLING_E2E_MEMBER_API_KEY` (a second test user), the smoke test also restricts its site
+to the member and checks through the API that the admin, outside the audience, finds no such site;
+the site pass itself needs browser sessions, so the local e2e follows it.
 
 ## Routes, consistency and the KV fallback
 
@@ -228,13 +231,21 @@ kept in D1, written first, and **a KV miss is answered from D1**: a new site or 
 everywhere as soon as the API has written it, so the CLI and the MCP tools never wait on KV, and
 the CLI's readiness check (`ready.ts`) has nothing new to wait for. What KV can still show for up
 to about a minute is a change to an existing key: a rollback or redeploy (the previous version),
-a visibility change, an archived site, a rotated or revoked share link.
+a visibility change, an archived site, a rotated or revoked share link, a site becoming
+restricted or open again (its audience changing from or to empty).
+
+**Restricted sites** (private with an audience) are let in by a site pass: the app checks the
+audience at sign-in and the Worker sets a host-only `fling_pass` cookie, good for 15 minutes. So
+taking someone out of an audience shuts them out within 15 minutes (plus the KV delay above when it
+was the last person and the site opens to every member again).
 
 ## Rollback
 
 Run the workflow with an earlier commit of main as `ref`. The Worker, its assets and its config go
 back; D1 schema and data migrations don't (they are forward-only and written so older code keeps
 working), and neither does site content. `wrangler rollback` also works for the code alone.
+Rolling back to a release from before audiences opens restricted sites to every signed-in member
+until you roll forward again (the audiences are kept).
 
 ## Local development
 

@@ -54,6 +54,10 @@
     { "name": "fling_share", "description": "Get, rotate or revoke a public share link" },
     { "name": "fling_set_visibility", "description": "Make a site private or public" },
     {
+      "name": "fling_set_audience",
+      "description": "Limit a private site to listed people, or open it to everyone signed in"
+    },
+    {
       "name": "fling_archive",
       "description": "Take a site offline (or restore it), keeping its files"
     },

@@ -15,6 +15,8 @@ export const KvsSiteValueSchema = z.object({
   vis: z.enum(['private', 'public']),
   /** serve /index.html for unknown extensionless paths */
   spa: z.boolean(),
+  /** present when the site is restricted (private with an audience): the edge wants a site pass */
+  r: z.literal(1).optional(),
 })
 export type KvsSiteValue = z.infer<typeof KvsSiteValueSchema>
 

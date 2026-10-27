@@ -12,6 +12,7 @@
  */
 import { z } from 'zod'
 import type { VersionFiles } from './api.ts'
+import { AUDIENCE_EMAILS_MAX } from './audience.ts'
 import {
   authorLabel,
   COMMENT_MAX_CHARS,
@@ -133,6 +134,8 @@ const sitePath = z
   .describe(
     'Site-relative path with forward slashes, e.g. "index.html", "css/app.css", "img/logo.png". The root page must be "index.html". No dotfiles (".env", ".well-known/…")'
   )
+
+const emails = z.array(z.string().min(3).max(254)).max(AUDIENCE_EMAILS_MAX)
 
 const commentPath = z.string().max(1024)
 const commentId = z.string().min(1).max(100)
@@ -335,6 +338,25 @@ export function mcpToolsFor(w: McpWording) {
       description: `Make a site private (only ${w.privateAudience}) or public (anyone).`,
       inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
       annotations: { idempotentHint: true, openWorldHint: true },
+    }),
+
+    setAudience: tool({
+      name: 'fling_set_audience',
+      title: 'Set who can see a private site',
+      description:
+        `Limit a private site to listed people (its audience), or open it again to ${w.privateAudience}. ` +
+        '`add` and `remove` change the list, `set` replaces it and `clear` empties it (then every signed-in member ' +
+        'can see it again). The owner always sees the site. Each address must be one that can sign in to ' +
+        `${w.name}. The audience only applies while the site is private (fling_set_visibility); share links still ` +
+        'open it to anyone. Removing someone takes up to 15 minutes to shut them out. fling_info shows the audience.',
+      inputSchema: {
+        name: siteName,
+        add: emails.optional().describe('Addresses to let in'),
+        remove: emails.optional().describe('Addresses to take out'),
+        set: emails.optional().describe('Replace the list with exactly these addresses'),
+        clear: z.boolean().optional().describe('Empty the list: every signed-in member sees it'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
     }),
 
     archive: tool({

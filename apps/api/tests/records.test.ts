@@ -6,12 +6,13 @@
  * whose name another user holds.
  */
 import { describe, expect, it } from 'vitest'
-import { decode, encode, type Upgrade } from '../src/store/evolution.ts'
+import { currentVersion, decode, encode, type Upgrade } from '../src/store/evolution.ts'
 import { Records } from '../src/store/records.ts'
 import type { SiteRecord, VersionRecord } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
 
 const NOW = '2026-01-01T00:00:00.000Z'
+const SITE_V = currentVersion('site')
 const LATER = '2026-01-02T00:00:00.000Z'
 
 const site = (email: string, name: string, overrides: Partial<SiteRecord> = {}): SiteRecord => ({
@@ -23,6 +24,7 @@ const site = (email: string, name: string, overrides: Partial<SiteRecord> = {}):
   archived: false,
   currentVersionId: null,
   shareToken: null,
+  audience: { emails: [], groups: [] },
   createdAt: NOW,
   updatedAt: NOW,
   ...overrides,
@@ -68,8 +70,8 @@ describe('site-centric keys', () => {
     await new Records(table).createSite(s)
     expect(await items(table)).toEqual([
       { ...old.claim('hello', s.email), v: 1 },
-      { pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 1, ...s },
-      { pk: 'USER#a@example.test', sk: 'SITE#hello', type: 'site', v: 1, ...s },
+      { pk: 'SITE#site1', sk: 'SITE', type: 'site', v: SITE_V, ...s },
+      { pk: 'USER#a@example.test', sk: 'SITE#hello', type: 'site', v: SITE_V, ...s },
     ])
   })
 
@@ -189,6 +191,51 @@ describe('expand phase: data written by the code before the site-centric keys', 
   })
 })
 
+describe('direct grants', () => {
+  it('follow the audience: added addresses gain one, removed ones lose it, the owner never has one', async () => {
+    const table = new MemoryTable()
+    const records = new Records(table)
+    const s = site('a@example.test', 'hello')
+    await records.createSite(s)
+    const before = s.audience
+    s.audience = { emails: ['b@example.test', 'c@example.test', 'a@example.test'], groups: [] }
+    await records.putSite(s, before)
+    expect((await records.listSiteGrants('b@example.test')).map(g => g.siteId)).toEqual(['site1'])
+    expect(await records.listSiteGrants('a@example.test')).toEqual([])
+    const grant = (await records.listSiteGrants('c@example.test'))[0]
+    expect(grant).toMatchObject({ email: 'c@example.test', name: 'hello', owner: 'a@example.test' })
+
+    const prev = s.audience
+    s.audience = { emails: ['c@example.test', 'd@example.test'], groups: [] }
+    await records.putSite(s, prev)
+    expect(await records.listSiteGrants('b@example.test')).toEqual([])
+    expect(await records.listSiteGrants('c@example.test')).toHaveLength(1)
+    expect(await records.listSiteGrants('d@example.test')).toHaveLength(1)
+    // OAuth grants share the user partition; site grants never show up among them.
+    expect(await records.listGrants('c@example.test')).toEqual([])
+
+    await records.deleteSite(s)
+    expect(await records.listSiteGrants('c@example.test')).toEqual([])
+    expect(await records.listSiteGrants('d@example.test')).toEqual([])
+  })
+
+  it('a hundred addresses take more than one transaction, and all land', async () => {
+    const table = new MemoryTable()
+    const records = new Records(table)
+    const s = site('a@example.test', 'hello')
+    await records.createSite(s)
+    const emails = Array.from({ length: 100 }, (_, i) => `u${i}@example.test`)
+    const before = s.audience
+    s.audience = { emails, groups: [] }
+    await records.putSite(s, before)
+    for (const email of [emails[0], emails[50], emails[99]]) {
+      expect(await records.listSiteGrants(email as string)).toHaveLength(1)
+    }
+    await records.putSite({ ...s, audience: { emails: [], groups: [] } }, s.audience)
+    expect(await records.listSiteGrants(emails[99] as string)).toEqual([])
+  })
+})
+
 describe('record versions', () => {
   it('writes type and v with the record', async () => {
     const table = new MemoryTable()
@@ -197,7 +244,7 @@ describe('record versions', () => {
       pk: 'SITE#site1',
       sk: 'SITE',
       type: 'site',
-      v: 1,
+      v: SITE_V,
       ...site('a@example.test', 'hello'),
     })
   })
@@ -209,19 +256,31 @@ describe('record versions', () => {
     expect(await new Records(table).findSite('hello')).toEqual(site('a@example.test', 'hello'))
   })
 
+  it('reads a v1 site (no audience) as having the empty audience, and keeps one a v1 reader wrote back', async () => {
+    const table = new MemoryTable()
+    const { audience: _none, ...v1 } = site('a@example.test', 'hello')
+    await table.put(old.claim('hello', 'a@example.test'))
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 1, ...v1 })
+    const records = new Records(table)
+    expect((await records.findSite('hello'))?.audience).toEqual({ emails: [], groups: [] })
+    const kept = { emails: ['b@example.test'], groups: [] }
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 1, ...v1, audience: kept })
+    expect((await records.findSite('hello'))?.audience).toEqual(kept)
+  })
+
   it('reads a record one version ahead, passing unknown fields through', async () => {
     const table = new MemoryTable()
     const ahead = { ...site('a@example.test', 'hello'), reviewers: ['b@example.test'] }
     await table.put(old.claim('hello', 'a@example.test'))
-    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 2, ...ahead })
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: SITE_V + 1, ...ahead })
     expect(await new Records(table).findSite('hello')).toEqual(ahead)
   })
 
   it('refuses a record two versions ahead', async () => {
     const table = new MemoryTable()
     await table.put(old.claim('hello', 'a@example.test'))
-    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 3 })
-    await expect(new Records(table).findSite('hello')).rejects.toThrow(/v3/)
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: SITE_V + 2 })
+    await expect(new Records(table).findSite('hello')).rejects.toThrow(`v${SITE_V + 2}`)
   })
 
   it('upgrades old records step by step on read, and writes the current version', () => {

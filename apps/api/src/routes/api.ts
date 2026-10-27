@@ -17,6 +17,7 @@ import {
   SiteDetailSchema,
   SiteListSchema,
   SiteSchema,
+  SiteWithAudienceSchema,
   UpdateCommentRequestSchema,
   UpdateSiteRequestSchema,
   VersionFilesSchema,
@@ -162,7 +163,7 @@ apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
 apiRoutes.patch('/sites/:name', async c => {
   const patch = await jsonBody(c, UpdateSiteRequestSchema)
   const site = await sites.updateSite(c.get('deps'), c.get('user'), c.req.param('name'), patch)
-  return c.json(SiteSchema.parse(site))
+  return c.json(SiteWithAudienceSchema.parse(site))
 })
 
 apiRoutes.post('/sites/:name/deploys', async c => {

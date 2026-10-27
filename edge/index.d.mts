@@ -12,6 +12,8 @@ export type CloudFrontResponse = {
   statusCode: number
   statusDescription?: string
   headers?: Record<string, CfValue>
+  /** cookies to set, by name (the site pass) */
+  cookies?: Record<string, { value: string; attributes?: string }>
 }
 
 export type CloudFrontEvent = {

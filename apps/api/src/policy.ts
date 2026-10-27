@@ -6,36 +6,56 @@
  *
  * Actors are resolved against the site into a role:
  * - `owner`: the signed-in user who holds the site (`site.email`).
+ * - `viewer`: a signed-in user in the site's audience (`site.audience`), by email or through one
+ *   of their groups (`groups` on the actor, which requireSite loads only for a restricted site).
  * - `member`: any other signed-in user. Signing in already applied the instance's email policy
  *   (`admit…` in auth/), so every user the API knows is admitted.
  * - `share`: whoever holds the site's current share link (`s--<token>`). A revoked or rotated
  *   token is `anonymous`.
  * - `anonymous`: nobody we know.
- * - (`collaborator`, later: a user the owner invited; between owner and member.)
+ *
+ * What a role may do depends on the site's access (`accessOf`): `public`, `private` (signed-in
+ * members), or `restricted` (private with a non-empty audience: the owner and the viewers only).
+ * The audience is kept while a site is public, and ignored.
  *
  * The edge enforces `site.view` on its own (it serves sites without calling the API), from the
- * visibility in the route table: tests/policy.test.ts runs the real site router against this table
- * so the two cannot drift.
+ * visibility in the route table and, for a restricted site, a site pass the edge mints from the
+ * API's say-so (`/auth/login` asks `can(…, 'site.view', …)` here): tests/policy.test.ts runs the
+ * real site router against this table so the two cannot drift.
  */
-import type { CommentAuthor, Visibility } from '@fling/shared'
+import type { CommentAuthor } from '@fling/shared'
 import type { SiteRecord } from './store/types.ts'
 
 export type Actor =
-  | { kind: 'user'; email: string }
+  /** `groups`: the ids of the user's groups, when policy needs them (a restricted site) */
+  | { kind: 'user'; email: string; groups?: readonly string[] }
   | { kind: 'share'; token: string }
   | { kind: 'anonymous' }
 
-export type Role = 'owner' | 'member' | 'share' | 'anonymous'
+export type Role = 'owner' | 'viewer' | 'member' | 'share' | 'anonymous'
 
-export const ROLES: readonly Role[] = ['owner', 'member', 'share', 'anonymous']
+export const ROLES: readonly Role[] = ['owner', 'viewer', 'member', 'share', 'anonymous']
 
 /** What policy needs to know about a site. */
-export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken'>
+export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken' | 'audience'>
+
+/** Who may see a site: anyone, signed-in members, or (restricted) the owner and its audience. */
+export type Access = 'public' | 'private' | 'restricted'
+
+export const ACCESSES: readonly Access[] = ['public', 'private', 'restricted']
+
+/** Private with an audience: only the owner and the people in it see the site. */
+export const isRestricted = (site: Pick<SiteRecord, 'visibility' | 'audience'>): boolean =>
+  site.visibility === 'private' && site.audience.emails.length + site.audience.groups.length > 0
+
+export const accessOf = (site: Pick<SiteRecord, 'visibility' | 'audience'>): Access =>
+  site.visibility === 'public' ? 'public' : isRestricted(site) ? 'restricted' : 'private'
 
 /**
  * Every action on a site. API routes and MCP tools map onto them:
  *
- *   site.view        open the served site (edge; `/auth/login` refreshes the cookie for it)
+ *   site.view        open the served site (edge; `/auth/login` refreshes the cookie for it, and
+ *                    hands a restricted site's viewers a site pass)
  *   site.read        GET /api/sites/:name, fling_info, fling_check_name "yours"
  *   version.list     the versions in GET /api/sites/:name and fling_info
  *   version.read     GET …/versions/:id/files, fling_files
@@ -44,6 +64,7 @@ export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken'>
  *   site.rollback    POST …/current, fling_rollback
  *   site.settings    PATCH { spa }
  *   site.visibility  PATCH { visibility }, fling_set_visibility
+ *   site.audience    PATCH { audience }, fling_set_audience (and seeing the audience)
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete
  *   share.read       fling_share returning the existing link
@@ -57,8 +78,9 @@ export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken'>
  *   comment.delete.own  the same, for a comment the actor wrote (`canDeleteComment`)
  *
  * Comments are the conversation around a site, so everyone who can see a site by signing in
- * takes part: members read, write and resolve (resolving is reversible, and review threads are
- * closed by whoever addressed them), and delete what they wrote; only the owner deletes anyone's.
+ * takes part: members (on a restricted site, only its viewers) read, write and resolve (resolving
+ * is reversible, and review threads are closed by whoever addressed them), and delete what they
+ * wrote; only the owner deletes anyone's.
  * Share-link holders get nothing yet. Guest commenting (a name, kept in a signed per-site
  * cookie, as a `{ kind: 'guest' }` author) will turn on `comment.read` and `comment.create`
  * for `share`, and `comment.delete.own` once a guest can be recognised again.
@@ -72,6 +94,7 @@ export const ACTIONS = [
   'site.rollback',
   'site.settings',
   'site.visibility',
+  'site.audience',
   'site.archive',
   'site.delete',
   'share.read',
@@ -87,12 +110,17 @@ export const ACTIONS = [
 export type Action = (typeof ACTIONS)[number]
 
 const ownerOnly = (role: Role) => role === 'owner'
-/** Signed in: the owner or any member (both can view the site, whatever its visibility). */
-const signedIn = (role: Role) => role === 'owner' || role === 'member'
+/**
+ * Signed in and able to see the site: the owner and its viewers, and on a site that isn't
+ * restricted any member.
+ */
+const signedIn = (role: Role, access: Access) =>
+  role === 'owner' || role === 'viewer' || (role === 'member' && access !== 'restricted')
 
-const RULES: Record<Action, (role: Role, visibility: Visibility) => boolean> = {
-  // Public: anyone. Private: any signed-in user, or anyone with the share link.
-  'site.view': (role, visibility) => visibility === 'public' || role !== 'anonymous',
+const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
+  // Public: anyone. Private: any signed-in user, or anyone with the share link. Restricted: the
+  // owner, its viewers, or anyone with the share link.
+  'site.view': (role, access) => access === 'public' || role === 'share' || signedIn(role, access),
   'site.read': ownerOnly,
   'version.list': ownerOnly,
   'version.read': ownerOnly,
@@ -100,6 +128,7 @@ const RULES: Record<Action, (role: Role, visibility: Visibility) => boolean> = {
   'site.rollback': ownerOnly,
   'site.settings': ownerOnly,
   'site.visibility': ownerOnly,
+  'site.audience': ownerOnly,
   'site.archive': ownerOnly,
   'site.delete': ownerOnly,
   'share.read': ownerOnly,
@@ -115,8 +144,14 @@ const RULES: Record<Action, (role: Role, visibility: Visibility) => boolean> = {
 /** The actor's role on this site. */
 export function roleOf(actor: Actor, site: PolicySite): Role {
   switch (actor.kind) {
-    case 'user':
-      return actor.email === site.email ? 'owner' : 'member'
+    case 'user': {
+      if (actor.email === site.email) return 'owner'
+      const groups = actor.groups ?? []
+      const inAudience =
+        site.audience.emails.includes(actor.email) ||
+        site.audience.groups.some(g => groups.includes(g))
+      return inAudience ? 'viewer' : 'member'
+    }
     case 'share':
       return site.shareToken !== null && actor.token === site.shareToken ? 'share' : 'anonymous'
     case 'anonymous':
@@ -125,7 +160,7 @@ export function roleOf(actor: Actor, site: PolicySite): Role {
 }
 
 export function can(actor: Actor, action: Action, site: PolicySite): boolean {
-  return RULES[action](roleOf(actor, site), site.visibility)
+  return RULES[action](roleOf(actor, site), accessOf(site))
 }
 
 /** A signed-in user as an actor. */

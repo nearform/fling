@@ -16,7 +16,6 @@
  */
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto'
 import {
-  isValidSiteName,
   LIVE_MESSAGE_MAX_BYTES,
   LiveClientMessageSchema,
   type LivePeer,
@@ -27,7 +26,8 @@ import {
   peerPicture,
 } from '@fling/shared'
 import { notFound } from './lib/errors.ts'
-import { type Actor, can } from './policy.ts'
+import type { Actor } from './policy.ts'
+import { resolveSite } from './sites.ts'
 import type { Deps } from './types.ts'
 
 /** How long a ticket admits a socket: connect straight after asking for one. */
@@ -130,10 +130,8 @@ function requireLive(deps: Deps) {
 /** A ticket into the site's room, for someone who may read its comments; else 404. */
 export async function issueLiveTicket(deps: Deps, actor: Actor, name: string): Promise<LiveTicket> {
   requireLive(deps)
-  const site = isValidSiteName(name) ? await deps.store.findSite(name) : null
-  if (!site || !can(actor, 'comment.read', site) || actor.kind !== 'user') {
-    throw notFound(`No site named "${name}"`)
-  }
+  if (actor.kind !== 'user') throw notFound(`No site named "${name}"`)
+  const { site } = await resolveSite(deps, actor, name, 'comment.read')
   const user = await deps.store.getUser(actor.email)
   const now = deps.clock.now()
   const ticket = signTicket(

@@ -10,7 +10,9 @@
  * user, adds what a member may do on the first one's site (comments); without it that is skipped.
  * FLING_E2E_ADMIN_API_KEY, a key of a user in ADMIN_EMAILS, adds the users list (and checks that
  * a key cannot impersonate); impersonation itself needs a browser session, so only `pnpm e2e`
- * runs it. Without the key the admin checks are skipped.
+ * runs it. Without the key the admin checks are skipped. With the member and admin keys, the
+ * audience checks run through the API (the admin as the outsider); the site pass needs browser
+ * sessions, so only `pnpm e2e` follows it.
  */
 import { parseArgs } from 'node:util'
 import { runScenario } from './scenario.ts'

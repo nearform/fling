@@ -42,6 +42,7 @@ function site(owner: string, name = siteName(), overrides: Partial<SiteRecord> =
     archived: false,
     currentVersionId: null,
     shareToken: null,
+    audience: { emails: [], groups: [] },
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

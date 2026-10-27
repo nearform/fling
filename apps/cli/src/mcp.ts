@@ -22,6 +22,8 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
   COMMENTS_NOTE,
+  changesAudience,
+  describeAudience,
   describeComments,
   describeVersionFiles,
   type InstanceMetadata,
@@ -34,6 +36,7 @@ import {
   mcpWording,
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
+  privateAudience,
   reviewUrl,
   shareForFeedback,
 } from '@fling/shared'
@@ -90,6 +93,7 @@ import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
   addComment,
   archiveSite,
+  audiencesEnabled,
   checkName,
   commentsEnabled,
   deleteComment,
@@ -99,6 +103,7 @@ import {
   listSites,
   resolveComment,
   rollback,
+  setAudience,
   setVisibility,
   share,
   sitesBaseOf,
@@ -753,10 +758,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
+  /** Who may open a private site on the call's Fling, for copy. */
+  const membersOn = async (target: Target) => {
+    const instance = await target.instance()
+    return instance ? privateAudience(instance) : 'anyone signed in to this Fling'
+  }
+
   server.registerTool(t.info.name, serverTool(t.info), args =>
-    run(t.info.name, args.server, async ({ client }) => {
-      const site = await getSite(client, args.name)
-      return { summary: `${site.name}: ${site.url}`, data: site }
+    run(t.info.name, args.server, async target => {
+      const site = await getSite(target.client, args.name)
+      const access = site.audience ? `\n${describeAudience(site, await membersOn(target))}` : ''
+      return { summary: `${site.name}: ${site.url}${access}`, data: site }
     })
   )
 
@@ -797,6 +809,27 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       return { summary: `${site.name} is now ${site.visibility}: ${site.url}`, data: site }
     })
   )
+
+  // Audiences: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => audiencesEnabled(s.instance))) {
+    server.registerTool(t.setAudience.name, serverTool(t.setAudience), args =>
+      run(t.setAudience.name, args.server, async target => {
+        const instance = await target.instance()
+        if (instance && !audiencesEnabled(instance)) {
+          throw new CliError(
+            `${instance.name} (${serverLabel(target.url)}) can't limit a site to listed people`
+          )
+        }
+        const change = { add: args.add, remove: args.remove, set: args.set, clear: args.clear }
+        if (!changesAudience(change)) throw new CliError('Pass `add`, `remove`, `set` or `clear`')
+        const site = await setAudience(target.client, args.name, change)
+        return {
+          summary: `${site.name}: ${describeAudience(site, await membersOn(target))}${onFling(target.url, instance)}`,
+          data: site,
+        }
+      })
+    )
+  }
 
   server.registerTool(t.archive.name, serverTool(t.archive), args =>
     run(t.archive.name, args.server, async ({ client }) => {

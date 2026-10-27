@@ -252,6 +252,7 @@ async function prepare(
       archived: false,
       currentVersionId: null,
       shareToken: null,
+      audience: { emails: [], groups: [] },
       createdAt: now,
       updatedAt: now,
     }))

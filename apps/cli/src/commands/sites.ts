@@ -1,15 +1,28 @@
-/** Site management: ls, info, versions, rollback, share, visibility, archive/unarchive, rm. */
-import type { Site, SiteDetail, SiteSort, Visibility } from '@fling/shared'
+/** Site management: ls, info, versions, rollback, share, visibility, access, archive/unarchive, rm. */
+import {
+  changesAudience,
+  describeAudience,
+  privateAudience,
+  type Site,
+  type SiteDetail,
+  type SiteSort,
+  splitEmails,
+  type Visibility,
+} from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
 import { waitWithSpinner } from '../ready.ts'
 import {
   archiveSite,
+  audiencesEnabled,
+  audienceWarnings,
   deleteSite,
+  getAudience,
   getSite,
   listSites,
   rollback,
+  setAudience,
   setVisibility,
   share,
   versionFiles,
@@ -60,11 +73,20 @@ function filesRow(
   return [row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`)]
 }
 
+/** Who may open a private site, for copy: the instance's members, or a generic phrase. */
+const membersOf = (ctx: CommandContext) =>
+  ctx.config.instance ? privateAudience(ctx.config.instance) : 'anyone signed in to this Fling'
+
 export async function runInfo(ctx: CommandContext, name: string): Promise<void> {
   const site = await getSite(requireClient(ctx), name)
+  const access =
+    site.audience && audiencesEnabled(ctx.config.instance)
+      ? [`${chalk.bold('Access:'.padEnd(12))}${describeAudience(site, membersOf(ctx))}`]
+      : []
   ctx.out.data(site, () =>
     [
       ...describeSite(site),
+      ...access,
       '',
       chalk.dim(
         `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
@@ -166,6 +188,33 @@ export async function runVisibility(
       : `${name} is private — sign-in required`
   )
   ctx.out.data(site, () => site.url)
+}
+
+/**
+ * `fling access <name> [--add …] [--remove …] [--clear]`: show who can open a site or, with
+ * options, change its audience (the addresses besides the owner who may open it while private).
+ */
+export async function runAccess(
+  ctx: CommandContext,
+  name: string,
+  opts: { add?: string[]; remove?: string[]; clear?: boolean }
+): Promise<void> {
+  const instance = ctx.config.instance
+  if (instance && !audiencesEnabled(instance)) {
+    throw new CliError(`${instance.name} can't limit a site to listed people`)
+  }
+  const change = {
+    add: splitEmails(opts.add ?? []),
+    remove: splitEmails(opts.remove ?? []),
+    clear: opts.clear,
+  }
+  const client = requireClient(ctx)
+  const site = changesAudience(change)
+    ? await setAudience(client, name, change)
+    : await getAudience(client, name)
+  const warnings = audienceWarnings(site)
+  for (const w of warnings) ctx.log.warn(w)
+  ctx.out.data({ ...site, warnings }, () => describeAudience(site, membersOf(ctx)))
 }
 
 export async function runArchive(

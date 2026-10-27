@@ -20,6 +20,10 @@
  *                                                        connection id when it closes)
  *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
  *                                                        projection), so a user's sites are one query
+ *   USER#<email>           SHARED#<siteId>               direct grant: the email is in the audience
+ *                                                        of someone else's site (name, owner) — a
+ *                                                        projection of `audience`, so the sites
+ *                                                        shared with a user are one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
  *                                                        come, first served); how a site is found
@@ -34,6 +38,9 @@
  *   APIKEY#<sha256>        APIKEY                        api key lookup → { email, id }
  *
  * A site's record, its index item and (on creation) its claim are written in one transaction.
+ * Grants that change with its audience join that transaction while it has room (25 operations);
+ * the rest follow in batches, so an interrupted write can leave a grant out of step with the
+ * audience until the site is written again. Policy reads the audience, never the grants.
  *
  * EXPAND PHASE (migration 0001; see its header for the deploy and rollback story). Before this
  * layout a site lived only at USER#<email>/SITE#<name>, which is why the index item keeps that
@@ -100,6 +107,8 @@ import {
   type OAuthClientRecord,
   type OAuthRequestRecord,
   type RefreshTokenRecord,
+  type SiteAudience,
+  type SiteGrantRecord,
   type SiteRecord,
   type SiteRef,
   type Store,
@@ -124,6 +133,7 @@ const key = {
   name: (name: string) => ({ pk: `NAME#${name}`, sk: 'NAME' }),
   site: (siteId: string) => ({ pk: sitePk(siteId), sk: 'SITE' }),
   siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
+  siteGrant: (email: string, siteId: string) => ({ pk: userPk(email), sk: `SHARED#${siteId}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
   comment: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `COMMENT#${id}` }),
   live: (siteId: string, connectionId: string) => ({
@@ -148,8 +158,13 @@ const key = {
   }),
 }
 
+/** The most operations one transaction takes (the Table port's limit). */
+const TRANSACT_MAX = 25
+
 /** How many single-item deletes run at once when clearing a set of items. */
 const DELETE_CONCURRENCY = 10
+/** How many single-item reads run at once when looking up a set of items. */
+const READ_CONCURRENCY = 10
 
 const newestFirst = <T extends { createdAt: string }>(xs: T[]) =>
   xs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -379,11 +394,47 @@ export class Records implements Store {
     }
   }
 
-  async putSite(site: SiteRecord) {
-    await this.table.transact([
+  async putSite(site: SiteRecord, before?: SiteAudience) {
+    const ops: TransactOp[] = [
       { put: encode('site', key.site(site.id), site) },
       { put: encode('site', key.siteIndex(site.email, site.name), site) },
-    ])
+      ...(before ? this.grantOps(site, before.emails, site.audience.emails) : []),
+    ]
+    await this.table.transact(ops.slice(0, TRANSACT_MAX))
+    for (let i = TRANSACT_MAX; i < ops.length; i += TRANSACT_MAX) {
+      await this.table.transact(ops.slice(i, i + TRANSACT_MAX))
+    }
+  }
+
+  /** The grant writes that take a site's direct grants from `before` to `after`. */
+  private grantOps(site: SiteRecord, before: readonly string[], after: readonly string[]) {
+    const ops: TransactOp[] = []
+    for (const email of after) {
+      if (before.includes(email) || email === site.email) continue
+      const grant: SiteGrantRecord = {
+        email,
+        siteId: site.id,
+        name: site.name,
+        owner: site.email,
+        grantedAt: site.updatedAt,
+      }
+      ops.push({ put: encode('sitegrant', key.siteGrant(email, site.id), grant) })
+    }
+    for (const email of before) {
+      if (!after.includes(email)) ops.push({ delete: key.siteGrant(email, site.id) })
+    }
+    return ops
+  }
+
+  listSiteGrants(email: string) {
+    return this.list<SiteGrantRecord>('sitegrant', userPk(email), 'SHARED#')
+  }
+
+  async knownEmails(emails: readonly string[]) {
+    const found = await mapLimit([...emails], READ_CONCURRENCY, async email =>
+      (await this.table.get('USERS', key.userIndex(email).sk)) ? email : null
+    )
+    return new Set(found.filter((e): e is string => e !== null))
   }
 
   async deleteSite(site: SiteRecord) {
@@ -394,7 +445,8 @@ export class Records implements Store {
       skPrefix: `VERSION#${site.id}#`,
     })
     const rest = owned.items.filter(i => i.sk !== 'SITE')
-    await this.deleteAll([...rest, ...legacy.items])
+    const grants = site.audience.emails.map(email => key.siteGrant(email, site.id))
+    await this.deleteAll([...rest, ...legacy.items, ...grants])
     // Release the name claim only if it is this site's (or absent). If another site holds it,
     // the site is still deleted and the claim kept.
     const ops: TransactOp[] = [

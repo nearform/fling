@@ -20,6 +20,7 @@ export type Kind =
   | 'apikeyref'
   | 'name'
   | 'site'
+  | 'sitegrant'
   | 'version'
   | 'comment'
   | 'live'
@@ -37,9 +38,15 @@ export type Upgrade = (fields: Fields) => Fields
 
 /**
  * `UPGRADES[kind][n - 1]` turns a version-n record of `kind` into version n+1, so a kind's
- * current version is its number of upgrades + 1. None yet: every kind is at version 1.
+ * current version is its number of upgrades + 1. Kinds not listed are at version 1.
  */
-export const UPGRADES: Partial<Record<Kind, readonly Upgrade[]>> = {}
+export const UPGRADES: Partial<Record<Kind, readonly Upgrade[]>> = {
+  site: [
+    // v2: `audience`. A v1 record has none (or, written back by a v1 reader, kept the field it
+    // passed through): every member sees it.
+    fields => ({ ...fields, audience: fields.audience ?? { emails: [], groups: [] } }),
+  ],
+}
 
 export const currentVersion = (kind: Kind, upgrades = UPGRADES) => (upgrades[kind]?.length ?? 0) + 1
 

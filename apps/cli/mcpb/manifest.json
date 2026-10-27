@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "fling",
   "display_name": "Fling",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Publish HTML pages, zips and folders from your computer to Fling and get a link back.",
   "long_description": "Fling hosts static sites at https://<name>.<your sites domain> (private to people signed in to your Fling unless you make them public or share a link).\n\nThis extension runs on your computer, so Claude can publish:\n\n- content it created in the conversation (sent inline — no sandbox uploads),\n- a file you downloaded or Claude Desktop saved, by name: it looks in Downloads, Desktop, Documents/Claude and Claude Desktop's output folders,\n- a single .html file, a .zip of a site, or a folder with index.html.\n\nIt works with every Fling you sign in to: the one you downloaded it from is added on start, Claude can sign in to another with the fling_login tool, and the logins are shared with the fling CLI (`fling login <address>`). When several Flings are set up, Claude settles with you which one a conversation uses and names it on every call.",
   "author": {

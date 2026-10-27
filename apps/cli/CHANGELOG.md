@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.5.1
+
+- `fling comments` shows the text a thread is pinned to (`> …` under its header), when a reviewer
+  pinned it by selecting text in review mode. The MCP tools return it as the anchor's `quote`.
+
 ## 0.5.0
 
 - **One MCP server for every Fling.** The local MCP server (`fling mcp` and the Claude Desktop

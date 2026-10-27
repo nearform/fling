@@ -27,6 +27,7 @@ import {
   describeComments,
   describeGroup,
   describeGroups,
+  describeSharedSite,
   describeVersionFiles,
   type InstanceMetadata,
   isSecretPath,
@@ -108,6 +109,7 @@ import {
   groupsEnabled,
   listComments,
   listGroups,
+  listShared,
   listSites,
   renameGroup,
   resolveComment,
@@ -761,7 +763,22 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
   const t = mcpTools
   server.registerTool(t.list.name, serverTool(t.list), args =>
-    run(t.list.name, args.server, async ({ client, url }) => {
+    run(t.list.name, args.server, async target => {
+      const { client, url } = target
+      if (args.shared) {
+        const instance = await target.instance()
+        if (instance && !audiencesEnabled(instance)) {
+          throw new CliError(
+            `${instance.name} (${serverLabel(url)}) can't limit a site to listed people, so nothing is shared`
+          )
+        }
+        const sites = await listShared(client, { sort: args.sort })
+        const lines = sites.map(describeSharedSite).join('\n')
+        return {
+          summary: `${sites.length} site(s) shared with you on ${serverLabel(url)}${lines ? `:\n${lines}` : ''}`,
+          data: { sites },
+        }
+      }
       const sites = await listSites(client, { archived: args.archived, sort: args.sort })
       return { summary: `${sites.length} site(s) on ${serverLabel(url)}`, data: { sites } }
     })

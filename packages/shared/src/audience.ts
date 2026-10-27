@@ -1,7 +1,8 @@
 // A site's audience: who, besides its owner, may see it while it is private. Empty means every
 // signed-in member; a private site with an audience is restricted. The contract, the edits every
 // client makes (`fling access`, both servers' `fling_set_audience`, the web's Access section) and
-// the words the CLI and both MCP servers describe it with. Browser-safe (zod only).
+// the words the CLI and both MCP servers describe it (and the sites shared with someone) with.
+// Browser-safe (zod only).
 
 import { z } from 'zod'
 
@@ -190,3 +191,27 @@ export function describeAudience(
   }
   return `Restricted: only ${and(['you', ...whoIn(emails, groups)])} can open it${list}.${share}`
 }
+
+/** What says how a shared site reached someone (`SharedSite`, api.ts). */
+interface SharedVia {
+  via: { direct: boolean; groups: readonly string[] }
+}
+
+/** `your address`, `group design`, `your address and groups design, ops`: how a site was shared. */
+export function sharedVia(site: SharedVia): string {
+  const { direct, groups } = site.via
+  return and([
+    ...(direct ? ['your address'] : []),
+    ...(groups.length ? [`${groups.length === 1 ? 'group' : 'groups'} ${groups.join(', ')}`] : []),
+  ])
+}
+
+/**
+ * One site shared with the user, for the CLI and both MCP servers:
+ * `- q3-report: https://… (shared by ann@x.test, through group design; review: https://…)`.
+ */
+export const describeSharedSite = (
+  site: SharedVia & { name: string; url: string; owner: string; reviewUrl?: string }
+) =>
+  `- ${site.name}: ${site.url} (shared by ${site.owner}, through ${sharedVia(site)}` +
+  `${site.reviewUrl ? `; review: ${site.reviewUrl}` : ''})`

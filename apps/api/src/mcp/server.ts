@@ -10,6 +10,7 @@ import {
   describeComments,
   describeGroup,
   describeGroups,
+  describeSharedSite,
   describeVersionFiles,
   editAudienceInput,
   MCP_PUBLISH_MAX_BYTES,
@@ -209,6 +210,15 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   }))
 
   register(mcpTools.list, async args => {
+    if (args.shared) {
+      const shared = sortSites(await sites.listShared(deps, user), args.sort)
+      return {
+        text: shared.length
+          ? `${shared.length} site(s) shared with you:\n${shared.map(describeSharedSite).join('\n')}`
+          : 'No sites have been shared with you.',
+        data: { sites: shared },
+      }
+    }
     const list = sortSites(await sites.listSites(deps, user, Boolean(args.archived)), args.sort)
     const lines = list.map(s => `- ${s.name}: ${describeSite(s)}`).join('\n')
     return {

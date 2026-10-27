@@ -2,7 +2,8 @@
  * Who can open the site: public or private and, private, everyone signed in or only the people
  * and groups in its audience (with the `audiences` and `groups` capabilities); and its share link (create, copy, refresh,
  * revoke). Refreshing and revoking break the link people already have, and emptying the audience
- * opens the site to every member, so those ask first. The audience is saved as it is edited, and
+ * (choosing everyone, or removing its last address or group) opens the site to every member, so
+ * those ask first. The audience is saved as it is edited, and
  * the API's word on a refused address is shown beside the input.
  */
 import {
@@ -24,7 +25,7 @@ import { Link } from 'react-router-dom'
 import { useInstance } from '../../hooks/instance'
 import { useGroups, useSiteActions } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
-import { addToAudience, audienceWho, peopleLabel } from '../../lib/audience'
+import { addToAudience, audienceWho, opensToEveryone, peopleLabel } from '../../lib/audience'
 import { displayUrl } from '../../lib/format'
 import { audienceFor, DEFAULT_INSTANCE_NAME } from '../../lib/instance'
 import { showToast } from '../../lib/toast'
@@ -184,7 +185,8 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
   const [only, setOnly] = useState(size > 0)
   const [draft, setDraft] = useState('')
   const [problem, setProblem] = useState<string | null>(null)
-  const [confirmClear, setConfirmClear] = useState(false)
+  /** Asking before the audience empties: chosen "Everyone signed in", or removed its last entry. */
+  const [confirmClear, setConfirmClear] = useState<'everyone' | 'last' | null>(null)
   const id = useId()
 
   // A list that appears from elsewhere (the CLI, another tab) shows as "Only these people".
@@ -206,16 +208,18 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
     left: string[] = [],
     note: string | null = null
   ) => {
-    save.mutate(
-      { emails: next.emails ?? emails, groups: next.groups ?? slugs },
-      {
-        onSuccess: () => {
-          setDraft(left.join(', '))
-          setProblem(note)
-        },
-        onError: error => setProblem(errorMessage(error)),
-      }
-    )
+    const audience = { emails: next.emails ?? emails, groups: next.groups ?? slugs }
+    if (opensToEveryone({ emails, groups: slugs }, audience)) {
+      setConfirmClear('last')
+      return
+    }
+    save.mutate(audience, {
+      onSuccess: () => {
+        setDraft(left.join(', '))
+        setProblem(note)
+      },
+      onError: error => setProblem(errorMessage(error)),
+    })
   }
 
   const add = (text: string) => {
@@ -234,7 +238,7 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
     commit({ emails: next }, left, note)
   }
 
-  const everyone = () => (size > 0 ? setConfirmClear(true) : setOnly(false))
+  const everyone = () => (size > 0 ? setConfirmClear('everyone') : setOnly(false))
 
   return (
     <fieldset className="surface-inset space-y-2 px-3 py-2 md:col-span-2">
@@ -307,13 +311,17 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
       )}
 
       <ConfirmModal
-        isOpen={confirmClear}
+        isOpen={confirmClear !== null}
         title="Open the site to everyone signed in?"
-        message={`The list of ${who} is cleared, and the site is open to ${audienceFor(instance)}.`}
+        message={
+          confirmClear === 'last'
+            ? `That empties its list, and the site is open to ${audienceFor(instance)}.`
+            : `The list of ${who} is cleared, and the site is open to ${audienceFor(instance)}.`
+        }
         confirmText="Open to everyone"
         confirmButtonClass="btn-warning"
         isLoading={save.isPending}
-        onCancel={() => setConfirmClear(false)}
+        onCancel={() => setConfirmClear(null)}
         onConfirm={() =>
           save.mutate(
             { emails: [], groups: [] },
@@ -323,7 +331,7 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
                 setProblem(null)
               },
               onError: error => setProblem(errorMessage(error)),
-              onSettled: () => setConfirmClear(false),
+              onSettled: () => setConfirmClear(null),
             }
           )
         }

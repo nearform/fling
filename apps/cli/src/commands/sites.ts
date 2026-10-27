@@ -6,6 +6,7 @@ import {
   type Site,
   type SiteDetail,
   type SiteSort,
+  sharedVia,
   splitEmails,
   splitGroups,
   type Visibility,
@@ -22,6 +23,7 @@ import {
   getAudience,
   getSite,
   groupsEnabled,
+  listShared,
   listSites,
   rollback,
   setAudience,
@@ -45,6 +47,24 @@ export async function runList(
         value: s => (s.archived ? `${s.visibility} (archived)` : s.visibility),
       },
       { header: 'SHARE', value: s => s.shareUrl },
+      { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
+    ])
+  )
+}
+
+/** `ls --shared`: the restricted sites others have shared with the caller. */
+export async function runListShared(ctx: CommandContext, opts: { sort?: SiteSort }): Promise<void> {
+  const instance = ctx.config.instance
+  if (instance && !audiencesEnabled(instance)) {
+    throw new CliError(`${instance.name} can't limit a site to listed people, so nothing is shared`)
+  }
+  const sites = await listShared(requireClient(ctx), opts)
+  ctx.out.data({ sites }, () =>
+    renderTable(sites, [
+      { header: 'NAME', value: s => s.name },
+      { header: 'URL', value: s => s.url },
+      { header: 'OWNER', value: s => s.owner },
+      { header: 'VIA', value: s => sharedVia(s) },
       { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
     ])
   )

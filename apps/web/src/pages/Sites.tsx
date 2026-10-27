@@ -2,15 +2,25 @@
  * Home: a plain header (greeting, count, search, order), then your sites — active or archived —
  * each as a compact `SiteCard` linking to its site page, narrowed by a client-side search kept in
  * `?q=`. The order (`sortSites`, last updated first by default) is kept in `?sort=` and
- * remembered in localStorage. No sites yet → the CLI quick start.
+ * remembered in localStorage. No sites yet → the CLI quick start. With the `audiences`
+ * capability, a Shared tab (`?view=shared`) lists the restricted sites others have shared with
+ * you, each a `SharedSiteCard`, searched and ordered the same way.
  */
-import { DEFAULT_SITE_SORT, SITE_SORTS, type SiteSort, sortSites } from '@fling/shared'
+import {
+  DEFAULT_SITE_SORT,
+  type SharedSite,
+  SITE_SORTS,
+  type SiteSort,
+  sortSites,
+} from '@fling/shared'
 import { XMarkIcon } from '@heroicons/react/24/outline'
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { SharedSiteCard } from '../components/SharedSiteCard'
 import { SiteCard } from '../components/SiteCard'
 import { SiteSearch } from '../components/SiteSearch'
-import { useMe, useSites } from '../hooks/queries'
+import { useInstance } from '../hooks/instance'
+import { useMe, useSharedSites, useSites } from '../hooks/queries'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { errorMessage } from '../lib/api'
 import { countLabel, filterSites } from '../lib/search'
@@ -30,12 +40,14 @@ export function greeting(hour: number): string {
  * the order.
  */
 function SitesHeader({
+  title,
   count,
   query,
   onQueryChange,
   sort,
   onSortChange,
 }: {
+  title: string
   count: string
   query: string
   onQueryChange: (q: string) => void
@@ -53,7 +65,7 @@ function SitesHeader({
           {firstName ? `, ${firstName}` : ''}
         </p>
         <div className="flex flex-wrap items-baseline gap-x-3">
-          <h1 className="text-xl font-semibold tracking-tight">Your sites</h1>
+          <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
           <p className="text-sm text-secondary" aria-live="polite">
             {count}
           </p>
@@ -78,9 +90,82 @@ function SitesHeader({
   )
 }
 
+/** The Shared tab's body: loading, an error, nothing shared, nothing matching, or the rows. */
+function SharedList({
+  list,
+  shown,
+  query,
+  onClear,
+}: {
+  list: ReturnType<typeof useSharedSites>
+  shown: SharedSite[]
+  query: string
+  onClear: () => void
+}) {
+  if (list.isPending) return <Loading />
+  if (list.isError) {
+    return (
+      <div className="alert alert-error text-sm" role="alert">
+        {errorMessage(list.error)}
+        <button type="button" className="btn btn-sm" onClick={() => list.refetch()}>
+          Try again
+        </button>
+      </div>
+    )
+  }
+  if (list.data.length === 0) {
+    return (
+      <div className="surface-panel text-center text-sm text-secondary">
+        Nothing shared with you yet. When someone limits a private site to you, or to a group you
+        are in, it shows up here.
+      </div>
+    )
+  }
+  if (shown.length === 0) return <NoMatch query={query} label="shared " onClear={onClear} />
+  return (
+    <ul className="space-y-2">
+      {shown.map(site => (
+        <li key={site.name}>
+          <SharedSiteCard site={site} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Loading() {
+  return (
+    <div className="grid place-items-center py-12">
+      <span
+        className="loading loading-spinner loading-md text-muted"
+        role="status"
+        aria-label="Loading"
+      />
+    </div>
+  )
+}
+
+function NoMatch({ query, label, onClear }: { query: string; label: string; onClear: () => void }) {
+  return (
+    <div className="surface-panel space-y-3 text-center text-sm text-secondary">
+      <p>
+        No {label}sites match{' '}
+        <span className="font-medium text-base-content">"{query.trim()}"</span>
+      </p>
+      <button type="button" className="btn btn-sm" onClick={onClear}>
+        <XMarkIcon className="h-4 w-4" aria-hidden />
+        Clear search
+      </button>
+    </div>
+  )
+}
+
 export default function Sites() {
   const [params, setParams] = useSearchParams()
-  const archived = params.get('view') === 'archived'
+  const sharing = useInstance()?.capabilities.audiences === true
+  const view = params.get('view')
+  const archived = view === 'archived'
+  const shared = sharing && view === 'shared'
   const query = params.get('q') ?? ''
   const searching = query.trim() !== ''
   const [savedSort, setSavedSort] = useLocalStoragePreference<string>(
@@ -90,9 +175,14 @@ export default function Sites() {
   const sort = chooseSiteSort(params.get('sort'), savedSort)
   const active = useSites(false)
   const list = useSites(archived)
+  const sharedList = useSharedSites(sharing)
   const shown = useMemo(
     () => sortSites(filterSites(list.data ?? [], query), sort),
     [list.data, query, sort]
+  )
+  const sharedShown = useMemo(
+    () => sortSites(filterSites(sharedList.data ?? [], query), sort),
+    [sharedList.data, query, sort]
   )
 
   const update = (key: 'view' | 'q' | 'sort', value: string | null) =>
@@ -105,7 +195,8 @@ export default function Sites() {
       },
       { replace: true }
     )
-  const setView = (view: 'active' | 'archived') => update('view', view === 'archived' ? view : null)
+  const setView = (next: 'active' | 'archived' | 'shared') =>
+    update('view', next === 'active' ? null : next)
   const setQuery = (q: string) => update('q', q || null)
   const setSort = (next: SiteSort) => {
     setSavedSort(next)
@@ -115,7 +206,18 @@ export default function Sites() {
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <SitesHeader
-        count={countLabel({ total: list.data?.length, shown: shown.length, archived, searching })}
+        title={shared ? 'Shared with you' : 'Your sites'}
+        count={
+          shared
+            ? countLabel({
+                total: sharedList.data?.length,
+                shown: sharedShown.length,
+                archived: false,
+                shared: true,
+                searching,
+              })
+            : countLabel({ total: list.data?.length, shown: shown.length, archived, searching })
+        }
         query={query}
         onQueryChange={setQuery}
         sort={sort}
@@ -126,8 +228,8 @@ export default function Sites() {
         <button
           type="button"
           role="tab"
-          aria-selected={!archived}
-          className={`tab ${archived ? '' : 'tab-active'}`}
+          aria-selected={!archived && !shared}
+          className={`tab ${archived || shared ? '' : 'tab-active'}`}
           onClick={() => setView('active')}
         >
           Active
@@ -142,16 +244,29 @@ export default function Sites() {
         >
           Archived
         </button>
+        {sharing && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={shared}
+            className={`tab ${shared ? 'tab-active' : ''}`}
+            onClick={() => setView('shared')}
+          >
+            Shared with me
+            {sharedList.data && <span className="ml-1.5 text-muted">{sharedList.data.length}</span>}
+          </button>
+        )}
       </div>
 
-      {list.isPending ? (
-        <div className="grid place-items-center py-12">
-          <span
-            className="loading loading-spinner loading-md text-muted"
-            role="status"
-            aria-label="Loading"
-          />
-        </div>
+      {shared ? (
+        <SharedList
+          list={sharedList}
+          shown={sharedShown}
+          query={query}
+          onClear={() => setQuery('')}
+        />
+      ) : list.isPending ? (
+        <Loading />
       ) : list.isError ? (
         <div className="alert alert-error text-sm" role="alert">
           {errorMessage(list.error)}
@@ -174,16 +289,7 @@ export default function Sites() {
           </div>
         )
       ) : shown.length === 0 ? (
-        <div className="surface-panel space-y-3 text-center text-sm text-secondary">
-          <p>
-            No {archived ? 'archived ' : ''}sites match{' '}
-            <span className="font-medium text-base-content">"{query.trim()}"</span>
-          </p>
-          <button type="button" className="btn btn-sm" onClick={() => setQuery('')}>
-            <XMarkIcon className="h-4 w-4" aria-hidden />
-            Clear search
-          </button>
-        </div>
+        <NoMatch query={query} label={archived ? 'archived ' : ''} onClear={() => setQuery('')} />
       ) : (
         <ul className="space-y-2">
           {shown.map(site => (

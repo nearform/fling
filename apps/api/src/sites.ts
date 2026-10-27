@@ -15,6 +15,9 @@
  * exists (named by slug, stored by id). The route value then carries `r: 1`, and the edge wants a
  * site pass, which `/auth/login` hands to whoever policy lets view it (`signedInReturn`). Deleting
  * a group takes it out of the audiences that name it, never widening one (`dropGroup`).
+ *
+ * Shared with me (`listShared`): the restricted sites of others that the user may see, found from
+ * their direct grants and their groups' site items, and each one still asked of policy.
  */
 import {
   AUDIENCE_EMAILS_MAX,
@@ -34,6 +37,8 @@ import {
   NOT_FOUND_PAGE,
   nameSuggestions,
   parseLabel,
+  reviewUrl,
+  type SharedSite,
   SITE_PASS_PATH,
   type Site,
   type SiteDetail,
@@ -45,12 +50,14 @@ import {
   sitePrefix,
   siteUrl,
   slugify,
+  sortSites,
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
 import { PASS_HANDOFF_TTL_SECONDS, signPassHandoff } from '@fling/shared/site-cookie'
 import { emailAllowed } from './auth/identity.ts'
 import { manifestKey } from './blobs/types.ts'
+import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
@@ -341,6 +348,62 @@ export async function listSites(deps: Deps, user: User, archived: boolean): Prom
   return sites
     .filter(s => s.archived === archived && (archived || s.currentVersionId !== null))
     .map(s => toSite(deps, user, s))
+}
+
+/** Sites read at once while listing the ones shared with a user. */
+const SHARED_READ_CONCURRENCY = 10
+
+/**
+ * GET /api/shared — the restricted sites of others that the user may see because the audience
+ * names them, directly or through a group they are in: their direct grants and their groups'
+ * site items (index items only), each site then asked of policy, so an index item out of step with
+ * the audience (a removed member, a deleted group) never shows a site. Sites that aren't live
+ * (archived, or no current version) are left out, as are merely private ones, which every member
+ * sees anyway. Last updated first.
+ */
+export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> {
+  const [grants, groups] = await Promise.all([
+    deps.store.listSiteGrants(user.email),
+    groupsOf(deps, user.email),
+  ])
+  const groupSites = await mapLimit(groups, SHARED_READ_CONCURRENCY, id =>
+    deps.store.listGroupSites(id)
+  )
+  const candidates = new Map<string, string>()
+  for (const item of [...grants, ...groupSites.flat()]) candidates.set(item.siteId, item.name)
+  const found = await mapLimit([...candidates], SHARED_READ_CONCURRENCY, async ([id, name]) => {
+    const site = await deps.store.findSite(name)
+    return site?.id === id ? site : null
+  })
+  const actor: Actor = { kind: 'user', email: user.email, groups }
+  const visible = found.filter(
+    (site): site is SiteRecord =>
+      site !== null &&
+      site.email !== user.email &&
+      !site.archived &&
+      site.currentVersionId !== null &&
+      isRestricted(site) &&
+      can(actor, 'site.view', site)
+  )
+  const via = (site: SiteRecord) => site.audience.groups.filter(id => groups.includes(id))
+  const slugs = new Map(
+    (await deps.store.getGroups([...new Set(visible.flatMap(via))])).map(g => [g.id, g.slug])
+  )
+  const { sitesDomain, appOrigin, comments } = deps.config
+  return sortSites(
+    visible.map(site => ({
+      name: site.name,
+      url: siteUrl(siteLabel(site.name), sitesDomain, protocol(deps)),
+      ...(comments ? { reviewUrl: reviewUrl(appOrigin, site.name) } : {}),
+      owner: site.email,
+      via: {
+        direct: site.audience.emails.includes(user.email),
+        groups: via(site).flatMap(id => slugs.get(id) ?? []),
+      },
+      createdAt: site.createdAt,
+      updatedAt: site.updatedAt,
+    }))
+  )
 }
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {

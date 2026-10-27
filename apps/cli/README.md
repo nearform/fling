@@ -179,6 +179,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | Command | |
 |---|---|
 | `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
+| `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
 | `fling info <name>` / `fling versions <name>` | details and version history |
 | `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |
@@ -210,6 +211,11 @@ has it, and `fling access` warns while one exists. Removing someone shuts them o
 minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups:
 [{ slug, name, size }] }`) and `warnings`; `fling info` shows the same line, and `fling ls --json`
 gives each site's `restricted`, `audienceSize` and `audienceGroups` (how many of those are groups).
+
+`fling ls --shared` lists the other side: the restricted sites whose audience names you, or a group
+you are in, with their owner and how they reached you. With `--json`, each is `{ name, url,
+reviewUrl?, owner, via: { direct, groups }, createdAt, updatedAt }`. Your own sites, and private
+sites open to everyone signed in, aren't listed.
 
 ### Groups
 

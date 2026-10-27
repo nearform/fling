@@ -1,10 +1,11 @@
 /**
  * Client-side site search: a query matches a site when every whitespace-separated word appears
- * (case-insensitively, as a substring) in its name, URL or share URL.
+ * (case-insensitively, as a substring) in its name, URL, share URL or (a site shared with you) its
+ * owner.
  */
 import type { Site } from '@fling/shared'
 
-type Searchable = Pick<Site, 'name' | 'url' | 'shareUrl'>
+type Searchable = Pick<Site, 'name' | 'url'> & { shareUrl?: string | null; owner?: string }
 
 /** The query's words, lower-cased; empty for a blank query. */
 export function queryTerms(query: string): string[] {
@@ -14,7 +15,9 @@ export function queryTerms(query: string): string[] {
 export function matchesQuery(site: Searchable, query: string): boolean {
   const terms = queryTerms(query)
   if (terms.length === 0) return true
-  const haystack = [site.name, site.url, site.shareUrl ?? ''].join('\n').toLowerCase()
+  const haystack = [site.name, site.url, site.shareUrl ?? '', site.owner ?? '']
+    .join('\n')
+    .toLowerCase()
   return terms.every(term => haystack.includes(term))
 }
 
@@ -23,18 +26,30 @@ export function filterSites<T extends Searchable>(sites: readonly T[], query: st
   return queryTerms(query).length === 0 ? [...sites] : sites.filter(s => matchesQuery(s, query))
 }
 
-/** The header's count line: what's listed, and how much of it the search lets through. */
+/**
+ * The header's count line: what's listed (your live or archived sites, or the sites shared with
+ * you), and how much of it the search lets through.
+ */
 export function countLabel({
   total,
   shown,
   archived,
+  shared = false,
   searching,
 }: {
   total: number | undefined
   shown: number
   archived: boolean
+  shared?: boolean
   searching: boolean
 }): string {
+  if (shared) {
+    const sites = (n: number) => (n === 1 ? 'site' : 'sites')
+    if (total === undefined) return 'Restricted sites other people have shared with you'
+    if (searching) return `${shown} of ${total} shared ${sites(total)}`
+    if (total === 0) return 'Nothing shared with you yet'
+    return `${total} ${sites(total)} shared with you`
+  }
   if (total === undefined) return 'Everything you have flung, in one list'
   const noun = (n: number) => `${archived ? 'archived ' : ''}${n === 1 ? 'site' : 'sites'}`
   if (searching) return `${shown} of ${total} ${noun(total)}`

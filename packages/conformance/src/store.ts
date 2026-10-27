@@ -13,6 +13,7 @@ import type {
   AuditRecord,
   CommentRecord,
   GrantRecord,
+  GroupRecord,
   LiveConnectionRecord,
   RefreshTokenRecord,
   SiteRecord,
@@ -43,6 +44,19 @@ function site(owner: string, name = siteName(), overrides: Partial<SiteRecord> =
     currentVersionId: null,
     shareToken: null,
     audience: { emails: [], groups: [] },
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  }
+}
+
+function group(owner: string, overrides: Partial<GroupRecord> = {}): GroupRecord {
+  return {
+    id: uid(),
+    slug: `g-${uid()}`,
+    name: 'A group',
+    owner,
+    size: 0,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -432,6 +446,117 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       it('deleteSite of a site that does not exist is a no-op', async () => {
         const store = await factory()
         await expect(store.deleteSite(site(email()))).resolves.toBeUndefined()
+      })
+    })
+
+    describe('groups', () => {
+      it('createGroup claims the slug and stores the group with its members and memberships', async () => {
+        const store = await factory()
+        const owner = email()
+        const members = [email(), email()]
+        const g = group(owner, { size: 2 })
+        expect(await store.createGroup(g, members)).toEqual(g)
+        expect(await store.findGroup(g.slug)).toEqual(g)
+        expect(await store.getGroups([g.id, uid()])).toEqual([g])
+        expect(await store.listGroupMembers(g.id)).toEqual(byteOrder(members, m => m))
+        expect(await store.listMemberships(members[0] as string)).toEqual([g.id])
+        expect(await store.listOwnedGroups(owner)).toEqual([g])
+        expect((await store.listGroups()).filter(x => x.id === g.id)).toEqual([g])
+      })
+
+      it('createGroup on a slug in use returns null and changes nothing', async () => {
+        const store = await factory()
+        const g = group(email())
+        await store.createGroup(g, [])
+        const other = group(email(), { slug: g.slug })
+        expect(await store.createGroup(other, [email()])).toBeNull()
+        expect(await store.findGroup(g.slug)).toEqual(g)
+        expect(await store.getGroups([other.id])).toEqual([])
+      })
+
+      it('race: concurrent creates of one slug → exactly one wins', async () => {
+        const store = await factory()
+        const slug = `g-${uid()}`
+        const tries = Array.from({ length: 4 }, () => group(email(), { slug }))
+        const results = await Promise.all(tries.map(g => store.createGroup(g, [])))
+        expect(results.filter(r => r !== null)).toHaveLength(1)
+      })
+
+      it('putGroup renames and changes members past one transaction; lists go by slug', async () => {
+        const store = await factory()
+        const owner = email()
+        const g = group(owner, { slug: `g-${uid()}-b` })
+        const a = group(owner, { slug: `${g.slug.slice(0, -2)}-a` })
+        await store.createGroup(g, [])
+        await store.createGroup(a, [])
+        const many = Array.from({ length: 30 }, () => email())
+        const renamed = { ...g, name: 'Renamed', size: many.length, updatedAt: LATER }
+        await store.putGroup(renamed, { add: many, remove: [] })
+        expect(await store.findGroup(g.slug)).toEqual(renamed)
+        expect(await store.listGroupMembers(g.id)).toHaveLength(30)
+        expect(await store.listMemberships(many[29] as string)).toEqual([g.id])
+        expect(await store.listOwnedGroups(owner)).toEqual([a, renamed])
+        await store.putGroup({ ...renamed, size: 0 }, { add: [], remove: many })
+        expect(await store.listGroupMembers(g.id)).toEqual([])
+        expect(await store.listMemberships(many[29] as string)).toEqual([])
+      })
+
+      it('putSite keeps group-site items in step with the audience; deleteSite removes them', async () => {
+        const store = await factory()
+        const g = group(email())
+        await store.createGroup(g, [])
+        const s = site(email())
+        await store.createSite(s)
+        const withGroup = { ...s, audience: { emails: [], groups: [g.id] } }
+        await store.putSite(withGroup, s.audience)
+        expect(await store.listGroupSites(g.id)).toEqual([
+          { groupId: g.id, siteId: s.id, name: s.name, owner: s.email },
+        ])
+        await store.putSite(s, withGroup.audience)
+        expect(await store.listGroupSites(g.id)).toEqual([])
+        await store.putSite(withGroup, s.audience)
+        await store.deleteSite(withGroup)
+        expect(await store.listGroupSites(g.id)).toEqual([])
+      })
+
+      it('putSite and deleteSite tolerate an audience naming a group that no longer exists', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const gone = uid()
+        const dangling = { ...s, audience: { emails: [], groups: [gone] } }
+        await store.putSite(dangling, dangling.audience)
+        expect(await store.findSite(s.name)).toEqual(dangling)
+        const later = { ...dangling, audience: { emails: [email()], groups: [gone] } }
+        await store.putSite(later, dangling.audience)
+        await store.putSite(
+          { ...later, audience: { ...later.audience, groups: [] } },
+          later.audience
+        )
+        expect(await store.listGroupSites(gone)).toEqual([])
+        await store.deleteSite(dangling)
+        expect(await store.findSite(s.name)).toBeNull()
+      })
+
+      it('deleteGroup removes members, memberships, site items, copies and frees the slug', async () => {
+        const store = await factory()
+        const owner = email()
+        const member = email()
+        const g = group(owner, { size: 1 })
+        await store.createGroup(g, [member])
+        const s = site(email())
+        await store.createSite(s)
+        await store.putSite({ ...s, audience: { emails: [], groups: [g.id] } }, s.audience)
+        await store.deleteGroup(g)
+        expect(await store.findGroup(g.slug)).toBeNull()
+        expect(await store.getGroups([g.id])).toEqual([])
+        expect(await store.listGroupMembers(g.id)).toEqual([])
+        expect(await store.listMemberships(member)).toEqual([])
+        expect(await store.listGroupSites(g.id)).toEqual([])
+        expect(await store.listOwnedGroups(owner)).toEqual([])
+        expect((await store.listGroups()).some(x => x.id === g.id)).toBe(false)
+        const again = group(email(), { slug: g.slug })
+        expect(await store.createGroup(again, [])).toEqual(again)
       })
     })
 

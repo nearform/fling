@@ -1,4 +1,4 @@
-import type { Me } from '@fling/shared'
+import type { InstanceMetadata, Me } from '@fling/shared'
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -6,6 +6,7 @@ import {
   KeyIcon,
   RocketLaunchIcon,
   ShieldCheckIcon,
+  UserGroupIcon,
 } from '@heroicons/react/24/outline'
 import type { ComponentType } from 'react'
 import { Link, NavLink, useLocation } from 'react-router-dom'
@@ -35,9 +36,21 @@ export const ADMIN_NAV_ITEM: NavItem = {
   icon: ShieldCheckIcon,
 }
 
-/** The side nav's items for this user: everyone's, then Admin for admins. */
-export function navItemsFor(me: Me | null | undefined): NavItem[] {
-  return showsAdmin(me) ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS
+/** Groups, after Sites, on an instance with the `groups` capability. */
+export const GROUPS_NAV_ITEM: NavItem = { to: '/groups', label: 'Groups', icon: UserGroupIcon }
+
+/**
+ * The side nav's items for this user: everyone's (with Groups where the instance has them), then
+ * Admin for admins.
+ */
+export function navItemsFor(
+  me: Me | null | undefined,
+  instance?: Pick<InstanceMetadata, 'capabilities'> | null
+): NavItem[] {
+  const [first, ...rest] = NAV_ITEMS
+  const items =
+    instance?.capabilities.groups === true && first ? [first, GROUPS_NAV_ITEM, ...rest] : NAV_ITEMS
+  return showsAdmin(me) ? [...items, ADMIN_NAV_ITEM] : items
 }
 
 /** `/` matches only itself; every other path matches itself and its descendants. */
@@ -55,7 +68,8 @@ function closeMobileDrawer() {
 export default function SideNav() {
   const { pathname } = useLocation()
   const [isCollapsed, setIsCollapsed] = useBooleanPreference('sideNavCollapsed', false)
-  const name = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
+  const instance = useInstance()
+  const name = instance?.name ?? DEFAULT_INSTANCE_NAME
   const { data: me } = useMe()
 
   return (
@@ -78,7 +92,7 @@ export default function SideNav() {
       </Link>
 
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5" aria-label="Main">
-        {navItemsFor(me).map(item => (
+        {navItemsFor(me, instance).map(item => (
           <div key={item.to} className="relative group">
             <NavLink
               to={item.to}

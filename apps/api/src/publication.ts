@@ -218,7 +218,7 @@ async function prepare(
   if (existing && existing.currentVersionId === versionId) {
     applySettings(existing, req)
     existing.archived = false
-    await save(deps, user, existing)
+    await save(deps, existing)
     return {
       kind: 'done',
       result: { status: 'unchanged', versionId, site: toSite(deps, user, existing) },
@@ -231,7 +231,7 @@ async function prepare(
       existing.currentVersionId = versionId
       existing.archived = false
       applySettings(existing, req)
-      await save(deps, user, existing)
+      await save(deps, existing)
       return {
         kind: 'done',
         result: { status: 'repointed', versionId, site: toSite(deps, user, existing) },
@@ -294,7 +294,7 @@ async function goLive(
   site.currentVersionId = version.id
   site.archived = false
   applySettings(site, version)
-  await save(deps, user, site)
+  await save(deps, site)
   return { status: 'live', versionId: version.id, site: toSite(deps, user, site) }
 }
 

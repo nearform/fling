@@ -234,7 +234,8 @@ then delete the two `google-client-*` parameters.
 `fling_site` cookie: the API checks the audience at sign-in, then the site router sets a host-only
 `fling_pass` cookie (signed with the same key, good for 15 minutes) at `/_fling-pass` on the site's
 host. That path is outside `_fling/*`, so the site router handles it. Taking someone out of an
-audience shuts them out within 15 minutes; nothing else needs configuring.
+audience, or out of a group it names, shuts them out within 15 minutes; nothing else needs
+configuring.
 
 ## One-time setup
 
@@ -330,7 +331,8 @@ hand and says so. A single site rolls back with `fling rollback <name> <versionI
 
 Rolling back to a release from before audiences: its API and site router ignore an audience, so a
 restricted site is open to every signed-in member until you roll forward again (the audiences are
-kept).
+kept). Rolling back to a release from before groups keeps the groups but lets no one in through
+them: a site whose audience names a group is shut to the group's members until you roll forward.
 
 ## Data migrations
 

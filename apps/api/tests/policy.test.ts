@@ -17,7 +17,10 @@ import {
   type Actor,
   can,
   canDeleteComment,
+  canGroup,
   canInstance,
+  GROUP_ACTIONS,
+  type GroupAction,
   INSTANCE_ACTIONS,
   type InstanceAction,
   impersonationRefusal,
@@ -217,6 +220,48 @@ describe('roleOf', () => {
     expect(roleOf({ kind: 'share', token: TOKEN }, site)).toBe('share')
     expect(roleOf({ kind: 'share', token: 'zyxwvutsrq9876543210' }, site)).toBe('anonymous')
     expect(roleOf({ kind: 'share', token: TOKEN }, { ...site, shareToken: null })).toBe('anonymous')
+  })
+})
+
+describe('roleOf through a group', () => {
+  it("a user in one of the audience's groups is a viewer; the groups are the actor's", () => {
+    const site: PolicySite = { ...siteWith('private'), audience: { emails: [], groups: ['g1'] } }
+    const member = actorFor.member as Extract<Actor, { kind: 'user' }>
+    expect(roleOf({ ...member, groups: ['g1'] }, site)).toBe('viewer')
+    expect(roleOf({ ...member, groups: ['g2'] }, site)).toBe('member')
+    expect(roleOf(member, site)).toBe('member')
+    expect(can({ ...member, groups: ['g1'] }, 'site.view', site)).toBe(true)
+    expect(can({ ...member, groups: ['g2'] }, 'site.view', site)).toBe(false)
+  })
+})
+
+/** Who may do each group action: o = its owner, m = any other signed-in user. */
+const GROUP_EXPECTED: Record<GroupAction, string> = {
+  'group.read': 'om',
+  'group.manage': 'o',
+  'group.delete': 'o',
+}
+
+describe('canGroup', () => {
+  const group = { owner: OWNER }
+  const actors: Record<string, Actor> = {
+    o: { kind: 'user', email: OWNER },
+    m: { kind: 'user', email: 'member@example.test' },
+  }
+
+  it.each(GROUP_ACTIONS)('%s', action => {
+    const got = Object.entries(actors)
+      .filter(([, actor]) => canGroup(actor, action, group))
+      .map(([letter]) => letter)
+      .join('')
+    expect(got).toBe(GROUP_EXPECTED[action])
+  })
+
+  it('share-link holders and anonymous visitors get nothing', () => {
+    for (const action of GROUP_ACTIONS) {
+      expect(canGroup(actorFor.share, action, group)).toBe(false)
+      expect(canGroup(actorFor.anonymous, action, group)).toBe(false)
+    }
   })
 })
 

@@ -55,8 +55,17 @@
     { "name": "fling_set_visibility", "description": "Make a site private or public" },
     {
       "name": "fling_set_audience",
-      "description": "Limit a private site to listed people, or open it to everyone signed in"
+      "description": "Limit a private site to listed people and groups, or open it to everyone signed in"
     },
+    { "name": "fling_groups", "description": "List the groups of people on a Fling" },
+    { "name": "fling_group_show", "description": "Show a group and its members" },
+    { "name": "fling_group_create", "description": "Create a group of people" },
+    {
+      "name": "fling_group_members",
+      "description": "Add people to a group you own, or take them out"
+    },
+    { "name": "fling_group_rename", "description": "Rename a group you own" },
+    { "name": "fling_group_delete", "description": "Delete a group you own" },
     {
       "name": "fling_archive",
       "description": "Take a site offline (or restore it), keeping its files"

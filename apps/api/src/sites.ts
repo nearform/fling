@@ -10,16 +10,20 @@
  * decides whether the user may do the action. Refusals look exactly like a missing site (404), so
  * the API never confirms that someone else's site exists beyond what `checkName` says.
  *
- * Audiences: the owner may limit a private site to listed addresses (`setAudience` through
- * `updateSite`), each one the instance would let sign in. The route value then carries `r: 1`, and
- * the edge wants a site pass, which `/auth/login` hands to whoever policy lets view it
- * (`signedInReturn`).
+ * Audiences: the owner may limit a private site to listed addresses and groups (`applyAudience`
+ * through `updateSite`), each address one the instance would let sign in, each group one that
+ * exists (named by slug, stored by id). The route value then carries `r: 1`, and the edge wants a
+ * site pass, which `/auth/login` hands to whoever policy lets view it (`signedInReturn`). Deleting
+ * a group takes it out of the audiences that name it, never widening one (`dropGroup`).
  */
 import {
   AUDIENCE_EMAILS_MAX,
+  AUDIENCE_GROUPS_MAX,
   type Audience,
   type AudienceInput,
   AudienceInputSchema,
+  deletedGroupId,
+  deletedGroupRef,
   initialsFromEmail,
   isGeneratedListing,
   isValidSiteName,
@@ -91,27 +95,36 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
       : null,
     restricted: isRestricted(site),
     audienceSize: site.audience.emails.length + site.audience.groups.length,
+    audienceGroups: site.audience.groups.length,
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
   }
 }
 
-/** The audience as its owner sees it: each address, and whether it has signed in yet. */
+/**
+ * The audience as its owner sees it: each address, and whether it has signed in yet; each group by
+ * slug, with its name and size. A group that has been deleted (kept because it was the only entry,
+ * `dropGroup`) is `deleted`, named by its reference.
+ */
 export async function audienceOf(deps: Deps, site: SiteRecord): Promise<Audience> {
-  const known = await deps.store.knownEmails(site.audience.emails)
+  const [known, groups] = await Promise.all([
+    deps.store.knownEmails(site.audience.emails),
+    deps.store.getGroups(site.audience.groups),
+  ])
+  const byId = new Map(groups.map(g => [g.id, g]))
   return {
     emails: site.audience.emails.map(email => ({ email, known: known.has(email) })),
-    groups: [...site.audience.groups],
+    groups: site.audience.groups.map(id => {
+      const g = byId.get(id)
+      return g
+        ? { slug: g.slug, name: g.name, size: g.size }
+        : { slug: deletedGroupRef(id), name: 'a deleted group', size: 0, deleted: true }
+    }),
   }
 }
 
 /** Make the route table reflect the site: live (not archived, has a version) → keys present, else gone. */
-export async function syncRouteTable(
-  deps: Deps,
-  _user: User,
-  site: SiteRecord,
-  oldShareToken?: string
-) {
+export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken?: string) {
   const { routeTable } = deps
   const label = siteLabel(site.name)
   if (oldShareToken && oldShareToken !== site.shareToken) {
@@ -188,12 +201,9 @@ export async function checkName(deps: Deps, user: User, name: string): Promise<N
   return claim.email === user.email ? yours : taken()
 }
 
-/**
- * The ids of the groups `email` belongs to. The one place policy's `groups` come from; there are
- * no groups yet, so none.
- */
-async function groupsOf(_deps: Deps, _email: string): Promise<string[]> {
-  return []
+/** The ids of the groups `email` belongs to (one query): the one place policy's `groups` come from. */
+function groupsOf(deps: Deps, email: string): Promise<string[]> {
+  return deps.store.listMemberships(email)
 }
 
 /**
@@ -236,26 +246,20 @@ export async function requireSite(
 /** Write the site and its routes; `before`: the audience it had, when the audience changed. */
 export async function save(
   deps: Deps,
-  user: User,
   site: SiteRecord,
   oldShareToken?: string,
   before?: SiteAudience
 ) {
   site.updatedAt = deps.clock.now().toISOString()
   await deps.store.putSite(site, before)
-  await syncRouteTable(deps, user, site, oldShareToken)
+  await syncRouteTable(deps, site, oldShareToken)
 }
 
 /**
- * A new audience for the site, checked: every address one the instance would let sign in (an
- * audience can't name someone who could never see it). Returns the audience it had.
+ * Refuse (400 `email_not_allowed`, naming them) any address the instance would not let sign in:
+ * an audience or a group can't name someone who could never see the site.
  */
-export function applyAudience(deps: Deps, site: SiteRecord, input: AudienceInput): SiteAudience {
-  const audience = AudienceInputSchema.parse(input)
-  const emails = [...new Set(audience.emails)]
-  if (emails.length > AUDIENCE_EMAILS_MAX) {
-    throw badRequest(`An audience holds at most ${AUDIENCE_EMAILS_MAX} addresses`)
-  }
+export function checkEmails(deps: Deps, emails: readonly string[]) {
   const policy = {
     allowedDomains: deps.config.allowedEmailDomains,
     allowedEmails: deps.config.allowedEmails,
@@ -269,9 +273,62 @@ export function applyAudience(deps: Deps, site: SiteRecord, input: AudienceInput
       { emails: refused }
     )
   }
+}
+
+/**
+ * A new audience for the site, checked: every address one the instance would let sign in, every
+ * group slug one that exists (400 `unknown_group`, naming them), stored by id. A deleted group's
+ * reference (`#<id>`) keeps it, if the audience already names it. Returns the audience it had.
+ */
+export async function applyAudience(
+  deps: Deps,
+  site: SiteRecord,
+  input: AudienceInput
+): Promise<SiteAudience> {
+  const audience = AudienceInputSchema.parse(input)
+  const emails = [...new Set(audience.emails)]
+  if (emails.length > AUDIENCE_EMAILS_MAX) {
+    throw badRequest(`An audience holds at most ${AUDIENCE_EMAILS_MAX} addresses`)
+  }
+  const slugs = [...new Set(audience.groups)]
+  if (slugs.length > AUDIENCE_GROUPS_MAX) {
+    throw badRequest(`An audience names at most ${AUDIENCE_GROUPS_MAX} groups`)
+  }
+  checkEmails(deps, emails)
+  const ids = await Promise.all(
+    slugs.map(async slug => {
+      const kept = deletedGroupId(slug)
+      if (kept !== null) return site.audience.groups.includes(kept) ? kept : null
+      return (await deps.store.findGroup(slug))?.id ?? null
+    })
+  )
+  const unknown = slugs.filter((_, i) => !ids[i])
+  if (unknown.length) {
+    throw new ApiError(400, 'unknown_group', `No group named ${unknown.join(', ')}`, {
+      groups: unknown,
+    })
+  }
   const before = site.audience
-  site.audience = { emails, groups: [...audience.groups] }
+  site.audience = { emails, groups: [...new Set(ids as string[])] }
   return before
+}
+
+/**
+ * Take a group out of the audiences that name it (deleting the group), never widening who sees a
+ * site: an audience that names others as well loses it (each site saved the usual way); one it is
+ * the only entry of keeps its id, which matches nobody, so the site stays restricted to its owner
+ * until they change the audience.
+ */
+export async function dropGroup(deps: Deps, groupId: string) {
+  for (const item of await deps.store.listGroupSites(groupId)) {
+    const site = await deps.store.findSite(item.name)
+    if (site?.id !== item.siteId || !site.audience.groups.includes(groupId)) continue
+    const before = site.audience
+    const groups = before.groups.filter(g => g !== groupId)
+    if (before.emails.length + groups.length === 0) continue
+    site.audience = { ...before, groups }
+    await save(deps, site, undefined, before)
+  }
 }
 
 export function applySettings(site: SiteRecord, opts: { spa?: boolean; visibility?: Visibility }) {
@@ -347,8 +404,8 @@ export async function updateSite(
   const site = await requireSite(deps, user, name, first, ...rest)
   applySettings(site, patch)
   const before =
-    patch.audience === undefined ? undefined : applyAudience(deps, site, patch.audience)
-  await save(deps, user, site, undefined, before)
+    patch.audience === undefined ? undefined : await applyAudience(deps, site, patch.audience)
+  await save(deps, site, undefined, before)
   return {
     ...toSite(deps, user, site),
     ...(before ? { audience: await audienceOf(deps, site) } : {}),
@@ -360,7 +417,7 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
   const version = await deps.store.getVersion(site, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
-  await save(deps, user, site)
+  await save(deps, site)
   return toSite(deps, user, site)
 }
 
@@ -368,7 +425,7 @@ export async function rotateShare(deps: Deps, user: User, name: string) {
   const site = await requireSite(deps, user, name, 'share.create')
   const old = site.shareToken ?? undefined
   site.shareToken = newShareToken()
-  await save(deps, user, site, old)
+  await save(deps, site, old)
   return {
     shareUrl: siteUrl(shareLabel(site.shareToken), deps.config.sitesDomain, protocol(deps)),
   }
@@ -378,14 +435,14 @@ export async function revokeShare(deps: Deps, user: User, name: string) {
   const site = await requireSite(deps, user, name, 'share.revoke')
   const old = site.shareToken ?? undefined
   site.shareToken = null
-  await save(deps, user, site, old)
+  await save(deps, site, old)
   return toSite(deps, user, site)
 }
 
 export async function setArchived(deps: Deps, user: User, name: string, archived: boolean) {
   const site = await requireSite(deps, user, name, 'site.archive')
   site.archived = archived
-  await save(deps, user, site)
+  await save(deps, site)
   return toSite(deps, user, site)
 }
 

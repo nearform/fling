@@ -5,8 +5,12 @@ import {
   CommentSchema,
   ConnectionListSchema,
   CreateCommentRequestSchema,
+  CreateGroupRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
+  GroupDetailSchema,
+  GroupListSchema,
+  GroupMembersRequestSchema,
   LiveTicketSchema,
   MeSchema,
   NameCheckSchema,
@@ -19,6 +23,7 @@ import {
   SiteSchema,
   SiteWithAudienceSchema,
   UpdateCommentRequestSchema,
+  UpdateGroupRequestSchema,
   UpdateSiteRequestSchema,
   VersionFilesSchema,
 } from '@fling/shared'
@@ -27,6 +32,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { meOf } from '../admin.ts'
 import { requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
+import * as groups from '../groups.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
@@ -267,4 +273,45 @@ apiRoutes.delete('/sites/:name/comments/:id', async c => {
 apiRoutes.post('/sites/:name/live', async c => {
   const ticket = await issueLiveTicket(c.get('deps'), userActor(c.get('user')), c.req.param('name'))
   return c.json(LiveTicketSchema.parse(ticket))
+})
+
+// --- groups (the `groups` capability). canGroup decides: anyone reads, the owner changes. ---
+
+apiRoutes.get('/groups', async c => {
+  const mine = ['1', 'true'].includes(c.req.query('mine') ?? '')
+  const list = await groups.listGroups(c.get('deps'), c.get('user'), { mine })
+  return c.json(GroupListSchema.parse({ groups: list }))
+})
+
+apiRoutes.post('/groups', async c => {
+  const input = await jsonBody(c, CreateGroupRequestSchema)
+  const group = await groups.createGroup(c.get('deps'), c.get('user'), input)
+  return c.json(GroupDetailSchema.parse(group), 201)
+})
+
+apiRoutes.get('/groups/:slug', async c => {
+  const group = await groups.groupDetail(c.get('deps'), c.get('user'), c.req.param('slug'))
+  return c.json(GroupDetailSchema.parse(group))
+})
+
+apiRoutes.patch('/groups/:slug', async c => {
+  const { name } = await jsonBody(c, UpdateGroupRequestSchema)
+  const group = await groups.renameGroup(c.get('deps'), c.get('user'), c.req.param('slug'), name)
+  return c.json(GroupDetailSchema.parse(group))
+})
+
+apiRoutes.post('/groups/:slug/members', async c => {
+  const change = await jsonBody(c, GroupMembersRequestSchema)
+  const group = await groups.changeMembers(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('slug'),
+    change
+  )
+  return c.json(GroupDetailSchema.parse(group))
+})
+
+apiRoutes.delete('/groups/:slug', async c => {
+  await groups.deleteGroup(c.get('deps'), c.get('user'), c.req.param('slug'))
+  return c.body(null, 204)
 })

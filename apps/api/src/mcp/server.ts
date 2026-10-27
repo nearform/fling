@@ -8,8 +8,10 @@ import {
   changesAudience,
   describeAudience,
   describeComments,
+  describeGroup,
+  describeGroups,
   describeVersionFiles,
-  editAudience,
+  editAudienceInput,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
   mcpRemoteInstructions,
@@ -30,6 +32,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
 import * as comments from '../comments.ts'
+import * as groups from '../groups.ts'
 import { instanceMetadata } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
 import { userActor } from '../policy.ts'
@@ -364,16 +367,25 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   })
 
   register(mcpTools.setAudience, async args => {
-    const change = { add: args.add, remove: args.remove, set: args.set, clear: args.clear }
+    const change = {
+      add: args.add,
+      remove: args.remove,
+      set: args.set,
+      addGroups: args.addGroups,
+      removeGroups: args.removeGroups,
+      setGroups: args.setGroups,
+      clear: args.clear,
+    }
     if (!changesAudience(change)) {
-      throw new ApiError(400, 'bad_request', 'Pass `add`, `remove`, `set` or `clear`')
+      throw new ApiError(
+        400,
+        'bad_request',
+        'Pass `add`, `remove`, `set`, `addGroups`, `removeGroups`, `setGroups` or `clear`'
+      )
     }
     const current = await sites.requireSite(deps, user, args.name, 'site.audience')
     const site = await sites.updateSite(deps, user, args.name, {
-      audience: {
-        emails: editAudience(current.audience.emails, change),
-        groups: current.audience.groups,
-      },
+      audience: editAudienceInput(await sites.audienceOf(deps, current), change),
     })
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
@@ -404,9 +416,71 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
+  registerGroupTools(deps, user, mcpTools, register)
   if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
 
   return server
+}
+
+/** The group tools (the `groups` capability, which every instance has). */
+function registerGroupTools(
+  deps: Deps,
+  user: User,
+  mcpTools: ReturnType<typeof mcpToolsFor>,
+  register: <S extends z.ZodRawShape>(
+    def: McpToolDef<S>,
+    handler: (args: z.infer<z.ZodObject<S>>) => Promise<Result>
+  ) => void
+) {
+  register(mcpTools.groups, async args => {
+    const list = await groups.listGroups(deps, user, { mine: args.mine })
+    return {
+      text: list.length
+        ? `${list.length} ${args.mine ? 'of your ' : ''}group(s):\n${describeGroups(list, user.email)}`
+        : args.mine
+          ? 'You have no groups yet.'
+          : 'No groups yet.',
+      data: { groups: list },
+    }
+  })
+
+  register(mcpTools.groupShow, async args => {
+    const group = await groups.groupDetail(deps, user, args.slug)
+    return { text: describeGroup(group), data: group }
+  })
+
+  register(mcpTools.groupCreate, async args => {
+    const group = await groups.createGroup(deps, user, {
+      slug: args.slug,
+      name: args.name,
+      members: args.members,
+    })
+    return { text: `Created ${describeGroup(group)}`, data: group }
+  })
+
+  register(mcpTools.groupMembers, async args => {
+    if (!args.add?.length && !args.remove?.length) {
+      throw new ApiError(400, 'bad_request', 'Pass `add` or `remove`')
+    }
+    const group = await groups.changeMembers(deps, user, args.slug, {
+      add: args.add,
+      remove: args.remove,
+    })
+    return { text: describeGroup(group), data: group }
+  })
+
+  register(mcpTools.groupRename, async args => {
+    const group = await groups.renameGroup(deps, user, args.slug, args.name)
+    return { text: describeGroup(group), data: group }
+  })
+
+  register(mcpTools.groupDelete, async args => {
+    await groups.deleteGroup(deps, user, args.slug)
+    return {
+      text: `Group ${args.slug} deleted. Sites whose audience named it keep their restriction: anyone it let in has lost access.`,
+      data: { slug: args.slug, deleted: true },
+    }
+  })
 }
 
 /** Comments of open threads only (a resolved thread's replies go with it). */

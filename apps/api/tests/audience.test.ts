@@ -63,13 +63,15 @@ describe('PATCH /api/sites/:name { audience }', () => {
     expect(detail.audience.emails).toEqual([])
   })
 
-  it('refuses groups (not on this instance) and more than 100 addresses', async () => {
+  it('refuses a group that does not exist (naming it) and more than 100 addresses', async () => {
     const { env, alice, restrict } = await team()
     const groups = await api(env, alice.key, 'PATCH', '/api/sites/team', {
       audience: { emails: [], groups: ['g1'] },
     })
     expect(groups.status).toBe(400)
-    expect(JSON.stringify(await json(groups))).toMatch(/Groups are not available/)
+    const body = await json(groups)
+    expect(body.error).toMatchObject({ code: 'unknown_group', groups: ['g1'] })
+    expect(body.error.message).toContain('g1')
     const many = Array.from({ length: 101 }, (_, i) => `u${i}@example.test`)
     expect((await restrict(many)).status).toBe(400)
   })

@@ -8,7 +8,13 @@ import {
   type CommentList,
   CommentListSchema,
   CommentSchema,
-  editAudience,
+  type CreateGroupRequest,
+  editAudienceInput,
+  type GroupDetail,
+  GroupDetailSchema,
+  GroupListSchema,
+  type GroupMembersRequest,
+  type GroupSummary,
   type InstanceMetadata,
   type Me,
   MeSchema,
@@ -152,8 +158,8 @@ const noAudiences = () =>
   })
 
 /**
- * Change who can see a private site (`set`, `add`, `remove`, `clear`, as `editAudience`): PATCH
- * the whole new audience, keeping its groups. Returns the site with its audience.
+ * Change who can see a private site (addresses and groups, as `editAudienceInput`): PATCH the
+ * whole new audience. Returns the site with its audience.
  */
 export async function setAudience(
   client: ApiClient,
@@ -162,13 +168,9 @@ export async function setAudience(
 ): Promise<SiteWithAudience & { audience: NonNullable<SiteWithAudience['audience']> }> {
   const current = await getAudience(client, name)
   const audience = current.audience as NonNullable<SiteDetail['audience']>
-  const emails = editAudience(
-    audience.emails.map(e => e.email),
-    change
-  )
   const site = await client.request('PATCH', sitePath(name), {
     schema: SiteWithAudienceSchema,
-    body: { audience: { emails, groups: audience.groups } },
+    body: { audience: editAudienceInput(audience, change) },
   })
   if (!site.audience) throw noAudiences()
   return site as typeof site & { audience: NonNullable<typeof site.audience> }
@@ -179,7 +181,9 @@ export async function setAudience(
  * restricted site, or an audience on a public one.
  */
 export function audienceWarnings(site: SiteWithAudience): string[] {
-  const n = site.audience?.emails.length ?? site.audienceSize
+  const n = site.audience
+    ? site.audience.emails.length + site.audience.groups.length
+    : site.audienceSize
   if (site.visibility === 'public' && n > 0) {
     return [
       `${site.name} is public, so its audience doesn't apply yet; it does once the site is private: fling visibility ${site.name} private`,
@@ -201,6 +205,65 @@ export function audiencesEnabled(
 ): boolean {
   if (!instance) return false
   return instance.capabilities.audiences ?? true
+}
+
+// --- groups ---
+
+const groupPath = (slug: string) => `/api/groups/${encodeURIComponent(slug)}`
+
+/** Every group on the Fling, or (`mine`) the caller's own; by slug. */
+export async function listGroups(
+  client: ApiClient,
+  opts: { mine?: boolean } = {}
+): Promise<GroupSummary[]> {
+  const res = await client.request('GET', '/api/groups', {
+    schema: GroupListSchema,
+    query: { mine: opts.mine ? 1 : undefined },
+  })
+  return res.groups
+}
+
+export function getGroup(client: ApiClient, slug: string): Promise<GroupDetail> {
+  return client.request('GET', groupPath(slug), { schema: GroupDetailSchema })
+}
+
+export function createGroup(client: ApiClient, input: CreateGroupRequest): Promise<GroupDetail> {
+  return client.request('POST', '/api/groups', { schema: GroupDetailSchema, body: input })
+}
+
+/** Add people to a group the caller owns, then take people out. */
+export function changeGroupMembers(
+  client: ApiClient,
+  slug: string,
+  change: GroupMembersRequest
+): Promise<GroupDetail> {
+  return client.request('POST', `${groupPath(slug)}/members`, {
+    schema: GroupDetailSchema,
+    body: change,
+  })
+}
+
+export function renameGroup(client: ApiClient, slug: string, name: string): Promise<GroupDetail> {
+  return client.request('PATCH', groupPath(slug), { schema: GroupDetailSchema, body: { name } })
+}
+
+export async function deleteGroup(
+  client: ApiClient,
+  slug: string
+): Promise<{ slug: string; deleted: true }> {
+  await client.request('DELETE', groupPath(slug))
+  return { slug, deleted: true }
+}
+
+/**
+ * Whether the instance has groups, by its stored metadata: its `groups` capability, or — when the
+ * stored copy predates the flag — yes, and the server decides. No instance at all: no.
+ */
+export function groupsEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  if (!instance) return false
+  return instance.capabilities.groups ?? true
 }
 
 export async function archiveSite(

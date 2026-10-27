@@ -184,7 +184,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
 | `fling visibility <name> private\|public` | require sign-in, or not |
-| `fling access <name> [--add <emails>] [--remove <emails>] [--clear]` | who can open a private site: everyone signed in, or only listed people |
+| `fling access <name> [--add <emails>] [--remove <emails>] [--group <slugs>] [--remove-group <slugs>] [--clear]` | who can open a private site: everyone signed in, or only listed people and groups |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
@@ -197,6 +197,8 @@ A private site opens to everyone signed in to your Fling. `fling access` limits 
 fling access my-app                                   # who can open it now
 fling access my-app --add bob@example.com,cat@example.com
 fling access my-app --remove bob@example.com
+fling access my-app --group design                    # everyone in the design group too
+fling access my-app --remove-group design
 fling access my-app --clear                           # everyone signed in again
 ```
 
@@ -205,9 +207,32 @@ in to the Fling. Someone who hasn't signed in yet is marked `(hasn't signed in y
 the site once they do. The audience only applies while the site is private: on a public site it is
 kept for later and `fling access` says so. A share link still opens a restricted site to anyone who
 has it, and `fling access` warns while one exists. Removing someone shuts them out within 15
-minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups }`)
-and `warnings`; `fling info` shows the same line, and `fling ls --json` gives each site's
-`restricted` and `audienceSize`.
+minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups:
+[{ slug, name, size }] }`) and `warnings`; `fling info` shows the same line, and `fling ls --json`
+gives each site's `restricted`, `audienceSize` and `audienceGroups` (how many of those are groups).
+
+### Groups
+
+A group is a named list of people, such as a team, that anyone signed in can use in a site's
+audience. Everyone can list groups and see who is in one; only the group's owner, who made it, can
+change its members, rename it or delete it:
+
+```sh
+fling groups                                          # every group (--mine: only yours)
+fling groups show design                              # its members
+fling groups create design --name "Design team" --add bob@example.com,cat@example.com
+fling groups add design dan@example.com
+fling groups remove design bob@example.com
+fling groups rename design "Designers"
+fling groups delete design                            # asks first unless --yes
+```
+
+A slug is lowercase letters, digits and single hyphens, unique on the Fling; a group holds up to 500
+people, and an audience names up to 10 groups. Taking someone out of a group shuts them out of the
+sites it opens within 15 minutes. Deleting a group never opens a site up: sites whose audience
+names it keep their restriction, and anyone it let in loses access. Where it was the only entry,
+`fling access` shows "a deleted group (#<id>)" and only you can open the site until you add
+people or groups (`--remove-group '#<id>'` takes the reference out).
 
 ## Comments
 
@@ -284,8 +309,10 @@ The MCP tools:
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
   `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, and
-  `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site)
-  when it can limit sites to listed people.
+  `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,
+  and `addGroups`, `removeGroups`, `setGroups` for groups) when it can limit sites to listed
+  people, and the group tools (`fling_groups`, `fling_group_show`, `fling_group_create`,
+  `fling_group_members`, `fling_group_rename`, `fling_group_delete`) when it has groups.
 
 Results that give URLs (deploys, publishes, comments) end with the Fling they went to.
 

@@ -12,7 +12,7 @@
  */
 import { z } from 'zod'
 import type { VersionFiles } from './api.ts'
-import { AUDIENCE_EMAILS_MAX } from './audience.ts'
+import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import {
   authorLabel,
   COMMENT_MAX_CHARS,
@@ -20,6 +20,7 @@ import {
   commentThreads,
   reviewUrl,
 } from './comments.ts'
+import { GROUP_MEMBERS_MAX, GROUP_NAME_MAX, GROUP_SLUG_RULES } from './groups.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
 import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
@@ -136,6 +137,10 @@ const sitePath = z
   )
 
 const emails = z.array(z.string().min(3).max(254)).max(AUDIENCE_EMAILS_MAX)
+const groupSlugs = z.array(z.string().min(1).max(100)).max(AUDIENCE_GROUPS_MAX)
+const groupSlug = z.string().min(1).max(100).describe('The group\'s slug, e.g. "design"')
+const members = z.array(z.string().min(3).max(254)).max(GROUP_MEMBERS_MAX)
+const groupName = z.string().min(1).max(GROUP_NAME_MAX)
 
 const commentPath = z.string().max(1024)
 const commentId = z.string().min(1).max(100)
@@ -344,19 +349,100 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_set_audience',
       title: 'Set who can see a private site',
       description:
-        `Limit a private site to listed people (its audience), or open it again to ${w.privateAudience}. ` +
-        '`add` and `remove` change the list, `set` replaces it and `clear` empties it (then every signed-in member ' +
-        'can see it again). The owner always sees the site. Each address must be one that can sign in to ' +
-        `${w.name}. The audience only applies while the site is private (fling_set_visibility); share links still ` +
-        'open it to anyone. Removing someone takes up to 15 minutes to shut them out. fling_info shows the audience.',
+        `Limit a private site to listed people and groups (its audience), or open it again to ${w.privateAudience}. ` +
+        '`add` and `remove` change the addresses and `set` replaces them; `addGroups`, `removeGroups` and ' +
+        '`setGroups` do the same for groups, by slug (fling_groups lists them); `clear` empties both (then every ' +
+        'signed-in member can see it again). The owner always sees the site. Each address must be one that can ' +
+        `sign in to ${w.name}. The audience only applies while the site is private (fling_set_visibility); share ` +
+        'links still open it to anyone. Removing someone takes up to 15 minutes to shut them out. fling_info shows ' +
+        'the audience.',
       inputSchema: {
         name: siteName,
         add: emails.optional().describe('Addresses to let in'),
         remove: emails.optional().describe('Addresses to take out'),
-        set: emails.optional().describe('Replace the list with exactly these addresses'),
-        clear: z.boolean().optional().describe('Empty the list: every signed-in member sees it'),
+        set: emails.optional().describe('Replace the addresses with exactly these'),
+        addGroups: groupSlugs.optional().describe('Groups (slugs) to let in'),
+        removeGroups: groupSlugs.optional().describe('Groups (slugs) to take out'),
+        setGroups: groupSlugs.optional().describe('Replace the groups with exactly these slugs'),
+        clear: z
+          .boolean()
+          .optional()
+          .describe('Empty the audience (addresses and groups): every signed-in member sees it'),
       },
       annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    groups: tool({
+      name: 'fling_groups',
+      title: 'List groups',
+      description:
+        `List the groups on ${w.name}: named lists of people (a team) that any member can use in a site's ` +
+        'audience (fling_set_audience `addGroups`). Each has a slug, a name, a size and an owner; `mine` lists only ' +
+        "the user's own.",
+      inputSchema: {
+        mine: z.boolean().optional().describe('Only the groups the user owns'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    groupShow: tool({
+      name: 'fling_group_show',
+      title: 'Show a group',
+      description:
+        'Show a group and its members (each marked when they have not signed in yet), and whether the user owns ' +
+        'it (only the owner can change it).',
+      inputSchema: { slug: groupSlug },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    groupCreate: tool({
+      name: 'fling_group_create',
+      title: 'Create a group',
+      description:
+        `Create a group the user owns: a named list of people that anyone signed in to ${w.name} can see and use ` +
+        `in a site's audience, but only the user can change. The slug is ${GROUP_SLUG_RULES}, unique on ` +
+        `${w.name}; each member must be an address that can sign in (at most ${GROUP_MEMBERS_MAX}).`,
+      inputSchema: {
+        slug: groupSlug,
+        name: groupName.describe('Its display name, e.g. "Design team"'),
+        members: members.optional().describe('Addresses to put in it'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    }),
+
+    groupMembers: tool({
+      name: 'fling_group_members',
+      title: 'Change who is in a group',
+      description:
+        'Add people to a group the user owns, or take them out. Every site whose audience names the group follows: someone taken out is shut out within 15 minutes.',
+      inputSchema: {
+        slug: groupSlug,
+        add: members.optional().describe('Addresses to add'),
+        remove: members.optional().describe('Addresses to take out'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    groupRename: tool({
+      name: 'fling_group_rename',
+      title: 'Rename a group',
+      description: 'Change the display name of a group the user owns (the slug stays).',
+      inputSchema: { slug: groupSlug, name: groupName.describe('The new display name') },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    groupDelete: tool({
+      name: 'fling_group_delete',
+      title: 'Delete a group',
+      description:
+        'Permanently delete a group the user owns. Sites whose audience names it keep their restriction, and anyone ' +
+        'it let in loses access (a site limited to it alone is left to its owner). Cannot be undone — confirm with the user ' +
+        'first and pass `confirm: true`.',
+      inputSchema: {
+        slug: groupSlug,
+        confirm: z.literal(true).describe('Must be true: the user has confirmed the deletion'),
+      },
+      annotations: { destructiveHint: true, openWorldHint: false },
     }),
 
     archive: tool({

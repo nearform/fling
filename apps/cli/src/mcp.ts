@@ -25,6 +25,8 @@ import {
   changesAudience,
   describeAudience,
   describeComments,
+  describeGroup,
+  describeGroups,
   describeVersionFiles,
   type InstanceMetadata,
   isSecretPath,
@@ -94,13 +96,20 @@ import {
   addComment,
   archiveSite,
   audiencesEnabled,
+  changeGroupMembers,
   checkName,
   commentsEnabled,
+  createGroup,
   deleteComment,
+  deleteGroup,
   deleteSite,
+  getGroup,
   getSite,
+  groupsEnabled,
   listComments,
+  listGroups,
   listSites,
+  renameGroup,
   resolveComment,
   rollback,
   setAudience,
@@ -820,12 +829,106 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             `${instance.name} (${serverLabel(target.url)}) can't limit a site to listed people`
           )
         }
-        const change = { add: args.add, remove: args.remove, set: args.set, clear: args.clear }
-        if (!changesAudience(change)) throw new CliError('Pass `add`, `remove`, `set` or `clear`')
+        const change = {
+          add: args.add,
+          remove: args.remove,
+          set: args.set,
+          addGroups: args.addGroups,
+          removeGroups: args.removeGroups,
+          setGroups: args.setGroups,
+          clear: args.clear,
+        }
+        if (!changesAudience(change)) {
+          throw new CliError(
+            'Pass `add`, `remove`, `set`, `addGroups`, `removeGroups`, `setGroups` or `clear`'
+          )
+        }
         const site = await setAudience(target.client, args.name, change)
         return {
           summary: `${site.name}: ${describeAudience(site, await membersOn(target))}${onFling(target.url, instance)}`,
           data: site,
+        }
+      })
+    )
+  }
+
+  // Groups: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => groupsEnabled(s.instance))) {
+    /** The call's Fling, refused when it has no groups. */
+    const withGroups = async (target: Target) => {
+      const instance = await target.instance()
+      if (instance && !groupsEnabled(instance)) {
+        throw new CliError(`${instance.name} (${serverLabel(target.url)}) has no groups`)
+      }
+      return instance
+    }
+
+    server.registerTool(t.groups.name, serverTool(t.groups), args =>
+      run(t.groups.name, args.server, async target => {
+        const instance = await withGroups(target)
+        const [groups, me] = await Promise.all([
+          listGroups(target.client, { mine: args.mine }),
+          whoami(target.client),
+        ])
+        return {
+          summary: `${groups.length} ${args.mine ? 'of your ' : ''}group(s)${onFling(target.url, instance)}\n${describeGroups(groups, me.email)}`,
+          data: { groups },
+        }
+      })
+    )
+
+    server.registerTool(t.groupShow.name, serverTool(t.groupShow), args =>
+      run(t.groupShow.name, args.server, async target => {
+        await withGroups(target)
+        const group = await getGroup(target.client, args.slug)
+        return { summary: describeGroup(group), data: group }
+      })
+    )
+
+    server.registerTool(t.groupCreate.name, serverTool(t.groupCreate), args =>
+      run(t.groupCreate.name, args.server, async target => {
+        const instance = await withGroups(target)
+        const group = await createGroup(target.client, {
+          slug: args.slug,
+          name: args.name,
+          members: args.members,
+        })
+        return {
+          summary: `Created ${describeGroup(group)}${onFling(target.url, instance)}`,
+          data: group,
+        }
+      })
+    )
+
+    server.registerTool(t.groupMembers.name, serverTool(t.groupMembers), args =>
+      run(t.groupMembers.name, args.server, async target => {
+        await withGroups(target)
+        if (!args.add?.length && !args.remove?.length) {
+          throw new CliError('Pass `add` or `remove`')
+        }
+        const group = await changeGroupMembers(target.client, args.slug, {
+          add: args.add,
+          remove: args.remove,
+        })
+        return { summary: describeGroup(group), data: group }
+      })
+    )
+
+    server.registerTool(t.groupRename.name, serverTool(t.groupRename), args =>
+      run(t.groupRename.name, args.server, async target => {
+        await withGroups(target)
+        const group = await renameGroup(target.client, args.slug, args.name)
+        return { summary: describeGroup(group), data: group }
+      })
+    )
+
+    server.registerTool(t.groupDelete.name, serverTool(t.groupDelete), args =>
+      run(t.groupDelete.name, args.server, async target => {
+        await withGroups(target)
+        const result = await deleteGroup(target.client, args.slug)
+        return {
+          summary: `Group ${args.slug} deleted. Sites whose audience named it keep their restriction: anyone it let in has lost access`,
+          data: result,
         }
       })
     )

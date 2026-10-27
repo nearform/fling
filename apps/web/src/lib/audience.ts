@@ -57,3 +57,13 @@ export function restrictedLabel(people: number, groups = 0): string {
   const parts = [people ? peopleLabel(people) : '', groups ? groupsLabel(groups) : '']
   return ['Restricted', ...parts.filter(Boolean)].join(' · ')
 }
+
+/**
+ * Whether an edit takes a site's audience from someone to no one, which opens the private site to
+ * every member: the Access section asks first.
+ */
+export const opensToEveryone = (
+  before: { emails: readonly unknown[]; groups: readonly unknown[] },
+  after: { emails: readonly unknown[]; groups: readonly unknown[] }
+) =>
+  before.emails.length + before.groups.length > 0 && after.emails.length + after.groups.length === 0

@@ -59,6 +59,26 @@ export type SiteDetail = z.infer<typeof SiteDetailSchema>
 export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
 
 /**
+ * A restricted site someone else owns that the caller may see, because its audience names them or
+ * a group they are in (GET /api/shared, `audiences` capability). What a viewer needs to open it and
+ * nothing of the owner's: no versions, share link or audience.
+ */
+export const SharedSiteSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  /** the site's review page (`comments` capability) */
+  reviewUrl: z.string().optional(),
+  owner: z.string(),
+  /** how the caller is in the audience: by address, and through which of their groups (slugs) */
+  via: z.object({ direct: z.boolean(), groups: z.array(z.string()) }),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+export type SharedSite = z.infer<typeof SharedSiteSchema>
+
+export const SharedSiteListSchema = z.object({ sites: z.array(SharedSiteSchema) })
+
+/**
  * GET /api/sites/:name/versions/:versionId/files — the files in one version (owner only; 404 for
  * an unknown site or version). Paths are sorted. `generatedIndex` is true when the root
  * index.html is the "List HTML files" page Fling generated (it carries the `fling-listing`

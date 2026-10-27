@@ -20,6 +20,8 @@ import {
   MeSchema,
   type NameCheck,
   NameCheckSchema,
+  type SharedSite,
+  SharedSiteListSchema,
   type Site,
   type SiteDetail,
   SiteDetailSchema,
@@ -88,6 +90,15 @@ export async function listSites(
     schema: SiteListSchema,
     query: { archived: opts.archived ? 1 : undefined },
   })
+  return sortSites(res.sites, opts.sort)
+}
+
+/** The restricted sites others have shared with the caller, in `sort` order (default updated). */
+export async function listShared(
+  client: ApiClient,
+  opts: { sort?: SiteSort } = {}
+): Promise<SharedSite[]> {
+  const res = await client.request('GET', '/api/shared', { schema: SharedSiteListSchema })
   return sortSites(res.sites, opts.sort)
 }
 

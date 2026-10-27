@@ -188,9 +188,16 @@ export function mcpToolsFor(w: McpWording) {
     list: tool({
       name: 'fling_list',
       title: 'List sites',
-      description: "List the user's Fling sites with URL, visibility and share link.",
+      description:
+        "List the user's Fling sites with URL, visibility and share link. With `shared: true`, list instead " +
+        "the restricted sites other people have shared with the user (by address or through a group they're in), " +
+        'with URL, review link and owner.',
       inputSchema: {
         archived: z.boolean().optional().describe('List archived sites instead of live ones'),
+        shared: z
+          .boolean()
+          .optional()
+          .describe("List the sites others have shared with the user instead of the user's own"),
         sort: z
           .enum(SITE_SORTS)
           .optional()

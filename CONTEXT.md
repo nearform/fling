@@ -59,6 +59,16 @@ and where it was the only entry its id stays, matching nobody, so the site is th
 (shown as "a deleted group", `#<id>`) until they change it. `/api/groups`, `fling groups`, the `fling_group*` tools and
 the web's Groups pages; the `groups` capability.
 
+**Shared with me** — the restricted sites of others that someone may see because the audience
+names them, by address or through a group they are a member of (`listShared` in
+`apps/api/src/sites.ts`; `SharedSite` in `packages/shared/src/api.ts`). Found from index items
+alone (their direct grants, their memberships' group-site items), then each site is asked of
+policy, so an item out of step with an audience never shows one; archived sites, sites with no
+current version, their own sites and private sites every member sees anyway are left out. A
+sharee sees the name, URL, review page, owner, when it was updated and how it reached them,
+nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
+`fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.
+
 **Site pass** — how the edge lets someone into a restricted site without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
 for 15 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to

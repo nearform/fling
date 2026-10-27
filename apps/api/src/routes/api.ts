@@ -17,6 +17,7 @@ import {
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
   RollbackRequestSchema,
+  SharedSiteListSchema,
   ShareResponseSchema,
   SiteDetailSchema,
   SiteListSchema,
@@ -149,6 +150,11 @@ apiRoutes.get('/sites', async c => {
   const archived = ['1', 'true'].includes(c.req.query('archived') ?? '')
   const list = await sites.listSites(c.get('deps'), c.get('user'), archived)
   return c.json(SiteListSchema.parse({ sites: list }))
+})
+
+apiRoutes.get('/shared', async c => {
+  const list = await sites.listShared(c.get('deps'), c.get('user'))
+  return c.json(SharedSiteListSchema.parse({ sites: list }))
 })
 
 apiRoutes.get('/sites/:name', async c => {

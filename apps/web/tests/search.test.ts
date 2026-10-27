@@ -64,3 +64,22 @@ describe('count label', () => {
     expect(label(4, 1, true, true)).toBe('1 of 4 archived sites')
   })
 })
+
+describe('shared sites', () => {
+  const shared = [
+    { name: 'plan', url: 'https://plan.sites.example.test/', owner: 'ann@example.test' },
+    { name: 'deck', url: 'https://deck.sites.example.test/', owner: 'bo@example.test' },
+  ]
+
+  it('match their owner too', () => {
+    expect(filterSites(shared, 'ann').map(s => s.name)).toEqual(['plan'])
+  })
+
+  it('count as shared with you', () => {
+    const label = (total: number | undefined, shown: number, searching = false) =>
+      countLabel({ total, shown, archived: false, shared: true, searching })
+    expect(label(0, 0)).toBe('Nothing shared with you yet')
+    expect(label(1, 1)).toBe('1 site shared with you')
+    expect(label(3, 1, true)).toBe('1 of 3 shared sites')
+  })
+})

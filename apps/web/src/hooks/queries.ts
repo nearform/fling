@@ -8,6 +8,7 @@ export const queryKeys = {
   me: ['me'] as const,
   sites: (archived: boolean) => ['sites', archived ? 'archived' : 'active'] as const,
   allSites: ['sites'] as const,
+  shared: ['sites', 'shared'] as const,
   site: (name: string) => ['site', name] as const,
   versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
   comments: (name: string) => ['comments', name] as const,
@@ -26,6 +27,11 @@ export function useMe() {
 
 export function useSites(archived: boolean) {
   return useQuery({ queryKey: queryKeys.sites(archived), queryFn: () => api.listSites(archived) })
+}
+
+/** The sites shared with the caller; fetched once the Shared tab is offered. */
+export function useSharedSites(enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.shared, queryFn: api.listShared, enabled })
 }
 
 export function useSiteDetail(name: string, enabled: boolean) {

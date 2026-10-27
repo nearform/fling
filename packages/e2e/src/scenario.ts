@@ -768,6 +768,25 @@ async function audienceStep(ctx: {
   }
   step('API: the viewer reads the comments; the outsider gets 404s, as for a missing site')
 
+  // Shared with me: the viewer finds the site there, by address; the outsider and the owner
+  // (`fling ls --shared`, whose own sites never show) don't.
+  const viewerShared = await sharedWith(appOrigin, viewer)
+  check(
+    viewerShared.some(s => s.name === name && s.via.direct),
+    `viewer GET /api/shared: ${JSON.stringify(viewerShared)}`
+  )
+  const outsiderShared = await sharedWith(appOrigin, outsider)
+  check(
+    !outsiderShared.some(s => s.name === name),
+    `outsider GET /api/shared lists ${name}: ${JSON.stringify(outsiderShared)}`
+  )
+  const ownerShared = (await fling('ls', '--shared')) as { sites: SharedListed[] }
+  check(
+    !ownerShared.sites.some(s => s.name === name),
+    `owner fling ls --shared lists their own site: ${JSON.stringify(ownerShared)}`
+  )
+  step('shared with me: the viewer sees it; the outsider and the owner do not')
+
   // The site host: a member cookie doesn't open it; the viewer gets in through sign-in and the
   // site pass, the outsider is shown the sites' 404 page. Only with browser sessions.
   if (viewer.cookie && viewer.siteCookie && outsider.cookie) {
@@ -829,6 +848,21 @@ async function audienceStep(ctx: {
     `share link on a restricted site: ${viaShare.status}`
   )
   step('the share link still serves the restricted site')
+}
+
+interface SharedListed {
+  name: string
+  owner: string
+  via: { direct: boolean; groups: string[] }
+}
+
+/** The sites shared with `session` (GET /api/shared). */
+async function sharedWith(appOrigin: string, session: Session): Promise<SharedListed[]> {
+  const res = await fetch(`${appOrigin}/api/shared`, {
+    headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
+  })
+  check(res.status === 200, `GET /api/shared: ${res.status}`)
+  return ((await res.json()) as { sites: SharedListed[] }).sites
 }
 
 interface ApiGroup {
@@ -935,7 +969,12 @@ async function groupStep(ctx: {
         `group member sign-in hop: ${hop.status} → ${hop.location}`
       )
     }
-    step('through the group: the API and the sign-in hop (a site pass) let them in')
+    const joined = await sharedWith(appOrigin, joiner)
+    check(
+      joined.some(s => s.name === name && s.via.groups.includes(slug)),
+      `group member GET /api/shared: ${JSON.stringify(joined)}`
+    )
+    step('through the group: the API, the sign-in hop (a site pass) and shared with me let them in')
 
     const removed = await as(maker, 'POST', `${path}/members`, { remove: [joiner.email] })
     check(removed.status === 200, `member removes ${joiner.email}: ${removed.status}`)
@@ -950,7 +989,12 @@ async function groupStep(ctx: {
         `removed from the group, sign-in hop: ${hop.status} → ${hop.location}`
       )
     }
-    step('out of the group: refused at once by the API and on the next sign-in hop')
+    const left = await sharedWith(appOrigin, joiner)
+    check(
+      !left.some(s => s.name === name),
+      `removed from the group, GET /api/shared: ${JSON.stringify(left)}`
+    )
+    step('out of the group: refused at once by the API, shared with me and the next sign-in hop')
 
     // Deleting the group while it is the audience's only entry never opens the site up: whoever
     // it let in is refused, and the site is its owner's alone.

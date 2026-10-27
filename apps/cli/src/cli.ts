@@ -25,6 +25,7 @@ import {
   runFiles,
   runInfo,
   runList,
+  runListShared,
   runRemove,
   runRollback,
   runShare,
@@ -216,11 +217,21 @@ program
   .description('list your sites')
   .option('--archived', 'list archived sites')
   .addOption(
+    new Option(
+      '--shared',
+      'list the sites others have shared with you instead of your own'
+    ).conflicts('archived')
+  )
+  .addOption(
     new Option('--sort <order>', 'updated (newest first), created (newest first) or name (A–Z)')
       .choices(SITE_SORTS)
       .default(DEFAULT_SITE_SORT)
   )
-  .action(action((ctx, opts: { archived?: boolean; sort?: SiteSort }) => runList(ctx, opts)))
+  .action(
+    action((ctx, opts: { archived?: boolean; shared?: boolean; sort?: SiteSort }) =>
+      opts.shared ? runListShared(ctx, opts) : runList(ctx, opts)
+    )
+  )
 program
   .command('info <name>')
   .helpGroup('Sites:')

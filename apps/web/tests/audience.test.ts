@@ -7,6 +7,7 @@ import {
   addToAudience,
   addToGroup,
   audienceWho,
+  opensToEveryone,
   peopleLabel,
   restrictedLabel,
 } from '../src/lib/audience'
@@ -92,5 +93,18 @@ describe('the restricted badge', () => {
     expect(badges(site({ restricted: true, audienceSize: 2, archived: true }))).not.toContain(
       'Restricted'
     )
+  })
+})
+
+describe('opensToEveryone', () => {
+  const list = (emails: string[], groups: string[] = []) => ({ emails, groups })
+
+  it('is true only when an edit empties an audience that named someone', () => {
+    expect(opensToEveryone(list(['a@x.test']), list([]))).toBe(true)
+    expect(opensToEveryone(list([], ['design']), list([]))).toBe(true)
+    expect(opensToEveryone(list([], ['#deleted']), list([]))).toBe(true)
+    expect(opensToEveryone(list(['a@x.test'], ['design']), list([], ['design']))).toBe(false)
+    expect(opensToEveryone(list([]), list([]))).toBe(false)
+    expect(opensToEveryone(list([]), list(['a@x.test']))).toBe(false)
   })
 })

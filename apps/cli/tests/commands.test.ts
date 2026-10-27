@@ -7,6 +7,7 @@ import {
   runFiles,
   runInfo,
   runList,
+  runListShared,
   runRemove,
   runShare,
   runVersions,
@@ -128,6 +129,34 @@ describe('commands', () => {
     expect(await names()).toEqual(['new', 'old'])
     expect(await names('created')).toEqual(['old', 'new'])
     expect(await names('name')).toEqual(['new', 'old'])
+  })
+
+  it('ls --shared lists the sites shared with you, newest first, with owner and how', async () => {
+    const store = await loggedInStore()
+    const shared = (name: string, updatedAt: string, groups: string[]) => ({
+      name,
+      url: `https://${name}.sites.example.test/`,
+      reviewUrl: `https://fling.example.test/review/${name}`,
+      owner: 'ann@example.test',
+      via: { direct: groups.length === 0, groups },
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt,
+    })
+    const sites = [
+      shared('plan', '2026-10-02T00:00:00.000Z', []),
+      shared('deck', '2026-10-03T00:00:00.000Z', ['design']),
+    ]
+    const m = mockFetch({ 'GET /api/shared': () => jsonResponse({ sites }) })
+    const table = await testContext({ store, fetch: m.fetch })
+    await runListShared(table.ctx, {})
+    expect(table.out.content()).toMatch(/NAME\s+URL\s+OWNER\s+VIA\s+UPDATED/)
+    expect(table.out.content()).toMatch(/deck.*ann@example\.test\s+group design/)
+    expect(table.out.content()).toMatch(/plan.*your address/)
+    const json = await testContext({ store, fetch: m.fetch, json: true })
+    await runListShared(json.ctx, { sort: 'name' })
+    const listed = JSON.parse(json.out.content()).sites as { name: string }[]
+    expect(listed.map(s => s.name)).toEqual(['deck', 'plan'])
+    expect(listed[0]).toMatchObject({ owner: 'ann@example.test', via: { groups: ['design'] } })
   })
 
   it('versions marks the live version', async () => {

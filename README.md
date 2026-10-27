@@ -47,7 +47,9 @@ still open it. A **group** is a named list of people (`fling groups`, `fling_gro
 in the web UI): anyone signed in can see one and use it, and only its owner can change it. The edge
 holds no access lists: the API checks the audience when someone signs in to the site and hands them
 a 15-minute site pass for that one host, renewed without a prompt. So removing someone (from the
-audience or from a group in it) takes effect within 15 minutes.
+audience or from a group in it) takes effect within 15 minutes. **Shared with me** lists the
+restricted sites other people have limited to you, or to a group you are in (`fling ls --shared`,
+`fling_list { shared: true }`, the Sites page's Shared with me tab).
 
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.

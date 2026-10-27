@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Shared with me.** `fling ls --shared` lists the restricted sites other people have shared with
+  you, by address or through a group you are in, with their owner and how (`--sort` as for
+  `fling ls`; `--json`: `{ name, url, reviewUrl?, owner, via: { direct, groups }, createdAt,
+  updatedAt }`). The MCP tool `fling_list` takes `shared: true` for the same list, on a Fling with
+  the `audiences` capability.
+
 - **Groups.** `fling groups` lists the groups of people on a Fling (`--mine`: yours), and `show`,
   `create`, `add`, `remove`, `rename` and `delete` manage them. Anyone can see a group and use it;
   only its owner can change it. `fling access <name> --group <slugs>` / `--remove-group` put groups

@@ -193,6 +193,35 @@ describe('MCP server', () => {
     expect(bad.isError).toBe(true)
   })
 
+  it('fling_list `shared` lists the sites shared with the user, in the order asked', async () => {
+    const store = await loggedInStore()
+    const shared = (name: string, updatedAt: string) => ({
+      name,
+      url: `https://${name}.sites.example.test/`,
+      owner: 'ann@example.test',
+      via: { direct: true, groups: [] },
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt,
+    })
+    const sites = [
+      shared('alpha', '2026-10-02T00:00:00.000Z'),
+      shared('beta', '2026-10-03T00:00:00.000Z'),
+    ]
+    const m = mockFetch({ 'GET /api/shared': () => jsonResponse({ sites }) })
+    const client = await connect(store, m.fetch)
+    const res = await client.callTool({ name: 'fling_list', arguments: { shared: true } })
+    expect((dataOf(res).sites as { name: string }[]).map(s => s.name)).toEqual(['beta', 'alpha'])
+    expect(text(res)).toContain('2 site(s) shared with you')
+    expect(text(res)).toContain(
+      '- beta: https://beta.sites.example.test/ (shared by ann@example.test, through your address)'
+    )
+    const byName = await client.callTool({
+      name: 'fling_list',
+      arguments: { shared: true, sort: 'name' },
+    })
+    expect((dataOf(byName).sites as { name: string }[]).map(s => s.name)).toEqual(['alpha', 'beta'])
+  })
+
   it('deploys a path relative to cwd', async () => {
     const store = await loggedInStore()
     const cwd = await tempDir()

@@ -32,6 +32,8 @@ import {
   OAuthDecisionSchema,
   type OAuthRequestInfo,
   OAuthRequestInfoSchema,
+  type SharedSite,
+  SharedSiteListSchema,
   type Site,
   type SiteDetail,
   SiteDetailSchema,
@@ -145,6 +147,11 @@ export const api = {
   },
   async listSites(archived: boolean): Promise<Site[]> {
     const { sites } = await request(`/api/sites${archived ? '?archived=1' : ''}`, SiteListSchema)
+    return sites
+  },
+  /** The restricted sites others have shared with the caller (`audiences` capability). */
+  async listShared(): Promise<SharedSite[]> {
+    const { sites } = await request('/api/shared', SharedSiteListSchema)
     return sites
   },
   getSite: (name: string): Promise<SiteDetail> => request(site(name), SiteDetailSchema),

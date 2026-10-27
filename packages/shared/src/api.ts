@@ -34,6 +34,8 @@ export const SiteSchema = z.object({
   restricted: z.boolean().default(false),
   /** how many addresses and groups the audience names (kept, and ignored, while public) */
   audienceSize: z.number().default(0),
+  /** how many of those are groups */
+  audienceGroups: z.number().default(0),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

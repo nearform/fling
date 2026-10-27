@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Groups.** `fling groups` lists the groups of people on a Fling (`--mine`: yours), and `show`,
+  `create`, `add`, `remove`, `rename` and `delete` manage them. Anyone can see a group and use it;
+  only its owner can change it. `fling access <name> --group <slugs>` / `--remove-group` put groups
+  in a site's audience. The MCP tools `fling_groups`, `fling_group_show`, `fling_group_create`,
+  `fling_group_members`, `fling_group_rename` and `fling_group_delete` do the same on a Fling with
+  the `groups` capability, and `fling_set_audience` takes `addGroups`, `removeGroups` and
+  `setGroups`. A site's `audience.groups` is `[{ slug, name, size }]`, and sites carry
+  `audienceGroups`.
 - `fling access <name>` shows who can open a private site and, with `--add`, `--remove` or
   `--clear`, limits it to listed people (its audience) or opens it to everyone signed in again.
   It warns while a share link still opens a restricted site, and when the site is public (the

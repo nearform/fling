@@ -40,12 +40,14 @@ there, so none of them is tied to one instance. People sign in through the insta
 Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. Sites
 are private to them by default; share links open a site to anyone with the link.
 
-**Audiences.** The owner can limit a private site to listed people (`fling access <site> --add
-a@example.test`, `fling_set_audience`, or the site's Access section in the web UI). Each address must
-be one that can sign in; the owner always sees the site, and share links still open it. The edge
+**Audiences.** The owner can limit a private site to listed people and groups (`fling access <site>
+--add a@example.test --group design`, `fling_set_audience`, or the site's Access section in the web
+UI). Each address must be one that can sign in; the owner always sees the site, and share links
+still open it. A **group** is a named list of people (`fling groups`, `fling_groups`, the Groups page
+in the web UI): anyone signed in can see one and use it, and only its owner can change it. The edge
 holds no access lists: the API checks the audience when someone signs in to the site and hands them
-a 15-minute site pass for that one host, renewed without a prompt. So removing someone takes effect
-within 15 minutes.
+a 15-minute site pass for that one host, renewed without a prompt. So removing someone (from the
+audience or from a group in it) takes effect within 15 minutes.
 
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.

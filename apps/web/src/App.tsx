@@ -12,6 +12,8 @@ import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
 import GetStarted from './pages/GetStarted'
+import Group from './pages/Group'
+import Groups from './pages/Groups'
 import Login from './pages/Login'
 import Review from './pages/Review'
 import Site from './pages/Site'
@@ -85,6 +87,8 @@ export default function App() {
             <Route element={<Authenticated />}>
               <Route index element={<Sites />} />
               <Route path="sites/:name" element={<Site />} />
+              <Route path="groups" element={<Groups />} />
+              <Route path="groups/:slug" element={<Group />} />
               <Route path="get-started" element={<GetStarted />} />
               <Route path="connections" element={<ApiKeys />} />
               <Route path="keys" element={<Navigate to="/connections" replace />} />

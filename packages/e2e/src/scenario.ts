@@ -8,7 +8,10 @@
  *   share link → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list;
  *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
- *   they get in through the site pass, an outsider finds nothing, the share link still serves) → conditional-write race (concurrent
+ *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
+ *   group (the member makes one the owner can see and use but not change; the owner names it in
+ *   the audience; the outsider, once in it, gets in, and once out is refused; deleting it leaves
+ *   the site to its owner) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
@@ -320,6 +323,22 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('audiences: not on this instance (skipped)')
+    }
+
+    // Groups: a list of people the member owns, used by the owner in the site's audience.
+    if (meta.capabilities.audiences === true && meta.capabilities.groups === true) {
+      await groupStep({
+        appOrigin,
+        name,
+        nonce,
+        siteUrl,
+        comments: meta.capabilities.comments === true,
+        fling,
+        opts,
+        step,
+      })
+    } else {
+      step('groups: not on this instance (skipped)')
     }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
@@ -810,6 +829,175 @@ async function audienceStep(ctx: {
     `share link on a restricted site: ${viaShare.status}`
   )
   step('the share link still serves the restricted site')
+}
+
+interface ApiGroup {
+  slug: string
+  owner: string
+  size: number
+  canManage: boolean
+  members: { email: string }[]
+}
+
+/**
+ * The member makes a group; the owner sees it and its members and names it in the site's audience,
+ * but may not change it. The outsider, once the member adds them, gets in (the API, and the site
+ * pass on a fresh sign-in hop); once taken out, they are refused again on the next hop (a pass
+ * already held would last its 15 minutes). Deleting the group while it is the audience's only
+ * entry leaves the site restricted to its owner. The group is deleted however the step ends.
+ */
+async function groupStep(ctx: {
+  appOrigin: string
+  name: string
+  nonce: string
+  siteUrl: string
+  comments: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  opts: ScenarioOptions
+  step: (line: string) => void
+}) {
+  const { appOrigin, name, siteUrl, fling, opts, step } = ctx
+  const owner = opts.session
+  const maker = opts.member
+  const joiner = opts.outsider ?? opts.admin
+  if (!maker || !joiner) {
+    step('groups: needs two more users (skipped)')
+    return
+  }
+  const as = (session: Session, method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${session.apiKey}`,
+        accept: 'application/json',
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const slug = `e2e-${ctx.nonce}`
+  const path = `/api/groups/${slug}`
+  const made = await as(maker, 'POST', '/api/groups', { slug, name: `E2E ${ctx.nonce}` })
+  check(made.status === 201, `member creates group ${slug}: ${made.status}`)
+  try {
+    // The owner sees it and who is in it, and may not change it.
+    const seen = await as(owner, 'GET', path)
+    const seenGroup = (await seen.json()) as ApiGroup
+    check(
+      seen.status === 200 && seenGroup.owner === maker.email && seenGroup.canManage === false,
+      `owner GET ${path}: ${seen.status} ${JSON.stringify(seenGroup)}`
+    )
+    const listed = (await (await as(owner, 'GET', '/api/groups')).json()) as {
+      groups: ApiGroup[]
+    }
+    check(
+      listed.groups.some(g => g.slug === slug),
+      `GET /api/groups lists ${slug}: ${JSON.stringify(listed.groups.map(g => g.slug))}`
+    )
+    const refusals = await Promise.all([
+      as(owner, 'PATCH', path, { name: 'Taken over' }),
+      as(owner, 'POST', `${path}/members`, { add: [owner.email] }),
+      as(owner, 'DELETE', path),
+    ])
+    check(
+      refusals.every(r => r.status === 403),
+      `owner renames, changes members, deletes the member's group: ${refusals.map(r => r.status).join(', ')} (want 403s)`
+    )
+    step(`${maker.email} made group ${slug}; the owner sees it but gets 403 changing it`)
+
+    const added = await as(maker, 'POST', `${path}/members`, { add: [joiner.email] })
+    const addedGroup = (await added.json()) as ApiGroup
+    check(
+      added.status === 200 && addedGroup.members.some(m => m.email === joiner.email),
+      `member adds ${joiner.email}: ${added.status} ${JSON.stringify(addedGroup)}`
+    )
+    const access = (await fling('access', name, '--group', slug)) as {
+      restricted: boolean
+      audience?: { groups: { slug: string; size: number }[] }
+    }
+    check(
+      access.restricted && access.audience?.groups.some(g => g.slug === slug && g.size === 1),
+      `fling access --group: ${JSON.stringify(access)}`
+    )
+    step(`${joiner.email} added to ${slug}; the owner named ${slug} in ${name}'s audience`)
+
+    // In the group: the API lets them in, and a sign-in hop hands them a site pass.
+    const site = () => as(joiner, 'GET', `/api/sites/${name}/comments`)
+    const signIn = `${appOrigin}/auth/login?return=${encodeURIComponent(siteUrl)}`
+    const origin = new URL(siteUrl).origin
+    if (ctx.comments) {
+      const inside = await site()
+      check(inside.status === 200, `group member reads the comments: ${inside.status}`)
+    }
+    if (joiner.cookie) {
+      const hop = await get(signIn, { cookie: joiner.cookie })
+      check(
+        hop.status === 302 && (hop.location ?? '').startsWith(`${origin}/_fling-pass?t=`),
+        `group member sign-in hop: ${hop.status} → ${hop.location}`
+      )
+    }
+    step('through the group: the API and the sign-in hop (a site pass) let them in')
+
+    const removed = await as(maker, 'POST', `${path}/members`, { remove: [joiner.email] })
+    check(removed.status === 200, `member removes ${joiner.email}: ${removed.status}`)
+    if (ctx.comments) {
+      const outside = await site()
+      check(outside.status === 404, `removed from the group, comments: ${outside.status}`)
+    }
+    if (joiner.cookie) {
+      const hop = await get(signIn, { cookie: joiner.cookie })
+      check(
+        hop.status === 302 && hop.location === `${origin}/_fling/404.html`,
+        `removed from the group, sign-in hop: ${hop.status} → ${hop.location}`
+      )
+    }
+    step('out of the group: refused at once by the API and on the next sign-in hop')
+
+    // Deleting the group while it is the audience's only entry never opens the site up: whoever
+    // it let in is refused, and the site is its owner's alone.
+    await as(maker, 'POST', `${path}/members`, { add: [joiner.email] })
+    const only = (await fling('access', name, '--remove', maker.email)) as {
+      audience?: { emails: unknown[]; groups: unknown[] }
+    }
+    check(
+      only.audience?.emails.length === 0 && only.audience.groups.length === 1,
+      `the group alone in the audience: ${JSON.stringify(only.audience)}`
+    )
+    const deleted = await as(maker, 'DELETE', path)
+    check(deleted.status === 204, `member deletes group ${slug}: ${deleted.status}`)
+    const after = (await fling('access', name)) as {
+      restricted: boolean
+      audience?: { groups: { deleted?: boolean }[] }
+    }
+    check(
+      after.restricted && after.audience?.groups.length === 1 && after.audience.groups[0]?.deleted,
+      `after the group is deleted: ${JSON.stringify(after)}`
+    )
+    if (ctx.comments) {
+      const refused = await site()
+      check(refused.status === 404, `group deleted, its member reads comments: ${refused.status}`)
+      const owned = await as(owner, 'GET', `/api/sites/${name}/comments`)
+      check(owned.status === 200, `group deleted, the owner reads comments: ${owned.status}`)
+    }
+    const ownerSite = await as(owner, 'GET', `/api/sites/${name}`)
+    check(ownerSite.status === 200, `group deleted, the owner GET /api/sites: ${ownerSite.status}`)
+    if (joiner.cookie && owner.cookie) {
+      const refused = await get(signIn, { cookie: joiner.cookie })
+      check(
+        refused.status === 302 && refused.location === `${origin}/_fling/404.html`,
+        `group deleted, its member's sign-in hop: ${refused.status} → ${refused.location}`
+      )
+      const ownerHop = await get(signIn, { cookie: owner.cookie })
+      check(
+        ownerHop.status === 302 && (ownerHop.location ?? '').startsWith(`${origin}/_fling-pass?t=`),
+        `group deleted, the owner's sign-in hop: ${ownerHop.status} → ${ownerHop.location}`
+      )
+    }
+    step(`group ${slug} deleted: the site stays restricted, to its owner only`)
+  } finally {
+    // However the step ended, the group goes (already gone: 404).
+    const gone = await as(maker, 'DELETE', path)
+    check([204, 404].includes(gone.status), `member deletes group ${slug}: ${gone.status}`)
+  }
 }
 
 async function adminStep(ctx: {

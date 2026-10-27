@@ -22,9 +22,13 @@
  * visibility in the route table and, for a restricted site, a site pass the edge mints from the
  * API's say-so (`/auth/login` asks `can(…, 'site.view', …)` here): tests/policy.test.ts runs the
  * real site router against this table so the two cannot drift.
+ *
+ * Groups (a named list of people an audience can name) are `canGroup`: any signed-in user lists
+ * them, sees their members and uses them in an audience; only the group's owner, who made it,
+ * changes or deletes it.
  */
 import type { CommentAuthor } from '@fling/shared'
-import type { SiteRecord } from './store/types.ts'
+import type { GroupRecord, SiteRecord } from './store/types.ts'
 
 export type Actor =
   /** `groups`: the ids of the user's groups, when policy needs them (a restricted site) */
@@ -181,6 +185,34 @@ export function canDeleteComment(
     can(actor, 'comment.delete', site) ||
     (isAuthor(actor, comment.author) && can(actor, 'comment.delete.own', site))
   )
+}
+
+// --- groups ---
+
+/**
+ * Every action on a group. Groups are not secret: every member of the instance may know them, so
+ * a refusal is a 403, not a 404.
+ *
+ *   group.read    GET /api/groups, GET /api/groups/:slug (members included), fling_groups,
+ *                 fling_group_show; naming the group in a site's audience
+ *   group.manage  PATCH /api/groups/:slug { name }, POST …/members, fling_group_rename,
+ *                 fling_group_members
+ *   group.delete  DELETE /api/groups/:slug, fling_group_delete
+ *
+ * Making a group needs only a signed-in user (its maker becomes the owner). There are no
+ * co-managers, and admins get no rights over groups, as over sites: they act only by
+ * impersonating.
+ */
+export const GROUP_ACTIONS = ['group.read', 'group.manage', 'group.delete'] as const
+
+export type GroupAction = (typeof GROUP_ACTIONS)[number]
+
+/** What policy needs to know about a group. */
+export type PolicyGroup = Pick<GroupRecord, 'owner'>
+
+export function canGroup(actor: Actor, action: GroupAction, group: PolicyGroup): boolean {
+  if (actor.kind !== 'user') return false
+  return action === 'group.read' || actor.email === group.owner
 }
 
 // --- the instance: admins, and what an impersonating admin may not do ---

@@ -1,6 +1,6 @@
 import type { AdminUser, Me } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { ADMIN_NAV_ITEM, NAV_ITEMS, navItemsFor } from '../src/components/SideNav'
+import { ADMIN_NAV_ITEM, GROUPS_NAV_ITEM, NAV_ITEMS, navItemsFor } from '../src/components/SideNav'
 import {
   ADMIN_USERS_PATH,
   impersonateBlocked,
@@ -42,6 +42,15 @@ describe('the side nav', () => {
     expect(navItemsFor(me())).toEqual(NAV_ITEMS)
     expect(navItemsFor(null)).toEqual(NAV_ITEMS)
     expect(navItemsFor(undefined)).toEqual(NAV_ITEMS)
+  })
+
+  it('offers Groups, after Sites, only where the instance has the groups capability', () => {
+    const labels = (caps: Record<string, boolean>) =>
+      navItemsFor(me(), { capabilities: caps }).map(i => i.label)
+    expect(labels({ groups: true }).slice(0, 2)).toEqual(['Sites', GROUPS_NAV_ITEM.label])
+    expect(labels({})).not.toContain(GROUPS_NAV_ITEM.label)
+    expect(labels({ groups: false })).not.toContain(GROUPS_NAV_ITEM.label)
+    expect(navItemsFor(me())).not.toContain(GROUPS_NAV_ITEM)
   })
 
   it('not while impersonating, even if the server said admin', () => {

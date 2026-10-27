@@ -7,6 +7,7 @@ import {
   type SiteDetail,
   type SiteSort,
   splitEmails,
+  splitGroups,
   type Visibility,
 } from '@fling/shared'
 import chalk from 'chalk'
@@ -20,6 +21,7 @@ import {
   deleteSite,
   getAudience,
   getSite,
+  groupsEnabled,
   listSites,
   rollback,
   setAudience,
@@ -191,13 +193,20 @@ export async function runVisibility(
 }
 
 /**
- * `fling access <name> [--add …] [--remove …] [--clear]`: show who can open a site or, with
- * options, change its audience (the addresses besides the owner who may open it while private).
+ * `fling access <name> [--add …] [--remove …] [--group …] [--remove-group …] [--clear]`: show who
+ * can open a site or, with options, change its audience (the addresses and groups besides the
+ * owner who may open it while private).
  */
 export async function runAccess(
   ctx: CommandContext,
   name: string,
-  opts: { add?: string[]; remove?: string[]; clear?: boolean }
+  opts: {
+    add?: string[]
+    remove?: string[]
+    group?: string[]
+    removeGroup?: string[]
+    clear?: boolean
+  }
 ): Promise<void> {
   const instance = ctx.config.instance
   if (instance && !audiencesEnabled(instance)) {
@@ -206,7 +215,12 @@ export async function runAccess(
   const change = {
     add: splitEmails(opts.add ?? []),
     remove: splitEmails(opts.remove ?? []),
+    addGroups: splitGroups(opts.group ?? []),
+    removeGroups: splitGroups(opts.removeGroup ?? []),
     clear: opts.clear,
+  }
+  if (instance && (change.addGroups.length || change.removeGroups.length)) {
+    if (!groupsEnabled(instance)) throw new CliError(`${instance.name} has no groups`)
   }
   const client = requireClient(ctx)
   const site = changesAudience(change)

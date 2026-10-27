@@ -10,6 +10,14 @@ import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
+import {
+  runGroupCreate,
+  runGroupDelete,
+  runGroupMembers,
+  runGroupRename,
+  runGroupShow,
+  runGroups,
+} from './commands/groups.ts'
 import { runSetup } from './commands/setup.ts'
 import {
   runAccess,
@@ -254,13 +262,25 @@ program
 program
   .command('access <name>')
   .helpGroup('Sites:')
-  .description('show who can open a private site, or limit it to listed people')
+  .description('show who can open a private site, or limit it to listed people and groups')
   .option('--add <emails...>', 'let these addresses in (comma-separated or repeated)')
   .option('--remove <emails...>', 'take these addresses out')
-  .option('--clear', 'empty the list: everyone signed in can open it again')
+  .option('--group <slugs...>', 'let these groups in (see `fling groups`)')
+  .option('--remove-group <slugs...>', 'take these groups out')
+  .option('--clear', 'empty the audience: everyone signed in can open it again')
   .action(
-    action((ctx, name: string, opts: { add?: string[]; remove?: string[]; clear?: boolean }) =>
-      runAccess(ctx, name, opts)
+    action(
+      (
+        ctx,
+        name: string,
+        opts: {
+          add?: string[]
+          remove?: string[]
+          group?: string[]
+          removeGroup?: string[]
+          clear?: boolean
+        }
+      ) => runAccess(ctx, name, opts)
     )
   )
 program
@@ -280,6 +300,59 @@ program
   .description('delete a site and all its versions (asks first unless --yes)')
   .option('-y, --yes', 'do not ask for confirmation')
   .action(action((ctx, name: string, opts: { yes?: boolean }) => runRemove(ctx, name, opts)))
+
+// ---- groups --------------------------------------------------------------------------------
+
+const groups = program
+  .command('groups')
+  .helpGroup('Groups:')
+  .description(
+    'named lists of people anyone can use in an audience; only the owner changes one (default: list)'
+  )
+groups
+  .command('list', { isDefault: true })
+  .alias('ls')
+  .description('list the groups on this Fling')
+  .option('--mine', 'only the groups you own')
+  .action(action((ctx, opts: { mine?: boolean }) => runGroups(ctx, opts)))
+groups
+  .command('create <slug>')
+  .description('create a group you own (slug: lowercase letters, digits and single hyphens)')
+  .option('--name <name>', 'its display name (default: the slug)')
+  .option('--add <emails...>', 'put these addresses in it')
+  .action(
+    action((ctx, slug: string, opts: { name?: string; add?: string[] }) =>
+      runGroupCreate(ctx, slug, opts)
+    )
+  )
+groups
+  .command('show <slug>')
+  .description('show a group and its members')
+  .action(action((ctx, slug: string) => runGroupShow(ctx, slug)))
+groups
+  .command('add <slug> <emails...>')
+  .description('add people to a group you own')
+  .action(
+    action((ctx, slug: string, emails: string[]) => runGroupMembers(ctx, slug, emails, 'add'))
+  )
+groups
+  .command('remove <slug> <emails...>')
+  .description('take people out of a group you own')
+  .action(
+    action((ctx, slug: string, emails: string[]) => runGroupMembers(ctx, slug, emails, 'remove'))
+  )
+groups
+  .command('rename <slug> <name>')
+  .description('change the display name of a group you own')
+  .action(action((ctx, slug: string, name: string) => runGroupRename(ctx, slug, name)))
+groups
+  .command('delete <slug>')
+  .alias('rm')
+  .description(
+    'delete a group you own; anyone it let into a site loses access (asks first unless --yes)'
+  )
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action(action((ctx, slug: string, opts: { yes?: boolean }) => runGroupDelete(ctx, slug, opts)))
 
 // ---- comments ------------------------------------------------------------------------------
 

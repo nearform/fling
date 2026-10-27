@@ -104,6 +104,7 @@ export function site(overrides: Partial<Site> = {}): Site {
     shareUrl: null,
     restricted: false,
     audienceSize: 0,
+    audienceGroups: 0,
     createdAt: '2026-10-01T10:00:00.000Z',
     updatedAt: '2026-10-02T10:00:00.000Z',
     ...overrides,

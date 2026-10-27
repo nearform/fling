@@ -18,7 +18,13 @@ import {
   CommentSchema,
   type Connection,
   ConnectionListSchema,
+  type CreateGroupRequest,
   ErrorEnvelopeSchema,
+  type GroupDetail,
+  GroupDetailSchema,
+  GroupListSchema,
+  type GroupMembersRequest,
+  type GroupSummary,
   type LiveTicket,
   LiveTicketSchema,
   type Me,
@@ -125,6 +131,7 @@ const ShareResponseParser: Parser<{ shareUrl: string }> = {
 }
 
 const site = (name: string) => `/api/sites/${encodeURIComponent(name)}`
+const group = (slug: string) => `/api/groups/${encodeURIComponent(slug)}`
 
 export const api = {
   /** The signed-in user, or `null` when there is no session (401). */
@@ -173,6 +180,21 @@ export const api = {
     request(`${site(name)}/live`, LiveTicketSchema, { method: 'POST' }),
   deleteComment: (name: string, id: string) =>
     request(`${site(name)}/comments/${encodeURIComponent(id)}`, ignoreBody, { method: 'DELETE' }),
+  /** Every group on the instance, or only the caller's own (`mine`), by slug. */
+  async listGroups(mine = false): Promise<GroupSummary[]> {
+    const { groups } = await request(`/api/groups${mine ? '?mine=1' : ''}`, GroupListSchema)
+    return groups
+  },
+  getGroup: (slug: string): Promise<GroupDetail> => request(group(slug), GroupDetailSchema),
+  createGroup: (body: CreateGroupRequest): Promise<GroupDetail> =>
+    request('/api/groups', GroupDetailSchema, { method: 'POST', body }),
+  /** The owner only, like every change to a group. */
+  renameGroup: (slug: string, name: string): Promise<GroupDetail> =>
+    request(group(slug), GroupDetailSchema, { method: 'PATCH', body: { name } }),
+  changeGroupMembers: (slug: string, body: GroupMembersRequest): Promise<GroupDetail> =>
+    request(`${group(slug)}/members`, GroupDetailSchema, { method: 'POST', body }),
+  /** Sites whose audience names it keep their restriction; anyone it let in loses access. */
+  deleteGroup: (slug: string) => request(group(slug), ignoreBody, { method: 'DELETE' }),
   async listKeys(): Promise<ApiKey[]> {
     const { keys } = await request('/api/keys', ApiKeyListSchema)
     return keys

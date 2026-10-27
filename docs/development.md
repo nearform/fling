@@ -50,7 +50,9 @@ review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
 **Signing in.** Local dev uses a dev login form: any `@example.test` address gets in, and
 `admin@example.test` is an admin. To try an audience, restrict a site to another `@example.test` address
 (`pnpm cli access <site> --add b@example.test`) and open it signed in as each in two browser
-profiles: the audience gets in through a site pass, anyone else sees the 404 page. To try a real provider, set `OIDC_ISSUER`, `OIDC_CLIENT_ID` and
+profiles: the audience gets in through a site pass, anyone else sees the 404 page. Groups work the
+same way (`pnpm cli groups create team --add b@example.test`, then `pnpm cli access <site> --group
+team`). To try a real provider, set `OIDC_ISSUER`, `OIDC_CLIENT_ID` and
 `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client.
 

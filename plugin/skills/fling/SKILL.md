@@ -156,6 +156,14 @@ It is remembered, and becomes the current one only if none is.
   again. The owner always sees it. It only applies while the site is private, a share link still
   opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 15
   minutes. `fling_info` shows who can open a site.
+- `addGroups`, `removeGroups` and `setGroups` on `fling_set_audience` do the same for **groups**
+  (named lists of people, by slug). `fling_groups` lists them (`mine: true`: the user's own) and
+  `fling_group_show { slug }` shows who is in one. Anyone can use any group, but only its owner can
+  change it: `fling_group_create { slug, name, members? }`, `fling_group_members { slug, add?,
+  remove? }`, `fling_group_rename`, `fling_group_delete` (needs `confirm: true`;
+  sites keep their restriction and anyone it let in loses access, so confirm with the user). A site
+  limited to a deleted group alone shows "a deleted group (#<id>)" and is its owner's only until
+  they add people or groups.
 
 ## Archive vs delete
 
@@ -190,6 +198,6 @@ pages. When the Fling has comments, these tools exist:
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
 CLI equivalents: `fling ls`, `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
-[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--clear]`, `fling archive|unarchive <name>`,
+[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

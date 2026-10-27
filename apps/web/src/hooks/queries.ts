@@ -1,4 +1,4 @@
-import type { CommentAnchor, Visibility } from '@fling/shared'
+import type { CommentAnchor, CreateGroupRequest, GroupDetail, Visibility } from '@fling/shared'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ADMIN_USERS_PATH } from '../lib/admin'
 import { api, errorMessage } from '../lib/api'
@@ -11,6 +11,9 @@ export const queryKeys = {
   site: (name: string) => ['site', name] as const,
   versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
   comments: (name: string) => ['comments', name] as const,
+  allGroups: ['groups'] as const,
+  groups: (mine: boolean) => ['groups', mine ? 'mine' : 'all'] as const,
+  group: (slug: string) => ['group', slug] as const,
   keys: ['keys'] as const,
   connections: ['connections'] as const,
   adminUsers: (q: string) => ['admin', 'users', q] as const,
@@ -75,10 +78,13 @@ export function useSiteActions(name: string) {
       (visibility: Visibility) => api.updateSite(name, { visibility }),
       'Visibility updated'
     ),
-    /** The audience's addresses (the whole list); refused addresses are the caller's to show. */
+    /**
+     * The whole audience: its addresses and its groups by slug. Refused addresses and unknown
+     * groups are the caller's to show.
+     */
     setAudience: useSiteMutation(
       name,
-      (emails: string[]) => api.updateSite(name, { audience: { emails, groups: [] } }),
+      (audience: { emails: string[]; groups: string[] }) => api.updateSite(name, { audience }),
       'Audience updated',
       false
     ),
@@ -132,6 +138,77 @@ export function useCommentActions(name: string) {
     remove: useMutation({
       mutationFn: (id: string) => api.deleteComment(name, id),
       ...options,
+    }),
+  }
+}
+
+export function useGroups(mine: boolean, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.groups(mine),
+    queryFn: () => api.listGroups(mine),
+    enabled,
+  })
+}
+
+export function useGroup(slug: string, enabled: boolean) {
+  return useQuery({ queryKey: queryKeys.group(slug), queryFn: () => api.getGroup(slug), enabled })
+}
+
+/**
+ * After a group changes: its lists refetch, and so do sites, whose audiences count its members
+ * (and lose it when it is deleted).
+ */
+function useGroupChanged() {
+  const queryClient = useQueryClient()
+  return (slug: string, detail?: GroupDetail) => {
+    if (detail) queryClient.setQueryData(queryKeys.group(slug), detail)
+    else queryClient.removeQueries({ queryKey: queryKeys.group(slug) })
+    queryClient.invalidateQueries({ queryKey: queryKeys.allGroups })
+    queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
+    queryClient.invalidateQueries({ queryKey: ['site'] })
+  }
+}
+
+/** Create a group; a taken slug or a refused address is the caller's to show. */
+export function useCreateGroup() {
+  const changed = useGroupChanged()
+  return useMutation({
+    mutationFn: (body: CreateGroupRequest) => api.createGroup(body),
+    onSuccess: detail => {
+      changed(detail.slug, detail)
+      showToast(`Group ${detail.slug} created`)
+    },
+  })
+}
+
+/**
+ * The owner's changes to one group. Renaming and deleting toast their failures; a refused member
+ * is the caller's to show, next to the input.
+ */
+export function useGroupActions(slug: string) {
+  const changed = useGroupChanged()
+  const onError = (error: unknown) => showToast(errorMessage(error), 'error')
+  return {
+    rename: useMutation({
+      mutationFn: (name: string) => api.renameGroup(slug, name),
+      onSuccess: detail => {
+        changed(slug, detail)
+        showToast('Group renamed')
+      },
+      onError,
+    }),
+    changeMembers: useMutation({
+      mutationFn: (body: { add?: string[]; remove?: string[] }) =>
+        api.changeGroupMembers(slug, body),
+      onSuccess: detail => changed(slug, detail),
+    }),
+    remove: useMutation({
+      mutationFn: () => api.deleteGroup(slug),
+      onSuccess: () => {
+        changed(slug)
+        showToast(`Group ${slug} deleted`)
+      },
+      onError,
     }),
   }
 }

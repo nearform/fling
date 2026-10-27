@@ -5,7 +5,7 @@
 import type { Site } from '@fling/shared'
 import { GlobeAltIcon, LinkIcon, LockClosedIcon, UserGroupIcon } from '@heroicons/react/24/outline'
 import { useInstance } from '../../hooks/instance'
-import { peopleLabel, restrictedLabel } from '../../lib/audience'
+import { audienceWho, restrictedLabel } from '../../lib/audience'
 import { audienceFor } from '../../lib/instance'
 
 export function VisibilityBadge({ visibility }: { visibility: Site['visibility'] }) {
@@ -21,14 +21,18 @@ export function VisibilityBadge({ visibility }: { visibility: Site['visibility']
   )
 }
 
-/** A private site limited to its audience: "Restricted · 3 people". */
-export function RestrictedBadge({ size }: { size: number }) {
+/**
+ * A private site limited to its audience: "Restricted · 3 people · 1 group". `size` counts the
+ * addresses and groups together; `groups`, how many of them are groups.
+ */
+export function RestrictedBadge({ size, groups = 0 }: { size: number; groups?: number }) {
+  const people = Math.max(0, size - groups)
   return (
     <span
       className="badge badge-sm tone-primary gap-1"
-      title={`Only you and ${peopleLabel(size)} can open it`}
+      title={`Only you and ${audienceWho(people, groups)} can open it`}
     >
-      <UserGroupIcon className="h-3 w-3" aria-hidden /> {restrictedLabel(size)}
+      <UserGroupIcon className="h-3 w-3" aria-hidden /> {restrictedLabel(people, groups)}
     </span>
   )
 }
@@ -45,7 +49,9 @@ export function SiteBadges({ site }: { site: Site }) {
       ) : (
         <VisibilityBadge visibility={site.visibility} />
       )}
-      {site.restricted && !site.archived && <RestrictedBadge size={site.audienceSize} />}
+      {site.restricted && !site.archived && (
+        <RestrictedBadge size={site.audienceSize} groups={site.audienceGroups} />
+      )}
       {site.shareUrl && !site.archived && (
         <span className="badge badge-sm badge-ghost gap-1" title="Has a share link">
           <LinkIcon className="h-3 w-3" aria-hidden />

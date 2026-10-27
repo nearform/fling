@@ -96,6 +96,32 @@ export interface SiteGrantRecord {
   grantedAt: string
 }
 
+/**
+ * A group: a named list of people any member may use in an audience, changed only by its owner.
+ * Its members are items of their own (`GROUP#<id>/MEMBER#<email>`); `size` counts them.
+ */
+export interface GroupRecord {
+  /** random id; what audiences store */
+  id: string
+  /** unique on the instance (the `GROUPNAME#<slug>` claim); what clients name it by */
+  slug: string
+  name: string
+  /** the user who made it */
+  owner: string
+  size: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** A site whose audience names a group (`GROUP#<id>/SITE#<siteId>`): what deleting it updates. */
+export interface GroupSiteRecord {
+  groupId: string
+  siteId: string
+  /** the site's name and owner when it was written */
+  name: string
+  owner: string
+}
+
 /** What locates a site's versions. */
 export type SiteRef = Pick<SiteRecord, 'id' | 'email'>
 
@@ -295,16 +321,51 @@ export interface Store {
    */
   createSite(site: SiteRecord): Promise<SiteRecord | null>
   /**
-   * Write the site. With `before` (the audience it had), also the direct grants that changed:
-   * added emails gain one, removed ones lose it.
+   * Write the site. With `before` (the audience it had), also the index items that changed: added
+   * emails gain a direct grant and removed ones lose it; added groups gain a group-site item and
+   * removed ones lose it.
    */
   putSite(site: SiteRecord, before?: SiteAudience): Promise<void>
-  /** Delete the site with its versions and grants, and release its name claim (if the claim is its). */
+  /**
+   * Delete the site with its versions, grants and group-site items, and release its name claim (if
+   * the claim is its).
+   */
   deleteSite(site: SiteRecord): Promise<void>
   /** The sites shared with `email` directly (its grants), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
+
+  // --- groups ---
+  /**
+   * Claim `group.slug` and insert the group with its members. Returns the stored group, or null
+   * when the slug is taken.
+   */
+  createGroup(group: GroupRecord, members: readonly string[]): Promise<GroupRecord | null>
+  /** The group holding the slug claim (null: no such group). */
+  findGroup(slug: string): Promise<GroupRecord | null>
+  /** Groups by id, in the order asked; ids of groups that are gone are left out. */
+  getGroups(ids: readonly string[]): Promise<GroupRecord[]>
+  /** Every group on the instance, by slug. */
+  listGroups(): Promise<GroupRecord[]>
+  /** The groups `email` owns, by slug. */
+  listOwnedGroups(email: string): Promise<GroupRecord[]>
+  /** The group's members, by email. */
+  listGroupMembers(groupId: string): Promise<string[]>
+  /** The ids of the groups `email` is a member of: what policy reads. */
+  listMemberships(email: string): Promise<string[]>
+  /**
+   * Write the group (its name, `size`) and, when given, the member changes: `add` gain a member
+   * and a membership item, `remove` lose both. The caller sets `size` to the count after them.
+   */
+  putGroup(
+    group: GroupRecord,
+    members?: { add: readonly string[]; remove: readonly string[] }
+  ): Promise<void>
+  /** The sites whose audience names the group. */
+  listGroupSites(groupId: string): Promise<GroupSiteRecord[]>
+  /** Delete the group: its members and memberships, its site items, its index items and claim. */
+  deleteGroup(group: GroupRecord): Promise<void>
 
   getVersion(site: SiteRef, id: string): Promise<VersionRecord | null>
   putVersion(site: SiteRef, version: VersionRecord): Promise<void>

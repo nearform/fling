@@ -37,10 +37,31 @@
  *   USER#<email>           KEY#<id>                      api key (name, hash, createdAt, lastUsedAt)
  *   APIKEY#<sha256>        APIKEY                        api key lookup → { email, id }
  *
+ * Groups (a named list of people that audiences name by id):
+ *
+ *   GROUP#<groupId>        GROUP                         group (slug, name, owner, size, …)
+ *   GROUP#<groupId>        MEMBER#<email>                a member
+ *   GROUP#<groupId>        SITE#<siteId>                 a site whose audience names the group
+ *                                                        (name, owner): what deleting it updates
+ *   USER#<email>           GROUP#<groupId>               membership: written with the member item,
+ *                                                        so a user's groups (what policy reads) are
+ *                                                        one query
+ *   USER#<email>           OWNS#<groupId>                a copy of the group, for its owner's list
+ *   GROUPS                 GROUP#<groupId>               the instance's group directory: a copy of
+ *                                                        the group, so every group lists by one query
+ *   GROUPNAME#<slug>       NAME                          slug claim → { slug, groupId, owner,
+ *                                                        createdAt }; how a group is found
+ *
  * A site's record, its index item and (on creation) its claim are written in one transaction.
  * Grants that change with its audience join that transaction while it has room (25 operations);
  * the rest follow in batches, so an interrupted write can leave a grant out of step with the
- * audience until the site is written again. Policy reads the audience, never the grants.
+ * audience until the site is written again. Policy reads the audience, never the grants. The same
+ * goes for the group-site items of the groups the audience names.
+ *
+ * A group's record, its two copies and (on creation) its claim are written in one transaction with
+ * as many member changes as fit; the rest follow in batches of 12 (a member item and its
+ * membership always together), so an interrupted change can leave `size` and some members out of
+ * step until the group is written again.
  *
  * EXPAND PHASE (migration 0001; see its header for the deploy and rollback story). Before this
  * layout a site lived only at USER#<email>/SITE#<name>, which is why the index item keeps that
@@ -102,6 +123,8 @@ import {
   type AuthCodeRecord,
   type CommentRecord,
   type GrantRecord,
+  type GroupRecord,
+  type GroupSiteRecord,
   type LiveConnectionRecord,
   type NameClaim,
   type OAuthClientRecord,
@@ -122,6 +145,7 @@ import {
 
 const userPk = (email: string) => `USER#${email}`
 const sitePk = (siteId: string) => `SITE#${siteId}`
+const groupPk = (groupId: string) => `GROUP#${groupId}`
 
 const key = {
   user: (email: string) => ({ pk: userPk(email), sk: 'PROFILE' }),
@@ -135,6 +159,13 @@ const key = {
   siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
   siteGrant: (email: string, siteId: string) => ({ pk: userPk(email), sk: `SHARED#${siteId}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
+  group: (id: string) => ({ pk: groupPk(id), sk: 'GROUP' }),
+  groupDirectory: (id: string) => ({ pk: 'GROUPS', sk: `GROUP#${id}` }),
+  groupOwned: (email: string, id: string) => ({ pk: userPk(email), sk: `OWNS#${id}` }),
+  groupName: (slug: string) => ({ pk: `GROUPNAME#${slug}`, sk: 'NAME' }),
+  groupMember: (id: string, email: string) => ({ pk: groupPk(id), sk: `MEMBER#${email}` }),
+  membership: (email: string, id: string) => ({ pk: userPk(email), sk: `GROUP#${id}` }),
+  groupSite: (id: string, siteId: string) => ({ pk: groupPk(id), sk: `SITE#${siteId}` }),
   comment: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `COMMENT#${id}` }),
   live: (siteId: string, connectionId: string) => ({
     pk: sitePk(siteId),
@@ -165,6 +196,34 @@ const TRANSACT_MAX = 25
 const DELETE_CONCURRENCY = 10
 /** How many single-item reads run at once when looking up a set of items. */
 const READ_CONCURRENCY = 10
+
+/** The slug claim's fields. */
+interface GroupNameClaim {
+  slug: string
+  groupId: string
+  owner: string
+  createdAt: string
+}
+
+const bySlug = (groups: GroupRecord[]) => groups.sort((a, b) => compareSk(a.slug, b.slug))
+
+/**
+ * `head`, then `pairs` (operations that must land together), as transactions of at most
+ * TRANSACT_MAX: the first holds `head` and as many pairs as fit.
+ */
+function batches(head: TransactOp[], pairs: [TransactOp, TransactOp][]): TransactOp[][] {
+  const out: TransactOp[][] = []
+  let batch = [...head]
+  for (const pair of pairs) {
+    if (batch.length + 2 > TRANSACT_MAX) {
+      out.push(batch)
+      batch = []
+    }
+    batch.push(...pair)
+  }
+  if (batch.length) out.push(batch)
+  return out
+}
 
 const newestFirst = <T extends { createdAt: string }>(xs: T[]) =>
   xs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -399,6 +458,7 @@ export class Records implements Store {
       { put: encode('site', key.site(site.id), site) },
       { put: encode('site', key.siteIndex(site.email, site.name), site) },
       ...(before ? this.grantOps(site, before.emails, site.audience.emails) : []),
+      ...(before ? this.groupSiteOps(site, before.groups, site.audience.groups) : []),
     ]
     await this.table.transact(ops.slice(0, TRANSACT_MAX))
     for (let i = TRANSACT_MAX; i < ops.length; i += TRANSACT_MAX) {
@@ -426,6 +486,20 @@ export class Records implements Store {
     return ops
   }
 
+  /** The group-site writes that take a site's groups from `before` to `after`. */
+  private groupSiteOps(site: SiteRecord, before: readonly string[], after: readonly string[]) {
+    const ops: TransactOp[] = []
+    for (const groupId of after) {
+      if (before.includes(groupId)) continue
+      const item: GroupSiteRecord = { groupId, siteId: site.id, name: site.name, owner: site.email }
+      ops.push({ put: encode('groupsite', key.groupSite(groupId, site.id), item) })
+    }
+    for (const groupId of before) {
+      if (!after.includes(groupId)) ops.push({ delete: key.groupSite(groupId, site.id) })
+    }
+    return ops
+  }
+
   listSiteGrants(email: string) {
     return this.list<SiteGrantRecord>('sitegrant', userPk(email), 'SHARED#')
   }
@@ -446,7 +520,8 @@ export class Records implements Store {
     })
     const rest = owned.items.filter(i => i.sk !== 'SITE')
     const grants = site.audience.emails.map(email => key.siteGrant(email, site.id))
-    await this.deleteAll([...rest, ...legacy.items, ...grants])
+    const groups = site.audience.groups.map(groupId => key.groupSite(groupId, site.id))
+    await this.deleteAll([...rest, ...legacy.items, ...grants, ...groups])
     // Release the name claim only if it is this site's (or absent). If another site holds it,
     // the site is still deleted and the claim kept.
     const ops: TransactOp[] = [
@@ -458,6 +533,141 @@ export class Records implements Store {
       cond: fieldEquals('siteId', site.id, { orAbsent: true }),
     }
     if (!(await unless(this.table.transact([...ops, claim])))) await this.table.transact(ops)
+  }
+
+  // --- groups ---
+
+  /** The group, its directory copy and its owner's copy. */
+  private groupOps(group: GroupRecord, cond?: typeof ifAbsent): TransactOp[] {
+    return [
+      { put: encode('group', key.group(group.id), group), ...(cond ? { cond } : {}) },
+      { put: encode('group', key.groupDirectory(group.id), group) },
+      { put: encode('group', key.groupOwned(group.owner, group.id), group) },
+    ]
+  }
+
+  /** A member item and its membership, added or removed together. */
+  private memberPairs(
+    group: GroupRecord,
+    members: { add: readonly string[]; remove: readonly string[] },
+    at: string
+  ): [TransactOp, TransactOp][] {
+    const added = members.add.map((email): [TransactOp, TransactOp] => [
+      {
+        put: encode('groupmember', key.groupMember(group.id, email), {
+          groupId: group.id,
+          email,
+          addedAt: at,
+        }),
+      },
+      {
+        put: encode('membership', key.membership(email, group.id), {
+          groupId: group.id,
+          email,
+          addedAt: at,
+        }),
+      },
+    ])
+    const removed = members.remove.map((email): [TransactOp, TransactOp] => [
+      { delete: key.groupMember(group.id, email) },
+      { delete: key.membership(email, group.id) },
+    ])
+    return [...added, ...removed]
+  }
+
+  async createGroup(group: GroupRecord, members: readonly string[]) {
+    const claim: GroupNameClaim = {
+      slug: group.slug,
+      groupId: group.id,
+      owner: group.owner,
+      createdAt: group.createdAt,
+    }
+    const pairs = this.memberPairs(group, { add: members, remove: [] }, group.createdAt)
+    const [first = [], ...rest] = batches(
+      [
+        { put: encode('groupname', key.groupName(group.slug), claim), cond: ifAbsent },
+        ...this.groupOps(group, ifAbsent),
+      ],
+      pairs
+    )
+    try {
+      await this.table.transact(first)
+    } catch (err) {
+      if (!(err instanceof ConditionFailed)) throw err
+      if (await this.read<GroupNameClaim>('groupname', key.groupName(group.slug))) return null
+      throw err
+    }
+    for (const batch of rest) await this.table.transact(batch)
+    return group
+  }
+
+  async findGroup(slug: string) {
+    const claim = await this.read<GroupNameClaim>('groupname', key.groupName(slug))
+    if (!claim) return null
+    const group = await this.read<GroupRecord>('group', key.group(claim.groupId))
+    return group?.slug === slug ? group : null
+  }
+
+  async getGroups(ids: readonly string[]) {
+    const found = await mapLimit([...ids], READ_CONCURRENCY, id =>
+      this.read<GroupRecord>('group', key.group(id))
+    )
+    return found.filter((g): g is GroupRecord => g !== null)
+  }
+
+  async listGroups() {
+    return bySlug(await this.list<GroupRecord>('group', 'GROUPS', 'GROUP#'))
+  }
+
+  async listOwnedGroups(email: string) {
+    return bySlug(await this.list<GroupRecord>('group', userPk(email), 'OWNS#'))
+  }
+
+  async listGroupMembers(groupId: string) {
+    const members = await this.list<{ email: string }>('groupmember', groupPk(groupId), 'MEMBER#')
+    return members.map(m => m.email)
+  }
+
+  async listMemberships(email: string) {
+    const items = await this.list<{ groupId: string }>('membership', userPk(email), 'GROUP#')
+    return items.map(m => m.groupId)
+  }
+
+  async putGroup(
+    group: GroupRecord,
+    members?: { add: readonly string[]; remove: readonly string[] }
+  ) {
+    const pairs = members ? this.memberPairs(group, members, group.updatedAt) : []
+    for (const batch of batches(this.groupOps(group), pairs)) await this.table.transact(batch)
+  }
+
+  listGroupSites(groupId: string) {
+    return this.list<GroupSiteRecord>('groupsite', groupPk(groupId), 'SITE#')
+  }
+
+  async deleteGroup(group: GroupRecord) {
+    // Members, memberships and site items first, so an interrupted delete leaves the group
+    // findable and the delete can be repeated.
+    const [members, sites] = await Promise.all([
+      this.listGroupMembers(group.id),
+      this.listGroupSites(group.id),
+    ])
+    await this.deleteAll([
+      ...members.flatMap(email => [
+        key.membership(email, group.id),
+        key.groupMember(group.id, email),
+      ]),
+      ...sites.map(s => key.groupSite(group.id, s.siteId)),
+    ])
+    await this.table.transact([
+      { delete: key.group(group.id) },
+      { delete: key.groupDirectory(group.id) },
+      { delete: key.groupOwned(group.owner, group.id) },
+      {
+        delete: key.groupName(group.slug),
+        cond: fieldEquals('groupId', group.id, { orAbsent: true }),
+      },
+    ])
   }
 
   // --- versions ---

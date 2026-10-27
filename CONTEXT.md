@@ -36,14 +36,28 @@ name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `
 **Private** — visible to any signed-in member of the instance (not only the owner), unless it has
 an audience. **Public** — anyone.
 
-**Audience** — the people, besides its owner, who may see a private site: addresses (and, later,
-groups), each one the instance's email policy admits (`SiteRecord.audience`, `apps/api/src/sites.ts`;
-contract in `packages/shared/src/audience.ts`). Empty means every member. A private site with an
+**Audience** — the people, besides its owner, who may see a private site: addresses, each one the
+instance's email policy admits, and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`;
+contract in `packages/shared/src/audience.ts`). Clients name a group by its slug; the audience
+stores its id. Empty means every member. A private site with an
 audience is **restricted**: only its owner and audience see it, and only they take part in its
 comments. The audience is kept, and ignored, while the site is public. Each address also gets a
 **direct grant** (`USER#<email>/SHARED#<siteId>`), a projection for listing the sites shared with
-someone. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and `fling_set_audience`;
-the `audiences` capability.
+someone; each group a group-site item (`GROUP#<id>/SITE#<siteId>`), so deleting the group can take
+it out of every audience. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and
+`fling_set_audience`; the `audiences` capability.
+
+**Group** — a named list of people, such as a team, that any audience may name
+(`apps/api/src/groups.ts`; contract in `packages/shared/src/groups.ts`): a slug unique on the
+instance (a claim, `GROUPNAME#<slug>`), a display name, an **owner** (who made it) and up to 500
+members, each an address the email policy admits. Every member of the instance lists groups, sees
+who is in one and uses it in their sites' audiences; only the owner renames it, changes its members
+or deletes it (`canGroup` in `policy.ts`; no co-managers, and admins get nothing extra). Each
+member has a **membership** item (`USER#<email>/GROUP#<id>`), what policy reads for a restricted
+site. Deleting a group never widens who sees a site: it leaves the audiences that name others too,
+and where it was the only entry its id stays, matching nobody, so the site is the owner's alone
+(shown as "a deleted group", `#<id>`) until they change it. `/api/groups`, `fling groups`, the `fling_group*` tools and
+the web's Groups pages; the `groups` capability.
 
 **Site pass** — how the edge lets someone into a restricted site without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
@@ -71,11 +85,14 @@ The `admin.*` actions are in `policy.ts` (`canAdmin`).
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
-**owner** (holds it), **viewer** (a signed-in user in its audience), **member** (any other
+**owner** (holds it), **viewer** (a signed-in user in its audience, by address or through a
+group), **member** (any other
 signed-in user), **share** (holds its current share link), **anonymous**. What a role may do depends
 on the site's access: public, private, or restricted. `site.view` and the comment actions reach
 beyond the owner (on a restricted site, only to its viewers and share-link holders). A refusal looks
-like a missing site (404).
+like a missing site (404). Groups have their own, smaller table, `canGroup(actor, action, group)`:
+anyone signed in may read one, its owner may change or delete it, and a refusal is a 403 (groups
+are not secret).
 
 **Comment** — a note on one page of a site (`COMMENT#<id>` in the site's partition, ids sortable by
 time): a **thread** or a one-level **reply** to one. It records the page **path** and the version

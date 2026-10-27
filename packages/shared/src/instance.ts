@@ -90,6 +90,8 @@ export const CORE_CAPABILITIES = {
   rollback: true,
   /** a private site can be limited to listed people (its audience) */
   audiences: true,
+  /** named lists of people (groups.ts) that any member can use in an audience */
+  groups: true,
 } as const
 
 /** `https://<name>.sites.example.test/` — a site's URL on an instance. */

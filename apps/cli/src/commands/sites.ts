@@ -1,5 +1,5 @@
 /** Site management: ls, info, versions, rollback, share, visibility, archive/unarchive, rm. */
-import type { Site, SiteDetail, Visibility } from '@fling/shared'
+import type { Site, SiteDetail, SiteSort, Visibility } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
@@ -16,7 +16,10 @@ import {
 } from '../sites.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 
-export async function runList(ctx: CommandContext, opts: { archived?: boolean }): Promise<void> {
+export async function runList(
+  ctx: CommandContext,
+  opts: { archived?: boolean; sort?: SiteSort }
+): Promise<void> {
   const sites = await listSites(requireClient(ctx), opts)
   ctx.out.data({ sites }, () =>
     renderTable(sites, [

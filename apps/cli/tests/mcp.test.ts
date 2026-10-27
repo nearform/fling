@@ -172,6 +172,27 @@ describe('MCP server', () => {
     expect(text(res)).toMatch(/fling login/)
   })
 
+  it('fling_list lists the last updated first, or in the order `sort` asks for', async () => {
+    const store = await loggedInStore()
+    const sites = [
+      site({ name: 'beta', updatedAt: '2026-10-03T00:00:00.000Z' }),
+      site({ name: 'alpha', updatedAt: '2026-10-02T00:00:00.000Z' }),
+      site({ name: 'gamma', updatedAt: '2026-10-04T00:00:00.000Z' }),
+    ]
+    const m = mockFetch({ '/api/sites': () => jsonResponse({ sites }) })
+    const client = await connect(store, m.fetch)
+    const names = async (args: Record<string, unknown>) =>
+      (
+        dataOf(await client.callTool({ name: 'fling_list', arguments: args })).sites as {
+          name: string
+        }[]
+      ).map(s => s.name)
+    expect(await names({})).toEqual(['gamma', 'beta', 'alpha'])
+    expect(await names({ sort: 'name' })).toEqual(['alpha', 'beta', 'gamma'])
+    const bad = await client.callTool({ name: 'fling_list', arguments: { sort: 'size' } })
+    expect(bad.isError).toBe(true)
+  })
+
   it('deploys a path relative to cwd', async () => {
     const store = await loggedInStore()
     const cwd = await tempDir()

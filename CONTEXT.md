@@ -25,6 +25,14 @@ Publication is the guarantee.
 
 **Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link.
 
+**Site page** — `/sites/<name>` on the app origin (`apps/web/src/pages/Site.tsx`): everything about
+one of your sites (overview, access, versions, archive and delete), in sections under
+`components/site/`. The site list links each row to it.
+
+**Site order** — how site lists are sorted, the same in every client: `sortSites`
+(`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or
+name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `fling_list` `sort`.
+
 **Private** — visible to any signed-in member of the instance (not only the owner). **Public** — anyone.
 
 **Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the

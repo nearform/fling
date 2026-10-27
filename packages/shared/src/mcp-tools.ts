@@ -22,6 +22,7 @@ import {
 import { SITE_NAME_MAX } from './hosts.ts'
 import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
+import { SITE_SORTS } from './site-sort.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
 export const MCP_PUBLISH_MAX_BYTES = 4 * 1024 * 1024
@@ -182,6 +183,12 @@ export function mcpToolsFor(w: McpWording) {
       description: "List the user's Fling sites with URL, visibility and share link.",
       inputSchema: {
         archived: z.boolean().optional().describe('List archived sites instead of live ones'),
+        sort: z
+          .enum(SITE_SORTS)
+          .optional()
+          .describe(
+            'Order: updated (last updated, newest first; the default), created (newest first) or name (A–Z)'
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),

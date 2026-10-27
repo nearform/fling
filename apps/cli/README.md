@@ -178,7 +178,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 
 | Command | |
 |---|---|
-| `fling ls [--archived]` | your sites |
+| `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
 | `fling info <name>` / `fling versions <name>` | details and version history |
 | `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |

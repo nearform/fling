@@ -177,7 +177,8 @@ pages. When the Fling has comments, these tools exist:
   suggestions)? With `path`, checks the name `fling_deploy` would generate for that file or folder.
 - `fling_find_files { query?, limit?, days? }` — recent `.html`/`.zip` files and folders with an
   `index.html` in Downloads, Desktop and Claude output folders (last 14 days by default).
-- `fling_list { archived? }` — the user's sites with URL, visibility and share link.
+- `fling_list { archived?, sort? }` — the user's sites with URL, visibility and share link, last
+  updated first; `sort: "created"` (newest first) or `"name"` (A–Z) for another order.
 - `fling_info { name }` — one site with its version history.
 - `fling_files { name, versionId? }` — the files in the live version (or an earlier one): use it to
   check what was published, e.g. when the user reports a 404 (no root `index.html` → the root 404s).

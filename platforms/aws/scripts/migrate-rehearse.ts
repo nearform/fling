@@ -59,6 +59,7 @@ function die(message: string): never {
 
 /** The kind of an item, from its key (what the counts are per). */
 function kindOf(item: TableItem): string {
+  if (item.pk === 'SITES') return 'site directory (new)'
   const prefix = item.pk.slice(0, item.pk.indexOf('#') + 1)
   const sk = item.sk
   switch (prefix) {
@@ -248,6 +249,8 @@ const expect = (kind: string, n: number) => {
 }
 expect('site record (new)', oldSiteIds.size)
 expect('version (new)', countsBefore['version (old key)'] ?? 0)
+// 0004: one directory item per site a name claim points at
+expect('site directory (new)', countsAfter['name claim'] ?? 0)
 const unchanged = new Map(before.map(i => [`${i.pk}\u0000${i.sk}`, JSON.stringify(i)]))
 let changed = 0
 for (const item of after) {

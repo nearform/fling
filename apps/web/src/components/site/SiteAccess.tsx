@@ -26,6 +26,7 @@ import { useInstance } from '../../hooks/instance'
 import { useGroups, useSiteActions } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
 import { addToAudience, audienceWho, opensToEveryone, peopleLabel } from '../../lib/audience'
+import { copyText } from '../../lib/clipboard'
 import { displayUrl } from '../../lib/format'
 import { audienceFor, DEFAULT_INSTANCE_NAME } from '../../lib/instance'
 import { showToast } from '../../lib/toast'
@@ -46,7 +47,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
       onSuccess: async ({ shareUrl }) => {
         close()
         try {
-          await navigator.clipboard.writeText(shareUrl)
+          await copyText(shareUrl)
           showToast(rotating ? 'New share link copied' : 'Share link created and copied')
         } catch {
           showToast(rotating ? 'Share link refreshed' : 'Share link created')

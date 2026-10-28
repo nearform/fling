@@ -1,5 +1,6 @@
 import { CheckIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import { useEffect, useState } from 'react'
+import { copyText } from '../lib/clipboard'
 import { showToast } from '../lib/toast'
 
 /** Copies `text`; the icon flips to a tick for a moment. */
@@ -22,7 +23,7 @@ export function CopyButton({
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(text)
+      await copyText(text)
       setCopied(true)
     } catch {
       showToast('Could not copy — select the text and copy it by hand', 'warning')

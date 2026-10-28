@@ -48,7 +48,8 @@ review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
 `pnpm --filter @fling/web build` before trying them locally, and again after changing them.
 
 **Signing in.** Local dev uses a dev login form: any `@example.test` address gets in, and
-`admin@example.test` is an admin. To try an audience, restrict a site to another `@example.test` address
+`admin@example.test` is an admin. The metadata publishes the allowed domains as for OIDC
+(`auth.emailDomains`), so the web's email inputs complete them. To try an audience, restrict a site to another `@example.test` address
 (`pnpm cli access <site> --add b@example.test`) and open it signed in as each in two browser
 profiles: the audience gets in through a site pass, anyone else sees the 404 page. Groups work the
 same way (`pnpm cli groups create team --add b@example.test`, then `pnpm cli access <site> --group

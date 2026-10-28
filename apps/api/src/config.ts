@@ -4,7 +4,12 @@
  * platforms/aws/src/secrets.ts) or, when that is unset (dev/tests), from the same-named env vars.
  * Sign-in (`OIDC_*`) is resolved from both in auth/oidc.ts.
  */
-import { DEFAULT_INSTALL_COMMAND, HEX_COLOR_RE, type InstanceBrand } from '@fling/shared'
+import {
+  DEFAULT_INSTALL_COMMAND,
+  HEX_COLOR_RE,
+  type InstanceBrand,
+  RESERVED_SITE_NAMES,
+} from '@fling/shared'
 import { z } from 'zod'
 import { emailAllowed } from './auth/identity.ts'
 
@@ -32,6 +37,23 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+$/
 const emailList = z.preprocess(
   blank,
   csvLower.pipe(z.array(z.string().regex(EMAIL_RE, 'must be an email address'))).optional()
+)
+
+/** One email address (MAIL_FROM, MAIL_REPLY_TO), lowercased. */
+const emailAddress = z.preprocess(
+  value => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+  z.preprocess(blank, z.string().regex(EMAIL_RE, 'must be an email address').optional())
+)
+
+/** Text that goes into a mail header (MAIL_FROM_NAME): one line. */
+const headerText = z.preprocess(
+  blank,
+  z
+    .string()
+    .min(1)
+    .max(100)
+    .refine(v => !/[\r\n]/.test(v), 'must be one line')
+    .optional()
 )
 
 const hexColor = z.preprocess(blank, z.string().regex(HEX_COLOR_RE).optional())
@@ -107,6 +129,11 @@ const envSchema = z.object({
       .refine(v => /^wss?:\/\//.test(v), 'must be a ws:// or wss:// URL')
       .optional()
   ),
+  MAIL_DRIVER: z.preprocess(blank, z.enum(['ses', 'cloudflare', 'file', 'memory']).optional()),
+  MAIL_FROM: emailAddress,
+  MAIL_FROM_NAME: headerText,
+  MAIL_REPLY_TO: emailAddress,
+  SES_CONFIGURATION_SET: optionalString,
 })
 
 /**
@@ -155,6 +182,27 @@ export interface OidcConfig {
   scopes?: string[]
   /** Treat a missing `email_verified` claim as verified (an explicit `false` is still refused). */
   assumeEmailVerified: boolean
+}
+
+/**
+ * Email (`MAIL_*`, from the platform's infrastructure: the Terraform `mail` variable, the
+ * Cloudflare deploy config's `MAIL`). Set only when `MAIL_DRIVER` is; without it there is no
+ * email channel. The addresses are never published.
+ */
+export interface MailConfig {
+  /**
+   * Which Mailer sends: the core has `memory` (tests, the e2e's Node runtime) and `file` (local dev,
+   * `.fling-dev/mail/`); a platform supplies `ses` or `cloudflare`. Production takes only those two.
+   */
+  driver: 'ses' | 'cloudflare' | 'file' | 'memory'
+  /** The sender address (`MAIL_FROM`), on a domain that is not the sites domain. */
+  from: string
+  /** The sender's display name (`MAIL_FROM_NAME`, default INSTANCE_NAME). */
+  fromName: string
+  /** The operator's reply-to address on every email (`MAIL_REPLY_TO`); never the actor's. */
+  replyTo?: string
+  /** AWS: the SES configuration set to name on each send; unset, the identity's default applies. */
+  sesConfigurationSet?: string
 }
 
 export interface Config {
@@ -207,6 +255,8 @@ export interface Config {
   live: boolean
   /** `LIVE_URL`: where clients open the live room's socket (`${liveUrl}?ticket=…`) */
   liveUrl?: string
+  /** Email, when a mail driver is configured (`MAIL_*`); absent: no email channel. */
+  mail?: MailConfig
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -301,10 +351,55 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
       assumeEmailVerified: e.OIDC_ASSUME_EMAIL_VERIFIED,
     }),
   }
+  const mail = mailConfig(e, cfg)
+  if (mail) cfg.mail = mail
   if (cfg.storeDriver === 'dynamo' && !cfg.tableName) throw new Error('TABLE_NAME is required')
   if (cfg.storageDriver === 's3' && !cfg.sitesBucket) throw new Error('SITES_BUCKET is required')
   if (cfg.kvsDriver === 'cloudfront' && !cfg.kvsArn) throw new Error('KVS_ARN is required')
   return cfg
+}
+
+/**
+ * The mail settings, checked. A driver needs MAIL_FROM. Production takes only the cloud drivers,
+ * and a sender whose domain is not the sites domain: a sending domain gets DNS records on names
+ * under it, which on the sites domain would shadow the wildcard (and break a site of that name).
+ * A subdomain of the sites domain is fine when the label under the sites domain is a reserved site
+ * name (`mail.<sites domain>`), which is never a site.
+ */
+function mailConfig(e: z.infer<typeof envSchema>, cfg: BaseConfig): MailConfig | undefined {
+  const production = cfg.appEnv === 'production'
+  if (!e.MAIL_DRIVER) return undefined
+  if (production && e.MAIL_DRIVER !== 'ses' && e.MAIL_DRIVER !== 'cloudflare') {
+    throw new Error(`MAIL_DRIVER must be ses or cloudflare in production (got ${e.MAIL_DRIVER})`)
+  }
+  if (!e.MAIL_FROM) throw new Error('MAIL_FROM is required with MAIL_DRIVER')
+  if (production) {
+    const domain = e.MAIL_FROM.slice(e.MAIL_FROM.lastIndexOf('@') + 1)
+    const sites = cfg.sitesDomain.replace(/:\d+$/, '')
+    if (domain === sites) {
+      throw new Error(
+        `MAIL_FROM must not be on the sites domain (${sites}); send from a subdomain such as mail.${sites}`
+      )
+    }
+    if (domain.endsWith(`.${sites}`)) {
+      const label = domain
+        .slice(0, -(sites.length + 1))
+        .split('.')
+        .at(-1) as string
+      if (!RESERVED_SITE_NAMES.includes(label)) {
+        throw new Error(
+          `MAIL_FROM's domain would shadow the site ${label}.${sites}; send from mail.${sites} or another domain`
+        )
+      }
+    }
+  }
+  return definedOnly({
+    driver: e.MAIL_DRIVER,
+    from: e.MAIL_FROM,
+    fromName: e.MAIL_FROM_NAME ?? e.INSTANCE_NAME,
+    replyTo: e.MAIL_REPLY_TO,
+    sesConfigurationSet: e.SES_CONFIGURATION_SET,
+  })
 }
 
 /** Drop undefined fields, so the metadata JSON only carries what is configured. */

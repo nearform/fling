@@ -37,6 +37,18 @@ export type Kind =
   | 'refresh'
   | 'upload'
   | 'uploadfile'
+  | 'notifyprefs'
+  | 'notifyevent'
+  | 'fanout'
+  | 'npending'
+  | 'nbatch'
+  | 'nbatchptr'
+  | 'notifycursor'
+  | 'notifystats'
+  | 'notifyfailure'
+  | 'nsent'
+  | 'suppression'
+  | 'counter'
 
 export type Fields = Record<string, unknown>
 export type Upgrade = (fields: Fields) => Fields

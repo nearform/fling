@@ -9,6 +9,7 @@ import { identityProviderFor } from '../src/auth/oidc.ts'
 import { signSession } from '../src/auth/session.ts'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
+import { MemoryMailer } from '../src/mail/memory.ts'
 import { MemoryRouteTable } from '../src/route-table/memory.ts'
 import { Records } from '../src/store/records.ts'
 import { MemoryTable } from '../src/table/memory.ts'
@@ -56,7 +57,10 @@ export function setup(overrides: Partial<Config> = {}, idp: TestIdp = testIdp())
   const routeTable = new MemoryRouteTable()
   const root = mkdtempSync(join(tmpdir(), 'fling-api-'))
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
+  // With a mail driver configured, what the email channel sends lands here.
+  const mailer = new MemoryMailer(() => clock.now())
   const deps: Deps = {
+    ...(config.mail ? { mailer } : {}),
     config,
     store,
     blobs,
@@ -73,6 +77,7 @@ export function setup(overrides: Partial<Config> = {}, idp: TestIdp = testIdp())
     table,
     routeTable,
     blobs,
+    mailer,
     root,
     idp,
     advance(ms: number) {

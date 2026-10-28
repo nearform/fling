@@ -173,6 +173,38 @@ Cloudflare, API Gateway WebSockets with live connection records (`SITE#<id>/LIVE
 on AWS. `LIVE_URL` says where clients connect; `LIVE=false` turns rooms off (the `live`
 capability).
 
+**Event** — something that happened that may concern people, such as a site shared with them or
+a comment on their site, named by a stable key (`site.shared`, `comment.reply`, …). Its id is
+derived from its cause, so a retried request records it once (`NOTIFY#<eventId>/EVENT`). The
+**event catalogue** (`EVENT_CATALOGUE`, `packages/shared/src/notifications.ts`) lists every event
+with its title, section, default per channel, whether it has a cool-down and the capability it
+needs; clients build their settings from it.
+
+**Channel** — a way a notification reaches someone: `email` so far (`ChannelId`,
+`packages/shared/src/notifications.ts`). Email goes out through the **Mailer** port
+(`apps/api/src/mail/types.ts`): `MemoryMailer` and `FileMailer` in the core, each cloud's own on its
+platform, all passing `mailerConformance`. `MAIL_DRIVER` turns it on (the `email` capability), and
+with any channel on, the `notifications` capability.
+
+**Notification preferences** — what one person hears about: per event and channel `on` or `off`,
+and a `muted` switch (`USER#<email>/NOTIFYPREFS`, keyed by address, so someone who never signed in
+has them too). Only the cells they set are stored; the rest take the catalogue's defaults
+(`effectivePreference`). A cell for an event the catalogue no longer has is ignored and dropped on
+the next write.
+
+**Outbox** — notifications on their way, in Records (`apps/api/src/store/records.ts`): the event,
+a fan-out marker, a **pending** notification per recipient, and batches due at a minute
+(`NDUE#<minute>`), drained a minute at a time from a cursor. The outbox is the queue on every
+platform; each only supplies the one-minute tick. A **batch** is what goes out as one message: one
+recipient, one channel, one site (or none, for shares and groups), due 2 minutes after its first
+notification, with everything that arrives meanwhile folded in. A drainer leases it (a conditional
+update), so overlapping drains never send it twice. After a message about comments on a site, the
+recipient's next batch for that site waits out a **cool-down** (`coolDownUntil` on their batch
+pointer).
+
+**Suppression** — an address Fling does not mail, after a hard bounce or a complaint
+(`SUPPRESS#<email>/SUPPRESS`); checked at send time.
+
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three
 ports:

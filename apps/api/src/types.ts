@@ -3,6 +3,7 @@ import type { SessionClaims } from './auth/session.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
 import type { LiveHub } from './live.ts'
+import type { Mailer } from './mail/types.ts'
 import type { RouteTable } from './route-table/types.ts'
 import type { Store, User } from './store/types.ts'
 
@@ -23,6 +24,11 @@ export interface Deps {
    * instance without live rooms, where publishing does nothing.
    */
   live?: LiveHub
+  /**
+   * The provider email goes out through (mail/types.ts), when the instance has a mail driver
+   * (`config.mail`). Absent: no email channel.
+   */
+  mailer?: Mailer
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

@@ -19,7 +19,7 @@ export function ReviewButton({ name }: { name: string }) {
     <span className={wrapClass}>
       <Link
         to={reviewHref(name)}
-        className={`${buttonClass} btn-primary`}
+        className={`${buttonClass} tone-primary hover:brightness-95`}
         title="Open the site with its comments: the link to share for feedback"
       >
         <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />

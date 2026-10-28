@@ -164,6 +164,7 @@ describe('can', () => {
 /** Allowed principal roles per instance action: a(dmin) t(oken: an admin's key) i(mpersonating) u(ser). */
 const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.users.list': 'at',
+  'admin.sites.list': 'at',
   'admin.audit.read': 'at',
   'admin.mail.read': 'at',
   'admin.mail.test': 'a',

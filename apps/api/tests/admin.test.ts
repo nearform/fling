@@ -1,5 +1,5 @@
 /**
- * Admins (ADMIN_EMAILS): the users list and the audit log, impersonation (its rules, what it may
+ * Admins (ADMIN_EMAILS): the users list, every site's listing and the audit log, impersonation (its rules, what it may
  * not do, its expiry, stopping it), and that admins get nothing over other people's sites.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -90,7 +90,7 @@ async function impersonate(cookie: string, email = MEMBER) {
 describe('the users list', () => {
   it('is a 404 to anyone who is not an admin, by session or key', async () => {
     const { member } = await world()
-    for (const path of ['/api/admin/users', '/api/admin/audit']) {
+    for (const path of ['/api/admin/users', '/api/admin/sites', '/api/admin/audit']) {
       expect((await browser(cookieOf(member.session), 'GET', path)).status).toBe(404)
       expect((await api(env, member.key, 'GET', path)).status).toBe(404)
     }
@@ -140,6 +140,72 @@ describe('the users list', () => {
     expect(next.users.map((u: { email: string }) => u.email)).toEqual([OTHER_ADMIN])
     const found = await json(await browser(bossCookie, 'GET', '/api/admin/users?q=Mem'))
     expect(found.users.map((u: { email: string }) => u.email)).toEqual([MEMBER])
+  })
+})
+
+describe('the sites list', () => {
+  it("lists every site's listing for an admin, and opens none of them", async () => {
+    const { bossCookie, boss } = await world()
+    await env.store.createSite({
+      ...site(MEMBER, 'member-secret'),
+      restricted: true,
+      audience: { emails: ['friend@example.test'], groups: [] },
+      currentVersionId: null,
+    })
+    await env.store.createSite({ ...site(BOSS, 'boss-site'), visibility: 'public', archived: true })
+    const res = await browser(bossCookie, 'GET', '/api/admin/sites')
+    expect(res.status).toBe(200)
+    const body = await json(res)
+    expect(body.cursor).toBeNull()
+    expect(body.sites.map((s: { name: string }) => s.name)).toEqual([
+      'boss-site',
+      'member-docs',
+      'member-secret',
+      'member-site',
+    ])
+    const secret = body.sites[2]
+    expect(secret).toEqual({
+      name: 'member-secret',
+      url: expect.stringContaining('member-secret'),
+      reviewUrl: expect.stringContaining('/review/member-secret'),
+      owner: MEMBER,
+      access: 'people',
+      archived: false,
+      live: false,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    expect(body.sites[0]).toMatchObject({ owner: BOSS, access: 'public', archived: true })
+    expect(body.sites[1]).toMatchObject({ access: 'members', live: true })
+    // The listing is all: the restricted site itself is still someone else's.
+    expect((await browser(bossCookie, 'GET', '/api/sites/member-secret')).status).toBe(404)
+    // An admin's API key may list too.
+    expect((await api(env, boss.key, 'GET', '/api/admin/sites')).status).toBe(200)
+  })
+
+  it('pages with a cursor and searches by name prefix', async () => {
+    const { bossCookie } = await world()
+    await env.store.createSite(site(BOSS, 'boss-site'))
+    const first = await json(await browser(bossCookie, 'GET', '/api/admin/sites?limit=2'))
+    expect(first.sites.map((s: { name: string }) => s.name)).toEqual(['boss-site', 'member-docs'])
+    const next = await json(
+      await browser(
+        bossCookie,
+        'GET',
+        `/api/admin/sites?limit=2&cursor=${encodeURIComponent(first.cursor)}`
+      )
+    )
+    expect(next.sites.map((s: { name: string }) => s.name)).toEqual(['member-site'])
+    expect(next.cursor).toBeNull()
+    const found = await json(await browser(bossCookie, 'GET', '/api/admin/sites?q=Member-S'))
+    expect(found.sites.map((s: { name: string }) => s.name)).toEqual(['member-site'])
+  })
+
+  it('is not for an admin while impersonating', async () => {
+    const { bossCookie } = await world()
+    const { cookie } = await impersonate(bossCookie)
+    const res = await browser(cookie, 'GET', '/api/admin/sites')
+    expect([res.status, (await json(res)).error.code]).toEqual([403, 'impersonating'])
   })
 })
 

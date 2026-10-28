@@ -1,5 +1,6 @@
 /**
- * The instance's admins (ADMIN_EMAILS): the users list, the audit log, the mail page
+ * The instance's admins (ADMIN_EMAILS): the users list, every site's listing (the site
+ * directory; policy still decides what an admin may open), the audit log, the mail page
  * (notifications/mail-admin.ts), and impersonation. Policy
  * (`canInstance`, `impersonationRefusal` in policy.ts) decides; this does it and keeps the record.
  * To anyone who isn't an admin, none of it exists (404).
@@ -10,7 +11,17 @@
  * AUDIT_TTL_DAYS). The record is written before the session changes, so an impersonation that
  * isn't on the record never happens.
  */
-import type { AdminUser, AuditEntry, MailAdmin, MailTestResult, Me } from '@fling/shared'
+import {
+  type AdminSite,
+  type AdminUser,
+  type AuditEntry,
+  type MailAdmin,
+  type MailTestResult,
+  type Me,
+  reviewUrl,
+  siteLabel,
+  siteUrl,
+} from '@fling/shared'
 import { isAdminEmail } from './config.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, forbidden, notFound } from './lib/errors.ts'
@@ -30,6 +41,9 @@ export const AUDIT_TTL_DAYS = 180
 /** Users per page of the list, by default and at most. */
 export const USERS_PAGE = 50
 export const USERS_PAGE_MAX = 100
+/** Sites per page of the list, by default and at most. */
+export const SITES_PAGE = 50
+export const SITES_PAGE_MAX = 100
 /** Audit entries the admin page shows. */
 export const AUDIT_PAGE = 50
 /** Site counts looked up at once (one query each). */
@@ -91,6 +105,34 @@ export async function listUsers(
     admin: isAdminEmail(deps.config, u.email),
   }))
   return { users, cursor: page.cursor ?? null }
+}
+
+/** Every site's listing, by name, under a name prefix: nothing that would let an admin open it. */
+export async function listSites(
+  deps: Deps,
+  p: Principal,
+  opts: { q?: string; cursor?: string; limit?: number }
+): Promise<{ sites: AdminSite[]; cursor: string | null }> {
+  ensure(p, 'admin.sites.list')
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? SITES_PAGE)), SITES_PAGE_MAX)
+  const page = await deps.store.listAllSites({
+    prefix: opts.q?.trim().toLowerCase() || undefined,
+    limit,
+    cursor: opts.cursor || undefined,
+  })
+  const { sitesDomain, siteScheme, appOrigin, comments } = deps.config
+  const sites = page.sites.map(s => ({
+    name: s.name,
+    url: siteUrl(siteLabel(s.name), sitesDomain, `${siteScheme}:`),
+    ...(comments ? { reviewUrl: reviewUrl(appOrigin, s.name) } : {}),
+    owner: s.owner,
+    access: s.access,
+    archived: s.archived,
+    live: s.live,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+  }))
+  return { sites, cursor: page.cursor ?? null }
 }
 
 export async function auditLog(deps: Deps, p: Principal): Promise<AuditEntry[]> {

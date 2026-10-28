@@ -8,6 +8,8 @@ import { AppInstanceProvider } from './hooks/instance'
 import { queryKeys, useMe } from './hooks/queries'
 import { ADMIN_USERS_PATH } from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
+import { ADMIN_MAIL_PATH, NOTIFICATION_SETTINGS_PATH } from './lib/notifications'
+import AdminMail from './pages/AdminMail'
 import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
@@ -15,6 +17,7 @@ import GetStarted from './pages/GetStarted'
 import Group from './pages/Group'
 import Groups from './pages/Groups'
 import Login from './pages/Login'
+import Notifications from './pages/Notifications'
 import Review from './pages/Review'
 import Site from './pages/Site'
 import Sites from './pages/Sites'
@@ -92,7 +95,9 @@ export default function App() {
               <Route path="get-started" element={<GetStarted />} />
               <Route path="connections" element={<ApiKeys />} />
               <Route path="keys" element={<Navigate to="/connections" replace />} />
+              <Route path={NOTIFICATION_SETTINGS_PATH.slice(1)} element={<Notifications />} />
               <Route path="admin/users" element={<AdminUsers />} />
+              <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
               <Route path="admin" element={<Navigate to={ADMIN_USERS_PATH} replace />} />
             </Route>
             <Route element={<Authenticated bare />}>

@@ -6,6 +6,7 @@
 import type { AdminUser, AuditEntry } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
 import { useDeferredValue, useState } from 'react'
+import { AdminTabs } from '../components/AdminTabs'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PageHeader } from '../components/PageHeader'
 import { useAdminAudit, useAdminUsers, useImpersonation, useMe } from '../hooks/queries'
@@ -144,10 +145,13 @@ export default function AdminUsers() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
-      <PageHeader
-        title="Users"
-        description="Everyone who has signed in to this instance. Impersonate someone to see and do what they do, for up to an hour."
-      />
+      <div className="space-y-4">
+        <AdminTabs />
+        <PageHeader
+          title="Users"
+          description="Everyone who has signed in to this instance. Impersonate someone to see and do what they do, for up to an hour."
+        />
+      </div>
 
       <section className="space-y-3">
         <label className="input input-sm w-full sm:w-80">

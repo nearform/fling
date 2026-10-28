@@ -20,6 +20,9 @@ export const queryKeys = {
   connections: ['connections'] as const,
   adminUsers: (q: string) => ['admin', 'users', q] as const,
   adminAudit: ['admin', 'audit'] as const,
+  adminMail: ['admin', 'mail'] as const,
+  notifications: ['notifications'] as const,
+  sentNotifications: ['notifications', 'sent'] as const,
 }
 
 export function useMe() {
@@ -277,6 +280,47 @@ export function useAdminAudit() {
     queryKey: queryKeys.adminAudit,
     queryFn: api.adminAudit,
     refetchInterval: 60_000,
+  })
+}
+
+/** Admins: the mail settings and health; refreshed every minute while shown. */
+export function useAdminMail(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.adminMail,
+    queryFn: api.adminMail,
+    refetchInterval: 60_000,
+  })
+}
+
+/** Admins: send a test email. The page shows the result; the remaining count refetches. */
+export function useSendTestMail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.sendTestMail,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.adminMail }),
+  })
+}
+
+export function useNotificationSettings(enabled: boolean) {
+  return useQuery({ enabled, queryKey: queryKeys.notifications, queryFn: api.notifications })
+}
+
+export function useSentNotifications(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.sentNotifications,
+    queryFn: api.sentNotifications,
+  })
+}
+
+/** Change notification settings; the answer is the settings after, so the cache takes it as is. */
+export function useUpdateNotifications() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.updateNotifications,
+    onSuccess: settings => queryClient.setQueryData(queryKeys.notifications, settings),
+    onError: error => showToast(errorMessage(error), 'error'),
   })
 }
 

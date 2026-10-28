@@ -27,11 +27,20 @@ import {
   type GroupSummary,
   type LiveTicket,
   LiveTicketSchema,
+  type MailAdmin,
+  MailAdminSchema,
+  type MailTestResult,
+  MailTestResultSchema,
   type Me,
   MeSchema,
+  type NotificationPreferencesUpdate,
+  type NotificationSettings,
+  NotificationSettingsSchema,
   OAuthDecisionSchema,
   type OAuthRequestInfo,
   OAuthRequestInfoSchema,
+  type SentNotification,
+  SentNotificationListSchema,
   type SharedSite,
   SharedSiteListSchema,
   type Site,
@@ -249,6 +258,20 @@ export const api = {
     request('/api/admin/impersonate', MeSchema, { method: 'POST', body: { email } }),
   stopImpersonating: (): Promise<Me> =>
     request('/api/admin/impersonate/stop', MeSchema, { method: 'POST' }),
+  /** Admins, on an instance with email: the mail settings and the last 24 hours of sending. */
+  adminMail: (): Promise<MailAdmin> => request('/api/admin/mail', MailAdminSchema),
+  /** Admins: send a test email to any address; the provider's id or the mapped error. */
+  sendTestMail: (to: string): Promise<MailTestResult> =>
+    request('/api/admin/mail/test', MailTestResultSchema, { method: 'POST', body: { to } }),
+  /** The caller's notification settings (the `notifications` capability). */
+  notifications: (): Promise<NotificationSettings> =>
+    request('/api/me/notifications', NotificationSettingsSchema),
+  updateNotifications: (body: NotificationPreferencesUpdate): Promise<NotificationSettings> =>
+    request('/api/me/notifications', NotificationSettingsSchema, { method: 'PUT', body }),
+  async sentNotifications(): Promise<SentNotification[]> {
+    const { sent } = await request('/api/me/notifications/sent', SentNotificationListSchema)
+    return sent
+  },
 }
 
 /** Full-page redirect into the instance's sign-in; the API sends the browser back to `returnTo`. */

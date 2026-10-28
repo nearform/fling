@@ -11,7 +11,7 @@
  *   `_top`/`_parent` links stay in the frame, and a load it cannot read (another origin) or of the
  *   shell itself is undone;
  * - pins: placed on a click (the element under it, as an anchor) or a drag (a box, on the
- *   element that holds it), drawn where their anchors resolve now, following scroll, resizes and
+ *   element that holds it), in pin mode or with Alt held, drawn where their anchors resolve now, following scroll, resizes and
  *   DOM changes; the selected one also outlines its area or highlights its quoted text; clicking
  *   one tells the page;
  * - text the reviewer selects in the page, as an anchor with its quote (`textSelected`; the page
@@ -217,6 +217,11 @@ function report() {
 }
 
 function onClick(e: MouseEvent) {
+  if (altDrag || (e.altKey && e.button === 0)) {
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
   const target = e.target as Element | null
   const link = target?.closest?.('a[href], area[href]')
   if (!link || e.defaultPrevented) return
@@ -245,6 +250,45 @@ function onSubmit(e: SubmitEvent) {
     e.preventDefault()
     post({ type: 'blocked', href: action.slice(0, 2048) })
   }
+}
+
+// --- Alt: a pin without the Pin button ------------------------------------------------------------
+
+/**
+ * Alt (Option) with a mouse places a pin straight from the page: a click a spot, a drag a box,
+ * as in pin mode. The site sees none of it, so an Alt-click on a link neither follows nor
+ * downloads it, and the drag selects no text. The page ignores a pin from a reviewer who may not
+ * comment.
+ */
+let altDrag = false
+
+function onAltPointerDown(e: PointerEvent) {
+  if (!e.altKey || e.button !== 0 || e.pointerType !== 'mouse' || placing) return
+  e.preventDefault()
+  e.stopPropagation()
+  const doc = (e.target as Node).ownerDocument
+  if (!doc) return
+  altDrag = true
+  dragFrom = { x: e.clientX, y: e.clientY }
+  const move = (m: PointerEvent) => drawMarquee(m)
+  const up = (u: PointerEvent) => {
+    doc.removeEventListener('pointermove', move, true)
+    doc.removeEventListener('pointerup', up, true)
+    const box = dragBox(u)
+    dragFrom = null
+    marquee.hidden = true
+    placeAt(u, box)
+    // The click that follows this pointerup is still Alt's: onClick swallows it.
+    setTimeout(() => {
+      altDrag = false
+    })
+  }
+  doc.addEventListener('pointermove', move, true)
+  doc.addEventListener('pointerup', up, true)
+}
+
+function onAltMouseDown(e: MouseEvent) {
+  if (e.altKey && e.button === 0) e.preventDefault()
 }
 
 // --- selecting text -----------------------------------------------------------------------------
@@ -292,6 +336,8 @@ function attach(win: Window) {
   win.addEventListener('popstate', report)
   win.addEventListener('scroll', scheduleDraw, { passive: true })
   win.addEventListener('resize', scheduleDraw)
+  doc.addEventListener('pointerdown', onAltPointerDown, true)
+  doc.addEventListener('mousedown', onAltMouseDown, true)
   doc.addEventListener('click', onClick, true)
   doc.addEventListener('submit', onSubmit, true)
   doc.addEventListener('keydown', onKey)
@@ -525,6 +571,23 @@ function dragBox(e: PointerEvent): Box | null {
   return box.width < DRAG_MIN && box.height < DRAG_MIN ? null : box
 }
 
+function drawMarquee(e: PointerEvent) {
+  const box = dragBox(e)
+  marquee.hidden = !box
+  if (box) {
+    marquee.style.transform = `translate(${Math.round(box.left)}px, ${Math.round(box.top)}px)`
+    marquee.style.width = `${Math.round(box.width)}px`
+    marquee.style.height = `${Math.round(box.height)}px`
+  }
+}
+
+function placeAt(e: PointerEvent, box: Box | null) {
+  const win = site()
+  if (!win) return
+  const anchor = box ? anchorForBox(win, box) : anchorAt(win, e.clientX, e.clientY)
+  post({ type: 'pinPlaced', anchor })
+}
+
 // A click places a spot; a drag draws a box.
 placer.addEventListener('pointerdown', e => {
   if (e.button !== 0) return
@@ -535,24 +598,15 @@ placer.addEventListener(
   'pointermove',
   e => {
     trackCursor(e.clientX, e.clientY)
-    const box = dragBox(e)
-    marquee.hidden = !box
-    if (box) {
-      marquee.style.transform = `translate(${Math.round(box.left)}px, ${Math.round(box.top)}px)`
-      marquee.style.width = `${Math.round(box.width)}px`
-      marquee.style.height = `${Math.round(box.height)}px`
-    }
+    drawMarquee(e)
   },
   { passive: true }
 )
 placer.addEventListener('pointerup', e => {
   if (!dragFrom) return
   const box = dragBox(e)
-  const win = site()
   setPlacing(false)
-  if (!win) return
-  const anchor = box ? anchorForBox(win, box) : anchorAt(win, e.clientX, e.clientY)
-  post({ type: 'pinPlaced', anchor })
+  placeAt(e, box)
 })
 placer.addEventListener('pointercancel', () => {
   dragFrom = null

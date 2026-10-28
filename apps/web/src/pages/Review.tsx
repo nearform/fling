@@ -306,6 +306,8 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
         break
       }
       case 'pinPlaced':
+        // Alt places a pin without pin mode, so the page checks here who may comment.
+        if (!list.can.create) break
         setPin({ anchor: m.anchor, at: atRef.current, from: 'placed' })
         setPlacing(false)
         setRevealed(true)
@@ -317,10 +319,11 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
         setPin(p =>
           p?.from === 'placed' ? p : { anchor: m.anchor, at: atRef.current, from: 'selection' }
         )
-        // Beside the frame, the composer takes the selection at once. Over it, as a sheet, focus
-        // would raise the keyboard while the reviewer may still be dragging the handles: the
-        // composer shows the quote when they open the panel.
-        if (panelShown && !sheet) setComposeRequest(n => n + 1)
+        // The panel opens on the composer, holding the quote and focused, ready to type. The
+        // frame reports a selection only once it has settled, so on a phone this follows the
+        // reviewer lifting their finger from the handles.
+        setRevealed(true)
+        setComposeRequest(n => n + 1)
         break
       case 'pinCancelled':
         setPlacing(false)
@@ -873,7 +876,7 @@ function Composer({
               className={`btn btn-ghost btn-xs ${placing ? 'btn-active' : ''}`}
               aria-pressed={placing}
               onClick={onPlace}
-              title="Click a spot or drag a box in the page (or select text in it): the pin stays on that element as the page scrolls"
+              title="Click a spot or drag a box in the page, or select text in it: the pin stays on that element as the page scrolls. Shortcut: hold Alt (⌥) and click or drag in the page"
             >
               <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pin to a spot
             </button>

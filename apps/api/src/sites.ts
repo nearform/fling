@@ -16,8 +16,8 @@
  * site pass, which `/auth/login` hands to whoever policy lets view it (`signedInReturn`). Deleting
  * a group takes it out of the audiences that name it, never widening one (`dropGroup`).
  *
- * Shared with me (`listShared`): the restricted sites of others that the user may see, found from
- * their direct grants and their groups' site items, and each one still asked of policy.
+ * Shared with me (`listShared`): the restricted sites of others that the user may see, listed from
+ * their direct grants and their groups' site items, which carry each site's listing.
  */
 import {
   AUDIENCE_EMAILS_MAX,
@@ -64,7 +64,14 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
-import type { SiteAudience, SiteRecord, User } from './store/types.ts'
+import {
+  hasListing,
+  listingOf,
+  type SharedListing,
+  type SiteAudience,
+  type SiteRecord,
+  type User,
+} from './store/types.ts'
 import type { Deps } from './types.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
@@ -253,15 +260,10 @@ export async function requireSite(
   return (await resolveSite(deps, userActor(user), name, ...actions)).site
 }
 
-/** Write the site and its routes; `before`: the audience it had, when the audience changed. */
-export async function save(
-  deps: Deps,
-  site: SiteRecord,
-  oldShareToken?: string,
-  before?: SiteAudience
-) {
+/** Write the site (with its index items) and its routes. */
+export async function save(deps: Deps, site: SiteRecord, oldShareToken?: string) {
   site.updatedAt = deps.clock.now().toISOString()
-  await deps.store.putSite(site, before)
+  await deps.store.putSite(site)
   await syncRouteTable(deps, site, oldShareToken)
 }
 
@@ -340,7 +342,7 @@ export async function dropGroup(deps: Deps, groupId: string) {
     const groups = before.groups.filter(g => g !== groupId)
     if (before.emails.length + groups.length === 0) continue
     site.audience = { ...before, groups }
-    await save(deps, site, undefined, before)
+    await save(deps, site)
   }
 }
 
@@ -356,58 +358,92 @@ export async function listSites(deps: Deps, user: User, archived: boolean): Prom
     .map(s => toSite(deps, user, s))
 }
 
-/** Sites read at once while listing the ones shared with a user. */
+/** Group-site queries, and sites read for v1 index items, run at once while listing. */
 const SHARED_READ_CONCURRENCY = 10
 
 /**
  * GET /api/shared — the restricted sites of others that the user may see because the audience
- * names them, directly or through a group they are in: their direct grants and their groups'
- * site items (index items only), each site then asked of policy, so an index item out of step with
- * the audience (a removed member, a deleted group) never shows a site. Sites that aren't live
- * (archived, or no current version) are left out, as are merely private ones, which every member
- * sees anyway. Last updated first.
+ * names them, directly or through a group they are in. One query for their direct grants, one for
+ * their memberships and one per group for its site items; each item carries the site's listing
+ * (`SharedListing`), so no site is read. Sites that aren't live (archived, or no current version)
+ * are left out, as are merely private ones, which every member sees anyway. Last updated first.
+ *
+ * Being in the audience is implied by the item existing (items are written and removed with the
+ * audience, `putSite`), and a group counts only while the user is a member of it now. An item the
+ * audience no longer backs (two saves of a site racing) lists the site's name until it is
+ * cleaned, nothing more: opening the site goes through `requireSite`, policy and the edge's site
+ * pass, which read the audience. A v1 item (no listing) is answered from the site itself, asked
+ * of policy.
  */
 export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> {
   const [grants, groups] = await Promise.all([
     deps.store.listSiteGrants(user.email),
     groupsOf(deps, user.email),
   ])
-  const groupSites = await mapLimit(groups, SHARED_READ_CONCURRENCY, id =>
-    deps.store.listGroupSites(id)
-  )
-  const candidates = new Map<string, string>()
-  for (const item of [...grants, ...groupSites.flat()]) candidates.set(item.siteId, item.name)
-  const found = await mapLimit([...candidates], SHARED_READ_CONCURRENCY, async ([id, name]) => {
-    const site = await deps.store.findSite(name)
-    return site?.id === id ? site : null
-  })
+  const groupSites = (
+    await mapLimit(groups, SHARED_READ_CONCURRENCY, id => deps.store.listGroupSites(id))
+  ).flat()
+
+  const listed = new Map<string, SharedListing>()
+  const unlisted = new Map<string, string>()
+  for (const item of [...grants, ...groupSites]) {
+    if (!hasListing(item)) unlisted.set(item.siteId, item.name)
+    else if ((listed.get(item.siteId)?.updatedAt ?? '') < item.updatedAt) {
+      listed.set(item.siteId, item)
+    }
+  }
+  const direct = new Set(grants.map(g => g.siteId))
+  const viaGroups = new Map<string, string[]>()
+  for (const item of groupSites) {
+    viaGroups.set(item.siteId, [...(viaGroups.get(item.siteId) ?? []), item.groupId])
+  }
+  const shown = (s: SharedListing) =>
+    s.owner !== user.email && !s.archived && s.live && s.restricted
+  const visible: { listing: SharedListing; direct: boolean; groups: string[] }[] = [
+    ...listed.values(),
+  ]
+    .filter(shown)
+    .map(listing => ({
+      listing,
+      direct: direct.has(listing.siteId),
+      groups: viaGroups.get(listing.siteId) ?? [],
+    }))
+
+  // v1 items: read the site and ask policy, as the listing would have answered.
   const actor: Actor = { kind: 'user', email: user.email, groups }
-  const visible = found.filter(
-    (site): site is SiteRecord =>
-      site !== null &&
-      site.email !== user.email &&
-      !site.archived &&
-      site.currentVersionId !== null &&
-      isRestricted(site) &&
-      can(actor, 'site.view', site)
+  const fromSites = await mapLimit(
+    [...unlisted].filter(([id]) => !listed.has(id)),
+    SHARED_READ_CONCURRENCY,
+    async ([id, name]) => {
+      const site = await deps.store.findSite(name)
+      if (site?.id !== id || !shown(listingOf(site)) || !can(actor, 'site.view', site)) return []
+      return [
+        {
+          listing: listingOf(site),
+          direct: site.audience.emails.includes(user.email),
+          groups: site.audience.groups.filter(g => groups.includes(g)),
+        },
+      ]
+    }
   )
-  const via = (site: SiteRecord) => site.audience.groups.filter(id => groups.includes(id))
+  visible.push(...fromSites.flat())
+
   const slugs = new Map(
-    (await deps.store.getGroups([...new Set(visible.flatMap(via))])).map(g => [g.id, g.slug])
+    (await deps.store.getGroups([...new Set(visible.flatMap(v => v.groups))])).map(g => [
+      g.id,
+      g.slug,
+    ])
   )
   const { sitesDomain, appOrigin, comments } = deps.config
   return sortSites(
-    visible.map(site => ({
-      name: site.name,
-      url: siteUrl(siteLabel(site.name), sitesDomain, protocol(deps)),
-      ...(comments ? { reviewUrl: reviewUrl(appOrigin, site.name) } : {}),
-      owner: site.email,
-      via: {
-        direct: site.audience.emails.includes(user.email),
-        groups: via(site).flatMap(id => slugs.get(id) ?? []),
-      },
-      createdAt: site.createdAt,
-      updatedAt: site.updatedAt,
+    visible.map(({ listing, direct, groups }) => ({
+      name: listing.name,
+      url: siteUrl(siteLabel(listing.name), sitesDomain, protocol(deps)),
+      ...(comments ? { reviewUrl: reviewUrl(appOrigin, listing.name) } : {}),
+      owner: listing.owner,
+      via: { direct, groups: groups.flatMap(id => slugs.get(id) ?? []) },
+      createdAt: listing.createdAt,
+      updatedAt: listing.updatedAt,
     }))
   )
 }
@@ -474,7 +510,7 @@ export async function updateSite(
   applySettings(site, patch)
   const before =
     patch.audience === undefined ? undefined : await applyAudience(deps, site, patch.audience)
-  await save(deps, site, undefined, before)
+  await save(deps, site)
   return {
     ...toSite(deps, user, site),
     ...(before ? { audience: await audienceOf(deps, site) } : {}),

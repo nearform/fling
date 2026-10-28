@@ -1,8 +1,10 @@
 /**
  * Shared with me (GET /api/shared and fling_list `shared`): the restricted sites of others the
- * caller may see, directly or through a group, found from index items and always asked of policy.
+ * caller may see, directly or through a group, found from index items that carry each site's
+ * listing, so listing reads no site.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { requireSite } from '../src/sites.ts'
 import { encode } from '../src/store/evolution.ts'
 import { APP_ORIGIN, api, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
@@ -10,12 +12,12 @@ import { callTool, connect } from './oauth-helpers.ts'
 const page = [file('index.html', '<h1>hi</h1>')]
 type Env = ReturnType<typeof setup>
 
-async function deploy(env: Env, key: string, name: string) {
+async function deploy(env: Env, key: string, name: string, files = page) {
   const res = await api(env, key, 'POST', `/api/sites/${name}/deploys`, {
-    manifest: { files: page.map(f => f.meta) },
+    manifest: { files: files.map(f => f.meta) },
   })
   const body = await json(res)
-  await upload(env, body.uploads, page)
+  await upload(env, body.uploads, files)
   await api(env, key, 'POST', `/api/sites/${name}/deploys/${body.versionId}/finalize`)
 }
 
@@ -25,7 +27,12 @@ const audience = (env: Env, key: string, name: string, emails: string[], groups:
 const shared = async (env: Env, key: string) => {
   const res = await api(env, key, 'GET', '/api/shared')
   expect(res.status).toBe(200)
-  return (await json(res)).sites as { name: string; owner: string; via: unknown }[]
+  return (await json(res)).sites as {
+    name: string
+    owner: string
+    via: unknown
+    updatedAt: string
+  }[]
 }
 const names = async (env: Env, key: string) => (await shared(env, key)).map(s => s.name)
 
@@ -108,12 +115,114 @@ describe('GET /api/shared', () => {
     expect(await names(env, carol.key)).toEqual([])
   })
 
-  it('asks policy of every site, so a stale index item shows nothing', async () => {
+  it('reads no site: one query per source, however many sites are shared', async () => {
+    const { env, alice, carol } = await world()
+    for (const name of ['one', 'two', 'three']) {
+      env.advance(1000)
+      await deploy(env, alice.key, name)
+      await audience(env, alice.key, name, ['carol@example.test'], ['design'])
+    }
+    const findSite = vi.spyOn(env.store, 'findSite')
+    const get = vi.spyOn(env.table, 'get')
+    expect(await names(env, carol.key)).toEqual(['three', 'two', 'one', 'team'])
+    expect(findSite).not.toHaveBeenCalled()
+    expect(get.mock.calls.filter(([pk]) => /^(SITE|NAME)#/.test(pk))).toEqual([])
+  })
+
+  it('shows each deploy’s updatedAt, and follows archive and unarchive', async () => {
+    const { env, alice, bob } = await world()
+    env.advance(60_000)
+    await deploy(env, alice.key, 'direct', [file('index.html', '<h1>again</h1>')])
+    const site = await env.store.findSite('direct')
+    expect((await shared(env, bob.key))[0]?.updatedAt).toBe(site?.updatedAt)
+    await api(env, alice.key, 'POST', '/api/sites/direct/archive')
+    expect(await names(env, bob.key)).toEqual([])
+    env.advance(1000)
+    await api(env, alice.key, 'POST', '/api/sites/direct/unarchive')
+    const [listed] = await shared(env, bob.key)
+    expect(listed?.name).toBe('direct')
+    expect(listed?.updatedAt).toBe((await env.store.findSite('direct'))?.updatedAt)
+  })
+
+  it('answers an item without a listing (v1) from the site, asked of policy', async () => {
+    const { env, bob } = await world()
+    const direct = await env.store.findSite('direct')
+    if (!direct) throw new Error('no site')
+    const { pk, sk } = { pk: 'USER#bob@example.test', sk: `SHARED#${direct.id}` }
+    await env.table.put({
+      pk,
+      sk,
+      type: 'sitegrant',
+      v: 1,
+      email: 'bob@example.test',
+      siteId: direct.id,
+      name: 'direct',
+      owner: 'alice@example.test',
+      grantedAt: direct.updatedAt,
+    })
+    expect(await shared(env, bob.key)).toMatchObject([
+      { name: 'direct', via: { direct: true, groups: [] }, updatedAt: direct.updatedAt },
+    ])
+  })
+
+  it('an interrupted rewrite leaves a stale listing until the site is next saved', async () => {
+    const { env, alice, carol } = await world()
+    // Carol last, so her grant falls past the first transaction.
+    const others = Array.from({ length: 29 }, (_, i) => `u${i}@example.test`)
+    await audience(env, alice.key, 'direct', [...others, 'carol@example.test'])
+    expect(await names(env, carol.key)).toContain('direct')
+    const transact = env.table.transact.bind(env.table)
+    let calls = 0
+    const spy = vi.spyOn(env.table, 'transact').mockImplementation(async ops => {
+      if (++calls > 1) throw new Error('interrupted')
+      return transact(ops)
+    })
+    expect((await api(env, alice.key, 'POST', '/api/sites/direct/archive')).status).toBe(500)
+    spy.mockRestore()
+    expect((await env.store.findSite('direct'))?.archived).toBe(true)
+    // Her grant still carries the listing from before the archive.
+    expect(await names(env, carol.key)).toContain('direct')
+    env.advance(1000)
+    await api(env, alice.key, 'PATCH', '/api/sites/direct', { spa: true })
+    expect(await names(env, carol.key)).not.toContain('direct')
+  })
+
+  it('an item the audience does not back lists the name, and opening the site is still refused', async () => {
+    const { env, carol } = await world()
+    const direct = await env.store.findSite('direct')
+    if (!direct) throw new Error('no site')
+    // A grant with a current listing for someone the audience doesn't name: what two saves of
+    // the site racing can leave.
+    await env.table.put(
+      encode(
+        'sitegrant',
+        { pk: 'USER#carol@example.test', sk: `SHARED#${direct.id}` },
+        {
+          email: 'carol@example.test',
+          siteId: direct.id,
+          name: 'direct',
+          owner: 'alice@example.test',
+          createdAt: direct.createdAt,
+          updatedAt: direct.updatedAt,
+          archived: false,
+          live: true,
+          restricted: true,
+        }
+      )
+    )
+    expect((await names(env, carol.key)).sort()).toEqual(['direct', 'team'])
+    await expect(requireSite(env.deps, carol.user, 'direct', 'site.view')).rejects.toMatchObject({
+      status: 404,
+    })
+    expect((await api(env, carol.key, 'GET', '/api/sites/direct/comments')).status).toBe(404)
+  })
+
+  it('asks policy of every site read for an item without a listing', async () => {
     const { env, alice, carol } = await world()
     const direct = await env.store.findSite('direct')
     if (!direct) throw new Error('no site')
-    // A grant the audience doesn't back (an interrupted write), and a group-site item for a group
-    // the audience doesn't name.
+    // Items without a listing: a grant the audience doesn't back, and a group-site item for a
+    // group the audience doesn't name.
     await env.table.put(
       encode(
         'sitegrant',

@@ -21,8 +21,10 @@
  *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
  *                                                        projection), so a user's sites are one query
  *   USER#<email>           SHARED#<siteId>               direct grant: the email is in the audience
- *                                                        of someone else's site (name, owner) — a
- *                                                        projection of `audience`, so the sites
+ *                                                        of someone else's site — a projection of
+ *                                                        `audience` carrying the site's listing
+ *                                                        (name, owner, createdAt, updatedAt,
+ *                                                        archived, live, restricted), so the sites
  *                                                        shared with a user are one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
@@ -41,8 +43,10 @@
  *
  *   GROUP#<groupId>        GROUP                         group (slug, name, owner, size, …)
  *   GROUP#<groupId>        MEMBER#<email>                a member
- *   GROUP#<groupId>        SITE#<siteId>                 a site whose audience names the group
- *                                                        (name, owner): what deleting it updates
+ *   GROUP#<groupId>        SITE#<siteId>                 a site whose audience names the group,
+ *                                                        with the site's listing (as a grant):
+ *                                                        what deleting the group updates, and how
+ *                                                        its members find the site
  *   USER#<email>           GROUP#<groupId>               membership: written with the member item,
  *                                                        so a user's groups (what policy reads) are
  *                                                        one query
@@ -53,10 +57,23 @@
  *                                                        createdAt }; how a group is found
  *
  * A site's record, its index item and (on creation) its claim are written in one transaction.
- * Grants that change with its audience join that transaction while it has room (25 operations);
- * the rest follow in batches, so an interrupted write can leave a grant out of step with the
- * audience until the site is written again. Policy reads the audience, never the grants. The same
- * goes for the group-site items of the groups the audience names.
+ *
+ * Direct grants and group-site items (v2) carry a copy of the site's listing (`SharedListing`),
+ * so Shared with me reads no site. `putSite` compares the site with the one stored and keeps
+ * them in step: emails and groups that leave the audience lose their item, those that join gain
+ * one, and when a listed field changed (a deploy or rollback, archive or unarchive, an audience or
+ * visibility change) every item is rewritten. Nothing is written when nothing listed changed. The
+ * caps (100 addresses, 10 groups) bound that to a handful of transactions. Removals go first, in
+ * their own batches, while the stored site still names them; then the site, its index item and
+ * as many grant and group-site writes as fit (25 operations); the rest follow in batches. So an
+ * interrupted write can leave an item missing, or with an out-of-date listing, until the site is
+ * next saved (every save changes `updatedAt`, so it rewrites them all), but never one for someone
+ * the stored audience doesn't name. Two saves of one site racing can: an item the audience no
+ * longer backs, which lists the site's name to that user until the audience next names and drops
+ * them, or the site is deleted. Policy reads the audience, never these items, so opening such a
+ * site is still refused. No release wrote v1 items (name and owner only), only development
+ * builds, so no migration fills them in: Shared with me reads the site for any item without a
+ * listing.
  *
  * A group's record, its two copies and (on creation) its claim are written in one transaction with
  * as many member changes as fit; the rest follow in batches of 12 (a member item and its
@@ -126,11 +143,12 @@ import {
   type GroupRecord,
   type GroupSiteRecord,
   type LiveConnectionRecord,
+  listingOf,
   type NameClaim,
   type OAuthClientRecord,
   type OAuthRequestRecord,
   type RefreshTokenRecord,
-  type SiteAudience,
+  type SharedListing,
   type SiteGrantRecord,
   type SiteRecord,
   type SiteRef,
@@ -206,6 +224,21 @@ interface GroupNameClaim {
 }
 
 const bySlug = (groups: GroupRecord[]) => groups.sort((a, b) => compareSk(a.slug, b.slug))
+
+/** Every listing field, so a field added to `SharedListing` can't be left out of the comparison. */
+const LISTING_FIELDS = Object.keys({
+  siteId: true,
+  name: true,
+  owner: true,
+  createdAt: true,
+  updatedAt: true,
+  archived: true,
+  live: true,
+  restricted: true,
+} satisfies Record<keyof SharedListing, true>) as (keyof SharedListing)[]
+
+const sameListing = (a: SharedListing, b: SharedListing) =>
+  LISTING_FIELDS.every(field => a[field] === b[field])
 
 /**
  * `head`, then `pairs` (operations that must land together), as transactions of at most
@@ -453,51 +486,63 @@ export class Records implements Store {
     }
   }
 
-  async putSite(site: SiteRecord, before?: SiteAudience) {
+  async putSite(site: SiteRecord) {
+    const stored = await this.storedSite(site)
+    const before = stored?.audience ?? { emails: [], groups: [] }
+    const after = site.audience
+    const listing = listingOf(site)
+    const relist = !stored || !sameListing(listingOf(stored), listing)
+    const removed: TransactOp[] = [
+      ...before.emails
+        .filter(email => !after.emails.includes(email) && email !== site.email)
+        .map(email => ({ delete: key.siteGrant(email, site.id) })),
+      ...before.groups
+        .filter(groupId => !after.groups.includes(groupId))
+        .map(groupId => ({ delete: key.groupSite(groupId, site.id) })),
+    ]
+    const written: TransactOp[] = [
+      ...after.emails
+        .filter(email => email !== site.email && (relist || !before.emails.includes(email)))
+        .map(email => {
+          const grant: SiteGrantRecord = { email, ...listing }
+          return { put: encode('sitegrant', key.siteGrant(email, site.id), grant) }
+        }),
+      ...after.groups
+        .filter(groupId => relist || !before.groups.includes(groupId))
+        .map(groupId => {
+          const item: GroupSiteRecord = { groupId, ...listing }
+          return { put: encode('groupsite', key.groupSite(groupId, site.id), item) }
+        }),
+    ]
+    // Removals land before the site stops naming them, so an interrupted write never leaves an
+    // item for someone outside the stored audience (the header has the rest of the story).
+    for (let i = 0; i < removed.length; i += TRANSACT_MAX) {
+      await this.table.transact(removed.slice(i, i + TRANSACT_MAX))
+    }
     const ops: TransactOp[] = [
       { put: encode('site', key.site(site.id), site) },
       { put: encode('site', key.siteIndex(site.email, site.name), site) },
-      ...(before ? this.grantOps(site, before.emails, site.audience.emails) : []),
-      ...(before ? this.groupSiteOps(site, before.groups, site.audience.groups) : []),
+      ...written,
     ]
-    await this.table.transact(ops.slice(0, TRANSACT_MAX))
-    for (let i = TRANSACT_MAX; i < ops.length; i += TRANSACT_MAX) {
+    for (let i = 0; i < ops.length; i += TRANSACT_MAX) {
       await this.table.transact(ops.slice(i, i + TRANSACT_MAX))
     }
   }
 
-  /** The grant writes that take a site's direct grants from `before` to `after`. */
-  private grantOps(site: SiteRecord, before: readonly string[], after: readonly string[]) {
-    const ops: TransactOp[] = []
-    for (const email of after) {
-      if (before.includes(email) || email === site.email) continue
-      const grant: SiteGrantRecord = {
-        email,
-        siteId: site.id,
-        name: site.name,
-        owner: site.email,
-        grantedAt: site.updatedAt,
-      }
-      ops.push({ put: encode('sitegrant', key.siteGrant(email, site.id), grant) })
-    }
-    for (const email of before) {
-      if (!after.includes(email)) ops.push({ delete: key.siteGrant(email, site.id) })
-    }
-    return ops
-  }
-
-  /** The group-site writes that take a site's groups from `before` to `after`. */
-  private groupSiteOps(site: SiteRecord, before: readonly string[], after: readonly string[]) {
-    const ops: TransactOp[] = []
-    for (const groupId of after) {
-      if (before.includes(groupId)) continue
-      const item: GroupSiteRecord = { groupId, siteId: site.id, name: site.name, owner: site.email }
-      ops.push({ put: encode('groupsite', key.groupSite(groupId, site.id), item) })
-    }
-    for (const groupId of before) {
-      if (!after.includes(groupId)) ops.push({ delete: key.groupSite(groupId, site.id) })
-    }
-    return ops
+  /**
+   * The site as stored, by its id: the newer of its record and its index item. LEGACY (expand
+   * phase): the index item may be the newer copy, as in `findSite`.
+   */
+  private async storedSite(site: SiteRecord) {
+    const [record, index] = await Promise.all([
+      this.read<SiteRecord>('site', key.site(site.id)),
+      this.read<SiteRecord>('site', key.siteIndex(site.email, site.name)),
+    ])
+    const copies = [record, index].filter((s): s is SiteRecord => s?.id === site.id)
+    return copies.reduce<SiteRecord | null>(
+      (newest, s) => (newest && newest.updatedAt >= s.updatedAt ? newest : s),
+      null
+    )
   }
 
   listSiteGrants(email: string) {

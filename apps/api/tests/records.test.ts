@@ -5,7 +5,7 @@
  * the site-centric keys (production as it is, or a Lambda rolled back to that code), and a site
  * whose name another user holds.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { currentVersion, decode, encode, type Upgrade } from '../src/store/evolution.ts'
 import { Records } from '../src/store/records.ts'
 import type { SiteRecord, VersionRecord } from '../src/store/types.ts'
@@ -197,17 +197,15 @@ describe('direct grants', () => {
     const records = new Records(table)
     const s = site('a@example.test', 'hello')
     await records.createSite(s)
-    const before = s.audience
     s.audience = { emails: ['b@example.test', 'c@example.test', 'a@example.test'], groups: [] }
-    await records.putSite(s, before)
+    await records.putSite(s)
     expect((await records.listSiteGrants('b@example.test')).map(g => g.siteId)).toEqual(['site1'])
     expect(await records.listSiteGrants('a@example.test')).toEqual([])
     const grant = (await records.listSiteGrants('c@example.test'))[0]
     expect(grant).toMatchObject({ email: 'c@example.test', name: 'hello', owner: 'a@example.test' })
 
-    const prev = s.audience
     s.audience = { emails: ['c@example.test', 'd@example.test'], groups: [] }
-    await records.putSite(s, prev)
+    await records.putSite(s)
     expect(await records.listSiteGrants('b@example.test')).toEqual([])
     expect(await records.listSiteGrants('c@example.test')).toHaveLength(1)
     expect(await records.listSiteGrants('d@example.test')).toHaveLength(1)
@@ -225,14 +223,34 @@ describe('direct grants', () => {
     const s = site('a@example.test', 'hello')
     await records.createSite(s)
     const emails = Array.from({ length: 100 }, (_, i) => `u${i}@example.test`)
-    const before = s.audience
     s.audience = { emails, groups: [] }
-    await records.putSite(s, before)
+    await records.putSite(s)
     for (const email of [emails[0], emails[50], emails[99]]) {
       expect(await records.listSiteGrants(email as string)).toHaveLength(1)
     }
-    await records.putSite({ ...s, audience: { emails: [], groups: [] } }, s.audience)
+    await records.putSite({ ...s, audience: { emails: [], groups: [] } })
     expect(await records.listSiteGrants(emails[99] as string)).toEqual([])
+  })
+})
+
+describe('listing copies', () => {
+  it('a save that changes nothing listed writes only the site and its index item', async () => {
+    const table = new MemoryTable()
+    const records = new Records(table)
+    const s = site('a@example.test', 'hello')
+    await records.createSite(s)
+    const emails = Array.from({ length: 30 }, (_, i) => `u${i}@example.test`)
+    s.audience = { emails, groups: [] }
+    await records.putSite(s)
+    const transact = vi.spyOn(table, 'transact')
+    await records.putSite({ ...s, spa: true })
+    expect(transact).toHaveBeenCalledTimes(1)
+    expect(transact.mock.calls[0]?.[0]).toHaveLength(2)
+    await records.putSite({ ...s, updatedAt: '2026-02-01T00:00:00.000Z' })
+    expect(transact.mock.calls.slice(1).flatMap(([ops]) => ops)).toHaveLength(2 + emails.length)
+    expect((await records.listSiteGrants('u29@example.test'))[0]?.updatedAt).toBe(
+      '2026-02-01T00:00:00.000Z'
+    )
   })
 })
 

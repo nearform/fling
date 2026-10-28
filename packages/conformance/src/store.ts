@@ -50,6 +50,21 @@ function site(owner: string, name = siteName(), overrides: Partial<SiteRecord> =
   }
 }
 
+/** The listing a site's grant and group-site items carry (`SharedListing`). */
+function listing(s: SiteRecord) {
+  return {
+    siteId: s.id,
+    name: s.name,
+    owner: s.email,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    archived: s.archived,
+    live: s.currentVersionId !== null,
+    restricted:
+      s.visibility === 'private' && s.audience.emails.length + s.audience.groups.length > 0,
+  }
+}
+
 function group(owner: string, overrides: Partial<GroupRecord> = {}): GroupRecord {
   return {
     id: uid(),
@@ -508,15 +523,49 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const s = site(email())
         await store.createSite(s)
         const withGroup = { ...s, audience: { emails: [], groups: [g.id] } }
-        await store.putSite(withGroup, s.audience)
-        expect(await store.listGroupSites(g.id)).toEqual([
-          { groupId: g.id, siteId: s.id, name: s.name, owner: s.email },
-        ])
-        await store.putSite(s, withGroup.audience)
+        await store.putSite(withGroup)
+        expect(await store.listGroupSites(g.id)).toEqual([{ groupId: g.id, ...listing(withGroup) }])
+        await store.putSite(s)
         expect(await store.listGroupSites(g.id)).toEqual([])
-        await store.putSite(withGroup, s.audience)
+        await store.putSite(withGroup)
         await store.deleteSite(withGroup)
         expect(await store.listGroupSites(g.id)).toEqual([])
+      })
+
+      it('putSite rewrites every grant and group-site item when the listing changes', async () => {
+        const store = await factory()
+        const g = group(email())
+        await store.createGroup(g, [])
+        const [stays, leaves, joins] = [email(), email(), email()]
+        const s = site(email(), siteName(), {
+          currentVersionId: 'v1',
+          audience: { emails: [stays, leaves], groups: [g.id] },
+        })
+        await store.createSite(site(s.email, s.name, { id: s.id }))
+        await store.putSite(s)
+        const grantOf = async (e: string) =>
+          (await store.listSiteGrants(e)).filter(x => x.siteId === s.id)
+        expect(await grantOf(stays)).toEqual([{ email: stays, ...listing(s) }])
+        expect(listing(s)).toMatchObject({ live: true, restricted: true, archived: false })
+
+        const changed: SiteRecord = {
+          ...s,
+          archived: true,
+          currentVersionId: 'v2',
+          updatedAt: LATER,
+          audience: { emails: [stays, joins], groups: [g.id] },
+        }
+        await store.putSite(changed)
+        expect(await grantOf(stays)).toEqual([{ email: stays, ...listing(changed) }])
+        expect(await grantOf(joins)).toEqual([{ email: joins, ...listing(changed) }])
+        expect(await grantOf(leaves)).toEqual([])
+        expect(await store.listGroupSites(g.id)).toEqual([{ groupId: g.id, ...listing(changed) }])
+
+        const open: SiteRecord = { ...changed, archived: false, visibility: 'public' }
+        await store.putSite(open)
+        expect(listing(open)).toMatchObject({ restricted: false, archived: false })
+        expect(await grantOf(stays)).toEqual([{ email: stays, ...listing(open) }])
+        expect(await store.listGroupSites(g.id)).toEqual([{ groupId: g.id, ...listing(open) }])
       })
 
       it('putSite and deleteSite tolerate an audience naming a group that no longer exists', async () => {
@@ -525,14 +574,11 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createSite(s)
         const gone = uid()
         const dangling = { ...s, audience: { emails: [], groups: [gone] } }
-        await store.putSite(dangling, dangling.audience)
+        await store.putSite(dangling)
         expect(await store.findSite(s.name)).toEqual(dangling)
         const later = { ...dangling, audience: { emails: [email()], groups: [gone] } }
-        await store.putSite(later, dangling.audience)
-        await store.putSite(
-          { ...later, audience: { ...later.audience, groups: [] } },
-          later.audience
-        )
+        await store.putSite(later)
+        await store.putSite({ ...later, audience: { ...later.audience, groups: [] } })
         expect(await store.listGroupSites(gone)).toEqual([])
         await store.deleteSite(dangling)
         expect(await store.findSite(s.name)).toBeNull()
@@ -546,7 +592,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createGroup(g, [member])
         const s = site(email())
         await store.createSite(s)
-        await store.putSite({ ...s, audience: { emails: [], groups: [g.id] } }, s.audience)
+        await store.putSite({ ...s, audience: { emails: [], groups: [g.id] } })
         await store.deleteGroup(g)
         expect(await store.findGroup(g.slug)).toBeNull()
         expect(await store.getGroups([g.id])).toEqual([])

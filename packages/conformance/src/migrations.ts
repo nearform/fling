@@ -1,6 +1,6 @@
 /**
- * The data migrations on a real backend: 0001 (site-centric keys, expand), 0002 (contract) and
- * 0003 (users index) run by the runner over a table holding exactly what production holds today: items written by the
+ * The data migrations on a real backend: 0001 (site-centric keys, expand), 0002 (contract), 0003
+ * (users index) and 0004 (site directory) run by the runner over a table holding exactly what production holds today: items written by the
  * code before the site-centric keys (no `v`, the old keys), including the anomalies a long-lived
  * table collects. Each test needs a table of its own (migrations scan everything and keep their
  * state in it), so the factory must return a fresh, empty one.
@@ -166,7 +166,7 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       const after = await scanAll(table)
       // Every item that was there is still there, unchanged.
       expect(
-        without(after, ['SITE#', 'MIGRATION#', 'USERS']).sort((x, y) =>
+        without(after, ['SITE#', 'SITES', 'MIGRATION#', 'USERS']).sort((x, y) =>
           keyOf(x) < keyOf(y) ? -1 : 1
         )
       ).toEqual([...before].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1)))
@@ -401,6 +401,136 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
       })
       expect(counts).toEqual({ 'user present': 3 })
       expect(await scanAll(table)).toEqual(once)
+    })
+
+    /** One migration by id, run over `items` as a page. */
+    async function applyOne(id: string, table: Table, items: TableItem[]) {
+      const m = MIGRATIONS.find(x => x.id === id)
+      if (!m) throw new Error(`no ${id}`)
+      const counts: Record<string, number> = {}
+      await m.apply(items, {
+        table,
+        dryRun: false,
+        count: (what, n = 1) => {
+          counts[what] = (counts[what] ?? 0) + n
+        },
+      })
+      return counts
+    }
+
+    it('0004 lists every site in the directory, skips stale copies, keeps fresher items, adds nothing else', async () => {
+      const table = await seeded()
+      // A site the API saved on the new release: its directory item is fresher than what this
+      // run reads, and kept as it is.
+      const fresh = {
+        pk: 'SITES',
+        sk: 'SITE#pub',
+        type: 'sitedirectory',
+        siteId: 'S4',
+        name: 'pub',
+        owner: 'bob@example.test',
+        createdAt: T(0),
+        updatedAt: T(9),
+        archived: false,
+        live: true,
+        restricted: false,
+        access: 'public',
+        v: 1,
+      }
+      await table.put(fresh)
+      // A site from after audiences, restricted to people, whose record (in its partition) is
+      // newer than its index item: the newer copy is the site.
+      const team = oldSite('carol@example.test', 'team', 'S5', {
+        currentVersionId: 'v1',
+        audience: { emails: ['dave@example.test'], groups: ['g1'] },
+        v: 2,
+      })
+      await table.put(team)
+      await table.put({ ...team, pk: 'SITE#S5', sk: 'SITE', archived: true, updatedAt: T(3) })
+      await table.put(claim('team', 'carol@example.test', 'S5'))
+      // Restricted to the owner alone (the only_me level).
+      const mine = oldSite('carol@example.test', 'mine', 'S6', { restricted: true, v: 2 })
+      await table.put(mine)
+      await table.put(claim('mine', 'carol@example.test', 'S6'))
+      const before = await scanAll(table)
+
+      const run = await runMigrations(table, { migrations: MIGRATIONS, only: ['0004'] })
+      onlyRan(run, '0004')
+      expect(entry(run, '0004').counts).toEqual({
+        'site indexed': 5,
+        'site present': 1,
+        'site skipped (stale)': 1,
+      })
+      const after = await scanAll(table)
+      const keyed = (xs: TableItem[]) => [...xs].sort((x, y) => (keyOf(x) < keyOf(y) ? -1 : 1))
+      expect(keyed(without(after, ['SITES', 'MIGRATION#']))).toEqual(
+        keyed(without(before, ['SITES']))
+      )
+      expect(await table.get('SITES', 'SITE#pub')).toEqual(fresh)
+      expect(await table.get('SITES', 'SITE#team')).toEqual({
+        pk: 'SITES',
+        sk: 'SITE#team',
+        type: 'sitedirectory',
+        siteId: 'S5',
+        name: 'team',
+        owner: 'carol@example.test',
+        createdAt: T(0),
+        updatedAt: T(3),
+        archived: true,
+        live: true,
+        restricted: true,
+        access: 'people',
+        v: 1,
+      })
+
+      const listed = await new Records(table).listAllSites({ limit: 10 })
+      expect(listed.sites.map(x => [x.name, x.owner, x.access, x.archived, x.live])).toEqual([
+        ['docs', 'alice@example.test', 'members', true, true],
+        ['draft', 'alice@example.test', 'members', false, false],
+        ['hello', 'alice@example.test', 'members', false, true],
+        ['mine', 'carol@example.test', 'only_me', false, false],
+        ['pub', 'bob@example.test', 'public', false, true],
+        ['team', 'carol@example.test', 'people', true, true],
+      ])
+      expect(listed.sites.find(x => x.name === 'hello')?.siteId).toBe('S1')
+    })
+
+    it('0004 is idempotent and runs on deploy after 0001', async () => {
+      const table = await seeded()
+      const run = await runMigrations(table, { migrations: MIGRATIONS, pageSize: 5 })
+      expect(entry(run, '0004')).toMatchObject({
+        status: 'completed',
+        counts: { 'site indexed': 4, 'site skipped (stale)': 1 },
+      })
+      const once = await scanAll(table)
+      const again = await runMigrations(table, { migrations: MIGRATIONS })
+      expect(entry(again, '0004').status).toBe('up-to-date')
+      expect(await applyOne('0004', table, without(once, ['MIGRATION#']))).toEqual({
+        'site present': 4,
+        'site skipped (stale)': 1,
+      })
+      expect(await scanAll(table)).toEqual(once)
+    })
+
+    it('0004 takes back the item of a site deleted while it ran', async () => {
+      const table = await seeded()
+      // The site is deleted (its claim released) just as the item is written.
+      const put: Table['put'] = async (item, cond) => {
+        await table.put(item, cond)
+        if (item.pk === 'SITES' && item.sk === 'SITE#draft')
+          await table.delete('NAME#draft', 'NAME')
+      }
+      const racing = new Proxy(table, {
+        get(target, prop) {
+          if (prop === 'put') return put
+          const value = Reflect.get(target, prop, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+      const draft = await table.get('USER#alice@example.test', 'SITE#draft')
+      if (!draft) throw new Error('no draft')
+      expect(await applyOne('0004', racing, [draft])).toEqual({ 'site gone': 1 })
+      expect(await table.get('SITES', 'SITE#draft')).toBeNull()
     })
   })
 }

@@ -8,8 +8,8 @@ description: Deploy, host, publish or share a static site, HTML file (including 
 Fling puts a folder of static files online at a stable URL: `https://<name>.<sites domain>` on the
 Fling server the user is logged in to (`fling_whoami` shows where sites are served; the tool
 descriptions name it too). Site names are one global namespace on that server — **first come,
-first served** across everyone who uses it. Sites are **private by default** — only people signed
-in to that Fling can view them. Re-flinging the same name updates the site in place; identical
+first served** across everyone who uses it. A new site is **visible only to the user** unless they
+say otherwise (or the Fling opens new sites to everyone signed in to it). Re-flinging the same name updates the site in place; identical
 content is a no-op; older content is restored instantly.
 
 ## When to use
@@ -52,10 +52,16 @@ or unique part of it, e.g. `fling.example.com`).
    name Fling would generate (e.g. `rocketpod-docs`), its URL and whether it is `available`,
    `yours` (deploying updates their existing site) or `taken`. Confirm the name with the user before
    deploying. Re-deploying a site you already flung in this conversation needs no confirmation.
+   **Ask who should see a new site**, unless the user already said: only them (`only_me`, the
+   usual default), everyone signed in to the Fling (`members`), specific people or teams
+   (`people` with `emails`, `groups` with `groups` by slug; both may be given), or anyone
+   (`public`, only when asked). Pass it as `access` on the first deploy. A re-deploy never changes
+   who can see a site: use `fling_set_access` for that.
 3. **Fling the output folder**, not the project root. Prefer the MCP tool:
-   `fling_deploy { path: "dist", name?: "my-app", spa?: true, public?: false }`
+   `fling_deploy { path: "dist", name?: "my-app", spa?: true, access?: "only_me" }`
    (`path` is absolute or relative to the working directory). Without the MCP server, use the CLI
-   with `--yes` (it never prompts then): `fling deploy ./dist --name my-app --yes`. Use `fling` if it is
+   with `--yes` (it never prompts then): `fling deploy ./dist --name my-app --access only_me --yes`
+   (`--access people --add a@example.com`, `--access groups --group design`). Use `fling` if it is
    installed (`command -v fling`); otherwise prefix with `npx @nearform/fling`, and suggest the user
    installs it once (the Get started page of their Fling shows the command).
    For content you wrote in this conversation, use `fling_publish { name, files: [{ path, content,
@@ -63,7 +69,8 @@ or unique part of it, e.g. `fling.example.com`).
 4. **If the name is taken** (someone else owns it), the tool fails and lists free suggestions
    (the name plus the user's initials, e.g. `my-app-cc`). Ask the user to pick one or give another
    name, then deploy again with `name`. Never silently pick a different name.
-5. **Report the links** the tool returns and whether the site is private or public, plus any
+5. **Report the links** the tool returns and who can open the site (a new site's result says so,
+   and how to change it), plus any
    `warnings`. When the Fling has comments, the result leads with the review link (`reviewUrl`):
    give it first, as the link to share for feedback (reviewers sign in to the Fling to see the
    site and comment), then the site URL.
@@ -143,17 +150,23 @@ It is remembered, and becomes the current one only if none is.
 
 `fling_whoami` checks the login.
 
-## Sharing and visibility
+## Who can see a site
+
+- Five access levels, narrowest first: `only_me`, `groups`, `people`, `members`, `public`.
+  `fling_set_access { name, access, emails?, groups? }` sets any of them (`groups` and `people`
+  take the whole list of addresses and group slugs, and may name both). Only change it when the
+  user asks. `fling_info` shows who can open a site.
 
 - `fling_share { name }` returns a public share link (`https://s--<token>.<sites domain>`).
   **Anyone with a share link can view the site without signing in** — say so when you hand it over,
   and only create one when the user wants to share with people who can't sign in.
 - `refresh: true` replaces the link (the old one stops working); `revoke: true` removes it.
 - `fling_set_visibility { name, visibility: "public" }` makes the site itself public (anyone can open it;
-  its review page and comments still need sign-in); `"private"` puts it back behind sign-in. Prefer a share link over making a site public.
-- `fling_set_audience { name, add?, remove?, set?, clear? }` limits a private site to listed
-  people (addresses that can sign in to the Fling); `clear: true` opens it to everyone signed in
-  again. The owner always sees it. It only applies while the site is private, a share link still
+  its review page and comments still need sign-in); `"private"` gives it back the access it had
+  (only the user, everyone signed in, or its list). Prefer a share link over making a site public.
+- `fling_set_audience { name, add?, remove?, set?, clear? }` edits that list of people
+  (addresses that can sign in to the Fling) and limits the site to them; `clear: true` opens it to
+  everyone signed in. The owner always sees it. It only applies while the site is private, a share link still
   opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 5
   minutes. `fling_info` shows who can open a site.
 - `addGroups`, `removeGroups` and `setGroups` on `fling_set_audience` do the same for **groups**

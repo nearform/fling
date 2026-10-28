@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Access levels.** A site is open to only you, teams, specific people, everyone signed in or
+  anyone. `fling deploy --access only_me|members|groups|people|public` (with `--add <emails>` and
+  `--group <slugs>`) chooses it for a new site; without it a new site gets the Fling's default,
+  only you unless the Fling says otherwise, and the deploy says who can open it. A re-deploy never
+  changes it. `fling access <name> --only-me | --members | --public` changes it later; `fling ls`
+  shows an ACCESS column in place of VISIBILITY, and `fling info` an Access line (the detailed one
+  is now Who). The MCP tools `fling_deploy` and `fling_publish` take `access` (with `emails` and
+  `groups`), and `fling_set_access` sets any level. Upgrade note: on a Fling with the new default,
+  a site you create without `--access` is no longer visible to everyone signed in; pass
+  `--access members` for that, or `fling access <name> --members` afterwards.
+
 - **Notifications.** On a Fling with email, `fling notifications` shows what it tells you about
   (sites shared with you, groups you are added to, comments on your sites and replies in your
   threads), per event and channel, marking the ones you chose. `fling notifications set <event>

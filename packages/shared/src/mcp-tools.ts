@@ -11,6 +11,7 @@
  * from its config, the local one from the instance the CLI is logged in to.
  */
 import { z } from 'zod'
+import { ACCESS_LEVELS, type DefaultAccessLevel } from './access.ts'
 import type { VersionFiles } from './api.ts'
 import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import {
@@ -22,7 +23,12 @@ import {
 } from './comments.ts'
 import { GROUP_MEMBERS_MAX, GROUP_NAME_MAX, GROUP_SLUG_RULES } from './groups.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
-import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
+import {
+  defaultAccessOf,
+  type InstanceMetadata,
+  instanceSitesPattern,
+  privateAudience,
+} from './instance.ts'
 import { MAX_FILES } from './limits.ts'
 import { CellChangeSchema } from './notifications.ts'
 import { SITE_SORTS } from './site-sort.ts'
@@ -65,6 +71,11 @@ export interface McpWording {
   signIn: string
   /** Where people review a site in the browser: `https://fling.example.test/review/<name>`. */
   reviewPattern: string
+  /**
+   * Who can open a new site that names no access level (the instance's `defaultAccess`); unset
+   * when the wording names no one instance.
+   */
+  defaultAccess?: DefaultAccessLevel
 }
 
 const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
@@ -73,7 +84,7 @@ const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<na
 export function mcpWording(
   instance?:
     | (Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> &
-        Partial<Pick<InstanceMetadata, 'appOrigin'>>)
+        Partial<Pick<InstanceMetadata, 'appOrigin' | 'defaultAccess'>>)
     | null
 ): McpWording {
   if (!instance) {
@@ -91,8 +102,30 @@ export function mcpWording(
     privateAudience: privateAudience(instance),
     signIn: `their ${instance.auth.displayName} account`,
     reviewPattern: instance.appOrigin ? reviewUrl(instance.appOrigin, '<name>') : GENERIC_REVIEW,
+    defaultAccess: defaultAccessOf(instance),
   }
 }
+
+/** Who can open a new site that names no access level, for copy. */
+const defaultAccessPhrase = (w: McpWording) =>
+  w.defaultAccess === 'members'
+    ? `open to ${w.privateAudience}`
+    : w.defaultAccess === 'only_me'
+      ? 'visible only to the user'
+      : "given the Fling's default (only the user, unless the Fling is set up otherwise)"
+
+/**
+ * What both servers tell the agent about access levels: ask before the first publish, the levels,
+ * the default, and that re-publishing never changes them.
+ */
+export const ACCESS_NOTE = (w: McpWording) =>
+  'Before publishing a new site, ask the user who should be able to open it, unless they already said, and pass ' +
+  '`access`: `only_me` (only the user), `members` (' +
+  w.privateAudience +
+  '), `groups` or `people` (only the groups in `groups`, by slug, and the addresses in `emails`; one site may ' +
+  'name both), or `public` (anyone, no sign-in; only if the user asks). Without `access` a new site is ' +
+  `${defaultAccessPhrase(w)}. Re-publishing never changes who can open an existing site: use fling_set_access ` +
+  'for that. Share links (fling_share) open a site to anyone who has them.'
 
 // --- shared wording -----------------------------------------------------------------------------
 
@@ -166,16 +199,29 @@ export function mcpToolsFor(w: McpWording) {
     `Site names are 1-${SITE_NAME_MAX} chars of lowercase letters, digits and single hyphens, and are ` +
     `one global namespace (first come, first served): the site is served at ${w.sitesPattern}.`
 
-  const VISIBILITY =
-    `Sites are private by default (only ${w.privateAudience} can open them); pass \`public: true\` only if ` +
-    'the user asks for a public site. Share links (fling_share) are public to anyone who has them.'
+  const VISIBILITY = ACCESS_NOTE(w)
 
   const isPublic = z
     .boolean()
     .optional()
     .describe(
-      `true → anyone can view; false → only ${w.privateAudience}. Omit to keep the current setting (new sites are private)`
+      'Prefer `access` (a new site) or fling_set_access (an existing one). true → anyone can view; false → private. Omit to keep the current setting'
     )
+
+  const access = z
+    .enum(ACCESS_LEVELS)
+    .optional()
+    .describe(
+      `Who can open a new site: only_me, members (${w.privateAudience}), groups, people or public. ` +
+        `Ask the user before the first publish; omit for the default (${defaultAccessPhrase(w)}). ` +
+        'Ignored when the site already exists'
+    )
+  const accessEmails = emails
+    .optional()
+    .describe('With access "people" (or "groups"): the addresses that may open it')
+  const accessGroups = groupSlugs
+    .optional()
+    .describe('With access "groups" (or "people"): the groups, by slug, whose members may open it')
 
   return {
     whoami: tool({
@@ -274,6 +320,9 @@ export function mcpToolsFor(w: McpWording) {
           .max(MAX_FILES)
           .describe('Every file of the site'),
         spa,
+        access,
+        emails: accessEmails,
+        groups: accessGroups,
         public: isPublic,
         listHtml,
       },
@@ -288,7 +337,14 @@ export function mcpToolsFor(w: McpWording) {
         'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
         `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
         `${NAME_REQUIRED} ${VISIBILITY}`,
-      inputSchema: { name: siteName, spa, public: isPublic },
+      inputSchema: {
+        name: siteName,
+        spa,
+        access,
+        emails: accessEmails,
+        groups: accessGroups,
+        public: isPublic,
+      },
       annotations: { destructiveHint: false, openWorldHint: false },
     }),
 
@@ -345,10 +401,32 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { destructiveHint: false, openWorldHint: true },
     }),
 
+    setAccess: tool({
+      name: 'fling_set_access',
+      title: 'Set who can open a site',
+      description:
+        "Set a site's access level: `only_me` (only the user), `members` (" +
+        w.privateAudience +
+        '), `groups` and `people` (only the user, the groups in `groups` by slug and the addresses in `emails`; ' +
+        'both levels take both, and replace the whole audience), or `public` (anyone can open the site; its review ' +
+        'page and comments still need sign-in). Only change it when the user asks. Each address must be one that can ' +
+        `sign in to ${w.name}. Share links still open the site to anyone who has them. Someone who loses access is ` +
+        'shut out within 5 minutes; people and groups added are told by email when the instance sends it.',
+      inputSchema: {
+        name: siteName,
+        access: z.enum(ACCESS_LEVELS).describe('only_me, members, groups, people or public'),
+        emails: emails.optional().describe('For groups or people: the addresses that may open it'),
+        groups: groupSlugs
+          .optional()
+          .describe('For groups or people: the groups (slugs, fling_groups) whose members may'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: true },
+    }),
+
     setVisibility: tool({
       name: 'fling_set_visibility',
       title: 'Set visibility',
-      description: `Make a site private (open to ${w.privateAudience}) or public (anyone can open the site; its review page and comments still need sign-in).`,
+      description: `Make a site private or public (anyone can open the site; its review page and comments still need sign-in). Making it private gives it back the access it had before (only the user, ${w.privateAudience}, or its audience). fling_set_access sets any level.`,
       inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
       annotations: { idempotentHint: true, openWorldHint: true },
     }),
@@ -357,7 +435,8 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_set_audience',
       title: 'Set who can see a private site',
       description:
-        `Limit a private site to listed people and groups (its audience), or open it again to ${w.privateAudience}. ` +
+        `Limit a private site to listed people and groups (its audience), or open it again to ${w.privateAudience}; ` +
+        'fling_set_access does the same for whole levels, including only the user. ' +
         '`add` and `remove` change the addresses and `set` replaces them; `addGroups`, `removeGroups` and ' +
         '`setGroups` do the same for groups, by slug (fling_groups lists them); `clear` empties both (then every ' +
         'signed-in member can see it again). The owner always sees the site. Each address must be one that can ' +
@@ -611,8 +690,8 @@ export const mcpRemoteInstructions = (
     'Every site needs a name. If the user did not give one, propose a short descriptive name and confirm it before ' +
       'publishing (fling_check_name shows whether it is free). Names are global and first come, first served; when a ' +
       'name is taken, offer the returned suggestions.',
-    `Sites are private (open to ${w.privateAudience}) by default. Only make one public if asked; to show a private ` +
-      'site to someone who cannot sign in, create a share link with fling_share.',
+    `${ACCESS_NOTE(w)} To show a site that is not public to someone who cannot sign in, create a share link with ` +
+      'fling_share.',
     'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
       'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +
       '(`listHtml: false`, the root URL will 404), then retry.',

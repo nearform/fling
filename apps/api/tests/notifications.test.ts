@@ -46,6 +46,7 @@ const page = [file('index.html', '<h1>hi</h1>')]
 async function deploy(env: Env, key: string, name: string) {
   const res = await api(env, key, 'POST', `/api/sites/${name}/deploys`, {
     manifest: { files: page.map(f => f.meta) },
+    access: 'members',
   })
   const body = await json(res)
   await upload(env, body.uploads, page)
@@ -138,6 +139,48 @@ describe('sharing a site', () => {
     expect(subjects(env, ALICE)).toEqual([])
     const text = env.mailer.sentTo(CAROL)[0]?.message.text ?? ''
     expect(text).toContain('Alice (alice@example.test) shared q3-report with Design team')
+  })
+
+  it('only you → an audience tells those added; only you again drops what is in flight; members tells nobody', async () => {
+    const { env, alice } = await world()
+    const access = (body: object) => api(env, alice.key, 'PATCH', '/api/sites/q3-report', body)
+    expect((await access({ access: 'only_me' })).status).toBe(200)
+    env.advance(1000)
+    await access({ access: 'people', audience: { emails: [BOB] } })
+    await settle(env)
+    expect(subjects(env, BOB)).toEqual(['Acme Fling: Alice shared q3-report with you'])
+
+    env.advance(1000)
+    await access({ access: 'people', audience: { emails: [BOB, CAROL] } })
+    env.advance(1000)
+    await access({ access: 'only_me' })
+    await settle(env)
+    // Carol was added, but by the drain the site was no one's but Alice's: the item was dropped.
+    expect(subjects(env, CAROL)).toEqual([])
+
+    // Opening the site to every member, or to anyone, tells nobody.
+    env.advance(1000)
+    await access({ access: 'members' })
+    env.advance(1000)
+    await access({ access: 'public' })
+    await settle(env)
+    expect(env.mailer.sent).toHaveLength(1)
+  })
+
+  it('a new site published with an audience tells it once the site is live', async () => {
+    const { env, alice } = await world()
+    const res = await api(env, alice.key, 'POST', '/api/sites/launch/deploys', {
+      manifest: { files: page.map(f => f.meta) },
+      access: 'people',
+      audience: { emails: [DAN] },
+    })
+    const body = await json(res)
+    await settle(env)
+    expect(subjects(env, DAN)).toEqual([])
+    await upload(env, body.uploads, page)
+    await api(env, alice.key, 'POST', `/api/sites/launch/deploys/${body.versionId}/finalize`)
+    await settle(env)
+    expect(subjects(env, DAN)).toEqual(['Acme Fling: Alice shared launch with you'])
   })
 
   it('drops a share the owner took back before the drain (the policy check at send time)', async () => {

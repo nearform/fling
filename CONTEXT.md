@@ -23,7 +23,9 @@ site at a complete version.
 and files containing secrets. The CLI and local MCP check first for early, specific messages;
 Publication is the guarantee.
 
-**Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link. The address
+**Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link, whatever its
+access level (a restricted one, only the owner's included: handing out the link is the owner's
+choice). The address
 is the secret, so responses on a share host say `Referrer-Policy: no-referrer` and the browser
 sends it to no one (`siteResponseHeaders` in `packages/shared/src/site-routing.ts`). Known limits:
 a page's own `<meta name="referrer">` still wins, and on AWS only the responses the CloudFront
@@ -38,16 +40,36 @@ one of your sites (overview, access, versions, archive and delete), in sections 
 (`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or
 name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `fling_list` `sort`.
 
-**Private** — visible to any signed-in member of the instance (not only the owner), unless it has
-an audience. **Public** — anyone can open the site itself; its review page and comments still need
-sign-in (`comment.*` in `policy.ts` is for signed-in users only).
+**Access level** — who can open a site, one of five, narrowest first: **only you** (`only_me`, the
+owner alone), **teams** (`groups`) and **specific people** (`people`), both an audience (one site may
+name groups and addresses; its level is `people` when it names an address), **everyone signed in**
+(`members`) and **public** (`public`). The contract (names, labels, descriptions, the mapping onto
+visibility, restriction and audience, the CLI's and MCP's words) is
+`packages/shared/src/access.ts`; `applyAccess` and `initialAccess` in `apps/api/src/sites.ts` set
+it. A new site gets the level its first deploy names (`access` on `POST …/deploys`, `fling deploy
+--access`, `access` on `fling_deploy` and `fling_publish`), else the instance's default,
+`SITE_DEFAULT_ACCESS` (`only_me` unless set to `members`), published as `defaultAccess` in the
+metadata. A re-deploy never changes it. `PATCH /api/sites/<name> { access, audience? }`, `fling
+access --only-me | --members | --public`, `fling_set_access` and the site's Access section change
+it; the `accessLevels` capability.
 
-**Audience** — the people, besides its owner, who may see a private site: addresses, each one the
+**Private** — not public: open to every signed-in member of the instance, unless it is
+restricted. **Public** — anyone can open the site itself; its review page and comments still need
+sign-in (`comment.*` in `policy.ts` is for signed-in users only). Making a public site private gives
+it back the access it had (only you, its audience, or every member).
+
+**Restricted** — a private site only its owner and its audience see, and only they take part in its
+comments (`SiteRecord.restricted`; `isRestricted` in `policy.ts`). With an empty audience, only its
+owner: the `only_me` level. A record from before access levels has no `restricted`, and is
+restricted exactly when its audience names someone, so every existing site keeps its access.
+
+**Audience** — the people, besides its owner, who may see a restricted site: addresses, each one the
 instance's email policy admits, and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`;
 contract in `packages/shared/src/audience.ts`). Clients name a group by its slug; the audience
-stores its id. Empty means every member. A private site with an
-audience is **restricted**: only its owner and audience see it, and only they take part in its
-comments. The audience is kept, and ignored, while the site is public. Each address also gets a
+stores its id. Editing the audience alone (`PATCH { audience }`, `fling access --add`,
+`fling_set_audience`) restricts the site when it names someone and opens it to every member when
+it is emptied; the `only_me` and `members` levels empty it. The audience is kept, and ignored,
+while the site is public. Each address also gets a
 **direct grant** (`USER#<email>/SHARED#<siteId>`), a projection for listing the sites shared with
 someone; each group a group-site item (`GROUP#<id>/SITE#<siteId>`), so deleting the group can take
 it out of every audience. Both carry the site's **listing** (`SharedListing` in
@@ -83,7 +105,8 @@ sharee sees the name, URL, review page, owner, when it was updated and how it re
 nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
 `fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.
 
-**Site pass** — how the edge lets someone into a restricted site without holding its audience: a
+**Site pass** — how the edge lets someone into a restricted site (only the owner's included)
+without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
 for 5 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
 `/auth/login`, where the API asks policy and sends a viewer to `/_fling-pass?t=<handoff>` on the
@@ -116,7 +139,8 @@ pure function every site route and MCP tool goes through. Actors resolve to a ro
 group), **member** (any other
 signed-in user), **share** (holds its current share link), **anonymous**. What a role may do depends
 on the site's access: public, private, or restricted. `site.view` and the comment actions reach
-beyond the owner (on a restricted site, only to its viewers and share-link holders). A refusal looks
+beyond the owner (on a restricted site, only to its viewers and share-link holders; on an `only_me`
+one, to share-link holders alone). A refusal looks
 like a missing site (404). Groups have their own, smaller table, `canGroup(actor, action, group)`:
 anyone signed in may read one, its owner may change or delete it, and a refusal is a 403 (groups
 are not secret).

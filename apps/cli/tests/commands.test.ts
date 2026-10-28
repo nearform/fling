@@ -102,7 +102,7 @@ describe('commands', () => {
     const { ctx, out } = await testContext({ store, fetch: m.fetch })
     await runList(ctx, { archived: true })
     expect(m.calls[0]?.url.searchParams.get('archived')).toBe('1')
-    expect(out.content()).toMatch(/NAME\s+URL\s+VISIBILITY\s+SHARE\s+UPDATED/)
+    expect(out.content()).toMatch(/NAME\s+URL\s+ACCESS\s+SHARE\s+UPDATED/)
     expect(out.content()).toContain('https://s-x.test/')
   })
 

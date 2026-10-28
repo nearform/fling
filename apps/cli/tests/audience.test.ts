@@ -55,6 +55,55 @@ function server(start: SiteDetail) {
   return { ...m, patches }
 }
 
+describe('fling access --only-me | --members | --public', () => {
+  async function withLevels(response: object) {
+    const store = await loggedInStore()
+    await store.putServer(SERVER, {
+      instance: { ...INSTANCE, capabilities: { ...INSTANCE.capabilities, accessLevels: true } },
+    })
+    const patches: unknown[] = []
+    const m = mockFetch({
+      'PATCH /api/sites/my-app': (_url, init) => {
+        patches.push(JSON.parse(String(init.body)))
+        return jsonResponse({ ...site(), audience: { emails: [], groups: [] }, ...response })
+      },
+    })
+    return { ...(await testContext({ store, fetch: m.fetch })), patches }
+  }
+
+  it('sets the level', async () => {
+    const mine = await withLevels({ access: 'only_me', restricted: true })
+    await runAccess(mine.ctx, 'my-app', { onlyMe: true })
+    expect(mine.patches).toEqual([{ access: 'only_me' }])
+    expect(mine.out.content()).toBe('Only you: nobody else can open it.\n')
+    const all = await withLevels({ access: 'members' })
+    await runAccess(all.ctx, 'my-app', { members: true })
+    expect(all.patches).toEqual([{ access: 'members' }])
+    expect(all.out.content()).toBe(`Private: ${MEMBERS} can open it.\n`)
+  })
+
+  it('refuses a level with people, or two levels', async () => {
+    const { ctx, patches } = await withLevels({})
+    expect(
+      (await captureError(runAccess(ctx, 'my-app', { onlyMe: true, add: ['bob@example.test'] })))
+        .message
+    ).toMatch(/lets no one else in/)
+    expect(
+      (await captureError(runAccess(ctx, 'my-app', { onlyMe: true, public: true }))).message
+    ).toMatch(/one of/)
+    expect(patches).toEqual([])
+  })
+
+  it('refuses on a Fling without access levels (it would ignore the change)', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({ 'GET /.well-known/fling': () => jsonResponse(INSTANCE) })
+    const { ctx } = await testContext({ store, fetch: m.fetch })
+    expect((await captureError(runAccess(ctx, 'my-app', { onlyMe: true }))).message).toMatch(
+      /has no access levels yet/
+    )
+  })
+})
+
 describe('fling access', () => {
   it('shows who can open the site', async () => {
     const store = await loggedInStore()

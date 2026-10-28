@@ -11,6 +11,7 @@
  */
 import { createHash } from 'node:crypto'
 import {
+  type AccessLevel,
   extractHtmlTitle,
   isHtmlPath,
   isValidSitePath,
@@ -37,7 +38,13 @@ export interface InlineFile {
   bytes: Uint8Array
 }
 
-export interface PublishOptions {
+/** Who can open a site the publish creates (ignored for an existing one). */
+export interface AccessOptions {
+  access?: AccessLevel
+  audience?: { emails: string[]; groups: string[] }
+}
+
+export interface PublishOptions extends AccessOptions {
   spa?: boolean
   visibility?: Visibility
   /** no root index.html: true → generate a listing page; false → publish anyway; undefined → ask */
@@ -51,6 +58,8 @@ export type PublishOutcome =
       status: 'live' | 'unchanged' | 'repointed'
       versionId: string
       site: Site
+      /** this publish made the site live for the first time */
+      first?: boolean
       fileCount: number
       totalBytes: number
       generatedIndex: boolean
@@ -138,7 +147,7 @@ export async function publishFiles(
     user,
     name,
     [...files].map(([path, bytes]) => ({ path, bytes })),
-    { spa: opts.spa, visibility: opts.visibility }
+    { spa: opts.spa, visibility: opts.visibility, access: opts.access, audience: opts.audience }
   )
   return {
     kind: 'published',
@@ -161,7 +170,7 @@ export async function beginUpload(
   deps: Deps,
   user: User,
   name: string,
-  opts: { spa?: boolean; visibility?: Visibility }
+  opts: { spa?: boolean; visibility?: Visibility } & AccessOptions
 ): Promise<UploadRecord> {
   // Fail early on a bad or taken name, before anything is uploaded.
   const check = await sites.checkName(deps, user, name)
@@ -183,6 +192,8 @@ export async function beginUpload(
     name,
     spa: opts.spa,
     visibility: opts.visibility,
+    ...(opts.access ? { access: opts.access } : {}),
+    ...(opts.audience ? { audience: opts.audience } : {}),
     createdAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + MCP_UPLOAD_TTL_SECONDS * 1000).toISOString(),
   }
@@ -274,6 +285,8 @@ export async function finishUpload(
   const outcome = await publishFiles(deps, user, upload.name, files, {
     spa: upload.spa,
     visibility: upload.visibility,
+    access: upload.access,
+    audience: upload.audience,
     listHtml: opts.listHtml,
   })
   // Keep the staged upload when the user still has to decide about the index page.

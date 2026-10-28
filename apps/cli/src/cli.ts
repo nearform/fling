@@ -149,8 +149,14 @@ program
   )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
   .option(
+    '--access <level>',
+    "who can open a new site: only_me, members (everyone signed in), groups, people or public (default: the Fling's, usually only_me). A deployed site keeps its access: see `access`"
+  )
+  .option('--add <emails...>', 'with --access people: the addresses that may open it')
+  .option('--group <slugs...>', 'with --access groups: the groups whose members may open it')
+  .option(
     '--public',
-    'make the site public: anyone can open it, reviewing still needs sign-in (default: sign-in required)'
+    'make the site public: anyone can open it, reviewing still needs sign-in (on every deploy; for a new site prefer --access public)'
   )
   .option(
     '-y, --yes',
@@ -163,7 +169,16 @@ program
       (
         ctx,
         path: string | undefined,
-        opts: { name?: string; spa?: boolean; public?: boolean; yes?: boolean; listHtml?: boolean }
+        opts: {
+          name?: string
+          spa?: boolean
+          access?: string
+          add?: string[]
+          group?: string[]
+          public?: boolean
+          yes?: boolean
+          listHtml?: boolean
+        }
       ) => runDeploy(ctx, path, opts)
     )
   )
@@ -284,7 +299,18 @@ program
 program
   .command('access <name>')
   .helpGroup('Sites:')
-  .description('show who can open a private site, or limit it to listed people and groups')
+  .description(
+    'show who can open a site, or change it: only you, everyone signed in, listed people and groups, or anyone'
+  )
+  .addOption(new Option('--only-me', 'only you can open it').conflicts(['members', 'public']))
+  .addOption(new Option('--members', 'everyone signed in can open it').conflicts('public'))
+  .addOption(
+    new Option('--public', 'anyone can open it; reviewing still needs sign-in').conflicts([
+      'add',
+      'group',
+      'clear',
+    ])
+  )
   .option('--add <emails...>', 'let these addresses in (comma-separated or repeated)')
   .option('--remove <emails...>', 'take these addresses out')
   .option('--group <slugs...>', 'let these groups in (see `fling groups`)')
@@ -301,6 +327,9 @@ program
           group?: string[]
           removeGroup?: string[]
           clear?: boolean
+          onlyMe?: boolean
+          members?: boolean
+          public?: boolean
         }
       ) => runAccess(ctx, name, opts)
     )

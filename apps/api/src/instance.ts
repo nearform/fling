@@ -60,5 +60,6 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       ...notificationCapabilities(config),
     },
     installCommand: config.installCommand,
+    defaultAccess: config.siteDefaultAccess,
   }
 }

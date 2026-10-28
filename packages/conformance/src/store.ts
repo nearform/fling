@@ -373,6 +373,21 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.findSite(s.name)).toBeNull()
       })
 
+      it("keeps a site's restriction (only its owner, with an empty audience), and its absence", async () => {
+        const store = await factory()
+        const e = email()
+        const mine = site(e, siteName(), { restricted: true })
+        await store.createSite(mine)
+        expect(await store.findSite(mine.name)).toEqual(mine)
+        expect((await store.listSites(e))[0]?.restricted).toBe(true)
+        // A record from before access levels has no `restricted`, and reads back without one.
+        const old = site(e)
+        await store.createSite(old)
+        expect('restricted' in ((await store.findSite(old.name)) ?? {})).toBe(false)
+        await store.putSite({ ...mine, restricted: false })
+        expect((await store.findSite(mine.name))?.restricted).toBe(false)
+      })
+
       it('createSite again by the owner returns the existing site unchanged', async () => {
         const store = await factory()
         const e = email()

@@ -1,5 +1,6 @@
 /** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
 import type {
+  AccessLevel,
   ChannelId,
   CommentAnchor,
   CommentAuthor,
@@ -66,8 +67,8 @@ export interface ApiKeyRecord {
 }
 
 /**
- * Who may see a private site besides its owner: addresses, and group ids. Empty: every member.
- * Kept, and ignored, while the site is public.
+ * Who may see a restricted site besides its owner: addresses, and group ids. Kept, and ignored,
+ * while the site is public or open to every member.
  */
 export interface SiteAudience {
   /** lowercase, each admitted by the instance's email policy when it was added */
@@ -87,6 +88,12 @@ export interface SiteRecord {
   shareToken: string | null
   /** v2; older records read as the empty audience */
   audience: SiteAudience
+  /**
+   * Private and limited to the owner and the audience: with an empty audience, the owner alone
+   * (the `only_me` access level). Absent on records written before access levels: restricted
+   * exactly when the audience names someone, as they were then (`restrictsToAudience`, policy.ts).
+   */
+  restricted?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -304,6 +311,9 @@ export interface UploadRecord {
   name: string
   spa?: boolean
   visibility?: Visibility
+  /** who can open the site, if the upload creates it (`DeployRequest`) */
+  access?: AccessLevel
+  audience?: { emails: string[]; groups: string[] }
   createdAt: string
   expiresAt: string
 }

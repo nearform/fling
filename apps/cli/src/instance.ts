@@ -55,3 +55,26 @@ export async function loadInstance(
     return null
   }
 }
+
+/**
+ * The instance for `config`, fetched again (and stored, for a remembered server) when the stored
+ * copy lacks `capability`: the server may have gained it since sign-in. The stored copy when the
+ * fetch fails.
+ */
+export async function loadInstanceWith(
+  store: ConfigStore,
+  config: Pick<ResolvedConfig, 'serverUrl' | 'remembered' | 'instance'>,
+  fetch: FetchLike,
+  capability: string
+): Promise<InstanceMetadata | null> {
+  const stored = await loadInstance(store, config, fetch)
+  if (stored?.capabilities[capability] === true || !config.serverUrl) return stored
+  try {
+    const instance = await fetchInstance(config.serverUrl, fetch)
+    if (config.remembered)
+      await store.putServer(config.serverUrl, { instance }, { makeCurrent: false })
+    return instance
+  } catch {
+    return stored
+  }
+}

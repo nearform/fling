@@ -176,6 +176,7 @@ Values reach the function two ways, and the function's own environment wins:
 | `MAIL_REPLY_TO` | no (none) | The operator's address replies go to, on every email (never the person who acted). Never published. |
 | `SES_CONFIGURATION_SET` | no (the identity's default) | AWS: the SES configuration set each send names. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
+| `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |
 | `BRAND_PRIMARY` | no | Hex colour behind primary buttons and active states, e.g. `#4f46e5`. |
 | `BRAND_PRIMARY_CONTENT` | no | Hex colour of text on `BRAND_PRIMARY`. |

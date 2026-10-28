@@ -67,9 +67,19 @@ describe('deploy', () => {
       archived: false,
       currentVersionId: body.versionId,
       shareUrl: null,
+      // the instance's default: only the owner
+      access: 'only_me',
+      restricted: true,
     })
+    expect(live.first).toBe(true)
     const value = kvsSite()
-    expect(value).toEqual({ id: expect.any(String), v: body.versionId, vis: 'private', spa: false })
+    expect(value).toEqual({
+      id: expect.any(String),
+      v: body.versionId,
+      vis: 'private',
+      spa: false,
+      r: 1,
+    })
 
     // finalize is idempotent
     const again = await api(env, key, 'POST', `/api/sites/hello/deploys/${body.versionId}/finalize`)

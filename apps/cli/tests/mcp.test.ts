@@ -133,6 +133,7 @@ describe('MCP server', () => {
       'fling_publish',
       'fling_rollback',
       'fling_servers',
+      'fling_set_access',
       'fling_set_visibility',
       'fling_share',
       'fling_whoami',
@@ -241,6 +242,67 @@ describe('MCP server', () => {
     expect(text(res)).toContain('Site: https://my-app.sites.example.test/ (private)')
     expect(text(res)).toContain('\nFling: server.test (Example Fling)')
     expect(dataOf(res)).toMatchObject({ server: SERVER })
+  })
+
+  it('a new site says who can open it; `access` (with its people) is sent, and refused by a Fling without access levels', async () => {
+    const store = await loggedInStore()
+    const withLevels = {
+      ...INSTANCE,
+      capabilities: { ...INSTANCE.capabilities, accessLevels: true },
+    }
+    await store.putServer(SERVER, { instance: withLevels })
+    const cwd = await tempDir()
+    await writeTree(join(cwd, 'proj'), { 'index.html': 'hi' })
+    let body: any
+    const m = mockFetch({
+      'POST /api/sites/proj/deploys': (_url, init) => {
+        body = JSON.parse(String(init.body))
+        return jsonResponse({ status: 'upload', versionId: '0123456789abcdef', uploads: [] })
+      },
+      'POST /api/sites/proj/deploys/0123456789abcdef/finalize': () =>
+        jsonResponse({
+          status: 'live',
+          versionId: '0123456789abcdef',
+          first: true,
+          site: site({ access: 'people', restricted: true, audienceSize: 1 }),
+        }),
+      'PATCH /api/sites/proj': (_url, init) =>
+        jsonResponse({
+          ...site({ access: 'only_me', restricted: true }),
+          audience: { emails: [], groups: [] },
+          patched: JSON.parse(String(init.body)),
+        }),
+    })
+    const client = await connect(store, m.fetch, cwd)
+    const res = await client.callTool({
+      name: 'fling_deploy',
+      arguments: { path: 'proj', access: 'people', emails: ['bob@example.test'] },
+    })
+    expect(res.isError).toBeFalsy()
+    expect(body).toMatchObject({ access: 'people', audience: { emails: ['bob@example.test'] } })
+    expect(text(res)).toContain('Who can open it: Only you and 1 person can open it.')
+    expect(text(res)).toContain('fling_set_access')
+    expect(dataOf(res).created).toBe(true)
+
+    const set = await client.callTool({
+      name: 'fling_set_access',
+      arguments: { name: 'proj', access: 'only_me' },
+    })
+    expect(text(set)).toContain('Only you: nobody else can open it.')
+    const patch = m.calls.find(c => c.method === 'PATCH')
+    expect(JSON.parse(String(patch?.init.body))).toEqual({ access: 'only_me' })
+
+    // A Fling whose metadata (stored and fetched) has no access levels: refused before anything is sent.
+    await store.putServer(SERVER, { instance: INSTANCE })
+    const old = mockFetch({ ...instanceRoute })
+    const before = await connect(store, old.fetch, cwd)
+    const refused = await before.callTool({
+      name: 'fling_deploy',
+      arguments: { path: 'proj', access: 'only_me' },
+    })
+    expect(refused.isError).toBe(true)
+    expect(text(refused)).toMatch(/has no access levels yet/)
+    expect(old.calls.every(c => c.method === 'GET')).toBe(true)
   })
 
   it('with comments on, a deploy leads with the review link to share, then the site URL', async () => {

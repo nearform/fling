@@ -241,7 +241,8 @@ apiRoutes.post('/sites/:name/deploys/:versionId/finalize', async c => {
     c.get('deps'),
     c.get('user'),
     c.req.param('name'),
-    c.req.param('versionId')
+    c.req.param('versionId'),
+    acting(c)
   )
   return c.json(FinalizeResponseSchema.parse(res))
 })

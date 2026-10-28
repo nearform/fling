@@ -1,10 +1,18 @@
 /**
- * Lists of people in the web UI, a private site's audience and a group's members: turning what
+ * Lists of people in the web UI, a site's audience and a group's members: turning what
  * someone types or pastes into addresses (lowercase, trimmed, each once, up to the list's cap),
  * and the words for an audience of people and groups. The API still checks every address against
  * the instance's email policy.
  */
-import { AUDIENCE_EMAILS_MAX, GROUP_MEMBERS_MAX, splitEmails } from '@fling/shared'
+import {
+  ACCESS_LABELS,
+  AUDIENCE_EMAILS_MAX,
+  GROUP_MEMBERS_MAX,
+  needsAudience,
+  type SiteAccessFields,
+  siteAccessLevel,
+  splitEmails,
+} from '@fling/shared'
 
 /** The same shape check the API makes before the email policy. */
 const EMAIL_RE = /^[^@\s]+@[^@\s]+$/
@@ -52,18 +60,16 @@ export function audienceWho(people: number, groups: number): string {
   return parts.filter(Boolean).join(' and ') || peopleLabel(0)
 }
 
-/** The list badge of a restricted site: `Restricted · 2 people · 1 group`. */
-export function restrictedLabel(people: number, groups = 0): string {
-  const parts = [people ? peopleLabel(people) : '', groups ? groupsLabel(groups) : '']
-  return ['Restricted', ...parts.filter(Boolean)].join(' · ')
-}
-
 /**
- * Whether an edit takes a site's audience from someone to no one, which opens the private site to
- * every member: the Access section asks first.
+ * A site's access level for its badge: the level's label (`Only you`, `Everyone signed in`,
+ * `Public`), and for a list of people and teams how many it names (`Specific people · 2 people ·
+ * 1 group`).
  */
-export const opensToEveryone = (
-  before: { emails: readonly unknown[]; groups: readonly unknown[] },
-  after: { emails: readonly unknown[]; groups: readonly unknown[] }
-) =>
-  before.emails.length + before.groups.length > 0 && after.emails.length + after.groups.length === 0
+export function accessBadgeLabel(site: SiteAccessFields): string {
+  const level = siteAccessLevel(site)
+  if (!needsAudience(level)) return ACCESS_LABELS[level]
+  const groups = site.audienceGroups ?? 0
+  const people = Math.max(0, (site.audienceSize ?? 0) - groups)
+  const parts = [people ? peopleLabel(people) : '', groups ? groupsLabel(groups) : '']
+  return [ACCESS_LABELS[level], ...parts.filter(Boolean)].join(' · ')
+}

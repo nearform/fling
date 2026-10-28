@@ -15,8 +15,9 @@
  * - `anonymous`: nobody we know.
  *
  * What a role may do depends on the site's access (`accessOf`): `public`, `private` (signed-in
- * members), or `restricted` (private with a non-empty audience: the owner and the viewers only).
- * The audience is kept while a site is public, and ignored.
+ * members), or `restricted` (private and limited to the owner and the viewers; with an empty
+ * audience, the owner alone: the `only_me` access level). The audience is kept while a site is
+ * public, and ignored.
  *
  * The edge enforces `site.view` on its own (it serves sites without calling the API), from the
  * visibility in the route table and, for a restricted site, a site pass the edge mints from the
@@ -41,18 +42,30 @@ export type Role = 'owner' | 'viewer' | 'member' | 'share' | 'anonymous'
 export const ROLES: readonly Role[] = ['owner', 'viewer', 'member', 'share', 'anonymous']
 
 /** What policy needs to know about a site. */
-export type PolicySite = Pick<SiteRecord, 'email' | 'visibility' | 'shareToken' | 'audience'>
+export type PolicySite = Pick<
+  SiteRecord,
+  'email' | 'visibility' | 'shareToken' | 'audience' | 'restricted'
+>
 
 /** Who may see a site: anyone, signed-in members, or (restricted) the owner and its audience. */
 export type Access = 'public' | 'private' | 'restricted'
 
 export const ACCESSES: readonly Access[] = ['public', 'private', 'restricted']
 
-/** Private with an audience: only the owner and the people in it see the site. */
-export const isRestricted = (site: Pick<SiteRecord, 'visibility' | 'audience'>): boolean =>
-  site.visibility === 'private' && site.audience.emails.length + site.audience.groups.length > 0
+type AccessFields = Pick<SiteRecord, 'visibility' | 'audience' | 'restricted'>
 
-export const accessOf = (site: Pick<SiteRecord, 'visibility' | 'audience'>): Access =>
+/**
+ * Whether the site, while private, is limited to its owner and audience. A record from before
+ * access levels has no `restricted`: it is, exactly when its audience names someone.
+ */
+export const restrictsToAudience = (site: Omit<AccessFields, 'visibility'>): boolean =>
+  site.restricted ?? site.audience.emails.length + site.audience.groups.length > 0
+
+/** Private and restricted: only the owner and the people in its audience (if any) see the site. */
+export const isRestricted = (site: AccessFields): boolean =>
+  site.visibility === 'private' && restrictsToAudience(site)
+
+export const accessOf = (site: AccessFields): Access =>
   site.visibility === 'public' ? 'public' : isRestricted(site) ? 'restricted' : 'private'
 
 /**
@@ -67,7 +80,8 @@ export const accessOf = (site: Pick<SiteRecord, 'visibility' | 'audience'>): Acc
  *                    claimed name "yours" rather than "taken"
  *   site.rollback    POST …/current, fling_rollback
  *   site.settings    PATCH { spa }
- *   site.visibility  PATCH { visibility }, fling_set_visibility
+ *   site.visibility  PATCH { visibility }, fling_set_visibility; with site.audience, PATCH
+ *                    { access } and fling_set_access (a new site's `access` is its creator's)
  *   site.audience    PATCH { audience }, fling_set_audience (and seeing the audience)
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete

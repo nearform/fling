@@ -1,14 +1,16 @@
 /**
- * One site as a row of the list: its name (linking to the site page), badges and URL on the
- * first line, when it was updated on the second, and the quick actions: open (the URL), copy the
- * link, review (when the instance has comments) and Manage. Everything else about a site is on
- * its page. Archived sites are offline, so their URL is plain text and they can't be reviewed.
+ * One site as a row of the list. The first line names it (and when it was updated), with its
+ * badges on the right; the second holds the two links people share: review (when the instance
+ * has comments) and the site itself, each with a copy button. The whole row opens the site page,
+ * where everything else is managed: the name is the link, stretched over the row, and the
+ * buttons sit above it. Archived sites are offline, so their URL is plain text and they can't
+ * be reviewed.
  */
 import type { Site } from '@fling/shared'
 import {
   ArrowTopRightOnSquareIcon,
   ChatBubbleLeftRightIcon,
-  Cog6ToothIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import { Link } from 'react-router-dom'
 import { useInstance } from '../hooks/instance'
@@ -18,80 +20,86 @@ import { siteHref } from '../lib/sites'
 import { CopyButton } from './CopyButton'
 import { SiteBadges } from './site/badges'
 
-const quickAction = 'btn btn-ghost btn-xs h-6 min-h-6 gap-1 px-1.5 font-normal'
+const copyClass = 'btn btn-ghost btn-xs btn-square h-7 min-h-7 w-7 shrink-0'
+const linkClass =
+  'btn btn-sm h-8 min-h-8 min-w-0 justify-start gap-1.5 px-2.5 font-normal normal-case'
 
 export function SiteCard({ site }: { site: Site }) {
   const instance = useInstance()
   // Review mode: the instance has comments, and the site is being served.
   const reviewable = instance?.capabilities.comments === true && !site.archived
+  const reviewUrl = `${window.location.origin}${reviewHref(site.name)}`
 
   return (
-    <article className="surface-panel px-4 py-2.5">
-      <div className="flex items-start gap-2">
-        {/* Line 1: name, badges, URL */}
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <h2 className="text-base font-medium leading-tight break-all">
-            <Link to={siteHref(site.name)} className="link link-hover">
+    <article className="surface-panel relative px-4 py-3 transition-colors hover:border-[var(--border-control)]">
+      {/* Line 1: name and when it was updated; badges on the right */}
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold leading-tight break-all">
+            <Link
+              to={siteHref(site.name)}
+              className="after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-[var(--focus-ring,currentColor)]"
+              title={`Manage ${site.name}: access, versions, archive and delete`}
+            >
               {site.name}
             </Link>
           </h2>
-          <SiteBadges site={site} />
-          <span className="flex min-w-0 max-w-full items-center">
-            {site.archived ? (
-              <span className="truncate text-sm text-muted">{displayUrl(site.url)}</span>
-            ) : (
-              <a
-                href={site.url}
-                target="_blank"
-                rel="noreferrer"
-                className="link link-hover inline-flex min-w-0 items-center gap-1 text-sm"
-              >
-                <span className="truncate">{displayUrl(site.url)}</span>
-                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className="sr-only">(opens in a new tab)</span>
-              </a>
-            )}
-            <CopyButton
-              text={site.url}
-              label={`Copy the URL of ${site.name}`}
-              className="btn btn-ghost btn-xs btn-square h-6 min-h-6 w-6 shrink-0"
-            />
-          </span>
+          <p className="mt-0.5 text-xs text-secondary">
+            <span className="max-sm:sr-only">Updated </span>
+            <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
+            <span className="max-sm:hidden">
+              {' · '}
+              <code className="text-xs" title={site.currentVersionId ?? undefined}>
+                {shortVersion(site.currentVersionId)}
+              </code>
+            </span>
+          </p>
         </div>
-
-        {/* Quick actions */}
-        <div className="flex shrink-0 items-center gap-0.5">
-          {reviewable && (
-            <Link
-              to={reviewHref(site.name)}
-              className={quickAction}
-              title="Open the site with its comments"
-            >
-              <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" aria-hidden />
-              Review
-            </Link>
-          )}
-          <Link
-            to={siteHref(site.name)}
-            className={quickAction}
-            title="Access, versions, archive and delete"
-            aria-label={`Manage ${site.name}`}
-          >
-            <Cog6ToothIcon className="h-3.5 w-3.5" aria-hidden />
-            Manage
-          </Link>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <SiteBadges site={site} />
+          <ChevronRightIcon className="h-4 w-4 text-muted" aria-hidden />
         </div>
       </div>
 
-      {/* Line 2: when it was updated, and the version it serves */}
-      <div className="mt-0.5 text-xs text-secondary">
-        <span className="max-sm:sr-only">Updated </span>
-        <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
-        <span className="max-sm:hidden">
-          {' · '}
-          <code className="text-xs" title={site.currentVersionId ?? undefined}>
-            {shortVersion(site.currentVersionId)}
-          </code>
+      {/* Line 2: the links to share, above the stretched row link */}
+      <div className="relative z-10 mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {reviewable && (
+          <span className="flex min-w-0 max-w-full items-center">
+            <Link
+              to={reviewHref(site.name)}
+              className={`${linkClass} btn-primary`}
+              title="Open the site with its comments: the link to share for feedback"
+            >
+              <ChatBubbleLeftRightIcon className="h-4 w-4 shrink-0" aria-hidden />
+              Review
+            </Link>
+            <CopyButton
+              text={reviewUrl}
+              label={`Copy the review link of ${site.name}`}
+              className={copyClass}
+            />
+          </span>
+        )}
+        <span className="flex min-w-0 max-w-full items-center">
+          {site.archived ? (
+            <span className="truncate px-2.5 text-sm text-muted">{displayUrl(site.url)}</span>
+          ) : (
+            <a
+              href={site.url}
+              target="_blank"
+              rel="noreferrer"
+              className={`${linkClass} btn-ghost border-[var(--border-control)]`}
+            >
+              <ArrowTopRightOnSquareIcon className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="truncate">{displayUrl(site.url)}</span>
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          )}
+          <CopyButton
+            text={site.url}
+            label={`Copy the URL of ${site.name}`}
+            className={copyClass}
+          />
         </span>
       </div>
     </article>

@@ -38,19 +38,18 @@ export function RestrictedBadge({ size, groups = 0 }: { size: number; groups?: n
 }
 
 /**
- * Archived, or the visibility (and, restricted, to how many); plus "Shared" while a live site
- * has a share link.
+ * Archived, restricted (to how many) or the visibility; plus "Shared" while a live site has a
+ * share link. A restricted site is private too, so it wears only the more specific badge.
  */
 export function SiteBadges({ site }: { site: Site }) {
   return (
     <>
       {site.archived ? (
         <span className="badge badge-sm badge-ghost">Archived</span>
+      ) : site.restricted ? (
+        <RestrictedBadge size={site.audienceSize} groups={site.audienceGroups} />
       ) : (
         <VisibilityBadge visibility={site.visibility} />
-      )}
-      {site.restricted && !site.archived && (
-        <RestrictedBadge size={site.audienceSize} groups={site.audienceGroups} />
       )}
       {site.shareUrl && !site.archived && (
         <span className="badge badge-sm badge-ghost gap-1" title="Has a share link">

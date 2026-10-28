@@ -10,6 +10,7 @@ import {
   describeComments,
   describeGroup,
   describeGroups,
+  describeNotificationSettings,
   describeSharedSite,
   describeVersionFiles,
   editAudienceInput,
@@ -19,6 +20,7 @@ import {
   mcpToolsFor,
   mcpWording,
   NOT_READY_NOTE,
+  preferencesUpdateOf,
   privateAudience,
   probeUrl,
   READY_TIMEOUT_LAMBDA_MS,
@@ -33,9 +35,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
 import * as comments from '../comments.ts'
+import { isAdminEmail } from '../config.ts'
 import * as groups from '../groups.ts'
-import { instanceMetadata } from '../instance.ts'
+import { instanceMetadata, notificationChannels } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
+import * as notifications from '../notifications/settings.ts'
 import { userActor } from '../policy.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
@@ -184,7 +188,12 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   const mcpTools = mcpToolsFor(wording)
   const server = new McpServer(
     { name: 'fling', title: deps.config.instanceName, version: SERVER_VERSION },
-    { instructions: mcpRemoteInstructions(wording, { comments: deps.config.comments }) }
+    {
+      instructions: mcpRemoteInstructions(wording, {
+        comments: deps.config.comments,
+        notifications: notificationChannels(deps.config).length > 0,
+      }),
+    }
   )
 
   function register<S extends z.ZodRawShape>(
@@ -428,6 +437,9 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
 
   registerGroupTools(deps, user, mcpTools, register)
   if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
+  if (notificationChannels(deps.config).length > 0) {
+    registerNotificationTools(deps, user, mcpTools, register)
+  }
 
   return server
 }
@@ -556,5 +568,34 @@ function registerCommentTools(
       text: `Comment ${args.id} on ${args.name} deleted.`,
       data: { name: args.name, id: args.id, deleted: true },
     }
+  })
+}
+
+/** The notification tools: only with a channel on (the `notifications` capability). */
+function registerNotificationTools(
+  deps: Deps,
+  user: User,
+  mcpTools: ReturnType<typeof mcpToolsFor>,
+  register: <S extends z.ZodRawShape>(
+    def: McpToolDef<S>,
+    handler: (args: z.infer<z.ZodObject<S>>) => Promise<Result>
+  ) => void
+) {
+  register(mcpTools.notifications, async () => {
+    const settings = await notifications.getNotificationSettings(deps, user.email)
+    return { text: describeNotificationSettings(settings), data: settings }
+  })
+
+  register(mcpTools.notificationsSet, async args => {
+    if (args.muted === undefined && !args.cells?.length) {
+      throw new ApiError(400, 'bad_request', 'Pass `muted` or `cells`')
+    }
+    // /mcp takes API keys and OAuth tokens, never a session, so it never acts for an impersonator.
+    const settings = await notifications.updateNotificationSettings(
+      deps,
+      { email: user.email, admin: isAdminEmail(deps.config, user.email), via: 'oauth' },
+      preferencesUpdateOf(args)
+    )
+    return { text: `Saved.\n${describeNotificationSettings(settings)}`, data: settings }
   })
 }

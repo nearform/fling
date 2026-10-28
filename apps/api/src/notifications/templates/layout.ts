@@ -15,10 +15,12 @@ import type { Section } from './types.ts'
 export interface Footer {
   /** the recipient's address and how they sign in ("Google") */
   to: string
-  signIn: string
+  /** absent: the recipient need not sign in (the admin's test email) */
+  signIn?: string
   /** one per event in the message: what it is, and its unsubscribe link */
   unsubscribe: { title: string; url: string }[]
-  settingsUrl: string
+  /** absent: no settings to choose (the admin's test email) */
+  settingsUrl?: string
   /** comment emails: replies to this email go nowhere */
   commentNote: boolean
 }
@@ -44,7 +46,7 @@ const COMMENT_NOTE = 'Reply on the review page; replies to this email are not po
 
 function footerLines(footer: Footer, sections: Section[]): string[] {
   return [
-    `Open the links signed in as ${footer.to} (${footer.signIn}).`,
+    ...(footer.signIn ? [`Open the links signed in as ${footer.to} (${footer.signIn}).`] : []),
     ...(footer.commentNote ? [COMMENT_NOTE] : []),
     ...sections.map(s => `You got this email because ${s.why}.`),
   ]
@@ -75,7 +77,8 @@ function renderText(name: string, sections: Section[], footer: Footer): string {
   }
   out.push('--', ...footerLines(footer, sections), '')
   for (const u of footer.unsubscribe) out.push(`Stop emails when "${u.title}": ${u.url}`)
-  out.push(`Choose what you hear about: ${footer.settingsUrl}`, '')
+  if (footer.settingsUrl) out.push(`Choose what you hear about: ${footer.settingsUrl}`)
+  out.push('')
   return out.join('\n')
 }
 
@@ -120,7 +123,7 @@ function renderHtml(
     ...footer.unsubscribe.map(u =>
       small(`${link('Stop these emails', u.url)} (${e(u.title.toLowerCase())})`)
     ),
-    small(link('Choose what you hear about', footer.settingsUrl)),
+    ...(footer.settingsUrl ? [small(link('Choose what you hear about', footer.settingsUrl))] : []),
   ].join('')
 
   return `<!doctype html>

@@ -186,6 +186,21 @@ pages. When the Fling has comments, these tools exist:
 - `fling_comment_add { name, body, path?, replyTo? }` and `fling_comment_delete { name, id }` —
   only when the user asks: comments are signed with their name.
 
+## Notifications
+
+When the Fling has notifications (it emails people when a site is shared with them, they are added
+to a group, or someone comments on their site or replies in their thread), these tools exist:
+
+- `fling_notifications` — each event (by key, e.g. `comment.created`) with, per channel (`email`),
+  whether it is on or off, `(yours)` where the user chose it, and whether everything is muted. Use
+  it when the user asks why they get (or don't get) emails.
+- `fling_notifications_set { muted?, cells? }` — `muted: true` stops everything (`false` turns it
+  back on, keeping their choices); `cells: [{ event, channel, value }]` turns one event on or off,
+  or back to the default (`value: "default"`). Only change what the user asked for.
+
+What was sent to them is on their settings page (`<their Fling>/settings/notifications`) and in
+`fling notifications sent`.
+
 ## Other tools
 
 - `fling_check_name { name }` or `{ path }` — is a name available / the user's / taken (with
@@ -203,6 +218,6 @@ pages. When the Fling has comments, these tools exist:
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
 CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
-[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling archive|unarchive <name>`,
+[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

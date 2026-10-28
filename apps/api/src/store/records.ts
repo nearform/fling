@@ -1490,6 +1490,12 @@ export class Records implements Store {
   countMailTest(email: string, hour: Hour) {
     return this.count(key.mailTests(email, hour), after(`${hour}:00:00.000Z`, TTL.hourly))
   }
+
+  async mailTests(email: string, hour: Hour) {
+    const k = key.mailTests(email, hour)
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? Number(item.count) : 0
+  }
 }
 
 /** The minute an instant falls in, rounded up: the first minute that starts at or after it. */

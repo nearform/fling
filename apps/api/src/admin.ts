@@ -1,5 +1,6 @@
 /**
- * The instance's admins (ADMIN_EMAILS): the users list, the audit log, and impersonation. Policy
+ * The instance's admins (ADMIN_EMAILS): the users list, the audit log, the mail page
+ * (notifications/mail-admin.ts), and impersonation. Policy
  * (`canInstance`, `impersonationRefusal` in policy.ts) decides; this does it and keeps the record.
  * To anyone who isn't an admin, none of it exists (404).
  *
@@ -9,11 +10,12 @@
  * AUDIT_TTL_DAYS). The record is written before the session changes, so an impersonation that
  * isn't on the record never happens.
  */
-import type { AdminUser, AuditEntry, Me } from '@fling/shared'
+import type { AdminUser, AuditEntry, MailAdmin, MailTestResult, Me } from '@fling/shared'
 import { isAdminEmail } from './config.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, forbidden, notFound } from './lib/errors.ts'
 import { newSortableId } from './lib/ids.ts'
+import { mailOverview, sendTestMail } from './notifications/mail-admin.ts'
 import {
   canInstance,
   type ImpersonationRefusal,
@@ -52,14 +54,20 @@ export function meOf(
   }
 }
 
+/** What an admin may do only from their browser session, as a refusal names it. */
+const SESSION_ONLY: Partial<Record<InstanceAction, string>> = {
+  'admin.impersonate': 'Impersonation',
+  'admin.mail.test': 'Sending a test email',
+}
+
 /** Non-admins see nothing here: the admin routes are 404s to them (an impersonator is told). */
-function ensure(p: Principal, action: InstanceAction) {
+export function ensure(p: Principal, action: InstanceAction) {
   if (canInstance(p, action)) return
   if (p.impersonator) {
     throw forbidden(`Stop impersonating ${p.email} first`, 'impersonating')
   }
-  if (p.admin && action === 'admin.impersonate') {
-    throw forbidden('Impersonation needs your browser session', 'session_required')
+  if (p.admin && action in SESSION_ONLY) {
+    throw forbidden(`${SESSION_ONLY[action]} needs your browser session`, 'session_required')
   }
   throw notFound('Not found')
 }
@@ -89,6 +97,18 @@ export async function auditLog(deps: Deps, p: Principal): Promise<AuditEntry[]> 
   ensure(p, 'admin.audit.read')
   const entries = await deps.store.listAuditEntries(AUDIT_PAGE)
   return entries.map(({ expiresAt: _expiresAt, ...entry }) => entry)
+}
+
+/** The mail settings and the last 24 hours of sending (404 without email). */
+export function mail(deps: Deps, p: Principal): Promise<MailAdmin> {
+  ensure(p, 'admin.mail.read')
+  return mailOverview(deps, p.email)
+}
+
+/** Send a test email to `to`, any address (at most MAIL_TESTS_PER_HOUR an hour per admin). */
+export function mailTest(deps: Deps, p: Principal, to: string): Promise<MailTestResult> {
+  ensure(p, 'admin.mail.test')
+  return sendTestMail(deps, p.email, to)
 }
 
 /** Write the record and the log line; throws (and nothing else happens) if the record fails. */

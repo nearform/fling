@@ -3,6 +3,7 @@ import {
   applyPreferencesUpdate,
   CHANNEL_IDS,
   catalogueFor,
+  describeNotificationSettings,
   EVENT_CATALOGUE,
   EVENT_KEYS,
   effectivePreference,
@@ -11,6 +12,7 @@ import {
   NotificationPreferencesUpdateSchema,
   NotificationSettingsSchema,
   notificationSettings,
+  preferencesUpdateOf,
 } from '../src/notifications.ts'
 
 describe('the event catalogue', () => {
@@ -124,5 +126,33 @@ describe('notificationSettings', () => {
     )
     expect(settings.muted).toBe(true)
     for (const row of Object.values(settings.cells)) expect(row).toEqual({ email: 'off' })
+  })
+})
+
+describe('cell changes, as the CLI and the MCP tools take them', () => {
+  it('become a PUT body: default is null, muted only when given', () => {
+    expect(
+      preferencesUpdateOf({
+        cells: [
+          { event: 'comment.created', channel: 'email', value: 'off' },
+          { event: 'comment.reply', channel: 'email', value: 'default' },
+        ],
+      })
+    ).toEqual({ cells: { 'comment.created': { email: 'off' }, 'comment.reply': { email: null } } })
+    expect(preferencesUpdateOf({ muted: false })).toEqual({ muted: false })
+    expect(preferencesUpdateOf({})).toEqual({})
+  })
+
+  it('read back as text: every event with its key, values per channel, and your own marked', () => {
+    const prefs = applyPreferencesUpdate(null, { cells: { 'site.shared': { email: 'off' } } })
+    const text = describeNotificationSettings(
+      notificationSettings(prefs, { channels: ['email'], capabilities: { comments: true } })
+    )
+    for (const e of EVENT_CATALOGUE) expect(text).toContain(`- ${e.key}: ${e.title}`)
+    expect(text).toContain('site.shared: Someone shares a site with you — email off (yours)')
+    const muted = describeNotificationSettings(
+      notificationSettings({ ...prefs, muted: true }, { channels: ['email'], capabilities: {} })
+    )
+    expect(muted).toMatch(/^All notifications are muted/)
   })
 })

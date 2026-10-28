@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Notifications.** On a Fling with email, `fling notifications` shows what it tells you about
+  (sites shared with you, groups you are added to, comments on your sites and replies in your
+  threads), per event and channel, marking the ones you chose. `fling notifications set <event>
+  <channel> on|off|default` changes one, `mute` and `unmute` switch everything, and `sent` lists
+  what was sent to you in the last 30 days. The MCP tools `fling_notifications` and
+  `fling_notifications_set` (`muted`, `cells: [{ event, channel, value }]`) do the same on a Fling
+  with the `notifications` capability.
+
 ## 0.6.0
 
 - `fling groups --members a,b` lists only the groups whose members are exactly those people, to

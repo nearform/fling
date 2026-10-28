@@ -115,11 +115,14 @@ describe('can', () => {
 const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.users.list': 'at',
   'admin.audit.read': 'at',
+  'admin.mail.read': 'at',
+  'admin.mail.test': 'a',
   'admin.impersonate': 'a',
   'admin.impersonate.stop': 'i',
   'account.key.create': 'atu',
   'account.oauth.approve': 'atu',
   'account.revoke': 'atu',
+  'account.notifications.change': 'atu',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {

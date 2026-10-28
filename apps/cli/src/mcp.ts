@@ -27,6 +27,7 @@ import {
   describeComments,
   describeGroup,
   describeGroups,
+  describeNotificationSettings,
   describeSharedSite,
   describeVersionFiles,
   type InstanceMetadata,
@@ -39,6 +40,7 @@ import {
   mcpWording,
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
+  NOTIFICATIONS_NOTE,
   privateAudience,
   reviewUrl,
   shareForFeedback,
@@ -105,16 +107,19 @@ import {
   deleteGroup,
   deleteSite,
   getGroup,
+  getNotifications,
   getSite,
   groupsEnabled,
   listComments,
   listGroups,
   listShared,
   listSites,
+  notificationsEnabled,
   renameGroup,
   resolveComment,
   rollback,
   setAudience,
+  setNotifications,
   setVisibility,
   share,
   sitesBaseOf,
@@ -158,7 +163,7 @@ export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask t
 /** Sent at `initialize`: how to use this (local) server. */
 export const mcpLocalInstructions = (
   w: McpWording,
-  opts: { comments?: boolean; servers?: readonly KnownServer[] } = {}
+  opts: { comments?: boolean; notifications?: boolean; servers?: readonly KnownServer[] } = {}
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
@@ -173,6 +178,7 @@ export const mcpLocalInstructions = (
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
     `Sites are private (open to ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
+    ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
   ].join('\n\n')
 
 type DeployOutcome =
@@ -379,6 +385,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     {
       instructions: mcpLocalInstructions(wording, {
         comments: servers.some(s => commentsEnabled(s.instance)),
+        notifications: servers.some(s => notificationsEnabled(s.instance)),
         servers,
       }),
     }
@@ -1037,6 +1044,45 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         await reviewOn(target)
         const result = await deleteComment(target.client, args.name, args.id)
         return { summary: `Comment ${args.id} on ${args.name} deleted`, data: result }
+      })
+    )
+  }
+
+  // Notifications: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => notificationsEnabled(s.instance))) {
+    /** The call's Fling and its name, refused when it has no notifications. */
+    const withNotifications = async (target: Target) => {
+      const instance = await target.instance()
+      const name = `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)})`
+      if (instance && !notificationsEnabled(instance)) {
+        throw new CliError(`${name} has no notifications`)
+      }
+      return { name, fling: onFling(target.url, instance) }
+    }
+
+    server.registerTool(t.notifications.name, serverTool(t.notifications), args =>
+      run(t.notifications.name, args.server, async target => {
+        const { name, fling } = await withNotifications(target)
+        const settings = await getNotifications(target.client, name)
+        return { summary: `${describeNotificationSettings(settings)}${fling}`, data: settings }
+      })
+    )
+
+    server.registerTool(t.notificationsSet.name, serverTool(t.notificationsSet), args =>
+      run(t.notificationsSet.name, args.server, async target => {
+        const { name, fling } = await withNotifications(target)
+        if (args.muted === undefined && !args.cells?.length) {
+          throw new CliError('Pass `muted` or `cells`')
+        }
+        const settings = await setNotifications(
+          target.client,
+          { muted: args.muted, cells: args.cells },
+          name
+        )
+        return {
+          summary: `Saved.\n${describeNotificationSettings(settings)}${fling}`,
+          data: settings,
+        }
       })
     )
   }

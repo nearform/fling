@@ -4,6 +4,7 @@
  */
 import {
   type AudienceChange,
+  type CellChange,
   type Comment,
   type CommentList,
   CommentListSchema,
@@ -20,6 +21,11 @@ import {
   MeSchema,
   type NameCheck,
   NameCheckSchema,
+  type NotificationSettings,
+  NotificationSettingsSchema,
+  preferencesUpdateOf,
+  type SentNotification,
+  SentNotificationListSchema,
   type SharedSite,
   SharedSiteListSchema,
   type Site,
@@ -38,7 +44,7 @@ import {
   type Visibility,
 } from '@fling/shared'
 import { z } from 'zod'
-import type { ApiClient } from './api.ts'
+import { type ApiClient, CliApiError } from './api.ts'
 import { CliError } from './errors.ts'
 
 /**
@@ -390,4 +396,62 @@ export function commentsEnabled(
 ): boolean {
   if (!instance) return false
   return instance.capabilities.comments ?? true
+}
+
+// --- notifications ---
+
+/**
+ * Whether the instance has notifications, by its stored metadata: its `notifications` capability,
+ * or — when the stored copy predates the flag — yes, and the server decides (a 404 from it says
+ * none). No instance at all: no.
+ */
+export function notificationsEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  if (!instance) return false
+  return instance.capabilities.notifications ?? true
+}
+
+/** A 404 from the notifications API: the instance has none (or predates them). */
+async function notificationsCall<T>(name: string, call: () => Promise<T>): Promise<T> {
+  try {
+    return await call()
+  } catch (err) {
+    if (err instanceof CliApiError && err.status === 404) {
+      throw new CliError(`${name} has no notifications`)
+    }
+    throw err
+  }
+}
+
+/** GET /api/me/notifications: the events, the channels that are on, and the effective values. */
+export function getNotifications(client: ApiClient, name = 'This Fling') {
+  return notificationsCall(name, () =>
+    client.request('GET', '/api/me/notifications', { schema: NotificationSettingsSchema })
+  )
+}
+
+/** PUT /api/me/notifications: change `muted` and cells; returns the settings after. */
+export function setNotifications(
+  client: ApiClient,
+  change: { muted?: boolean; cells?: readonly CellChange[] },
+  name = 'This Fling'
+): Promise<NotificationSettings> {
+  return notificationsCall(name, () =>
+    client.request('PUT', '/api/me/notifications', {
+      schema: NotificationSettingsSchema,
+      body: preferencesUpdateOf(change),
+    })
+  )
+}
+
+/** GET /api/me/notifications/sent: what was sent to the user in the last 30 days, newest first. */
+export async function listSentNotifications(
+  client: ApiClient,
+  name = 'This Fling'
+): Promise<SentNotification[]> {
+  const res = await notificationsCall(name, () =>
+    client.request('GET', '/api/me/notifications/sent', { schema: SentNotificationListSchema })
+  )
+  return res.sent
 }

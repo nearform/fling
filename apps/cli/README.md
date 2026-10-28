@@ -257,6 +257,23 @@ feedback (`reviewUrl` in `--json`); reviewers sign in to use it.
 | `fling resolve <name> <id> [--reopen]` | resolve a thread, or reopen it |
 | `fling uncomment <name> <id> [--yes]` | delete a comment (a thread with its replies): your own, or any on your site |
 
+## Notifications
+
+A Fling with email tells you when a site is shared with you (directly or through a group), when
+you are added to a group, and when someone comments on your site or replies in your thread. You
+choose what you hear about, per event and channel; the same settings are on the web app's
+**Settings → Notifications** page, and every email has a link to stop that kind of email.
+
+| Command | |
+|---|---|
+| `fling notifications` | a table of events × channels: on or off, `*` where you chose it rather than the default |
+| `fling notifications set <event> <channel> on\|off\|default` | change one event on one channel (`default`: back to the Fling's default), e.g. `fling notifications set comment.created email off` |
+| `fling notifications mute` / `unmute` | stop everything, or start again (your choices are kept) |
+| `fling notifications sent` | what was sent to you in the last 30 days: when, the subject and its events |
+
+On a Fling without notifications they say so. `--json` prints the settings as the API returns them
+(`{ channels, events, muted, cells, overrides }`) or `{ sent: [...] }`.
+
 Global options: `--json` prints machine-readable output, and `--server <url>` points one command at
 another server (a remembered one brings its key; see [Several Flings](#several-flings)). Exit codes are `0` ok, `1` error, `2` not logged in and `3` forbidden.
 
@@ -319,7 +336,9 @@ The MCP tools:
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,
   and `addGroups`, `removeGroups`, `setGroups` for groups) when it can limit sites to listed
   people, and the group tools (`fling_groups`, `fling_group_show`, `fling_group_create`,
-  `fling_group_members`, `fling_group_rename`, `fling_group_delete`) when it has groups.
+  `fling_group_members`, `fling_group_rename`, `fling_group_delete`) when it has groups, and
+  `fling_notifications` and `fling_notifications_set` (`muted`, and `cells` of
+  `{ event, channel, value: on|off|default }`) when it has notifications.
 
 Results that give URLs (deploys, publishes, comments) end with the Fling they went to.
 

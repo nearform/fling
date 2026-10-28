@@ -71,7 +71,15 @@
       "description": "Take a site offline (or restore it), keeping its files"
     },
     { "name": "fling_rollback", "description": "Serve an earlier version of a site" },
-    { "name": "fling_delete", "description": "Permanently delete a site" }
+    { "name": "fling_delete", "description": "Permanently delete a site" },
+    {
+      "name": "fling_notifications",
+      "description": "Show what a Fling emails you about"
+    },
+    {
+      "name": "fling_notifications_set",
+      "description": "Turn notifications on or off, per event or all at once"
+    }
   ],
   "user_config": {
     "downloads_dir": {

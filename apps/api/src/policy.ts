@@ -252,28 +252,35 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *
  *   admin.users.list         GET /api/admin/users (and site counts)
  *   admin.audit.read         GET /api/admin/audit
+ *   admin.mail.read          GET /api/admin/mail: the mail settings and the sending health
+ *   admin.mail.test          POST /api/admin/mail/test: send a test email (browser session only)
  *   admin.impersonate        POST /api/admin/impersonate (then `impersonationRefusal` on the target)
  *   admin.impersonate.stop   POST /api/admin/impersonate/stop
  *   account.key.create       GET /auth/cli: mint an API key (`fling login`)
  *   account.oauth.approve    /oauth/authorize and /api/oauth/requests/…: approve (or deny) an app
  *   account.revoke           DELETE /api/keys/:id, /api/connections/:id
+ *   account.notifications.change  PUT /api/me/notifications (and fling_notifications_set)
  *
  * Admins have no extra rights over sites: `can` never asks whether someone is an admin, so an
  * admin is a member of other people's sites like anyone else, and acts on them only by
  * impersonating. Impersonation is for seeing and doing what the user sees and does with their
  * sites, never for creating anything that outlives it in their name: no API keys, no app
  * approvals, no other impersonation; and not for undoing what they set up either (revoking their
- * keys or apps). Starting one needs the admin's browser session: a key or token that leaked
- * must not be able to become someone else.
+ * keys or apps), nor changing what they hear about (preferences are their consent). Starting one
+ * needs the admin's browser session: a key or token that leaked must not be able to become someone
+ * else.
  */
 export const INSTANCE_ACTIONS = [
   'admin.users.list',
   'admin.audit.read',
+  'admin.mail.read',
+  'admin.mail.test',
   'admin.impersonate',
   'admin.impersonate.stop',
   'account.key.create',
   'account.oauth.approve',
   'account.revoke',
+  'account.notifications.change',
 ] as const
 
 export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
@@ -284,11 +291,15 @@ const notImpersonating = (role: PrincipalRole) => role !== 'impersonating'
 const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> = {
   'admin.users.list': isAdminRole,
   'admin.audit.read': isAdminRole,
+  'admin.mail.read': isAdminRole,
+  // Sending is never automatic: a leaked key or token must not be able to send mail.
+  'admin.mail.test': role => role === 'admin',
   'admin.impersonate': role => role === 'admin',
   'admin.impersonate.stop': role => role === 'impersonating',
   'account.key.create': notImpersonating,
   'account.oauth.approve': notImpersonating,
   'account.revoke': notImpersonating,
+  'account.notifications.change': notImpersonating,
 }
 
 export function principalRole(p: Principal): PrincipalRole {

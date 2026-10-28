@@ -14,9 +14,12 @@ import {
   LiveTicketSchema,
   MeSchema,
   NameCheckSchema,
+  NotificationPreferencesUpdateSchema,
+  NotificationSettingsSchema,
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
   RollbackRequestSchema,
+  SentNotificationListSchema,
   SharedSiteListSchema,
   ShareResponseSchema,
   SiteDetailSchema,
@@ -32,13 +35,14 @@ import {
 import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { meOf } from '../admin.ts'
-import { requireAccountAction, requireAuth } from '../auth/middleware.ts'
+import { principalOf, requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
 import * as groups from '../groups.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
 import type { Acting } from '../notifications/notify.ts'
+import * as notifications from '../notifications/settings.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
 import { userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
@@ -74,6 +78,29 @@ apiRoutes.get('/me', c => {
 })
 
 apiRoutes.route('/admin', adminRoutes)
+
+// --- notifications (the `notifications` capability): what the caller hears about, and what was sent ---
+
+apiRoutes.get('/me/notifications', async c => {
+  const settings = await notifications.getNotificationSettings(c.get('deps'), c.get('user').email)
+  return c.json(NotificationSettingsSchema.parse(settings))
+})
+
+apiRoutes.put('/me/notifications', async c => {
+  notifications.channelsOn(c.get('deps'))
+  const update = await jsonBody(c, NotificationPreferencesUpdateSchema)
+  const settings = await notifications.updateNotificationSettings(
+    c.get('deps'),
+    principalOf(c),
+    update
+  )
+  return c.json(NotificationSettingsSchema.parse(settings))
+})
+
+apiRoutes.get('/me/notifications/sent', async c => {
+  const sent = await notifications.sentNotifications(c.get('deps'), c.get('user').email)
+  return c.json(SentNotificationListSchema.parse({ sent }))
+})
 
 apiRoutes.get('/keys', async c => {
   const keys = await c.get('deps').store.listApiKeys(c.get('user').email)

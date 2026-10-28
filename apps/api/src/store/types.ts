@@ -750,6 +750,8 @@ export interface NotificationStore {
   countInstanceSend(minute: Minute): Promise<number>
   /** Count one more test email by the admin `email` this hour (`NTEST`); returns the count. */
   countMailTest(email: string, hour: Hour): Promise<number>
+  /** Test emails counted for the admin `email` this hour, without counting one. */
+  mailTests(email: string, hour: Hour): Promise<number>
 }
 
 /** `alice` → `alice`, `alice-2`, `alice-3`… within USER_SLUG_MAX. */

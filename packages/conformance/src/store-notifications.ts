@@ -369,8 +369,10 @@ export function notificationStoreConformance(factory: () => Store | Promise<Stor
       const m = minute()
       expect(await store.countInstanceSend(m)).toBe(1)
       expect(await store.countInstanceSend(m)).toBe(2)
+      expect(await store.mailTests(e, hour)).toBe(0)
       expect(await store.countMailTest(e, hour)).toBe(1)
       expect(await store.countMailTest(e, hour)).toBe(2)
+      expect(await store.mailTests(e, hour)).toBe(2)
     })
 
     it('adds to the hourly stats and lists them from an hour on', async () => {

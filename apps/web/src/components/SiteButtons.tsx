@@ -1,9 +1,10 @@
 /**
  * The two links people share for a site, with one look everywhere they appear (the site rows,
  * Shared with me, the site page), each with a copy button beside it:
- * - Review Site: the site with its comments, the link to share for feedback. The caller decides
+ * - Review: the site with its comments, the link to share for feedback. The caller decides
  *   whether the site can be reviewed (comments on, not archived).
- * - View Site: the site itself, in a new tab.
+ * - View: the site itself, in a new tab.
+ * The visible labels are short; their accessible names and titles say which site.
  */
 import { ArrowTopRightOnSquareIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
 import { Link } from 'react-router-dom'
@@ -20,10 +21,11 @@ export function ReviewButton({ name }: { name: string }) {
       <Link
         to={reviewHref(name)}
         className={`${buttonClass} tone-primary hover:brightness-95`}
-        title="Open the site with its comments: the link to share for feedback"
+        aria-label={`Review ${name}`}
+        title={`Review ${name}: the site with its comments, the link to share for feedback`}
       >
         <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        Review Site
+        Review
       </Link>
       <CopyButton
         text={`${window.location.origin}${reviewHref(name)}`}
@@ -42,11 +44,11 @@ export function ViewSiteButton({ name, url }: { name: string; url: string }) {
         target="_blank"
         rel="noreferrer"
         className={`${buttonClass} btn-ghost border-[var(--border-control)]`}
+        aria-label={`View ${name} (opens in a new tab)`}
         title={url}
       >
         <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        View Site
-        <span className="sr-only">(opens in a new tab)</span>
+        View
       </a>
       <CopyButton text={url} label={`Copy the URL of ${name}`} className={copyClass} />
     </span>

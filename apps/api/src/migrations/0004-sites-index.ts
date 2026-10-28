@@ -1,8 +1,8 @@
 /**
  * 0004 — the site directory, EXPAND only: one `SITES/SITE#<name>` item per site, so the admins'
- * list of every site is one query, never a scan. Records writes it with the site on creation and
- * whenever a save changes its listing or access level, from this release on; this backfills it
- * for sites nobody has saved since.
+ * list of every site reads one partition, never a scan. Records writes it with the site on
+ * creation and whenever a save changes its listing or access level, from this release on; this
+ * backfills it for sites nobody has saved since.
  *
  *   read                                        written (if absent)
  *   USER#<email>  SITE#<name>    site (index)   SITES  SITE#<name>   sitedirectory { siteId, name,

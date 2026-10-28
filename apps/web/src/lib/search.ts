@@ -1,7 +1,7 @@
 /**
  * Client-side site search: a query matches a site when every whitespace-separated word appears
- * (case-insensitively, as a substring) in its name, URL, share URL or (a site shared with you) its
- * owner.
+ * (case-insensitively, as a substring) in its name, URL, share URL or (a site shared with you, or
+ * any site in an admin's All sites) its owner.
  */
 import type { Site } from '@fling/shared'
 
@@ -27,22 +27,31 @@ export function filterSites<T extends Searchable>(sites: readonly T[], query: st
 }
 
 /**
- * The header's count line: what's listed (your live or archived sites, or the sites shared with
- * you), and how much of it the search lets through.
+ * The header's count line: what's listed (your live or archived sites, the sites shared with you,
+ * or every site on the instance), and how much of it the search lets through.
  */
 export function countLabel({
   total,
   shown,
   archived,
   shared = false,
+  all = false,
   searching,
 }: {
   total: number | undefined
   shown: number
   archived: boolean
   shared?: boolean
+  all?: boolean
   searching: boolean
 }): string {
+  if (all) {
+    const sites = (n: number) => (n === 1 ? 'site' : 'sites')
+    if (total === undefined) return 'Every site on this instance'
+    if (searching) return `${shown} of ${total} ${sites(total)}`
+    if (total === 0) return 'Nothing flung on this instance yet'
+    return `${total} ${sites(total)}`
+  }
   if (shared) {
     const sites = (n: number) => (n === 1 ? 'site' : 'sites')
     if (total === undefined) return 'Restricted sites other people have shared with you'

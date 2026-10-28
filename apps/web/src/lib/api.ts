@@ -257,13 +257,8 @@ export const api = {
     if (cursor) params.set('cursor', cursor)
     return request(`/api/admin/users${params.size ? `?${params}` : ''}`, AdminUserListSchema)
   },
-  /** Admins only: a page of every site's listing, by name, optionally under a name prefix. */
-  adminSites(q: string, cursor?: string): Promise<AdminSiteList> {
-    const params = new URLSearchParams()
-    if (q.trim()) params.set('q', q.trim())
-    if (cursor) params.set('cursor', cursor)
-    return request(`/api/admin/sites${params.size ? `?${params}` : ''}`, AdminSiteListSchema)
-  },
+  /** Admins only: every site's listing, by name (`truncated`: the server's ceiling cut it). */
+  adminSites: (): Promise<AdminSiteList> => request('/api/admin/sites', AdminSiteListSchema),
   async adminAudit(): Promise<AuditEntry[]> {
     const { entries } = await request('/api/admin/audit', AuditListSchema)
     return entries

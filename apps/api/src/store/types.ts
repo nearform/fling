@@ -141,7 +141,7 @@ export function accessOfSite(site: SiteRecord): AccessLevel {
 
 /**
  * A site in the instance's site directory (`SITES/SITE#<name>`): its listing and access level,
- * written with the site, so the admins' list of every site is one query.
+ * written with the site, so the admins' list of every site reads one partition.
  */
 export type SiteDirectoryRecord = SharedListing & { access: AccessLevel }
 
@@ -414,14 +414,15 @@ export interface Store extends NotificationStore {
   /** The sites shared with `email` directly (its grants, with their listings), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
   /**
-   * Every site on the instance by name (byte order), optionally only those whose name starts with
-   * `prefix`, a page at a time: the site directory, for admins.
+   * The site directory, for admins: every site on the instance by name (byte order), at most
+   * `max` of them (`truncated` when there were more), read `pageSize` items a query (by default
+   * 1000). `prefix`: only names that start with it.
    */
   listAllSites(opts: {
+    max: number
     prefix?: string
-    limit: number
-    cursor?: string
-  }): Promise<{ sites: SiteDirectoryRecord[]; cursor?: string }>
+    pageSize?: number
+  }): Promise<{ sites: SiteDirectoryRecord[]; truncated: boolean }>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
 

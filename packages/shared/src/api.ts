@@ -256,14 +256,12 @@ export const AdminUserListSchema = z.object({
 export type AdminUserList = z.infer<typeof AdminUserListSchema>
 
 /**
- * GET /api/admin/sites?q=<name prefix>&cursor=&limit= — every site on the instance, a page at a
- * time, by name: its listing, nothing of the owner's (versions, share link, audience).
+ * GET /api/admin/sites — every site on the instance, by name, in one response (clients search and
+ * sort it): its listing, nothing of the owner's (versions, share link, audience).
  */
 export const AdminSiteSchema = z.object({
   name: z.string(),
   url: z.string(),
-  /** the site's review page (`comments` capability) */
-  reviewUrl: z.string().optional(),
   owner: z.string(),
   access: AccessLevelSchema,
   archived: z.boolean(),
@@ -275,8 +273,8 @@ export const AdminSiteSchema = z.object({
 export type AdminSite = z.infer<typeof AdminSiteSchema>
 export const AdminSiteListSchema = z.object({
   sites: z.array(AdminSiteSchema),
-  /** pass back as `cursor` for the next page; null: no more */
-  cursor: z.string().nullable(),
+  /** the list stops at the server's ceiling: there are more sites than it holds */
+  truncated: z.boolean(),
 })
 export type AdminSiteList = z.infer<typeof AdminSiteListSchema>
 

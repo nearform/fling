@@ -83,3 +83,15 @@ describe('shared sites', () => {
     expect(label(3, 1, true)).toBe('1 of 3 shared sites')
   })
 })
+
+describe('all sites (admins)', () => {
+  it('count every site on the instance, and how many match', () => {
+    const label = (total: number | undefined, shown: number, searching = false) =>
+      countLabel({ total, shown, archived: false, all: true, searching })
+    expect(label(undefined, 0)).toBe('Every site on this instance')
+    expect(label(0, 0)).toBe('Nothing flung on this instance yet')
+    expect(label(1, 1)).toBe('1 site')
+    expect(label(6, 6)).toBe('6 sites')
+    expect(label(6, 2, true)).toBe('2 of 6 sites')
+  })
+})

@@ -139,7 +139,7 @@ describe('site-centric keys', () => {
     const stale = site('a@example.test', 'hello', { id: 'stale' })
     await table.put({ ...old.site(stale), pk: 'SITE#stale', sk: 'SITE' })
     await records.deleteSite(stale)
-    expect((await records.listAllSites({ limit: 10 })).sites).toEqual([
+    expect((await records.listAllSites({ max: 10 })).sites).toEqual([
       { ...listingOf(holder), access: 'members' },
     ])
     expect(await records.findSite('hello')).toEqual(holder)

@@ -19,14 +19,10 @@ export function SiteSearch({
   value,
   onChange,
   className = '',
-  placeholder = 'Search sites…',
-  label = 'Search sites by name, URL or share link',
 }: {
   value: string
   onChange: (value: string) => void
   className?: string
-  placeholder?: string
-  label?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -49,8 +45,8 @@ export function SiteSearch({
         ref={inputRef}
         type="search"
         className="grow [&::-webkit-search-cancel-button]:hidden"
-        placeholder={placeholder}
-        aria-label={label}
+        placeholder="Search sites…"
+        aria-label="Search sites by name, URL or share link"
         aria-keyshortcuts="/"
         autoComplete="off"
         spellCheck={false}

@@ -3,6 +3,7 @@
  * not do, its expiry, stopping it), and that admins get nothing over other people's sites.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as admin from '../src/admin.ts'
 import type { SiteRecord } from '../src/store/types.ts'
 import { APP_ORIGIN, api, cookiesOf, createUser, type Env, json, setup } from './helpers.ts'
 import {
@@ -156,7 +157,7 @@ describe('the sites list', () => {
     const res = await browser(bossCookie, 'GET', '/api/admin/sites')
     expect(res.status).toBe(200)
     const body = await json(res)
-    expect(body.cursor).toBeNull()
+    expect(body.truncated).toBe(false)
     expect(body.sites.map((s: { name: string }) => s.name)).toEqual([
       'boss-site',
       'member-docs',
@@ -167,7 +168,6 @@ describe('the sites list', () => {
     expect(secret).toEqual({
       name: 'member-secret',
       url: expect.stringContaining('member-secret'),
-      reviewUrl: expect.stringContaining('/review/member-secret'),
       owner: MEMBER,
       access: 'people',
       archived: false,
@@ -183,22 +183,15 @@ describe('the sites list', () => {
     expect((await api(env, boss.key, 'GET', '/api/admin/sites')).status).toBe(200)
   })
 
-  it('pages with a cursor and searches by name prefix', async () => {
-    const { bossCookie } = await world()
+  it('stops at the ceiling and says the list was cut', async () => {
+    await world()
     await env.store.createSite(site(BOSS, 'boss-site'))
-    const first = await json(await browser(bossCookie, 'GET', '/api/admin/sites?limit=2'))
-    expect(first.sites.map((s: { name: string }) => s.name)).toEqual(['boss-site', 'member-docs'])
-    const next = await json(
-      await browser(
-        bossCookie,
-        'GET',
-        `/api/admin/sites?limit=2&cursor=${encodeURIComponent(first.cursor)}`
-      )
-    )
-    expect(next.sites.map((s: { name: string }) => s.name)).toEqual(['member-site'])
-    expect(next.cursor).toBeNull()
-    const found = await json(await browser(bossCookie, 'GET', '/api/admin/sites?q=Member-S'))
-    expect(found.sites.map((s: { name: string }) => s.name)).toEqual(['member-site'])
+    const p = { email: BOSS, admin: true, via: 'session' as const }
+    const cut = await admin.listSites(env.deps, p, 2)
+    expect(cut.sites.map(s => s.name)).toEqual(['boss-site', 'member-docs'])
+    expect(cut.truncated).toBe(true)
+    const whole = await admin.listSites(env.deps, p, 3)
+    expect([whole.sites.length, whole.truncated]).toEqual([3, false])
   })
 
   it('is not for an admin while impersonating', async () => {

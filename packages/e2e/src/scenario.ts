@@ -1512,13 +1512,19 @@ async function adminStep(ctx: {
     const row = body.users.find(u => u.email === owner)
     check(row && row.siteCount >= 1, `users list: ${JSON.stringify(body.users)}`)
   }
-  /** Every site's listing, searched by the name of the owner's site. */
+  /** Every site's listing, the owner's site among them (unless the list stops short of it). */
   const allSites = async (how: { cookie: string } | { key: string }) => {
-    const res = await call(how, 'GET', `/api/admin/sites?q=${encodeURIComponent(name)}`)
+    const res = await call(how, 'GET', '/api/admin/sites')
     check(res.status === 200, `admin sites list: ${res.status}`)
-    const body = (await res.json()) as { sites: { name: string; owner: string }[] }
+    const body = (await res.json()) as {
+      sites: { name: string; owner: string }[]
+      truncated: boolean
+    }
     const row = body.sites.find(s => s.name === name)
-    check(row?.owner === owner, `sites list: ${JSON.stringify(body.sites)}`)
+    check(
+      row?.owner === owner || (!row && body.truncated),
+      `sites list: ${body.sites.length} sites, ${name} ${row ? `owned by ${row.owner}` : 'missing'}`
+    )
   }
 
   // Not admins: nothing there. A smoke run may sign in as one admin for both roles (a personal

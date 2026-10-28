@@ -72,7 +72,7 @@ describe('mcp tool catalogue', () => {
       auth: { kind: 'oidc', displayName: 'Google', emailDomains: [], invitedEmails: true },
     })
     expect(mcpToolsFor(w).setVisibility.description).toBe(
-      'Make a site private (only anyone signed in to My Fling (invited accounts)) or public (anyone).'
+      'Make a site private (open to anyone signed in to My Fling (invited accounts)) or public (anyone).'
     )
   })
 

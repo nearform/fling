@@ -347,7 +347,7 @@ export function mcpToolsFor(w: McpWording) {
     setVisibility: tool({
       name: 'fling_set_visibility',
       title: 'Set visibility',
-      description: `Make a site private (only ${w.privateAudience}) or public (anyone).`,
+      description: `Make a site private (open to ${w.privateAudience}) or public (anyone).`,
       inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
       annotations: { idempotentHint: true, openWorldHint: true },
     }),
@@ -574,7 +574,7 @@ export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean 
     'Every site needs a name. If the user did not give one, propose a short descriptive name and confirm it before ' +
       'publishing (fling_check_name shows whether it is free). Names are global and first come, first served; when a ' +
       'name is taken, offer the returned suggestions.',
-    `Sites are private (only ${w.privateAudience}) by default. Only make one public if asked; to show a private ` +
+    `Sites are private (open to ${w.privateAudience}) by default. Only make one public if asked; to show a private ` +
       'site to someone who cannot sign in, create a share link with fling_share.',
     'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
       'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +

@@ -6,8 +6,8 @@
  * It completes addresses from the instance's allowed email domains (`lib/email-complete.ts`). With
  * one domain the rest of the address shows as ghost text, which Tab takes (Enter takes it and
  * adds), and entries without a domain get it when added or pasted. With several, a list of
- * matching addresses opens under the input (an ARIA combobox: arrows move, Enter or Tab picks,
- * Escape closes). With none published there is no completion.
+ * matching addresses opens under the input with the first one highlighted (an ARIA combobox:
+ * arrows move, Tab fills in the highlighted one, Enter adds it, Escape closes). With none published there is no completion.
  */
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import { useInstance } from '../hooks/instance'
@@ -42,17 +42,19 @@ export function EmailAdder({
 }) {
   const domains = useInstance()?.auth.emailDomains ?? NO_DOMAINS
   const [closed, setClosed] = useState(false)
-  const [active, setActive] = useState(-1)
+  const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const ghost = inlineCompletion(draft, domains)
   const options = domains.length > 1 ? domainSuggestions(currentEntry(draft).entry, domains) : []
   const listOpen = options.length > 0 && !closed
   const listId = `${id}-suggestions`
+  // The highlighted option: the first until the arrows move it, kept in range as the list narrows.
+  const current = listOpen ? Math.min(active, options.length - 1) : -1
 
-  /** A new draft reopens the list and starts again from no option chosen. */
+  /** A new draft reopens the list, highlighting its first option again. */
   const change = (next: string) => {
     setClosed(false)
-    setActive(-1)
+    setActive(0)
     onDraftChange(next)
   }
   // The combobox attributes, only where there is something to complete.
@@ -64,7 +66,7 @@ export function EmailAdder({
           'aria-autocomplete': domains.length === 1 ? ('inline' as const) : ('list' as const),
           'aria-expanded': domains.length > 1 && listOpen,
           ...(domains.length > 1 && { 'aria-controls': listId }),
-          ...(listOpen && active >= 0 && { 'aria-activedescendant': `${listId}-${active}` }),
+          ...(current >= 0 && { 'aria-activedescendant': `${listId}-${current}` }),
         }
 
   const add = (text: string) => onAdd(completeEntries(text, domains))
@@ -79,7 +81,15 @@ export function EmailAdder({
     if (listOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault()
       const last = options.length - 1
-      setActive(i => (e.key === 'ArrowDown' ? (i >= last ? 0 : i + 1) : i <= 0 ? last : i - 1))
+      setActive(
+        e.key === 'ArrowDown'
+          ? current >= last
+            ? 0
+            : current + 1
+          : current <= 0
+            ? last
+            : current - 1
+      )
       return
     }
     if (listOpen && e.key === 'Escape') {
@@ -88,7 +98,7 @@ export function EmailAdder({
       setClosed(true)
       return
     }
-    const chosen = listOpen && active >= 0 ? options[active] : undefined
+    const chosen = current >= 0 ? options[current] : undefined
     if (e.key === 'Tab' && !e.shiftKey && (ghost || chosen)) {
       e.preventDefault()
       change(ghost ? `${draft}${ghost}` : acceptSuggestion(draft, chosen as string))
@@ -159,8 +169,8 @@ export function EmailAdder({
                   id={`${listId}-${i}`}
                   role="option"
                   tabIndex={-1}
-                  aria-selected={i === active}
-                  className={`cursor-pointer truncate rounded-field px-2 py-1 ${i === active ? 'bg-[var(--surface-active)]' : ''}`}
+                  aria-selected={i === current}
+                  className={`cursor-pointer truncate rounded-field px-2 py-1 ${i === current ? 'bg-[var(--surface-active)]' : ''}`}
                   // Keep focus in the input, so the pick lands where the person is typing.
                   onMouseDown={e => e.preventDefault()}
                   onClick={() => pick(address, false)}

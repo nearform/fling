@@ -171,7 +171,7 @@ export const mcpLocalInstructions = (
     'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
     NEVER_PUBLISHED,
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
-    `Sites are private (only ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
+    `Sites are private (open to ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
   ].join('\n\n')
 
@@ -403,7 +403,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If the name is taken it fails with free suggestions — ask the user to pick one, then retry with `name`. ' +
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
-        `Re-deploying identical content is a no-op. Sites are private (only ${wording.privateAudience}) unless \`public\` is set. ` +
+        `Re-deploying identical content is a no-op. Sites are private (open to ${wording.privateAudience}) unless \`public\` is set. ` +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z

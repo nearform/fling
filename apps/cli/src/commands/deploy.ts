@@ -163,7 +163,7 @@ async function deployPrepared(
           )
         ).ready
 
-  const who = instance ? `only ${privateAudience(instance)} can open it` : 'sign-in required'
+  const who = instance ? `${privateAudience(instance)} can open it` : 'sign-in required'
   const privateNote = `Private: ${who}. Share publicly with \`${ctx.binName} share ${result.name}\`.`
   // With comments on, the review page is the link to share for feedback; the site URL follows.
   const review =

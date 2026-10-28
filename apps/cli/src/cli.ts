@@ -142,7 +142,10 @@ program
     'site name — names are global, first come first served (default: generated from the project and folder, e.g. rocketpod-docs; you confirm it on a terminal)'
   )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
-  .option('--public', 'make the site public (default: sign-in required)')
+  .option(
+    '--public',
+    'make the site public: anyone can open it, reviewing still needs sign-in (default: sign-in required)'
+  )
   .option(
     '-y, --yes',
     'never prompt: accept the generated name; without index.html, list the HTML pages (or fling anyway if there are none)'
@@ -268,7 +271,9 @@ program
 program
   .command('visibility <name> <visibility>')
   .helpGroup('Sites:')
-  .description('private (sign-in required) or public (anyone)')
+  .description(
+    'private (sign-in required) or public (anyone can open the site; reviewing it still needs sign-in)'
+  )
   .action(action((ctx, name: string, visibility: string) => runVisibility(ctx, name, visibility)))
 program
   .command('access <name>')

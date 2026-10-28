@@ -149,8 +149,8 @@ It is remembered, and becomes the current one only if none is.
   **Anyone with a share link can view the site without signing in** — say so when you hand it over,
   and only create one when the user wants to share with people who can't sign in.
 - `refresh: true` replaces the link (the old one stops working); `revoke: true` removes it.
-- `fling_set_visibility { name, visibility: "public" }` makes the main URL public; `"private"`
-  puts it back behind sign-in. Prefer a share link over making a site public.
+- `fling_set_visibility { name, visibility: "public" }` makes the site itself public (anyone can open it;
+  its review page and comments still need sign-in); `"private"` puts it back behind sign-in. Prefer a share link over making a site public.
 - `fling_set_audience { name, add?, remove?, set?, clear? }` limits a private site to listed
   people (addresses that can sign in to the Fling); `clear: true` opens it to everyone signed in
   again. The owner always sees it. It only applies while the site is private, a share link still

@@ -178,8 +178,8 @@ export function describeAudience(
   const list = emails.length ? `: ${audienceList(emails)}` : ''
   if (site.visibility === 'public') {
     return empty
-      ? 'Public: anyone can open it.'
-      : `Public: anyone can open it. Its audience (${and(whoIn(emails, groups))}${list}) applies when it is private again.`
+      ? 'Public: anyone can open the site; reviewing it still needs sign-in.'
+      : `Public: anyone can open the site; reviewing it still needs sign-in. Its audience (${and(whoIn(emails, groups))}${list}) applies when it is private again.`
   }
   if (empty) return `Private: ${privateAudience} can open it.`
   const share = site.shareUrl

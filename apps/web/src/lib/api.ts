@@ -192,6 +192,12 @@ export const api = {
     const { groups } = await request(`/api/groups${mine ? '?mine=1' : ''}`, GroupListSchema)
     return groups
   },
+  /** The groups whose members are exactly `emails`, by slug. */
+  async groupsWithMembers(emails: readonly string[]): Promise<GroupSummary[]> {
+    const members = encodeURIComponent(emails.join(','))
+    const { groups } = await request(`/api/groups?members=${members}`, GroupListSchema)
+    return groups
+  },
   getGroup: (slug: string): Promise<GroupDetail> => request(group(slug), GroupDetailSchema),
   createGroup: (body: CreateGroupRequest): Promise<GroupDetail> =>
     request('/api/groups', GroupDetailSchema, { method: 'POST', body }),

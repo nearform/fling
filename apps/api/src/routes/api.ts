@@ -23,6 +23,7 @@ import {
   SiteListSchema,
   SiteSchema,
   SiteWithAudienceSchema,
+  splitEmails,
   UpdateCommentRequestSchema,
   UpdateGroupRequestSchema,
   UpdateSiteRequestSchema,
@@ -285,7 +286,11 @@ apiRoutes.post('/sites/:name/live', async c => {
 
 apiRoutes.get('/groups', async c => {
   const mine = ['1', 'true'].includes(c.req.query('mine') ?? '')
-  const list = await groups.listGroups(c.get('deps'), c.get('user'), { mine })
+  const members = c.req.query('members')
+  const list = await groups.listGroups(c.get('deps'), c.get('user'), {
+    mine,
+    members: members === undefined ? undefined : splitEmails(members),
+  })
   return c.json(GroupListSchema.parse({ groups: list }))
 })
 

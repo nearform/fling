@@ -361,7 +361,7 @@ describe('the edge agrees with site.view', () => {
     expect(await served('team.fling.test', await pass('bob@example.test', 'team', now))).toBe(false)
   })
 
-  it('/auth/login hands a viewer a pass the edge accepts, and anyone else the 404 page', async () => {
+  it('/auth/login hands a viewer a pass the edge accepts, and anyone else a refusal', async () => {
     const { env, owner, viewer, member, router } = await sites()
     const login = (session: string, ret: string) =>
       env.app.request(`/auth/login?return=${encodeURIComponent(ret)}`, {
@@ -390,8 +390,30 @@ describe('the edge agrees with site.view', () => {
       )
       expect(!isResponse(page) && page.uri.startsWith('/sites/')).toBe(true)
     }
-    const refused = await login(member.session, ret)
-    expect(refused.headers.get('location')).toBe('https://team.fling.test/_fling/404.html')
+    // Anyone else goes the same way with a deny handoff, and is then answered as a missing site.
+    const refused = new URL((await login(member.session, ret)).headers.get('location') ?? '')
+    expect(`${refused.origin}${refused.pathname}`).toBe('https://team.fling.test/_fling-pass')
+    expect(refused.searchParams.get('r')).toBe('/docs/?q=1')
+    const denial = await router(
+      toCloudFrontEvent({
+        host: refused.host,
+        path: refused.pathname,
+        query: refused.search.slice(1),
+      })
+    )
+    if (!isResponse(denial)) throw new Error('expected a redirect')
+    expect(denial.headers?.location?.value).toBe('/docs/?q=1')
+    const denied = denial.cookies?.fling_pass?.value
+    expect(denied).toBeTruthy()
+    const page = await router(
+      toCloudFrontEvent({
+        host: refused.host,
+        path: '/docs/',
+        query: 'q=1',
+        cookieHeader: `fling_pass=${denied}`,
+      })
+    )
+    expect(!isResponse(page) && page.uri).toBe('/_fling/missing')
     // Other sites go straight back, as ever.
     const priv = await login(member.session, 'https://priv.fling.test/')
     expect(priv.headers.get('location')).toBe('https://priv.fling.test/')

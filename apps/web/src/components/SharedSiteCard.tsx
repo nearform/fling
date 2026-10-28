@@ -11,6 +11,7 @@ import { useInstance } from '../hooks/instance'
 import { displayUrl, fullDate, timeAgo } from '../lib/format'
 import { reviewHref } from '../lib/review'
 import { CopyButton } from './CopyButton'
+import { EmailBadge } from './EmailBadge'
 
 const quickAction = 'btn btn-ghost btn-xs h-6 min-h-6 gap-1 px-1.5 font-normal'
 
@@ -61,12 +62,11 @@ export function SharedSiteCard({ site }: { site: SharedSite }) {
         )}
       </div>
 
-      <div className="mt-0.5 text-xs text-secondary">
-        <span className="break-all">{site.owner}</span>
-        <span> · through {sharedVia(site)}</span>
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-secondary">
+        <EmailBadge email={site.owner} size="sm" />
+        <span>· through {sharedVia(site)}</span>
         <span className="max-sm:hidden">
-          {' · '}
-          Updated <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
+          · Updated <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
         </span>
       </div>
     </article>

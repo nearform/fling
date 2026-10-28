@@ -14,6 +14,7 @@ export const queryKeys = {
   comments: (name: string) => ['comments', name] as const,
   allGroups: ['groups'] as const,
   groups: (mine: boolean) => ['groups', mine ? 'mine' : 'all'] as const,
+  groupsWithMembers: (emails: readonly string[]) => ['groups', 'members', ...emails] as const,
   group: (slug: string) => ['group', slug] as const,
   keys: ['keys'] as const,
   connections: ['connections'] as const,
@@ -153,6 +154,19 @@ export function useGroups(mine: boolean, enabled = true) {
     queryKey: queryKeys.groups(mine),
     queryFn: () => api.listGroups(mine),
     enabled,
+  })
+}
+
+/**
+ * The groups of exactly these people (none asked for: none). The addresses are sorted for the
+ * query key, so the same people in another order share one answer.
+ */
+export function useGroupsWithMembers(emails: readonly string[], enabled = true) {
+  const sorted = [...new Set(emails.map(e => e.toLowerCase()))].sort()
+  return useQuery({
+    queryKey: queryKeys.groupsWithMembers(sorted),
+    queryFn: () => api.groupsWithMembers(sorted),
+    enabled: enabled && sorted.length > 0,
   })
 }
 

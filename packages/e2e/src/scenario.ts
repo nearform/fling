@@ -83,6 +83,62 @@ async function get(url: string, headers: Record<string, string> = {}): Promise<F
   }
 }
 
+/**
+ * As a browser would: follow redirects from `url`, sending each host the cookies it holds (`jar`:
+ * host → `a=1; b=2`, starting with the ones given) and keeping those it sets. Where it ended up.
+ */
+async function browse(
+  url: string,
+  jar: Record<string, string>
+): Promise<Fetched & { url: string; hops: string[] }> {
+  const hops: string[] = []
+  let at = url
+  for (let i = 0; i < 10; i++) {
+    const host = new URL(at).host
+    const res = await get(at, jar[host] ? { cookie: jar[host] } : {})
+    const held = new Map(
+      (jar[host] ?? '')
+        .split(/;\s*/)
+        .filter(Boolean)
+        .map(c => [c.split('=')[0] as string, c] as const)
+    )
+    for (const c of res.headers.getSetCookie()) {
+      const pair = c.split(';')[0] as string
+      held.set(pair.split('=')[0] as string, pair)
+    }
+    jar[host] = [...held.values()].join('; ')
+    if (res.status < 300 || res.status >= 400 || !res.location) return { ...res, url: at, hops }
+    hops.push(`${res.status} ${at}`)
+    at = new URL(res.location, at).toString()
+  }
+  throw new ScenarioError(`too many redirects from ${url}: ${hops.join(' → ')}`)
+}
+
+/**
+ * Someone signed in (`session`, their app cookie) whom a restricted site refuses: a browser goes
+ * from `siteUrl` through sign-in and the site's `/_fling-pass` back to `siteUrl`, which answers
+ * 404 with the sites' 404 page, exactly as a site that does not exist.
+ */
+async function refusedAt(siteUrl: string, appOrigin: string, session: string, who: string) {
+  const jar = { [new URL(appOrigin).host]: session }
+  const end = await browse(siteUrl, jar)
+  const origin = new URL(siteUrl).origin
+  const route = `${end.hops.join(' → ')} → ${end.status} ${end.url}`
+  check(
+    end.hops.some(h => h.includes(`${appOrigin}/auth/login?`)) &&
+      end.hops.some(h => h.includes(`${origin}/_fling-pass?t=`)),
+    `${who}: not refused through sign-in and the site pass path: ${route}`
+  )
+  const unknown = await get(siteUrl.replace(/\/\/([^.]+)\./, '//$1-nobody.'))
+  check(
+    end.url === new URL(siteUrl).href &&
+      end.status === 404 &&
+      unknown.status === 404 &&
+      end.text === unknown.text,
+    `${who}: not the sites' 404 page at the site's address (${route}; unknown site ${unknown.status})`
+  )
+}
+
 /** Poll until `ok`, or fail with the last response. */
 async function eventually(
   what: string,
@@ -788,7 +844,8 @@ async function audienceStep(ctx: {
   step('shared with me: the viewer sees it; the outsider and the owner do not')
 
   // The site host: a member cookie doesn't open it; the viewer gets in through sign-in and the
-  // site pass, the outsider is shown the sites' 404 page. Only with browser sessions.
+  // site pass, the outsider is answered as for a missing site, at the address they asked for.
+  // Only with browser sessions.
   if (viewer.cookie && viewer.siteCookie && outsider.cookie) {
     const loginPrefix = `${appOrigin}/auth/login?return=`
     const toSignIn = await eventually(
@@ -825,19 +882,8 @@ async function audienceStep(ctx: {
     }
     step('viewer: sign-in → site pass → served (frameable)')
 
-    const refused = await get(signIn, { cookie: outsider.cookie })
-    const notFoundUrl = `${new URL(siteUrl).origin}/_fling/404.html`
-    check(
-      refused.status === 302 && refused.location === notFoundUrl,
-      `outsider sign-in hop: ${refused.status} → ${refused.location}`
-    )
-    const page = await get(notFoundUrl)
-    const unknown = await get(siteUrl.replace(`//${name}.`, `//${name}-nobody.`))
-    check(
-      unknown.status === 404 && page.text === unknown.text,
-      `outsider is not shown the sites' 404 page (${page.status}, unknown site ${unknown.status})`
-    )
-    step("outsider: the sites' 404 page, as for a site that does not exist")
+    await refusedAt(siteUrl, appOrigin, outsider.cookie, 'outsider')
+    step("outsider: the sites' 404 page at the site's address, as for a site that does not exist")
   } else {
     step('audience: no browser sessions, so the site host checks are skipped')
   }
@@ -877,7 +923,7 @@ interface ApiGroup {
  * The member makes a group; the owner sees it and its members and names it in the site's audience,
  * but may not change it. The outsider, once the member adds them, gets in (the API, and the site
  * pass on a fresh sign-in hop); once taken out, they are refused again on the next hop (a pass
- * already held would last its 15 minutes). Deleting the group while it is the audience's only
+ * already held would last its 5 minutes). Deleting the group while it is the audience's only
  * entry leaves the site restricted to its owner. The group is deleted however the step ends.
  */
 async function groupStep(ctx: {
@@ -952,7 +998,16 @@ async function groupStep(ctx: {
       access.restricted && access.audience?.groups.some(g => g.slug === slug && g.size === 1),
       `fling access --group: ${JSON.stringify(access)}`
     )
-    step(`${joiner.email} added to ${slug}; the owner named ${slug} in ${name}'s audience`)
+    const twins = (await fling('groups', 'list', '--members', joiner.email)) as {
+      groups: { slug: string }[]
+    }
+    check(
+      twins.groups.some(g => g.slug === slug),
+      `fling groups --members ${joiner.email}: ${JSON.stringify(twins)}`
+    )
+    step(
+      `${joiner.email} added to ${slug} (found by its members); the owner named ${slug} in ${name}'s audience`
+    )
 
     // In the group: the API lets them in, and a sign-in hop hands them a site pass.
     const site = () => as(joiner, 'GET', `/api/sites/${name}/comments`)
@@ -983,11 +1038,7 @@ async function groupStep(ctx: {
       check(outside.status === 404, `removed from the group, comments: ${outside.status}`)
     }
     if (joiner.cookie) {
-      const hop = await get(signIn, { cookie: joiner.cookie })
-      check(
-        hop.status === 302 && hop.location === `${origin}/_fling/404.html`,
-        `removed from the group, sign-in hop: ${hop.status} → ${hop.location}`
-      )
+      await refusedAt(siteUrl, appOrigin, joiner.cookie, 'removed from the group')
     }
     const left = await sharedWith(appOrigin, joiner)
     check(
@@ -1025,11 +1076,7 @@ async function groupStep(ctx: {
     const ownerSite = await as(owner, 'GET', `/api/sites/${name}`)
     check(ownerSite.status === 200, `group deleted, the owner GET /api/sites: ${ownerSite.status}`)
     if (joiner.cookie && owner.cookie) {
-      const refused = await get(signIn, { cookie: joiner.cookie })
-      check(
-        refused.status === 302 && refused.location === `${origin}/_fling/404.html`,
-        `group deleted, its member's sign-in hop: ${refused.status} → ${refused.location}`
-      )
+      await refusedAt(siteUrl, appOrigin, joiner.cookie, 'group deleted, its member')
       const ownerHop = await get(signIn, { cookie: owner.cookie })
       check(
         ownerHop.status === 302 && (ownerHop.location ?? '').startsWith(`${origin}/_fling-pass?t=`),

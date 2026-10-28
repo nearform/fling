@@ -1,36 +1,45 @@
 /**
- * Groups: every group on the instance, or only yours (kept in `?mine=1`), each linking to its
- * page, and a form to make one. Any member may use any group in a site's audience; only its owner
- * changes it. A new group's slug follows its name until it is edited by hand.
+ * Groups: every group on the instance, or only yours (kept in `?mine=1`). A row opens the group
+ * in the group editor, kept in `?edit=<slug>` so it can be linked to; "New group" opens the editor
+ * to make one, and then shows it. Any member may use any group in a site's audience; only its
+ * owner changes it.
  */
-import { GROUP_SLUG_MAX, GROUP_SLUG_RULES } from '@fling/shared'
 import { PlusIcon, UserGroupIcon } from '@heroicons/react/24/outline'
-import { type FormEvent, useId, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Modal } from '../components/Modal'
+import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { EmailBadge } from '../components/EmailBadge'
+import { GroupEditor, type GroupEditorTarget } from '../components/GroupEditor'
 import { PageHeader } from '../components/PageHeader'
-import { useCreateGroup, useGroups, useMe } from '../hooks/queries'
+import { useGroups, useMe } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { peopleLabel } from '../lib/audience'
-import { checkNewGroup, slugFromName } from '../lib/groups'
 
 export default function Groups() {
   const [params, setParams] = useSearchParams()
   const mine = params.get('mine') === '1'
   const list = useGroups(mine)
   const { data: me } = useMe()
+  const editing = params.get('edit')
   const [creating, setCreating] = useState(false)
+  const target: GroupEditorTarget | null = creating
+    ? { mode: 'create' }
+    : editing
+      ? { mode: 'open', slug: editing }
+      : null
 
-  const setMine = (next: boolean) =>
+  const setParam = (key: string, value: string | null, replace = true) =>
     setParams(
       prev => {
         const p = new URLSearchParams(prev)
-        if (next) p.set('mine', '1')
-        else p.delete('mine')
+        if (value) p.set(key, value)
+        else p.delete(key)
         return p
       },
-      { replace: true }
+      { replace }
     )
+  const setMine = (next: boolean) => setParam('mine', next ? '1' : null)
+  /** Opening a group is a step Back undoes; closing it isn't. */
+  const open = (slug: string | null) => setParam('edit', slug, slug === null)
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -106,19 +115,24 @@ export default function Groups() {
                 {list.data.map(g => (
                   <tr key={g.slug}>
                     <td className="text-sm">
-                      <Link
-                        to={`/groups/${encodeURIComponent(g.slug)}`}
-                        className="link link-hover font-medium"
+                      <button
+                        type="button"
+                        className="link link-hover text-left font-medium"
+                        onClick={() => open(g.slug)}
                       >
                         {g.name}
-                      </Link>
+                      </button>
                       {g.name !== g.slug && (
-                        <span className="ml-1.5 font-mono text-xs text-secondary">{g.slug}</span>
+                        <span className="ms-1.5 font-mono text-xs text-secondary">{g.slug}</span>
                       )}
                     </td>
                     <td className="text-secondary">{peopleLabel(g.size)}</td>
-                    <td className="text-secondary break-all">
-                      {g.owner === me?.email ? 'You' : g.owner}
+                    <td className="max-w-64">
+                      {g.owner === me?.email ? (
+                        <span className="text-secondary">You</span>
+                      ) : (
+                        <EmailBadge email={g.owner} size="sm" />
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -128,118 +142,11 @@ export default function Groups() {
         )}
       </div>
 
-      <NewGroupModal open={creating} onClose={() => setCreating(false)} />
+      <GroupEditor
+        target={target}
+        onClose={() => (creating ? setCreating(false) : open(null))}
+        onCreated={group => open(group.slug)}
+      />
     </div>
-  )
-}
-
-/** Slug, name and (optionally) the first members; on success, the new group's page. */
-function NewGroupModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const create = useCreateGroup()
-  const navigate = useNavigate()
-  const id = useId()
-  const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [slugEdited, setSlugEdited] = useState(false)
-  const [members, setMembers] = useState('')
-  const [problem, setProblem] = useState<string | null>(null)
-
-  const close = () => {
-    setName('')
-    setSlug('')
-    setSlugEdited(false)
-    setMembers('')
-    setProblem(null)
-    create.reset()
-    onClose()
-  }
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault()
-    const checked = checkNewGroup({ slug, name, members })
-    if (!checked.ok) {
-      setProblem(checked.problem)
-      return
-    }
-    setProblem(null)
-    create.mutate(
-      { slug: checked.slug, name: checked.name, members: checked.members },
-      {
-        onSuccess: group => {
-          close()
-          navigate(`/groups/${encodeURIComponent(group.slug)}`)
-        },
-        onError: error => setProblem(errorMessage(error)),
-      }
-    )
-  }
-
-  return (
-    <Modal open={open} onClose={close} title="New group">
-      <form className="space-y-3" onSubmit={submit}>
-        <label className="block space-y-1">
-          <span className="text-sm font-medium text-base-content">Name</span>
-          <input
-            className="input input-sm w-full"
-            value={name}
-            autoComplete="off"
-            placeholder="Design team"
-            onChange={e => {
-              setName(e.target.value)
-              if (!slugEdited) setSlug(slugFromName(e.target.value))
-            }}
-          />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-sm font-medium text-base-content">Slug</span>
-          <input
-            className="input input-sm w-full font-mono"
-            value={slug}
-            maxLength={GROUP_SLUG_MAX}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="design"
-            aria-describedby={`${id}-slug-help`}
-            onChange={e => {
-              setSlug(e.target.value)
-              setSlugEdited(true)
-            }}
-          />
-          <span id={`${id}-slug-help`} className="block text-xs text-muted">
-            How the CLI and Claude name it: {GROUP_SLUG_RULES}. It can't be changed later.
-          </span>
-        </label>
-        <label className="block space-y-1">
-          <span className="text-sm font-medium text-base-content">Members (optional)</span>
-          <textarea
-            className="textarea textarea-sm w-full"
-            rows={3}
-            value={members}
-            placeholder="name@example.com, another@example.com"
-            onChange={e => setMembers(e.target.value)}
-          />
-          <span className="block text-xs text-muted">
-            Separate addresses with commas, spaces or new lines. You can add more later.
-          </span>
-        </label>
-        {problem && (
-          <p className="text-sm text-error" role="alert">
-            {problem}
-          </p>
-        )}
-        <div className="flex justify-end gap-2 pt-1">
-          <button type="button" className="btn btn-sm" onClick={close} disabled={create.isPending}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={create.isPending}>
-            {create.isPending ? (
-              <span className="loading loading-spinner loading-xs" />
-            ) : (
-              'Create group'
-            )}
-          </button>
-        </div>
-      </form>
-    </Modal>
   )
 }

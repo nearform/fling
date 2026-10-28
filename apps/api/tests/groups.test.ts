@@ -5,6 +5,7 @@
  * widens who sees a site.
  */
 import { GROUP_MEMBERS_MAX, siteKvsKey } from '@fling/shared'
+import { verifySiteDenial, verifySitePass } from '@fling/shared/site-cookie'
 import { describe, expect, it } from 'vitest'
 import { api, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
@@ -67,6 +68,37 @@ describe('/api/groups', () => {
     expect(all.groups.map((g: { slug: string }) => g.slug)).toEqual(['alpha', 'design'])
     const mine = await json(await api(env, bob.key, 'GET', '/api/groups?mine=1'))
     expect(mine.groups.map((g: { slug: string }) => g.slug)).toEqual(['design'])
+  })
+
+  it('?members= lists the groups of exactly those people, from memberships', async () => {
+    const { env, alice, bob } = await team()
+    // `wider` holds the same people and one more; `ops` holds one of them: neither is a match.
+    await api(env, alice.key, 'POST', '/api/groups', {
+      slug: 'wider',
+      name: 'Wider',
+      members: ['carol@example.test', 'new@example.test', 'bob@example.test'],
+    })
+    await api(env, alice.key, 'POST', '/api/groups', {
+      slug: 'ops',
+      name: 'Ops',
+      members: ['carol@example.test'],
+    })
+    await api(env, alice.key, 'POST', '/api/groups', {
+      slug: 'twin',
+      name: 'Twin',
+      members: ['new@example.test', 'carol@example.test'],
+    })
+    const slugs = async (key: string, query: string) =>
+      (await json(await api(env, key, 'GET', `/api/groups?${query}`))).groups.map(
+        (g: { slug: string }) => g.slug
+      )
+    const pair = encodeURIComponent('New@example.test, carol@example.test')
+    expect(await slugs(alice.key, `members=${pair}`)).toEqual(['design', 'twin'])
+    expect(await slugs(alice.key, `members=${pair}&mine=1`)).toEqual(['twin'])
+    expect(await slugs(bob.key, `members=${pair}&mine=1`)).toEqual(['design'])
+    expect(await slugs(alice.key, 'members=carol@example.test')).toEqual(['ops'])
+    expect(await slugs(alice.key, 'members=nobody@example.test')).toEqual([])
+    expect(await slugs(alice.key, 'members=')).toEqual([])
   })
 
   it('refuses a slug in use, a bad slug, an address that cannot sign in and too many members', async () => {
@@ -168,13 +200,22 @@ describe('a group in an audience', () => {
       env.app.request(`/auth/login?return=${encodeURIComponent('https://team.fling.test/')}`, {
         headers: { cookie: `__Host-fling_session=${carol.session}` },
       })
-    expect((await hop()).headers.get('location')).toMatch(
-      /^https:\/\/team\.fling\.test\/_fling-pass\?t=/
-    )
+    const handoff = async () => {
+      const location = new URL((await hop()).headers.get('location') ?? '')
+      expect(`${location.origin}${location.pathname}`).toBe('https://team.fling.test/_fling-pass')
+      return location.searchParams.get('t') ?? ''
+    }
+    const key = env.config.secrets.siteHmacKey
+    const now = Math.floor(env.deps.clock.now().getTime() / 1000)
+    const inside = await handoff()
+    expect(verifySitePass(inside, key, 'handoff', now)?.e).toBe('carol@example.test')
+    expect(verifySiteDenial(inside, key, 'deny', now)).toBeNull()
     await api(env, bob.key, 'POST', '/api/groups/design/members', {
       remove: ['carol@example.test'],
     })
-    expect((await hop()).headers.get('location')).toBe('https://team.fling.test/_fling/404.html')
+    const outside = await handoff()
+    expect(verifySiteDenial(outside, key, 'deny', now)).not.toBeNull()
+    expect(verifySitePass(outside, key, 'handoff', now)).toBeNull()
   })
 
   it('deleting the only group in an audience keeps the site restricted, to its owner', async () => {
@@ -288,6 +329,13 @@ describe('the group tools and fling_set_audience with groups', () => {
     expect(added.structuredContent.size).toBe(2)
     const renamed = await call('fling_group_rename', { slug: 'ops', name: 'Operations' })
     expect(renamed.structuredContent.name).toBe('Operations')
+    const same = await call('fling_groups', {
+      members: ['new@example.test', 'carol@example.test'],
+    })
+    expect(same.structuredContent.groups.map((g: { slug: string }) => g.slug)).toEqual(['design'])
+    expect(same.content[0]?.text).toContain('of exactly those people')
+    const none = await call('fling_groups', { members: ['nobody@example.test'] })
+    expect(none.content[0]?.text).toBe('No group has exactly those people.')
     const mine = await call('fling_groups', { mine: true })
     expect(mine.structuredContent.groups.map((g: { slug: string }) => g.slug)).toEqual(['ops'])
 

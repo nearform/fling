@@ -5,8 +5,8 @@
 // and turn the decision into their runtime's response.
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
-//   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile);
-//     NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host
+//   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile,
+//     restricted site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie; restricted site without a valid `fling_pass` naming it), 301 to add a
 //     trailing slash (extensionless path, not an SPA).
@@ -15,8 +15,12 @@
 // `fling_site`, because the edge holds no access lists. The app's `/auth/login` asks policy and,
 // for a viewer, sends the browser to `/_fling-pass?t=<handoff>&r=<path>` on the site's host. Here
 // the handoff (60 s, naming this site's id) becomes a host-only `fling_pass` cookie, signed with
-// the same key for 15 minutes, and the browser goes on to `r`. An expired pass renews through
+// the same key for 5 minutes, and the browser goes on to `r`. An expired pass renews through
 // the same redirects, so removing someone from the audience takes effect within that window.
+// Anyone else gets a deny handoff on the same path, and their `fling_pass` instead says this site
+// refused them, for SITE_DENIED_TTL_SECONDS: while it lasts the site answers as a missing one (the
+// 404 page at the URL asked for), and afterwards the next visit asks the app again, so someone
+// added to the audience gets in within seconds and nobody loops between the two hosts.
 //
 // SYNTAX. This file runs in the CloudFront Functions runtime (cloudfront-js-2.0: ES5.1 plus
 // const/let, arrow functions, template literals, async/await on function declarations). So: no
@@ -33,6 +37,7 @@ import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
   REVIEW_SHELL,
+  SITE_DENIED_TTL_SECONDS,
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
   SITE_PASS_TTL_SECONDS,
@@ -84,7 +89,7 @@ export interface SiteResponse {
   status: number
   statusDescription: string
   headers: Record<string, string>
-  /** by name; only the pass handoff sets one (`fling_pass`) */
+  /** by name; only `/_fling-pass` sets one (`fling_pass`) */
   cookies?: Record<string, SiteCookie>
 }
 
@@ -161,6 +166,27 @@ export function validSiteCookie(
 }
 
 /**
+ * A valid, unexpired token of exactly `kind` naming site `siteId` (site-cookie.ts): a site pass or
+ * pass handoff (`pass`, `handoff`; for one email `e`), or a refusal (`denied`, `deny`; no email).
+ * Its payload, else null.
+ */
+function siteToken(
+  value: string,
+  key: string,
+  kind: string,
+  siteId: string,
+  nowSeconds: number,
+  hmac: (key: string, data: string) => string
+  // biome-ignore lint/suspicious/noExplicitAny: a parsed JSON payload, checked field by field
+): any {
+  const p = signedPayload(value, key, hmac)
+  if (!p || p.k !== kind || p.s !== siteId || typeof p.x !== 'number' || p.x <= nowSeconds) {
+    return null
+  }
+  return p
+}
+
+/**
  * A valid, unexpired site pass or pass handoff (`kind`) naming site `siteId`: who it is for (its
  * email), else null.
  */
@@ -172,9 +198,20 @@ export function validSitePass(
   nowSeconds: number,
   hmac: (key: string, data: string) => string
 ): string | null {
-  const p = signedPayload(value, key, hmac)
-  if (!p || p.k !== kind || p.s !== siteId || typeof p.e !== 'string') return null
-  return typeof p.x === 'number' && p.x > nowSeconds ? p.e : null
+  const p = siteToken(value, key, kind, siteId, nowSeconds, hmac)
+  return p && typeof p.e === 'string' ? p.e : null
+}
+
+/** A valid, unexpired refusal (`kind`: the API's `deny` handoff or the edge's `denied` cookie). */
+export function validSiteDenial(
+  value: string,
+  key: string,
+  kind: 'deny' | 'denied',
+  siteId: string,
+  nowSeconds: number,
+  hmac: (key: string, data: string) => string
+): boolean {
+  return !!siteToken(value, key, kind, siteId, nowSeconds, hmac)
 }
 
 function redirect(status: number, location: string, noStore: boolean): SiteResponse {
@@ -218,7 +255,8 @@ function sameHostPath(raw: string | null): string {
 
 /**
  * `/_fling-pass?t=<handoff>&r=<path>`: on to `r`, with a `fling_pass` for this site when the
- * handoff is valid. Without one, `r` sends the browser to sign in again for a fresh handoff.
+ * handoff is valid: a site pass from a pass handoff, a `denied` token from a deny handoff. Without
+ * one, `r` sends the browser to sign in again for a fresh handoff.
  */
 async function passFromHandoff(
   req: SiteRequest,
@@ -228,11 +266,17 @@ async function passFromHandoff(
   const res = redirect(302, sameHostPath(queryParam(req.query, 'r')), true)
   const key = await ctx.getCookieKey()
   const handoff = queryParam(req.query, 't')
-  const email =
-    key && handoff ? validSitePass(handoff, key, 'handoff', siteId, ctx.nowSeconds, ctx.hmac) : null
-  if (!key || email === null) return res
-  const ttl = ctx.passTtlSeconds || SITE_PASS_TTL_SECONDS
-  const payload = { k: 'pass', s: siteId, e: email, x: ctx.nowSeconds + ttl }
+  if (!key || !handoff) return res
+  const now = ctx.nowSeconds
+  const email = validSitePass(handoff, key, 'handoff', siteId, now, ctx.hmac)
+  let ttl = ctx.passTtlSeconds || SITE_PASS_TTL_SECONDS
+  // biome-ignore lint/suspicious/noExplicitAny: the token's payload, by kind (site-cookie.ts)
+  let payload: any = { k: 'pass', s: siteId, e: email, x: now + ttl }
+  if (email === null) {
+    if (!validSiteDenial(handoff, key, 'deny', siteId, now, ctx.hmac)) return res
+    ttl = SITE_DENIED_TTL_SECONDS
+    payload = { k: 'denied', s: siteId, x: now + ttl }
+  }
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const secure = ctx.siteScheme === 'https' ? 'Secure; ' : ''
   res.cookies = {}
@@ -283,6 +327,10 @@ export async function routeSiteRequest(
     const pass = req.pass
     let key: string | null = null
     if (pass) key = await ctx.getCookieKey()
+    // Refused a moment ago: answer as a missing site, until the refusal runs out.
+    if (key && pass && validSiteDenial(pass, key, 'denied', site.id, ctx.nowSeconds, ctx.hmac)) {
+      return { action: 'rewrite', uri: MISSING_KEY }
+    }
     if (!key || !pass || !validSitePass(pass, key, 'pass', site.id, ctx.nowSeconds, ctx.hmac)) {
       return toSignIn(req, ctx, host)
     }

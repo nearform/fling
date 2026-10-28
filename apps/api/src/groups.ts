@@ -56,16 +56,44 @@ export async function requireGroup(
   return group
 }
 
-/** GET /api/groups — every group on the instance, or (`mine`) the user's own; by slug. */
+/**
+ * GET /api/groups — every group on the instance, or (`mine`) the user's own; by slug. With
+ * `members`, only the groups whose members are exactly those people (`groupsWithMembers`).
+ */
 export async function listGroups(
   deps: Deps,
   user: User,
-  opts: { mine?: boolean } = {}
+  opts: { mine?: boolean; members?: readonly string[] } = {}
 ): Promise<GroupSummary[]> {
-  const groups = opts.mine
-    ? await deps.store.listOwnedGroups(user.email)
-    : await deps.store.listGroups()
-  return groups.map(summaryOf)
+  const groups = opts.members
+    ? (await groupsWithMembers(deps, opts.members)).filter(
+        g => !opts.mine || g.owner === user.email
+      )
+    : opts.mine
+      ? await deps.store.listOwnedGroups(user.email)
+      : await deps.store.listGroups()
+  return groups.filter(g => canGroup(userActor(user), 'group.read', g)).map(summaryOf)
+}
+
+/**
+ * The groups whose members are exactly `emails`, by slug: the groups each address is in
+ * (memberships, one query per address), intersected, then those whose `size` is the number of
+ * addresses. No scan, so it answers "is there already a group of these people?" at any size.
+ */
+export async function groupsWithMembers(
+  deps: Deps,
+  emails: readonly string[]
+): Promise<GroupRecord[]> {
+  const wanted = [...new Set(emails.map(e => e.trim().toLowerCase()).filter(Boolean))]
+  if (wanted.length === 0 || wanted.length > GROUP_MEMBERS_MAX) return []
+  let common = new Set(await deps.store.listMemberships(wanted[0] as string))
+  for (const email of wanted.slice(1)) {
+    if (common.size === 0) return []
+    const before = common
+    common = new Set((await deps.store.listMemberships(email)).filter(id => before.has(id)))
+  }
+  const groups = await deps.store.getGroups([...common])
+  return groups.filter(g => g.size === wanted.length).sort((a, b) => a.slug.localeCompare(b.slug))
 }
 
 async function detailOf(deps: Deps, user: User, group: GroupRecord): Promise<GroupDetail> {

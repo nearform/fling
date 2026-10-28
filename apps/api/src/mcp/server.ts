@@ -443,13 +443,15 @@ function registerGroupTools(
   ) => void
 ) {
   register(mcpTools.groups, async args => {
-    const list = await groups.listGroups(deps, user, { mine: args.mine })
+    const list = await groups.listGroups(deps, user, { mine: args.mine, members: args.members })
     return {
       text: list.length
-        ? `${list.length} ${args.mine ? 'of your ' : ''}group(s):\n${describeGroups(list, user.email)}`
-        : args.mine
-          ? 'You have no groups yet.'
-          : 'No groups yet.',
+        ? `${list.length} ${args.mine ? 'of your ' : ''}group(s)${args.members ? ' of exactly those people' : ''}:\n${describeGroups(list, user.email)}`
+        : args.members
+          ? 'No group has exactly those people.'
+          : args.mine
+            ? 'You have no groups yet.'
+            : 'No groups yet.',
       data: { groups: list },
     }
   })

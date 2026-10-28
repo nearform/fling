@@ -1,9 +1,12 @@
 import { parseLabel } from '@fling/shared/hosts'
 import { SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
 import {
+  signDenyHandoff,
   signPassHandoff,
   signSiteCookie,
+  signSiteDenied,
   signSitePass,
+  verifySiteDenial,
   verifySitePass,
 } from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -146,6 +149,9 @@ describe('restricted sites and the site pass', () => {
     `fling_pass=${signSitePass({ s, e: 'bob@example.test', x }, key)}`
   const handoff = (s = 'S7', x = NOW_S + 60) =>
     signPassHandoff({ s, e: 'bob@example.test', x }, HMAC)
+  const deny = (s = 'S7', x = NOW_S + 60) => signDenyHandoff({ s, x }, HMAC)
+  const denied = (s = 'S7', x = NOW_S + 60, key = HMAC) =>
+    `fling_pass=${signSiteDenied({ s, x }, key)}`
   const login = (back: string) => `${APP}/auth/login?return=${encodeURIComponent(back)}`
 
   it('serves with a valid pass for this site', async () => {
@@ -161,6 +167,10 @@ describe('restricted sites and the site pass', () => {
       pass('S7', NOW_S),
       pass('S7', NOW_S + 60, 'other'),
       `fling_pass=${handoff()}`,
+      `fling_pass=${deny()}`,
+      denied('S1'),
+      denied('S7', NOW_S),
+      denied('S7', NOW_S + 60, 'other'),
       'fling_pass=garbage',
     ]) {
       const res = await asResponse({
@@ -181,10 +191,12 @@ describe('restricted sites and the site pass', () => {
     }
   })
 
-  it('never takes a pass or a handoff as a member cookie', async () => {
+  it('never takes a pass, a handoff or a refusal as a member cookie', async () => {
     for (const token of [
       signSitePass({ s: 'S1', e: 'b@x.test', x: NOW_S + 60 }, HMAC),
       handoff('S1'),
+      deny('S1'),
+      signSiteDenied({ s: 'S1', x: NOW_S + 60 }, HMAC),
     ]) {
       const res = await asResponse({ host: PRIVATE, cookieHeader: `fling_site=${token}` })
       expect(res.statusCode).toBe(302)
@@ -208,15 +220,59 @@ describe('restricted sites and the site pass', () => {
     expect(res.headers?.location?.value).toBe('/docs/a.html?x=1&y=2')
     expect(res.headers?.['cache-control']?.value).toBe('no-store')
     const cookie = res.cookies?.fling_pass
-    expect(cookie?.attributes).toBe('Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=900')
+    expect(cookie?.attributes).toBe('Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=300')
     expect(cookie?.attributes).not.toMatch(/Domain/i)
     expect(verifySitePass(cookie?.value ?? '', HMAC, 'pass', NOW_S)).toEqual({
       s: 'S7',
       e: 'bob@example.test',
-      x: NOW_S + 900,
+      x: NOW_S + 300,
     })
     // …which then opens the site.
     const req = await asRequest({ host: RESTRICTED, cookieHeader: `fling_pass=${cookie?.value}` })
+    expect(req.uri).toBe('/sites/S7/V7/index.html')
+  })
+
+  it('turns a deny handoff into a refusal: the 404 page at the same URL until it runs out', async () => {
+    const res = await asResponse({
+      host: RESTRICTED,
+      path: '/_fling-pass',
+      query: `t=${deny()}&r=${encodeURIComponent('/docs/a.html?x=1')}`,
+    })
+    expect(res.statusCode).toBe(302)
+    expect(res.headers?.location?.value).toBe('/docs/a.html?x=1')
+    const cookie = res.cookies?.fling_pass
+    expect(cookie?.attributes).toBe('Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=10')
+    expect(verifySiteDenial(cookie?.value ?? '', HMAC, 'denied', NOW_S)).toEqual({
+      s: 'S7',
+      x: NOW_S + 10,
+    })
+    expect(verifySitePass(cookie?.value ?? '', HMAC, 'pass', NOW_S)).toBeNull()
+    const refused = `fling_pass=${cookie?.value}`
+    expect(
+      (await asRequest({ host: RESTRICTED, path: '/docs/a.html', cookieHeader: refused })).uri
+    ).toBe('/_fling/missing')
+    // …and once it runs out, the next visit asks the app again.
+    const later = createSiteRouter({
+      kvs: { get: async key => store.get(key) },
+      appOrigin: APP,
+      now: () => NOW_MS + 10_000,
+    })
+    const again = (await later(
+      toCloudFrontEvent({ host: RESTRICTED, path: '/', cookieHeader: refused })
+    )) as CloudFrontResponse
+    expect(again.statusCode).toBe(302)
+    expect(again.headers?.location?.value).toBe(login(`https://${RESTRICTED}/`))
+  })
+
+  it('a pass handoff replaces a refusal', async () => {
+    const res = await asResponse({
+      host: RESTRICTED,
+      path: '/_fling-pass',
+      query: `t=${handoff()}&r=%2F`,
+      cookieHeader: denied(),
+    })
+    const cookie = res.cookies?.fling_pass?.value
+    const req = await asRequest({ host: RESTRICTED, cookieHeader: `fling_pass=${cookie}` })
     expect(req.uri).toBe('/sites/S7/V7/index.html')
   })
 
@@ -230,12 +286,22 @@ describe('restricted sites and the site pass', () => {
     const res = (await dev(
       toCloudFrontEvent({ host: RESTRICTED, path: '/_fling-pass', query: `t=${handoff()}&r=%2F` })
     )) as CloudFrontResponse
-    expect(res.cookies?.fling_pass?.attributes).toBe('HttpOnly; SameSite=Lax; Path=/; Max-Age=900')
+    expect(res.cookies?.fling_pass?.attributes).toBe('HttpOnly; SameSite=Lax; Path=/; Max-Age=300')
   })
 
-  it('sets no pass for an expired, foreign or forged handoff, or a pass in its place', async () => {
+  it('sets no cookie for an expired, foreign or forged handoff, or a pass in its place', async () => {
     const forged = `${handoff().split('.')[0]}.${'A'.repeat(43)}`
-    for (const t of [handoff('S7', NOW_S), handoff('S1'), forged, pass().slice(11), '']) {
+    const deniedToken = denied().slice(11)
+    for (const t of [
+      handoff('S7', NOW_S),
+      handoff('S1'),
+      forged,
+      pass().slice(11),
+      deniedToken,
+      deny('S7', NOW_S),
+      deny('S1'),
+      '',
+    ]) {
       const res = await asResponse({
         host: RESTRICTED,
         path: '/_fling-pass',

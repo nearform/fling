@@ -207,7 +207,7 @@ Addresses are comma-separated or given after `--add` one by one, and each must b
 in to the Fling. Someone who hasn't signed in yet is marked `(hasn't signed in yet)`; they can open
 the site once they do. The audience only applies while the site is private: on a public site it is
 kept for later and `fling access` says so. A share link still opens a restricted site to anyone who
-has it, and `fling access` warns while one exists. Removing someone shuts them out within 15
+has it, and `fling access` warns while one exists. Removing someone shuts them out within 5
 minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups:
 [{ slug, name, size }] }`) and `warnings`; `fling info` shows the same line, and `fling ls --json`
 gives each site's `restricted`, `audienceSize` and `audienceGroups` (how many of those are groups).
@@ -225,6 +225,7 @@ change its members, rename it or delete it:
 
 ```sh
 fling groups                                          # every group (--mine: only yours)
+fling groups --members bob@example.com,cat@example.com  # the groups of exactly these people
 fling groups show design                              # its members
 fling groups create design --name "Design team" --add bob@example.com,cat@example.com
 fling groups add design dan@example.com
@@ -235,7 +236,7 @@ fling groups delete design                            # asks first unless --yes
 
 A slug is lowercase letters, digits and single hyphens, unique on the Fling; a group holds up to 500
 people, and an audience names up to 10 groups. Taking someone out of a group shuts them out of the
-sites it opens within 15 minutes. Deleting a group never opens a site up: sites whose audience
+sites it opens within 5 minutes. Deleting a group never opens a site up: sites whose audience
 names it keep their restriction, and anyone it let in loses access. Where it was the only entry,
 `fling access` shows "a deleted group (#<id>)" and only you can open the site until you add
 people or groups (`--remove-group '#<id>'` takes the reference out).

@@ -34,7 +34,6 @@ import {
   type Manifest,
   type ManifestFile,
   type NameCheck,
-  NOT_FOUND_PAGE,
   nameSuggestions,
   parseLabel,
   reviewUrl,
@@ -54,7 +53,11 @@ import {
   type VersionFiles,
   type Visibility,
 } from '@fling/shared'
-import { PASS_HANDOFF_TTL_SECONDS, signPassHandoff } from '@fling/shared/site-cookie'
+import {
+  PASS_HANDOFF_TTL_SECONDS,
+  signDenyHandoff,
+  signPassHandoff,
+} from '@fling/shared/site-cookie'
 import { emailAllowed } from './auth/identity.ts'
 import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
@@ -515,8 +518,9 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
 /**
  * Where `/auth/login` sends a signed-in user (`ret`, already through safeReturnUrl). A restricted
  * site's host is let in only through a site pass: someone policy lets view it goes by its
- * `/_fling-pass` with a 60-second handoff naming them and the site; anyone else gets the sites'
- * 404 page, as for a site that doesn't exist. Every other return URL is unchanged.
+ * `/_fling-pass` with a 60-second handoff naming them and the site; anyone else goes the same way
+ * with a 60-second deny handoff naming only the site, after which the edge answers the site as a
+ * missing one (its 404 page at the address asked for). Every other return URL is unchanged.
  */
 export async function signedInReturn(deps: Deps, user: User, ret: string): Promise<string> {
   const { config } = deps
@@ -533,9 +537,11 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
   const site = await deps.store.findSite(label.name)
   if (!site || !isRestricted(site)) return ret
   const actor = await actorOn(deps, userActor(user), site)
-  if (!can(actor, 'site.view', site)) return `${url.origin}${NOT_FOUND_PAGE}`
   const x = Math.floor(deps.clock.now().getTime() / 1000) + PASS_HANDOFF_TTL_SECONDS
-  const t = signPassHandoff({ s: site.id, e: user.email, x }, config.secrets.siteHmacKey)
+  const key = config.secrets.siteHmacKey
+  const t = can(actor, 'site.view', site)
+    ? signPassHandoff({ s: site.id, e: user.email, x }, key)
+    : signDenyHandoff({ s: site.id, x }, key)
   const r = encodeURIComponent(`${url.pathname}${url.search}`)
   return `${url.origin}${SITE_PASS_PATH}?t=${t}&r=${r}`
 }

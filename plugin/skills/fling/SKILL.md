@@ -154,11 +154,13 @@ It is remembered, and becomes the current one only if none is.
 - `fling_set_audience { name, add?, remove?, set?, clear? }` limits a private site to listed
   people (addresses that can sign in to the Fling); `clear: true` opens it to everyone signed in
   again. The owner always sees it. It only applies while the site is private, a share link still
-  opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 15
+  opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 5
   minutes. `fling_info` shows who can open a site.
 - `addGroups`, `removeGroups` and `setGroups` on `fling_set_audience` do the same for **groups**
-  (named lists of people, by slug). `fling_groups` lists them (`mine: true`: the user's own) and
-  `fling_group_show { slug }` shows who is in one. Anyone can use any group, but only its owner can
+  (named lists of people, by slug). `fling_groups` lists them (`mine: true`: the user's own;
+  `members: [...]`: only the groups of exactly those people) and `fling_group_show { slug }` shows
+  who is in one. Before making a group, or when an audience lists several people, call
+  `fling_groups { members }` and offer an existing group instead. Anyone can use any group, but only its owner can
   change it: `fling_group_create { slug, name, members? }`, `fling_group_members { slug, add?,
   remove? }`, `fling_group_rename`, `fling_group_delete` (needs `confirm: true`;
   sites keep their restriction and anyone it let in loses access, so confirm with the user). A site

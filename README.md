@@ -46,8 +46,8 @@ UI). Each address must be one that can sign in; the owner always sees the site, 
 still open it. A **group** is a named list of people (`fling groups`, `fling_groups`, the Groups page
 in the web UI): anyone signed in can see one and use it, and only its owner can change it. The edge
 holds no access lists: the API checks the audience when someone signs in to the site and hands them
-a 15-minute site pass for that one host, renewed without a prompt. So removing someone (from the
-audience or from a group in it) takes effect within 15 minutes. **Shared with me** lists the
+a 5-minute site pass for that one host, renewed without a prompt. So removing someone (from the
+audience or from a group in it) takes effect within 5 minutes. **Shared with me** lists the
 restricted sites other people have limited to you, or to a group you are in (`fling ls --shared`,
 `fling_list { shared: true }`, the Sites page's Shared with me tab).
 

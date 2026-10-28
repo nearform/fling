@@ -361,7 +361,7 @@ export function mcpToolsFor(w: McpWording) {
         '`setGroups` do the same for groups, by slug (fling_groups lists them); `clear` empties both (then every ' +
         'signed-in member can see it again). The owner always sees the site. Each address must be one that can ' +
         `sign in to ${w.name}. The audience only applies while the site is private (fling_set_visibility); share ` +
-        'links still open it to anyone. Removing someone takes up to 15 minutes to shut them out. fling_info shows ' +
+        'links still open it to anyone. Removing someone takes up to 5 minutes to shut them out. fling_info shows ' +
         'the audience.',
       inputSchema: {
         name: siteName,
@@ -385,9 +385,13 @@ export function mcpToolsFor(w: McpWording) {
       description:
         `List the groups on ${w.name}: named lists of people (a team) that any member can use in a site's ` +
         'audience (fling_set_audience `addGroups`). Each has a slug, a name, a size and an owner; `mine` lists only ' +
-        "the user's own.",
+        "the user's own. `members` lists only the groups of exactly those people: use it before making a group, " +
+        'or to swap a list of addresses in an audience for a group that already holds them.',
       inputSchema: {
         mine: z.boolean().optional().describe('Only the groups the user owns'),
+        members: members
+          .optional()
+          .describe('Only the groups whose members are exactly these addresses'),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
@@ -421,7 +425,7 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_group_members',
       title: 'Change who is in a group',
       description:
-        'Add people to a group the user owns, or take them out. Every site whose audience names the group follows: someone taken out is shut out within 15 minutes.',
+        'Add people to a group the user owns, or take them out. Every site whose audience names the group follows: someone taken out is shut out within 5 minutes.',
       inputSchema: {
         slug: groupSlug,
         add: members.optional().describe('Addresses to add'),

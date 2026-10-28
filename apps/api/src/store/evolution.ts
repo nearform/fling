@@ -51,6 +51,11 @@ export const UPGRADES: Partial<Record<Kind, readonly Upgrade[]>> = {
     // passed through): every member sees it.
     fields => ({ ...fields, audience: fields.audience ?? { emails: [], groups: [] } }),
   ],
+  // v2: the site's listing (`SharedListing`). A v1 item has only the site's id, name and owner, and
+  // nothing to fill the rest from, so it reads as it is and readers fall back to the site
+  // (`hasListing`).
+  sitegrant: [fields => fields],
+  groupsite: [fields => fields],
 }
 
 export const currentVersion = (kind: Kind, upgrades = UPGRADES) => (upgrades[kind]?.length ?? 0) + 1

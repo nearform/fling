@@ -1,5 +1,6 @@
 /** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
 import type { CommentAnchor, CommentAuthor, LivePeer, Visibility } from '@fling/shared'
+import { isRestricted } from '../policy.ts'
 
 export interface User {
   email: string
@@ -83,18 +84,57 @@ export interface SiteRecord {
 }
 
 /**
- * A user's direct grant on someone else's site (`USER#<email>/SHARED#<siteId>`): written with the
- * site while the email is in its audience, so the sites shared with a user are one query. A
- * projection: the site's audience is what policy reads.
+ * What Shared with me shows and filters on, copied from a site onto its index items (direct grants
+ * and group-site items) so the list needs no read of the site. `live`: it has a current version.
+ * `restricted`: policy's `isRestricted`.
  */
-export interface SiteGrantRecord {
-  email: string
+export interface SharedListing {
   siteId: string
-  /** the site's name and owner when the grant was written */
   name: string
   owner: string
-  grantedAt: string
+  createdAt: string
+  updatedAt: string
+  archived: boolean
+  live: boolean
+  restricted: boolean
 }
+
+/** What Shared with me shows of a site, as its index items carry it. */
+export function listingOf(site: SiteRecord): SharedListing {
+  return {
+    siteId: site.id,
+    name: site.name,
+    owner: site.email,
+    createdAt: site.createdAt,
+    updatedAt: site.updatedAt,
+    archived: site.archived,
+    live: site.currentVersionId !== null,
+    restricted: isRestricted(site),
+  }
+}
+
+/**
+ * The listing on an index item. v1 items (written before the listing was copied) carry only the
+ * site's id, name and owner: whoever reads one falls back to the site itself (`hasListing`).
+ */
+export type ListingCopy = Pick<SharedListing, 'siteId' | 'name' | 'owner'> &
+  Partial<Omit<SharedListing, 'siteId' | 'name' | 'owner'>>
+
+/** Does the index item carry the whole listing (v2), or only the site's id, name and owner (v1)? */
+export const hasListing = <T extends ListingCopy>(item: T): item is T & SharedListing =>
+  typeof item.live === 'boolean' &&
+  typeof item.archived === 'boolean' &&
+  typeof item.restricted === 'boolean' &&
+  typeof item.createdAt === 'string' &&
+  typeof item.updatedAt === 'string'
+
+/**
+ * A user's direct grant on someone else's site (`USER#<email>/SHARED#<siteId>`): written with the
+ * site while the email is in its audience, so the sites shared with a user are one query. A
+ * projection: the site's audience is what policy reads. It carries the site's listing, rewritten
+ * whenever the listing changes.
+ */
+export type SiteGrantRecord = ListingCopy & { email: string }
 
 /**
  * A group: a named list of people any member may use in an audience, changed only by its owner.
@@ -113,14 +153,11 @@ export interface GroupRecord {
   updatedAt: string
 }
 
-/** A site whose audience names a group (`GROUP#<id>/SITE#<siteId>`): what deleting it updates. */
-export interface GroupSiteRecord {
-  groupId: string
-  siteId: string
-  /** the site's name and owner when it was written */
-  name: string
-  owner: string
-}
+/**
+ * A site whose audience names a group (`GROUP#<id>/SITE#<siteId>`): what deleting the group
+ * updates, and how its members find the site. It carries the site's listing, like a direct grant.
+ */
+export type GroupSiteRecord = ListingCopy & { groupId: string }
 
 /** What locates a site's versions. */
 export type SiteRef = Pick<SiteRecord, 'id' | 'email'>
@@ -321,17 +358,17 @@ export interface Store {
    */
   createSite(site: SiteRecord): Promise<SiteRecord | null>
   /**
-   * Write the site. With `before` (the audience it had), also the index items that changed: added
-   * emails gain a direct grant and removed ones lose it; added groups gain a group-site item and
-   * removed ones lose it.
+   * Write the site and keep its index items in step with the stored one: emails that leave the
+   * audience lose their direct grant and groups their group-site item; those that join gain one;
+   * and when the listing (`SharedListing`) changed, every grant and group-site item is rewritten.
    */
-  putSite(site: SiteRecord, before?: SiteAudience): Promise<void>
+  putSite(site: SiteRecord): Promise<void>
   /**
    * Delete the site with its versions, grants and group-site items, and release its name claim (if
    * the claim is its).
    */
   deleteSite(site: SiteRecord): Promise<void>
-  /** The sites shared with `email` directly (its grants), by site id. */
+  /** The sites shared with `email` directly (its grants, with their listings), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
@@ -362,7 +399,7 @@ export interface Store {
     group: GroupRecord,
     members?: { add: readonly string[]; remove: readonly string[] }
   ): Promise<void>
-  /** The sites whose audience names the group. */
+  /** The sites whose audience names the group, with their listings. */
   listGroupSites(groupId: string): Promise<GroupSiteRecord[]>
   /** Delete the group: its members and memberships, its site items, its index items and claim. */
   deleteGroup(group: GroupRecord): Promise<void>

@@ -21,6 +21,8 @@ export interface NavItem {
   to: string
   label: string
   icon: ComponentType<{ className?: string }>
+  /** the paths it is active on, when wider than `to` (Admin: every admin page) */
+  match?: string
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -35,11 +37,12 @@ export const GET_STARTED_NAV_ITEM: NavItem = {
   icon: RocketLaunchIcon,
 }
 
-/** Admin → Users, for admins in their own session. */
+/** Admin (Users first, then Mail), for admins in their own session. */
 export const ADMIN_NAV_ITEM: NavItem = {
   to: ADMIN_USERS_PATH,
   label: 'Admin',
   icon: ShieldCheckIcon,
+  match: '/admin',
 }
 
 /** Groups, after Sites, on an instance with the `groups` capability. */
@@ -103,7 +106,7 @@ export default function SideNav() {
             <NavLink
               to={item.to}
               onClick={closeMobileDrawer}
-              data-active={isPathActive(pathname, item.to)}
+              data-active={isPathActive(pathname, item.match ?? item.to)}
               className={`nav-item flex items-center gap-2.5 ${
                 isCollapsed ? 'justify-center px-3 py-2.5' : 'px-2.5 py-1.5'
               }`}

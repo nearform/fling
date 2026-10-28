@@ -1,13 +1,19 @@
-/** Header avatar dropdown: who you are, your connections, sign out. Theme lives in `ThemeToggle`. */
-import { ArrowRightStartOnRectangleIcon, KeyIcon } from '@heroicons/react/24/outline'
+/**
+ * Header avatar dropdown: who you are, your connections, your notifications (on an instance that
+ * has them), sign out. Theme lives in `ThemeToggle`.
+ */
+import { ArrowRightStartOnRectangleIcon, BellIcon, KeyIcon } from '@heroicons/react/24/outline'
 import { useRef } from 'react'
 import { Link } from 'react-router-dom'
+import { useInstance } from '../hooks/instance'
 import { useLogout, useMe } from '../hooks/queries'
 import { initials } from '../lib/format'
+import { NOTIFICATION_SETTINGS_PATH, showsNotifications } from '../lib/notifications'
 
 export function UserMenu() {
   const { data: user } = useMe()
   const logout = useLogout()
+  const instance = useInstance()
   const ref = useRef<HTMLDetailsElement>(null)
   if (!user) return null
 
@@ -47,6 +53,17 @@ export function UserMenu() {
             <KeyIcon className="w-4 h-4" /> Connections
           </Link>
         </li>
+        {showsNotifications(instance) && (
+          <li>
+            <Link
+              to={NOTIFICATION_SETTINGS_PATH}
+              onClick={close}
+              className="nav-item flex items-center gap-2 px-2.5 py-1.5 text-sm"
+            >
+              <BellIcon className="w-4 h-4" /> Notifications
+            </Link>
+          </li>
+        )}
         <li className="border-t border-[color:var(--border-subtle)] my-1" />
         <li>
           <button

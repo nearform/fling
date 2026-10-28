@@ -9,6 +9,7 @@ import type {
   Fetcher,
   KVNamespace,
   R2Bucket,
+  SendEmail,
 } from '@cloudflare/workers-types'
 
 export interface Bindings {
@@ -22,6 +23,11 @@ export interface Bindings {
   ASSETS: Fetcher
   /** Durable Objects: the live rooms, one per site (src/live.ts) */
   LIVE_ROOMS: DurableObjectNamespace
+  /**
+   * Email Service: the `send_email` binding the deploy config's `MAIL` adds (src/mail/email.ts).
+   * Absent without it.
+   */
+  EMAIL?: SendEmail
 }
 
 export type Env = Bindings & Record<string, unknown>

@@ -81,6 +81,12 @@ export function checkDeployConfig(config) {
       throw new Error(`CF_DEPLOY_CONFIG.INSTANCE.${k} must be a string, number or boolean`)
     }
   }
+  // MAIL_* and SES_* come from MAIL, which also renders the send_email binding they need.
+  const mailKey = Object.keys(instance).find(k => /^(MAIL|SES)_/.test(k))
+  if (mailKey) {
+    throw new Error(`CF_DEPLOY_CONFIG.INSTANCE.${mailKey} is not allowed: email is set in MAIL`)
+  }
+  checkMail(config.MAIL)
   // Who may sign in has no default: whole domains, individual addresses, or both.
   const set = k => typeof instance[k] === 'string' && instance[k].trim() !== ''
   if (!set('ALLOWED_EMAIL_DOMAINS') && !set('ALLOWED_EMAILS')) {
@@ -89,6 +95,61 @@ export function checkDeployConfig(config) {
     )
   }
   return config
+}
+
+/** One address, as the API's config takes MAIL_FROM and MAIL_REPLY_TO. */
+const ADDRESS_RE = /^[^@\s<>"(),;:\\[\]]+@[^@\s<>"(),;:\\[\]]+\.[^@\s<>"(),;:\\[\]]+$/
+
+/**
+ * `MAIL` (optional): `{ FROM, FROM_NAME?, REPLY_TO? }`. FROM is an address on a domain onboarded
+ * to Email Service; the Worker refuses to start if that domain is the sites domain itself.
+ */
+export function checkMail(mail) {
+  if (mail === undefined) return
+  if (typeof mail !== 'object' || mail === null || Array.isArray(mail)) {
+    throw new Error('CF_DEPLOY_CONFIG.MAIL must be an object: { FROM, FROM_NAME?, REPLY_TO? }')
+  }
+  const unknown = Object.keys(mail).filter(k => !['FROM', 'FROM_NAME', 'REPLY_TO'].includes(k))
+  if (unknown.length) {
+    throw new Error(`CF_DEPLOY_CONFIG.MAIL has unknown keys: ${unknown.join(', ')}`)
+  }
+  if (typeof mail.FROM !== 'string' || !ADDRESS_RE.test(mail.FROM.trim())) {
+    throw new Error(
+      'CF_DEPLOY_CONFIG.MAIL.FROM must be an email address, e.g. fling@mail.example.com'
+    )
+  }
+  if (
+    mail.FROM_NAME !== undefined &&
+    (typeof mail.FROM_NAME !== 'string' || !mail.FROM_NAME.trim() || /[\r\n]/.test(mail.FROM_NAME))
+  ) {
+    throw new Error('CF_DEPLOY_CONFIG.MAIL.FROM_NAME must be one line of text')
+  }
+  if (
+    mail.REPLY_TO !== undefined &&
+    (typeof mail.REPLY_TO !== 'string' || !ADDRESS_RE.test(mail.REPLY_TO.trim()))
+  ) {
+    throw new Error('CF_DEPLOY_CONFIG.MAIL.REPLY_TO must be an email address')
+  }
+}
+
+/** The every-minute cron that drains the notifications' outbox: on only with MAIL. */
+export const MAIL_CRON = '* * * * *'
+
+/** The binding, crons and vars MAIL gives the Worker: no binding, cron or vars without it. */
+function mailConfig(template, mail) {
+  const crons = (template.triggers?.crons ?? []).filter(c => c !== MAIL_CRON)
+  if (!mail) return { triggers: { ...template.triggers, crons }, vars: {} }
+  const from = mail.FROM.trim().toLowerCase()
+  return {
+    send_email: [{ name: 'EMAIL', allowed_sender_addresses: [from] }],
+    triggers: { ...template.triggers, crons: [...crons, MAIL_CRON] },
+    vars: {
+      MAIL_DRIVER: 'cloudflare',
+      MAIL_FROM: from,
+      ...(mail.FROM_NAME ? { MAIL_FROM_NAME: mail.FROM_NAME.trim() } : {}),
+      ...(mail.REPLY_TO ? { MAIL_REPLY_TO: mail.REPLY_TO.trim().toLowerCase() } : {}),
+    },
+  }
 }
 
 /** The longest dot-suffix two hosts share: the domain the `fling_site` cookie is set on. */
@@ -110,11 +171,12 @@ const rebase = (path, dir) => {
 
 /**
  * The deployable wrangler config: the template with this instance's account, resources, routes
- * and vars. The dev vars are dropped, never merged: production gets only what is configured.
+ * and vars, plus, with `MAIL`, the Email Service binding, the drain's cron and the mail vars. The dev vars are dropped, never merged: production gets only what is configured.
  */
 export function renderWranglerConfig(template, config, outDir) {
   checkDeployConfig(config)
   const appHost = new URL(config.APP_ORIGIN).hostname
+  const mail = mailConfig(template, config.MAIL)
   const instance = Object.fromEntries(
     Object.entries(config.INSTANCE ?? {}).map(([k, v]) => [k, String(v)])
   )
@@ -149,8 +211,12 @@ export function renderWranglerConfig(template, config, outDir) {
       STORE_DRIVER: 'd1',
       STORAGE_DRIVER: 'r2',
       KVS_DRIVER: 'workers-kv',
+      ...mail.vars,
     },
+    triggers: mail.triggers,
   }
+  if (mail.send_email) out.send_email = mail.send_email
+  else delete out.send_email
   delete out.dev
   delete out.$schema
   return out

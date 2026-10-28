@@ -56,3 +56,69 @@ describe('renderWranglerConfig', () => {
     expect(out.vars.LIVE).toBe('false')
   })
 })
+
+describe('MAIL', () => {
+  type Rendered = Record<string, unknown> & {
+    vars: Record<string, string>
+    triggers: { crons: string[] }
+    send_email?: unknown
+  }
+  const render = (extra: Record<string, unknown>) =>
+    renderWranglerConfig(
+      readJsonc(TEMPLATE),
+      { ...config({ ALLOWED_EMAIL_DOMAINS: 'example.test' }), ...extra },
+      '/tmp/dist'
+    ) as unknown as Rendered
+
+  it('renders the send_email binding, the every-minute cron and the mail vars', () => {
+    const out = render({
+      MAIL: {
+        FROM: 'Fling@Mail.Example.test',
+        FROM_NAME: 'Acme Fling',
+        REPLY_TO: 'help@example.test',
+      },
+    })
+    expect(out.send_email).toEqual([
+      { name: 'EMAIL', allowed_sender_addresses: ['fling@mail.example.test'] },
+    ])
+    expect(out.triggers.crons).toEqual(['17 * * * *', '* * * * *'])
+    expect(out.vars).toMatchObject({
+      MAIL_DRIVER: 'cloudflare',
+      MAIL_FROM: 'fling@mail.example.test',
+      MAIL_FROM_NAME: 'Acme Fling',
+      MAIL_REPLY_TO: 'help@example.test',
+    })
+  })
+
+  it('leaves the optional values out when they are not set', () => {
+    const out = render({ MAIL: { FROM: 'fling@mail.example.test' } })
+    expect(out.vars).not.toHaveProperty('MAIL_FROM_NAME')
+    expect(out.vars).not.toHaveProperty('MAIL_REPLY_TO')
+  })
+
+  it('without MAIL: no binding, no every-minute cron, no mail vars', () => {
+    const out = render({})
+    expect(out).not.toHaveProperty('send_email')
+    expect(out.triggers.crons).toEqual(['17 * * * *'])
+    expect(Object.keys(out.vars).filter(k => k.startsWith('MAIL_'))).toEqual([])
+  })
+
+  it('refuses a malformed MAIL, and mail settings in INSTANCE', () => {
+    const refused: unknown[] = [
+      'fling@mail.example.test',
+      {},
+      { FROM: 'not an address' },
+      { FROM: 'fling@mail.example.test', FROM_NAME: 'Acme\nBcc: x@example.test' },
+      { FROM: 'fling@mail.example.test', REPLY_TO: 'nobody' },
+      { FROM: 'fling@mail.example.test', DRIVER: 'ses' },
+    ]
+    for (const MAIL of refused) {
+      expect(() =>
+        checkDeployConfig({ ...config({ ALLOWED_EMAILS: 'a@example.test' }), MAIL })
+      ).toThrow(/MAIL/)
+    }
+    expect(() =>
+      checkDeployConfig(config({ ALLOWED_EMAILS: 'a@example.test', MAIL_DRIVER: 'cloudflare' }))
+    ).toThrow(/INSTANCE.MAIL_DRIVER is not allowed/)
+  })
+})

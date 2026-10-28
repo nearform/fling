@@ -209,6 +209,8 @@ const config = checkDeployConfig({
   R2_BUCKET: bucket,
   KV_NAMESPACE_ID: kv.id,
   INSTANCE: instance,
+  // Email (DEPLOY.md, Email) is added by hand; setup keeps it.
+  ...(previous.MAIL ? { MAIL: previous.MAIL } : {}),
 })
 writeFileSync(out, `${JSON.stringify(config, null, 2)}\n`)
 console.log(`wrote ${out}`)

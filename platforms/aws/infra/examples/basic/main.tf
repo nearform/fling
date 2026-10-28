@@ -85,6 +85,13 @@ module "fling" {
     OIDC_CLIENT_ID        = "1234-abcd.apps.googleusercontent.com"
     INSTANCE_NAME         = "Example Fling"
   }
+
+  # Email notifications, through an SES identity you already have in this region
+  # (platforms/aws/DEPLOY.md, Email). Without it there is no email.
+  # mail = {
+  #   from         = "fling@mail.fling.example.test"
+  #   identity_arn = "arn:aws:ses:eu-west-1:123456789012:identity/mail.fling.example.test"
+  # }
 }
 
 # Creating a public function URL can make AWS add the FunctionURLAllowPublicAccess permission

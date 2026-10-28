@@ -60,3 +60,8 @@ output "function_name" {
   description = "The API's Lambda function (for running migrations by hand: platforms/aws/DEPLOY.md)."
   value       = aws_lambda_function.api.function_name
 }
+
+output "notify_schedule" {
+  description = "The EventBridge Scheduler schedule that drains the notifications every minute; null without var.mail."
+  value       = one(aws_scheduler_schedule.notify[*].name)
+}

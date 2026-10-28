@@ -24,6 +24,8 @@ $APP_HOST        Worker Custom Domain ─┬─ /api/*, /auth/*, /healthz, /mcp,
 *.$SITES_DOMAIN  Worker route ───────── the shared site routing decision
                                         (route table: KV, D1 on a miss) → R2
 cron (hourly)    Worker scheduled ───── delete expired D1 items
+cron (minutely)  Worker scheduled ───── drain the notifications' outbox → Email Service
+                                        (send_email binding EMAIL; only with MAIL)
 D1 $WORKER, R2 $WORKER-sites, KV $WORKER-routes, Durable Object class LiveRoom; secrets on the
 Worker
 ```
@@ -43,7 +45,7 @@ neither header (see
 | Who | Owns |
 | --- | --- |
 | `scripts/setup.mjs` (once, with your Cloudflare login) | The D1 database, R2 bucket and KV namespace; the D1 schema; the Worker's secrets; your deploy config |
-| You, in the dashboard | The sites' wildcard DNS record and, if needed, its certificate |
+| You, in the dashboard | The sites' wildcard DNS record and, if needed, its certificate; for email, the sending domain in Email Service |
 | `scripts/deploy.mjs` (the workflow) | The Worker's code, config, assets, routes and cron; D1 schema migrations; data migrations |
 | The Worker at runtime | D1 items, KV route keys, site files in R2 |
 
@@ -66,6 +68,10 @@ neither header (see
     (`$ZONE=flingsites.example`, `$APP_HOST=$SITES_DOMAIN=flingsites.example`): Universal SSL
     covers both, at no cost.
 - Node 24 and pnpm (the repository's), and `wrangler` comes with `pnpm install`.
+- **For email notifications (optional): Cloudflare Email Service**, Email Sending, in public beta.
+  It sends to any recipient once a sending domain is onboarded, and that domain must use
+  Cloudflare DNS. Workers Paid, which Fling already needs, is required. Without it, leave `MAIL`
+  out of the deploy config: there is no email.
 
 ## One-time setup
 
@@ -100,7 +106,9 @@ neither header (see
    certificate by the first deploy (it must not already have a DNS record).
 4. **Certificate for the sites** (see Requirements), unless `*.$SITES_DOMAIN` is `*.$ZONE`.
 5. **Sign-in**: register the OIDC client (next section) and put its secret on the Worker.
-6. **GitHub** (repository → Settings → Environments → `cloudflare`, or repository-level):
+6. **Email** (optional): onboard a sending domain and add `MAIL` to the deploy config
+   ([Email](#email)).
+7. **GitHub** (repository → Settings → Environments → `cloudflare`, or repository-level):
    - variable `CF_DEPLOY_CONFIG`: the contents of `deploy-config.json`
      (`gh variable set CF_DEPLOY_CONFIG < <path to deploy-config.json>`);
    - secret `CLOUDFLARE_API_TOKEN`: an account API token (My Profile or Manage Account → API
@@ -108,7 +116,7 @@ neither header (see
      Storage Edit, Account Settings Read; **Zone** (`$ZONE`): Workers Routes Edit, DNS Edit (the
      Custom Domain's record), Zone Read. If wrangler reports another missing permission, add it;
    - secret `FLING_E2E_API_KEY` after the first deploy (see [Smoke test](#smoke-test)).
-7. **Deploy**: run the **Deploy (Cloudflare)** workflow (Actions → Deploy (Cloudflare) → Run
+8. **Deploy**: run the **Deploy (Cloudflare)** workflow (Actions → Deploy (Cloudflare) → Run
    workflow), or from a checkout of main:
 
    ```bash
@@ -134,19 +142,56 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
+| `MAIL` | Optional: `{ "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }`, email notifications through Email Service ([Email](#email)). `FROM` is required in it; `FROM_NAME` defaults to `INSTANCE_NAME`, `REPLY_TO` to none. Not in `INSTANCE`, because the binding needs `FROM` too. `setup.mjs` keeps it when rerun |
 
 The rendered config replaces the template's local-development vars wholesale: production gets
 `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME=https`, `SITE_COOKIE_DOMAIN` (the
 domain the app and the sites share), `LIVE_URL=wss://$APP_HOST/api/live` (the live rooms, below),
 the `d1`/`r2`/`workers-kv` drivers, and `INSTANCE`, never the dev login. `LIVE=false` in `INSTANCE`
-turns the live rooms off.
+turns the live rooms off. With `MAIL` it also gets the `send_email` binding `EMAIL`
+(`allowed_sender_addresses: [FROM]`), the every-minute cron `* * * * *` beside the hourly one, and
+`MAIL_DRIVER=cloudflare`, `MAIL_FROM`, `MAIL_FROM_NAME` and `MAIL_REPLY_TO`; without it, none of
+them.
 
 **Live rooms** (review mode's realtime) are a Durable Object per site, `LiveRoom` (binding
 `LIVE_ROOMS`), declared with its SQLite migration in `wrangler.jsonc`: the first deploy creates the
 class, nothing to set up. The Worker checks the socket's ticket and hands it to the site's object,
 which keeps it with the WebSocket hibernation API, so an idle room costs nothing while sockets stay
 open. Changing an instance value is a deploy.
+
+## Email
+
+Notification emails (someone shared a site with you, commented, added you to a group) go out
+through Cloudflare Email Service's `send_email` binding. Every minute the Worker's cron drains the
+notifications' outbox and sends each message with the binding, from `MAIL.FROM`.
+
+1. **Onboard a sending domain** (once, in the dashboard: Email Service → Email Sending → Onboard
+   Domain). It is not the sites domain itself: onboarding adds records under the domain (SPF and MX
+   on a `cf-bounce` subdomain, DKIM, DMARC), which on the sites domain would shadow the sites'
+   wildcard and break a site of the same name. Use `mail.$SITES_DOMAIN` (`mail` is a reserved site
+   name, so it is never a site), or another domain on the account. The Worker refuses to start with
+   a sender on the sites domain. Onboarding has no API or wrangler command, so this step is the
+   dashboard's.
+2. **Add `MAIL`** to the deploy config, with `FROM` on that domain, update `CF_DEPLOY_CONFIG`, and
+   deploy:
+
+   ```json
+   "MAIL": { "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }
+   ```
+
+3. **Check it**: `/.well-known/fling` advertises the `email` capability. Sign in as an admin, open
+   **Admin → Mail** (`/admin/mail`) and send a test email to a real mailbox. It shows Email
+   Service's message id or the mapped error: `E_SENDER_NOT_VERIFIED` or
+   `E_SENDER_DOMAIN_NOT_AVAILABLE` mean the domain is not onboarded (or `FROM` is not on it). In the
+   received message's headers, check that SPF, DKIM and DMARC pass. Fling never sends a message to
+   check the setup on its own.
+
+Email Service suppresses hard-bouncing addresses itself and refuses a send to one
+(`E_RECIPIENT_SUPPRESSED`), which Fling records as suppressed. Its daily quota starts conservative
+and grows, and is not published; when it is spent (`E_DAILY_LIMIT_EXCEEDED`), Fling defers the
+batch to the next UTC day and logs a warning the first time each day. Each message carries
+`List-Unsubscribe` and one-click unsubscribe headers and the batch id in `X-Fling-Batch`.
 
 ## Sign-in (OpenID Connect)
 
@@ -274,6 +319,11 @@ Secrets come from `.dev.vars`, created with random values the first time. The li
 local Durable Objects at `ws://flingcf.lvh.me:47103/api/live`. `pnpm e2e` (part of
 `pnpm gate`) runs the scenario here and on the AWS-flavoured dev server.
 
+`wrangler dev` simulates the `send_email` binding (`EMAIL`, in the template `wrangler.jsonc`):
+it accepts any recipient, logs each message's From, To and Subject, and saves its text and HTML
+parts to local files whose paths it prints. Nothing is sent. To turn email on locally, add
+`MAIL_DRIVER=cloudflare` and `MAIL_FROM=fling@mail.flingcf.lvh.me` to `.dev.vars`.
+
 ## Costs
 
 At internal scale, mostly the fixed parts: the Workers Paid plan ($5/month, with 10 million
@@ -283,5 +333,7 @@ first), plus a KV read per site request. D1, R2 and KV are billed by use beyond 
 amounts: D1 by rows read and written and storage, R2 by storage (about $0.015 per GB-month, the main
 variable cost: every site version is kept) and operations, with no egress fees; KV by reads and
 writes. Live rooms are Durable Object requests (each socket message, each publish when a comment
-changes) and duration, which hibernation keeps to the moments a room is busy. Check Cloudflare's
-current pricing pages before relying on these numbers.
+changes) and duration, which hibernation keeps to the moments a room is busy. Email, with `MAIL`:
+3,000 emails a month are included, then $0.35 per 1,000 (hard bounces count, refused sends such as
+suppressed recipients don't); the every-minute cron is a short Worker invocation each time, about
+43,000 a month. Check Cloudflare's current pricing pages before relying on these numbers.

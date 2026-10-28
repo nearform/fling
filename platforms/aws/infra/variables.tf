@@ -168,3 +168,40 @@ variable "error_page_path" {
   type        = string
   default     = "/_fling/404.html"
 }
+
+variable "mail" {
+  description = <<-EOT
+    Email, for notifications (mail.tf; DEPLOY.md, Email). null: no email, and none of mail.tf exists.
+    Sends through an SES v2 identity you already have, in this region; the module creates no SES
+    resources. It lets the function send from `from` only, sets MAIL_* on it and adds an EventBridge
+    Scheduler schedule that drains the notifications every minute.
+    - from: the sender address, on the identity's domain and not on the sites domain itself
+      (e.g. fling@mail.<hostname>). The function refuses to start otherwise.
+    - from_name: the sender's display name. Default: the instance's INSTANCE_NAME.
+    - reply_to: the operator's address that replies go to, on every email. Default: none.
+    - identity_arn: the SES identity's ARN (arn:aws:ses:<region>:<account>:identity/<domain>).
+    - configuration_set_name: a configuration set to name on each send. Default: none, so the
+      identity's default configuration set applies.
+    - events_topic_arn: an SNS topic the configuration set publishes bounces and complaints to.
+      Accepted but not used yet: handling bounces and complaints is a later phase.
+  EOT
+  type = object({
+    from                   = string
+    from_name              = optional(string)
+    reply_to               = optional(string)
+    identity_arn           = string
+    configuration_set_name = optional(string)
+    events_topic_arn       = optional(string)
+  })
+  default = null
+
+  validation {
+    condition     = var.mail == null ? true : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.mail.from))
+    error_message = "mail.from must be an email address."
+  }
+
+  validation {
+    condition     = var.mail == null ? true : can(regex("^arn:aws[a-z-]*:ses:[a-z0-9-]+:[0-9]{12}:identity/.+$", var.mail.identity_arn))
+    error_message = "mail.identity_arn must be an SES identity ARN (arn:aws:ses:<region>:<account>:identity/<name>)."
+  }
+}

@@ -62,6 +62,14 @@ It also creates the live rooms' API Gateway WebSocket API ([`live.tf`](infra/liv
 post to its connections); the function gets its `wss://` URL as `LIVE_URL` (output `live_url`).
 Connections are table items that expire after 2 hours, API Gateway's own limit.
 
+With `mail` set ([`mail.tf`](infra/mail.tf); see [Email](#email)), it also lets the function's role
+send with SES (`ses:SendEmail` on the identity, and on the configuration set when one is named,
+only from `mail.from`), sets `MAIL_DRIVER=ses`, `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` and
+`SES_CONFIGURATION_SET` on the function, and adds an EventBridge Scheduler schedule
+(`<namespace>-<env>-<name>-notify`, `rate(1 minute)`) that invokes the function with
+`{"fling":"notify"}` through its own role, to drain the notifications' outbox. Without `mail`, none
+of it exists and the plan is the same as without the input.
+
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
 provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
 resources with the providers' `default_tags`.
@@ -87,6 +95,7 @@ resources with the providers' `default_tags`.
 | `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
 | `log_retention_days` | `30` | The function's log retention |
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |
+| `mail` | `null` (no email) | Email notifications through an SES identity you already have: `{ from, from_name, reply_to, identity_arn, configuration_set_name, events_topic_arn }`. See [Email](#email) |
 
 | Output | What |
 | --- | --- |
@@ -94,6 +103,7 @@ resources with the providers' `default_tags`.
 | `url` | `https://<hostname>` |
 | `manual_secrets` | The SSM parameters you fill by hand |
 | `ssm_prefix`, `table_name`, `function_name`, `key_value_store_arn`, `log_group` | For operating it (migrations, rehearsals, logs) |
+| `notify_schedule` | The EventBridge Scheduler schedule that drains notifications every minute; `null` without `mail` |
 
 Everything the remote MCP connector needs is part of it: DynamoDB TTL on `ttl`, the function's
 access to `sites/*` and `uploads/*`, a lifecycle rule expiring `uploads/` after a day, and the app
@@ -328,6 +338,146 @@ and, with the deploy role over OIDC:
 Site content is never touched by a deploy. Terraform ignores the code, so a plan after a deploy
 reads "No changes".
 
+## Email
+
+Notification emails (someone shared a site with you, commented, added you to a group) go out
+through Amazon SES v2, from an identity you own. Fling brings its own permission to send and the
+addresses, nothing else: the identity, its DNS records, the configuration set and the account's
+production access stay in your infrastructure, often shared with other apps. Without the module's
+`mail` input there is no email, and nothing in Fling offers it.
+
+### Bringing an identity
+
+You need, in the function's region:
+
+- a verified SES **domain identity** for the sender's domain. The domain must not be the sites
+  domain itself: onboarding puts records on names under it, which would shadow the sites'
+  wildcard. `mail.$SITES_DOMAIN` works (`mail` is a reserved site name, so it is never a site), as
+  does any other domain you own. The function refuses to start with a sender on the sites domain;
+- optionally a **configuration set**. Name it in `mail` to have every send use it; leave it out and
+  the identity's default configuration set, if any, applies;
+- **production access** in that region (below). Until then SES only delivers to verified
+  addresses.
+
+Then add `mail` to the module call and apply:
+
+```hcl
+module "fling" {
+  # ...
+  mail = {
+    from                   = "fling@mail.fling.example.test"
+    from_name              = "Example Fling"       # default: INSTANCE_NAME
+    reply_to               = "help@example.test"   # default: none
+    identity_arn           = "arn:aws:ses:eu-west-1:123456789012:identity/mail.fling.example.test"
+    configuration_set_name = "fling-mail"          # default: the identity's own
+  }
+}
+```
+
+`events_topic_arn` (an SNS topic your configuration set publishes bounces and complaints to) is
+accepted and not used yet: until Fling handles those events itself, SES's suppression list keeps
+bounced and complaining addresses from being sent to again. SES accepts a send to a suppressed
+address and drops it.
+
+The function's role may send only from `from` (a `ses:FromAddress` condition), only through that
+identity and configuration set. The function sends one `SendEmail` per recipient, with
+`List-Unsubscribe` and one-click unsubscribe headers, and tags each message `fling-batch` (the
+batch id, also in the `X-Fling-Batch` header) and `fling-events` (the event keys), which your
+configuration set's event destinations can filter on.
+
+### Creating an identity
+
+If you have none, this is one way to make one, in your own Terraform beside the module call (the
+names are examples; Route 53 is assumed):
+
+```hcl
+locals { mail_domain = "mail.fling.example.test" }
+
+resource "aws_sesv2_configuration_set" "mail" {
+  configuration_set_name = "fling-mail"
+  suppression_options { suppressed_reasons = ["BOUNCE", "COMPLAINT"] }
+  reputation_options { reputation_metrics_enabled = true }
+}
+
+# Easy DKIM: SES signs with a 2048-bit key; three CNAMEs publish it.
+resource "aws_sesv2_email_identity" "mail" {
+  email_identity         = local.mail_domain
+  configuration_set_name = aws_sesv2_configuration_set.mail.configuration_set_name
+}
+
+resource "aws_route53_record" "dkim" {
+  count   = 3
+  zone_id = data.aws_route53_zone.this.zone_id
+  name    = "${aws_sesv2_email_identity.mail.dkim_signing_attributes[0].tokens[count.index]}._domainkey.${local.mail_domain}"
+  type    = "CNAME"
+  ttl     = 600
+  records = ["${aws_sesv2_email_identity.mail.dkim_signing_attributes[0].tokens[count.index]}.dkim.amazonses.com"]
+}
+
+# A custom MAIL FROM domain, so SPF aligns with the From address for DMARC.
+resource "aws_sesv2_email_identity_mail_from_attributes" "mail" {
+  email_identity         = aws_sesv2_email_identity.mail.email_identity
+  mail_from_domain       = "bounce.${local.mail_domain}"
+  behavior_on_mx_failure = "USE_DEFAULT_VALUE"
+}
+
+resource "aws_route53_record" "mail_from_mx" {
+  zone_id = data.aws_route53_zone.this.zone_id
+  name    = "bounce.${local.mail_domain}"
+  type    = "MX"
+  ttl     = 600
+  records = ["10 feedback-smtp.eu-west-1.amazonses.com"]
+}
+
+resource "aws_route53_record" "mail_from_spf" {
+  zone_id = data.aws_route53_zone.this.zone_id
+  name    = "bounce.${local.mail_domain}"
+  type    = "TXT"
+  ttl     = 600
+  records = ["v=spf1 include:amazonses.com ~all"]
+}
+
+resource "aws_route53_record" "dmarc" {
+  zone_id = data.aws_route53_zone.this.zone_id
+  name    = "_dmarc.${local.mail_domain}"
+  type    = "TXT"
+  ttl     = 600
+  records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@example.test"]
+}
+```
+
+Then pass `aws_sesv2_email_identity.mail.arn` as `mail.identity_arn` and
+`aws_sesv2_configuration_set.mail.configuration_set_name` as `mail.configuration_set_name`. SES
+verifies the identity once the DKIM records resolve (`aws sesv2 get-email-identity
+--email-identity mail.fling.example.test` shows `VerifiedForSendingStatus: true`). Start DMARC at
+`p=none` if the domain sends mail from elsewhere too, and tighten it once the reports are clean.
+
+### Production access
+
+A new SES account is in the sandbox in each region: it sends only to verified addresses, at most
+200 messages a day and 1 a second. The identity's owner requests production access once per
+region, in the console (SES, Account dashboard, Request production access) or:
+
+```sh
+aws sesv2 put-account-details --region $AWS_REGION --production-access-enabled \
+  --mail-type TRANSACTIONAL --website-url https://$APP_DOMAIN \
+  --use-case-description "Notifications to signed-in members of our Fling instance: shares, comments, group changes. Each email has one-click unsubscribe."
+aws sesv2 get-account --region $AWS_REGION --query '{production: ProductionAccessEnabled, quota: SendQuota}'
+```
+
+AWS answers within about 96 hours. Quotas (messages a day, a second) are per account and region,
+counted in recipients; Fling defers a batch to the next UTC day when SES reports the daily quota
+spent, and logs a warning the first time each day.
+
+### Checking it
+
+After the apply and a deploy, `/.well-known/fling` advertises the `email` capability. Sign in as an
+admin, open **Admin → Mail** (`/admin/mail`), check the settings it shows and send a test email to
+a real mailbox: it shows SES's message id or the mapped error (`rejected: MessageRejected` usually
+means the identity is not verified or the account is in the sandbox). In the received message's
+headers, check that SPF, DKIM and DMARC pass and align with the From domain. Fling never sends a
+message to check the setup on its own.
+
 ## Indexing and share-link referrers
 
 Sites are not indexed, and a share link's address (`s--<token>.<sites domain>`, the secret) is not
@@ -537,3 +687,9 @@ DynamoDB reads; relaying it to the others is a message each. Pointers are thrott
 to about 12 a second while someone moves the mouse over a reviewed page, so a busy review session
 of a few people is thousands of invocations an hour. `LIVE=false` turns the rooms off.
 Logs are kept for 30 days.
+
+Email, with `mail` set: SES charges per message, $0.10 per 1,000 à la carte. Accounts created from
+21 July 2026 start on the Essentials plan ($0.16 per 1,000), so switch to à la carte explicitly if
+that is all you need. The every-minute schedule is about 43,000 invocations a month, well inside
+EventBridge Scheduler's 14 million free ones, and each is a short Lambda invocation with a few
+DynamoDB queries: pennies a month.

@@ -4,6 +4,8 @@
  */
 import { readFile } from 'node:fs/promises'
 import {
+  type AccessLevel,
+  type AudienceInput,
   DeployResponseSchema,
   FinalizeResponseSchema,
   isValidSiteName,
@@ -84,6 +86,12 @@ export interface DeployOptions {
   name?: string
   spa?: boolean
   public?: boolean
+  /**
+   * Who can open the site if this deploy creates it (with `audience` for groups and people);
+   * omitted, the instance's default. A site that has been live keeps its access.
+   */
+  access?: AccessLevel
+  audience?: AudienceInput
   /** A manifest already built from `dir` (so the caller can inspect it before deploying). */
   manifest?: LocalManifest
   onProgress?: (event: {
@@ -112,6 +120,8 @@ export interface DeployResult {
   /** files actually uploaded (0 unless status is `live`) */
   uploaded: number
   warnings: string[]
+  /** this deploy made the site live for the first time: a new site, its access just set */
+  first: boolean
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
@@ -133,6 +143,8 @@ export async function deploy(deps: DeployDeps, opts: DeployOptions): Promise<Dep
         manifest: toManifest(local),
         ...(opts.spa !== undefined ? { spa: opts.spa } : {}),
         ...(opts.public ? { visibility: 'public' as const } : {}),
+        ...(opts.access ? { access: opts.access } : {}),
+        ...(opts.audience ? { audience: opts.audience } : {}),
       },
     })
     .catch(async (error: unknown) => {
@@ -148,6 +160,7 @@ export async function deploy(deps: DeployDeps, opts: DeployOptions): Promise<Dep
       versionId: res.versionId,
       site: res.site,
       uploaded: 0,
+      first: false,
     }
   }
 
@@ -180,6 +193,7 @@ export async function deploy(deps: DeployDeps, opts: DeployOptions): Promise<Dep
     versionId: fin.versionId,
     site: fin.site,
     uploaded: uploads.length,
+    first: fin.first === true,
   }
 }
 

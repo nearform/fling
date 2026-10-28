@@ -5,7 +5,9 @@
  * Sign-in (`OIDC_*`) is resolved from both in auth/oidc.ts.
  */
 import {
+  DEFAULT_ACCESS_LEVELS,
   DEFAULT_INSTALL_COMMAND,
+  type DefaultAccessLevel,
   HEX_COLOR_RE,
   type InstanceBrand,
   RESERVED_SITE_NAMES,
@@ -120,6 +122,7 @@ const envSchema = z.object({
   OIDC_DISPLAY_NAME: z.preprocess(blank, z.string().min(1).max(60).optional()),
   OIDC_SCOPES: optionalString,
   OIDC_ASSUME_EMAIL_VERIFIED: flag,
+  SITE_DEFAULT_ACCESS: z.preprocess(blank, z.enum(DEFAULT_ACCESS_LEVELS).default('only_me')),
   COMMENTS: flagDefaultOn,
   LIVE: flagDefaultOn,
   LIVE_URL: z.preprocess(
@@ -228,6 +231,11 @@ export interface Config {
   brand: InstanceBrand
   /** How the instance tells people to install the CLI (`INSTALL_COMMAND`). */
   installCommand: string
+  /**
+   * Who can open a new site whose first deploy names no access level (`SITE_DEFAULT_ACCESS`):
+   * `only_me` (the default) or `members`. Published as `defaultAccess`; existing sites keep theirs.
+   */
+  siteDefaultAccess: DefaultAccessLevel
   tableName?: string
   sitesBucket?: string
   kvsArn?: string
@@ -325,6 +333,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
       colors: definedOnly(colors),
     }),
     installCommand: e.INSTALL_COMMAND,
+    siteDefaultAccess: e.SITE_DEFAULT_ACCESS,
     tableName: e.TABLE_NAME,
     sitesBucket: e.SITES_BUCKET,
     kvsArn: e.KVS_ARN,

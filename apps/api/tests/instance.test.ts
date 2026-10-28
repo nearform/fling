@@ -38,7 +38,19 @@ describe('GET /.well-known/fling', () => {
       brand: { colors: {} },
       capabilities: expect.objectContaining({ ...CORE_CAPABILITIES, comments: true }),
       installCommand: expect.stringMatching(/^npm install -g \S+$/),
+      defaultAccess: 'only_me',
     })
+  })
+
+  it('publishes the access level new sites get: only you, unless SITE_DEFAULT_ACCESS says members', async () => {
+    const access = (env: Record<string, string>) =>
+      loadBaseConfig({ ...PROD, ...env }).siteDefaultAccess
+    expect(access({})).toBe('only_me')
+    expect(access({ SITE_DEFAULT_ACCESS: 'members' })).toBe('members')
+    expect(() => access({ SITE_DEFAULT_ACCESS: 'public' })).toThrow()
+    const env = setup({ siteDefaultAccess: 'members' })
+    const body = await (await env.app.request(INSTANCE_METADATA_PATH)).json()
+    expect(body.defaultAccess).toBe('members')
   })
 
   it('advertises live rooms only with LIVE_URL, comments on and LIVE not off', async () => {

@@ -1,18 +1,30 @@
 /**
- * Who can open the site: public or private and, private, everyone signed in or only the people
- * and groups in its audience (with the `audiences` and `groups` capabilities); and its share link (create, copy, refresh,
- * revoke). Refreshing and revoking break the link people already have, and emptying the audience
- * (choosing everyone, or removing its last address or group) opens the site to every member, so
- * those ask first. The audience is saved as it is edited, and
- * the API's word on a refused address is shown beside the input. Groups open in the group editor
- * from here: to see one, to change one the user owns, or to make one (from scratch, or from the
- * listed people, to use in their place).
+ * Who can open the site, as one radio group from narrowest to widest: only you, specific people
+ * and teams, everyone signed in, or anyone (the access levels in @fling/shared's access.ts, with
+ * `groups` and `people` folded into one option, since one audience holds both). The chosen option
+ * is the site's level. Only you, everyone and public save as soon as they are chosen (asking first
+ * when that clears a list of people and teams); people and teams opens its pickers beneath it, and
+ * a site moving to it saves with Save, since an audience names at least one person or team. While
+ * it is the site's level, every edit to the list saves at once, as the rest of the page does. Below
+ * the group, a secondary block: the share link (create, copy, refresh, revoke), which opens the
+ * site to anyone with the link whatever the level. Refreshing and revoking break the link people
+ * already have, so they ask first. Groups open in the group editor from the pickers: to see one,
+ * to change one the user owns, or to make one (from scratch, or from the listed people, to use in
+ * their place).
+ *
+ * An instance without the `accessLevels` capability has no "only you": the other options save
+ * through `visibility` and `audience` instead.
  */
 import {
+  type AccessLevel,
   AUDIENCE_EMAILS_MAX,
   AUDIENCE_GROUPS_MAX,
+  type AudienceEmail,
   type AudienceGroup,
+  allowedAccountsPhrase,
+  needsAudience,
   type SiteWithAudience,
+  siteAccessLevel,
 } from '@fling/shared'
 import {
   ArrowPathIcon,
@@ -22,15 +34,15 @@ import {
   PlusIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline'
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { useInstance } from '../../hooks/instance'
 import { useGroups, useGroupsWithMembers, useMe, useSiteActions } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
-import { addToAudience, audienceWho, opensToEveryone, peopleLabel } from '../../lib/audience'
+import { addToAudience, audienceWho, peopleLabel } from '../../lib/audience'
 import { copyText } from '../../lib/clipboard'
 import { displayUrl } from '../../lib/format'
 import { type AudienceEdit, sameMembers, swapEmailsForGroup } from '../../lib/groups'
-import { audienceFor, DEFAULT_INSTANCE_NAME } from '../../lib/instance'
+import { DEFAULT_INSTANCE_NAME } from '../../lib/instance'
 import { showToast } from '../../lib/toast'
 import { ConfirmModal } from '../ConfirmModal'
 import { CopyButton } from '../CopyButton'
@@ -40,17 +52,159 @@ import { GroupChip } from '../GroupChip'
 import { type CreateOffer, GroupEditor, type GroupEditorTarget } from '../GroupEditor'
 import { SiteSection } from './SiteSection'
 
+/** An option of the radio group: an access level, with `groups` and `people` as one. */
+export type AccessChoice = 'only_me' | 'audience' | 'members' | 'public'
+
+export const choiceOf = (level: AccessLevel): AccessChoice =>
+  needsAudience(level) ? 'audience' : (level as AccessChoice)
+
+/** The level of a list of people and teams: `people` when it names an address, else `groups`. */
+export const audienceLevel = (audience: { emails: readonly unknown[] }): AccessLevel =>
+  audience.emails.length > 0 ? 'people' : 'groups'
+
+type Audience = { emails: string[]; groups: string[] }
+
+const sizeOf = (a: { emails: readonly unknown[]; groups: readonly unknown[] }) =>
+  a.emails.length + a.groups.length
+
 export function SiteAccess({ site }: { site: SiteWithAudience }) {
   const instance = useInstance()
+  const levels = instance?.capabilities.accessLevels === true
   const audiences = instance?.capabilities.audiences === true
+  const groupsOn = instance?.capabilities.groups === true
   const actions = useSiteActions(site.name)
+  const allGroups = useGroups(false)
+  const id = useId()
+
+  const current = choiceOf(siteAccessLevel(site))
+  /** An option chosen but not saved yet: only people and teams waits, for its list and Save. */
+  const [chosen, setChosen] = useState<AccessChoice | null>(null)
+  const shown = chosen ?? current
+  /** The list being made while moving to people and teams (by slug), before Save. */
+  const [draft, setDraft] = useState<Audience>({ emails: [], groups: [] })
+  const [problem, setProblem] = useState<string | null>(null)
+  /** Asking before a list of people and teams is cleared: choosing only you or everyone. */
+  const [confirmClear, setConfirmClear] = useState<'only_me' | 'members' | null>(null)
   const [dialog, setDialog] = useState<'refresh-share' | 'revoke-share' | null>(null)
-  const close = () => setDialog(null)
+  const closeDialog = () => setDialog(null)
+
+  const listed = site.audience?.emails ?? []
+  const named = site.audience?.groups ?? []
+  const kept = { emails: listed.map(e => e.email), groups: named.map(g => g.slug) }
+  const busy =
+    actions.setAccess.isPending || actions.setAudience.isPending || actions.setVisibility.isPending
+  const instanceName = instance?.name ?? DEFAULT_INSTANCE_NAME
+  const accounts = instance ? allowedAccountsPhrase(instance.auth) : null
+
+  /** Save a level; `audience` for people and teams. Older servers: visibility and audience. */
+  const save = async (choice: AccessChoice, audience?: Audience) => {
+    setProblem(null)
+    try {
+      if (levels) {
+        await actions.setAccess.mutateAsync(
+          choice === 'audience' && audience
+            ? { access: audienceLevel(audience), audience }
+            : { access: choice as AccessLevel }
+        )
+      } else if (choice === 'public') {
+        await actions.setVisibility.mutateAsync('public')
+      } else {
+        if (site.visibility === 'public') await actions.setVisibility.mutateAsync('private')
+        const next = audience ?? { emails: [], groups: [] }
+        if (sizeOf(next) > 0 || sizeOf(kept) > 0) await actions.setAudience.mutateAsync(next)
+      }
+      setChosen(null)
+      return true
+    } catch (error) {
+      if (choice === 'audience') setProblem(errorMessage(error))
+      else showToast(errorMessage(error), 'error')
+      return false
+    }
+  }
+
+  const choose = (choice: AccessChoice) => {
+    if (choice === shown) return
+    setProblem(null)
+    if (choice === 'audience') {
+      setDraft(kept)
+      setChosen('audience')
+      return
+    }
+    if (choice !== 'public' && sizeOf(kept) > 0) {
+      setConfirmClear(choice)
+      return
+    }
+    void save(choice)
+  }
+
+  /** The list shown in the pickers: the site's while it is its level, else the draft. */
+  const editing = current === 'audience' && chosen === null
+  const groupBySlug = new Map((allGroups.data ?? []).map(g => [g.slug, g]))
+  const pickerEmails: AudienceEmail[] = editing
+    ? listed
+    : draft.emails.map(email => listed.find(e => e.email === email) ?? { email, known: true })
+  const pickerGroups: AudienceGroup[] = editing
+    ? named
+    : draft.groups.map(slug => {
+        const g = named.find(n => n.slug === slug) ?? groupBySlug.get(slug)
+        return g
+          ? { slug, name: g.name, size: g.size, ...('deleted' in g ? { deleted: g.deleted } : {}) }
+          : { slug, name: slug, size: 0 }
+      })
+
+  /** An edit in the pickers: saved at once while the site is restricted to the list, else kept. */
+  const changeList = async (next: Audience): Promise<boolean> => {
+    if (!editing) {
+      setDraft(next)
+      setProblem(null)
+      return true
+    }
+    if (sizeOf(next) === 0) {
+      setProblem(
+        'The list needs at least one person or team. To let no one else in, choose Only you above.'
+      )
+      return false
+    }
+    return save('audience', next)
+  }
+
+  const options: { choice: AccessChoice; label: string; description: string }[] = [
+    ...(levels
+      ? [
+          {
+            choice: 'only_me' as const,
+            label: 'Only you',
+            description: 'Nobody else can open it.',
+          },
+        ]
+      : []),
+    ...(audiences
+      ? [
+          {
+            choice: 'audience' as const,
+            label: groupsOn ? 'Specific people and teams' : 'Specific people',
+            description: groupsOn
+              ? 'Only you, the people you add and the members of the teams you choose.'
+              : 'Only you and the people you add.',
+          },
+        ]
+      : []),
+    {
+      choice: 'members',
+      label: `Everyone signed in to ${instanceName}${accounts ? ` (${accounts})` : ''}`,
+      description: `Anyone who can sign in to ${instanceName} can open it.`,
+    },
+    {
+      choice: 'public',
+      label: 'Public',
+      description: 'Anyone with the address can open it, without signing in.',
+    },
+  ]
 
   const createShare = (rotating: boolean) =>
     actions.share.mutate(undefined, {
       onSuccess: async ({ shareUrl }) => {
-        close()
+        closeDialog()
         try {
           await copyText(shareUrl)
           showToast(rotating ? 'New share link copied' : 'Share link created and copied')
@@ -60,95 +214,178 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
       },
     })
 
-  return (
-    <SiteSection title="Access" description="Who can open the site.">
-      <div className="grid gap-2 md:grid-cols-2">
-        {/* Visibility */}
-        <div className="surface-inset space-y-0.5 px-3 py-2">
-          <label className="flex cursor-pointer items-center justify-between gap-3">
-            <span className="text-sm font-medium">Public</span>
-            <input
-              type="checkbox"
-              className="toggle toggle-sm toggle-primary"
-              checked={site.visibility === 'public'}
-              disabled={actions.setVisibility.isPending}
-              onChange={e => actions.setVisibility.mutate(e.target.checked ? 'public' : 'private')}
-            />
-          </label>
-          <p className="text-xs text-muted">
-            {site.visibility === 'public'
-              ? 'Anyone with the URL can open the site. Its review page and comments still need sign-in.'
-              : site.restricted
-                ? `Private: only you and ${audienceWho(site.audience?.emails.length ?? 0, site.audience?.groups.length ?? 0)}.`
-                : `Private: open to ${audienceFor(instance)}.`}
-          </p>
-        </div>
+  const pickersId = `${id}-pickers`
 
-        {/* Share link */}
-        <div className="surface-inset space-y-0.5 px-3 py-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium">Share link</span>
-            {site.shareUrl ? (
-              <span className="flex gap-0.5">
-                <CopyButton text={site.shareUrl} label="Copy share link" />
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs btn-square"
-                  title="Refresh the share link"
-                  aria-label="Refresh the share link"
-                  onClick={() => setDialog('refresh-share')}
+  return (
+    <SiteSection title="Access">
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="pbe-2 text-sm font-medium">Who can open this site</legend>
+        {options.map(option => {
+          const selected = shown === option.choice
+          const descId = `${id}-${option.choice}`
+          return (
+            <div key={option.choice} className="choice-option">
+              <label className="flex cursor-pointer items-start gap-2.5 px-3 py-2">
+                <input
+                  type="radio"
+                  name={`${id}-access`}
+                  value={option.choice}
+                  className="radio radio-sm radio-primary mbs-0.5 shrink-0"
+                  checked={selected}
+                  disabled={busy}
+                  aria-describedby={descId}
+                  {...(option.choice === 'audience' ? { 'aria-controls': pickersId } : {})}
+                  onChange={() => choose(option.choice)}
+                />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-medium">{option.label}</span>
+                  <span id={descId} className="text-xs text-muted">
+                    {option.description}
+                    {option.choice === 'public' && (
+                      <span className="block">
+                        Its review page and comments still need sign-in.
+                      </span>
+                    )}
+                    {option.choice === 'audience' && !selected && sizeOf(kept) > 0 && (
+                      <span className="block">
+                        Its list of {audienceWho(listed.length, named.length)} is kept for when you
+                        choose this again.
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </label>
+              {option.choice === 'audience' && selected && (
+                <div
+                  id={pickersId}
+                  role="group"
+                  aria-label="People and teams who can open it"
+                  className="flex flex-col gap-2 pbe-3 ps-10 pe-3"
                 >
-                  <ArrowPathIcon className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs btn-square text-error"
-                  title="Revoke the share link"
-                  aria-label="Revoke the share link"
-                  onClick={() => setDialog('revoke-share')}
-                >
-                  <NoSymbolIcon className="h-4 w-4" />
-                </button>
-              </span>
-            ) : (
+                  <AudiencePicker
+                    emails={pickerEmails}
+                    named={pickerGroups}
+                    groupsOn={groupsOn}
+                    busy={busy}
+                    live={editing}
+                    problem={problem}
+                    onProblem={setProblem}
+                    onChange={changeList}
+                  />
+                  {!editing && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        disabled={busy || sizeOf(draft) === 0}
+                        onClick={() => void save('audience', draft)}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-ghost"
+                        disabled={busy}
+                        onClick={() => {
+                          setChosen(null)
+                          setProblem(null)
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </fieldset>
+
+      {/* The share link: an extra on top of whichever option is chosen. */}
+      <div className="flex flex-col gap-1 border-t border-[color:var(--border-subtle)] pbs-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <span className="flex min-w-0 flex-col">
+            <span className="text-sm font-medium">Also share with a link</span>
+            <span className="text-xs text-muted">
+              {site.visibility === 'public'
+                ? 'Not needed while the site is public: anyone can already open it.'
+                : 'Anyone with the link can open it without signing in, whoever you chose above.'}
+            </span>
+          </span>
+          {site.shareUrl ? (
+            <span className="flex gap-0.5">
+              <CopyButton text={site.shareUrl} label="Copy share link" />
               <button
                 type="button"
-                className="btn btn-xs"
-                onClick={() => createShare(false)}
-                disabled={actions.share.isPending}
+                className="btn btn-ghost btn-xs btn-square"
+                title="Refresh the share link"
+                aria-label="Refresh the share link"
+                onClick={() => setDialog('refresh-share')}
               >
-                <LinkIcon className="h-3.5 w-3.5" />
-                Create
+                <ArrowPathIcon className="h-4 w-4" />
               </button>
-            )}
-          </div>
-          {site.shareUrl ? (
-            <a
-              href={site.shareUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="link link-hover block truncate font-mono text-xs"
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs btn-square text-error"
+                title="Revoke the share link"
+                aria-label="Revoke the share link"
+                onClick={() => setDialog('revoke-share')}
+              >
+                <NoSymbolIcon className="h-4 w-4" />
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-xs"
+              onClick={() => createShare(false)}
+              disabled={actions.share.isPending}
             >
-              {displayUrl(site.shareUrl)}
-            </a>
-          ) : null}
-          {site.shareUrl && site.restricted && (
-            <p className="flex items-center gap-1 text-xs text-warning">
-              <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Anyone with the share link can still open this site.
-            </p>
-          )}
-          {!site.shareUrl && (
-            <p className="text-xs text-muted">
-              Lets anyone with the link open the site without signing in — for people who can’t sign
-              in.
-            </p>
+              <LinkIcon className="h-3.5 w-3.5" />
+              Create link
+            </button>
           )}
         </div>
-
-        {audiences && <SiteAudience site={site} />}
+        {site.shareUrl && (
+          <a
+            href={site.shareUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="link link-hover block truncate font-mono text-xs"
+          >
+            {displayUrl(site.shareUrl)}
+          </a>
+        )}
+        {site.shareUrl && site.restricted && (
+          <p className="flex items-center gap-1 text-xs text-warning">
+            <ExclamationTriangleIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Anyone with the share link can still open this site.
+          </p>
+        )}
       </div>
 
+      <ConfirmModal
+        isOpen={confirmClear !== null}
+        title={
+          confirmClear === 'only_me'
+            ? 'Make it yours alone?'
+            : 'Open the site to everyone signed in?'
+        }
+        message={`Its list of ${audienceWho(listed.length, named.length)} is cleared${
+          confirmClear === 'only_me'
+            ? ', and only you can open the site.'
+            : `, and anyone signed in to ${instanceName} can open the site.`
+        }`}
+        confirmText={confirmClear === 'only_me' ? 'Only you' : 'Open to everyone'}
+        confirmButtonClass={confirmClear === 'only_me' ? 'btn-primary' : 'btn-warning'}
+        isLoading={busy}
+        onCancel={() => setConfirmClear(null)}
+        onConfirm={async () => {
+          if (confirmClear) await save(confirmClear)
+          setConfirmClear(null)
+        }}
+      />
       <ConfirmModal
         isOpen={dialog === 'refresh-share'}
         title="Refresh the share link?"
@@ -156,52 +393,58 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
         confirmText="Refresh link"
         confirmButtonClass="btn-warning"
         isLoading={actions.share.isPending}
-        onCancel={close}
+        onCancel={closeDialog}
         onConfirm={() => createShare(true)}
       />
       <ConfirmModal
         isOpen={dialog === 'revoke-share'}
         title="Revoke the share link?"
-        message={`The link stops working straight away. People signed in to ${instance?.name ?? DEFAULT_INSTANCE_NAME} can still open the site if it is private.`}
+        message="The link stops working straight away. Whoever you chose above can still open the site."
         confirmText="Revoke"
         confirmButtonClass="btn-error"
         isLoading={actions.revokeShare.isPending}
-        onCancel={close}
-        onConfirm={() => actions.revokeShare.mutate(undefined, { onSettled: close })}
+        onCancel={closeDialog}
+        onConfirm={() => actions.revokeShare.mutate(undefined, { onSettled: closeDialog })}
       />
     </SiteSection>
   )
 }
 
 /**
- * Private: everyone signed in, or only the listed people and groups (groups with the `groups`
- * capability). Public: a quiet note when a list is kept for when it is private again. Every save
- * sends the whole audience, addresses and groups together.
+ * The people and teams of an audience: the addresses (each marked until it has signed in), the
+ * groups (with the `groups` capability), a suggestion to use a group that holds exactly the listed
+ * people, and the group editor. Every change sends the whole list to `onChange`, which saves it
+ * (`live`) or keeps it for Save, and says whether it was taken.
  */
-function SiteAudience({ site }: { site: SiteWithAudience }) {
-  const instance = useInstance()
-  const groupsOn = instance?.capabilities.groups === true
-  const save = useSiteActions(site.name).setAudience
-  const listed = site.audience?.emails ?? []
-  const named = site.audience?.groups ?? []
+function AudiencePicker({
+  emails: listed,
+  named,
+  groupsOn,
+  busy,
+  live,
+  problem,
+  onProblem,
+  onChange,
+}: {
+  emails: readonly AudienceEmail[]
+  named: readonly AudienceGroup[]
+  groupsOn: boolean
+  busy: boolean
+  live: boolean
+  problem: string | null
+  onProblem: (problem: string | null) => void
+  onChange: (next: Audience) => Promise<boolean>
+}) {
   const emails = listed.map(e => e.email)
   const slugs = named.map(g => g.slug)
   const size = listed.length + named.length
-  const who = audienceWho(listed.length, named.length)
-  const [only, setOnly] = useState(size > 0)
   const [draft, setDraft] = useState('')
-  const [problem, setProblem] = useState<string | null>(null)
-  /** Asking before the audience empties: chosen "Everyone signed in", or removed its last entry. */
-  const [confirmClear, setConfirmClear] = useState<'everyone' | 'last' | null>(null)
   /** The group editor, and why it was opened to create: a group to add, or one of the listed people. */
   const [editor, setEditor] = useState<GroupEditorTarget | null>(null)
   const [making, setMaking] = useState<'new' | 'from-people'>('new')
   /** Groups whose suggestion was waved away, so it stays away. */
   const [dismissed, setDismissed] = useState<string[]>([])
-  const twins = useGroupsWithMembers(
-    emails,
-    groupsOn && site.visibility === 'private' && emails.length >= 2
-  )
+  const twins = useGroupsWithMembers(emails, groupsOn && emails.length >= 2)
   const twin = (twins.data ?? []).find(
     g =>
       !dismissed.includes(g.slug) &&
@@ -209,37 +452,17 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
   )
   const id = useId()
 
-  // A list that appears from elsewhere (the CLI, another tab) shows as "Only these people".
-  useEffect(() => {
-    if (size > 0) setOnly(true)
-  }, [size])
-
-  if (site.visibility === 'public') {
-    return size > 0 ? (
-      <p className="text-xs text-muted md:col-span-2">
-        Its list of {who} is kept, and applies when the site is private again.
-      </p>
-    ) : null
-  }
-
-  /** Save the audience; afterwards leave `left` in the input and say `note`, if anything. */
-  const commit = (
+  /** Change the list; afterwards leave `left` in the input and say `note`, if anything. */
+  const commit = async (
     next: { emails?: string[]; groups?: string[] },
     left: string[] = [],
     note: string | null = null
   ) => {
-    const audience = { emails: next.emails ?? emails, groups: next.groups ?? slugs }
-    if (opensToEveryone({ emails, groups: slugs }, audience)) {
-      setConfirmClear('last')
-      return
+    const taken = await onChange({ emails: next.emails ?? emails, groups: next.groups ?? slugs })
+    if (taken) {
+      setDraft(left.join(', '))
+      onProblem(note)
     }
-    save.mutate(audience, {
-      onSuccess: () => {
-        setDraft(left.join(', '))
-        setProblem(note)
-      },
-      onError: error => setProblem(errorMessage(error)),
-    })
   }
 
   const add = (text: string) => {
@@ -252,13 +475,11 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
     const left = [...invalid, ...overflow]
     if (next.length === emails.length) {
       setDraft(left.join(', '))
-      setProblem(note)
+      onProblem(note)
       return
     }
-    commit({ emails: next }, left, note)
+    void commit({ emails: next }, left, note)
   }
-
-  const everyone = () => (size > 0 ? setConfirmClear('everyone') : setOnly(false))
 
   const roomForGroup = slugs.length < AUDIENCE_GROUPS_MAX
   /** After creating: name the new group, or swap the people it holds for it. */
@@ -281,7 +502,7 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
             { emails, groups: slugs },
             { slug: group.slug, members: group.members.map(m => m.email) }
           )
-    if (next) commit(next)
+    if (next) void commit(next)
   }
   const makeGroup = (from: 'new' | 'from-people') => {
     setMaking(from)
@@ -289,154 +510,97 @@ function SiteAudience({ site }: { site: SiteWithAudience }) {
   }
 
   return (
-    <fieldset className="surface-inset space-y-2 px-3 py-2 md:col-span-2">
-      <legend className="sr-only">Who can open it</legend>
-      <div className="flex flex-wrap gap-x-4 gap-y-1">
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name={`${id}-who`}
-            className="radio radio-sm radio-primary"
-            checked={!only}
-            disabled={save.isPending}
-            onChange={everyone}
-          />
-          Everyone signed in
-        </label>
-        <label className="flex cursor-pointer items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name={`${id}-who`}
-            className="radio radio-sm radio-primary"
-            checked={only}
-            disabled={save.isPending}
-            onChange={() => setOnly(true)}
-          />
-          Only these people
-        </label>
-      </div>
-
-      {only && (
-        <div className="space-y-1.5">
-          {listed.length > 0 && (
-            <ul className="flex flex-wrap gap-1.5" aria-label="People who can open it">
-              {listed.map(person => (
-                <li key={person.email} className="max-w-full">
-                  <EmailBadge
-                    email={person.email}
-                    known={person.known}
-                    disabled={save.isPending}
-                    onRemove={() => commit({ emails: emails.filter(e => e !== person.email) })}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-          {groupsOn && twin ? (
-            <div className="tone-info flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-box border px-2.5 py-1.5 text-xs">
-              <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                <UserGroupIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span>
-                  These are the same people as <strong>{twin.name}</strong>. Use the group instead?
-                </span>
-              </span>
-              <span className="flex gap-1">
-                <button
-                  type="button"
-                  className="btn btn-xs btn-ghost"
-                  onClick={() => setDismissed([...dismissed, twin.slug])}
-                >
-                  Not now
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-xs btn-primary"
-                  disabled={save.isPending}
-                  onClick={() => {
-                    const next = swapEmailsForGroup(
-                      { emails, groups: slugs },
-                      { slug: twin.slug, members: emails }
-                    )
-                    if (next) commit(next)
-                  }}
-                >
-                  Use {twin.name}
-                </button>
-              </span>
-            </div>
-          ) : (
-            groupsOn &&
-            listed.length >= 2 && (
-              <button
-                type="button"
-                className="btn btn-xs btn-ghost"
-                onClick={() => makeGroup('from-people')}
-              >
-                <UserGroupIcon className="h-3.5 w-3.5" aria-hidden />
-                Save these people as a group
-              </button>
-            )
-          )}
-          {groupsOn && (
-            <AudienceGroups
-              named={named}
-              busy={save.isPending}
-              onChange={groups => commit({ groups })}
-              onOpen={slug => setEditor({ mode: 'open', slug })}
-              onNew={() => makeGroup('new')}
-            />
-          )}
-          <EmailAdder
-            id={id}
-            draft={draft}
-            onDraftChange={setDraft}
-            onAdd={add}
-            busy={save.isPending}
-            problem={problem}
-            hint={
-              size === 0
-                ? `Add at least one person${groupsOn ? ' or group' : ''}. Until then, everyone signed in can open it.`
-                : listed.length === 0 && named.every(g => g.deleted)
-                  ? 'Only you can open it: the group it was limited to was deleted. Add people or groups to let them in.'
-                  : 'You can always open it. Someone you remove can still open it for up to 5 minutes.'
-            }
-          />
-        </div>
+    <>
+      {listed.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5" aria-label="People who can open it">
+          {listed.map(person => (
+            <li key={person.email} className="max-w-full">
+              <EmailBadge
+                email={person.email}
+                known={person.known}
+                disabled={busy}
+                onRemove={() => void commit({ emails: emails.filter(e => e !== person.email) })}
+              />
+            </li>
+          ))}
+        </ul>
       )}
-
+      {groupsOn && twin ? (
+        <div className="tone-info flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-box border px-2.5 py-1.5 text-xs">
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <UserGroupIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              These are the same people as <strong>{twin.name}</strong>. Use the group instead?
+            </span>
+          </span>
+          <span className="flex gap-1">
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost"
+              onClick={() => setDismissed([...dismissed, twin.slug])}
+            >
+              Not now
+            </button>
+            <button
+              type="button"
+              className="btn btn-xs btn-primary"
+              disabled={busy}
+              onClick={() => {
+                const next = swapEmailsForGroup(
+                  { emails, groups: slugs },
+                  { slug: twin.slug, members: emails }
+                )
+                if (next) void commit(next)
+              }}
+            >
+              Use {twin.name}
+            </button>
+          </span>
+        </div>
+      ) : (
+        groupsOn &&
+        listed.length >= 2 && (
+          <button
+            type="button"
+            className="btn btn-xs btn-ghost self-start"
+            onClick={() => makeGroup('from-people')}
+          >
+            <UserGroupIcon className="h-3.5 w-3.5" aria-hidden />
+            Save these people as a group
+          </button>
+        )
+      )}
+      {groupsOn && (
+        <AudienceGroups
+          named={named}
+          busy={busy}
+          onChange={groups => void commit({ groups })}
+          onOpen={slug => setEditor({ mode: 'open', slug })}
+          onNew={() => makeGroup('new')}
+        />
+      )}
+      <EmailAdder
+        id={id}
+        draft={draft}
+        onDraftChange={setDraft}
+        onAdd={add}
+        busy={busy}
+        problem={problem}
+        hint={
+          !live
+            ? `Add at least one person${groupsOn ? ' or team' : ''}, then save.`
+            : size > 0 && listed.length === 0 && named.every(g => g.deleted)
+              ? 'Only you can open it: the group it was limited to was deleted. Add people or teams to let them in.'
+              : 'You can always open it. Someone you remove can still open it for up to 5 minutes.'
+        }
+      />
       <GroupEditor
         target={editor}
         onClose={() => setEditor(null)}
         offer={offer}
         onCreated={created}
       />
-      <ConfirmModal
-        isOpen={confirmClear !== null}
-        title="Open the site to everyone signed in?"
-        message={
-          confirmClear === 'last'
-            ? `That empties its list, and the site is open to ${audienceFor(instance)}.`
-            : `The list of ${who} is cleared, and the site is open to ${audienceFor(instance)}.`
-        }
-        confirmText="Open to everyone"
-        confirmButtonClass="btn-warning"
-        isLoading={save.isPending}
-        onCancel={() => setConfirmClear(null)}
-        onConfirm={() =>
-          save.mutate(
-            { emails: [], groups: [] },
-            {
-              onSuccess: () => {
-                setOnly(false)
-                setProblem(null)
-              },
-              onError: error => setProblem(errorMessage(error)),
-              onSettled: () => setConfirmClear(null),
-            }
-          )
-        }
-      />
-    </fieldset>
+    </>
   )
 }
 

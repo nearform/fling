@@ -73,7 +73,9 @@ npm run build
 fling deploy ./dist                        # name generated from the project, e.g. rocketpod-docs; you confirm it
 fling deploy ./dist --name my-app          # → https://my-app.<your sites domain>
 fling deploy ./dist --name my-app --spa    # client-side routing: unknown paths serve index.html
-fling deploy ./dist --public               # no sign-in needed to view
+fling deploy ./dist --access members       # a new site everyone signed in can open
+fling deploy ./dist --access people --add bob@example.com   # only you and Bob
+fling deploy ./dist --access public        # no sign-in needed to view
 fling deploy ./dist --yes                  # never prompt (CI): use the generated name as is
 fling deploy                               # deploys the current folder
 fling deploy "Pitch Deck.html"             # a single page, served as index.html → pitch-deck
@@ -184,23 +186,34 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
-| `fling visibility <name> private\|public` | require sign-in, or not |
-| `fling access <name> [--add <emails>] [--remove <emails>] [--group <slugs>] [--remove-group <slugs>] [--clear]` | who can open a private site: everyone signed in, or only listed people and groups |
+| `fling visibility <name> private\|public` | require sign-in, or not (private again: the access it had) |
+| `fling access <name> [--only-me \| --members \| --public] [--add <emails>] [--remove <emails>] [--group <slugs>] [--remove-group <slugs>] [--clear]` | who can open a site: only you, listed people and groups, everyone signed in, or anyone |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
-### Who can open a private site
+### Who can open a site
 
-A private site opens to everyone signed in to your Fling. `fling access` limits it to listed people
-(its audience); you, the owner, can always open it:
+Each site has an access level: **only you**, **teams** (groups), **specific people**, **everyone
+signed in** to your Fling, or **public**. A new site gets the one you give with `deploy --access
+only_me|members|groups|people|public` (with `--add <emails>` and `--group <slugs>` for people and
+teams); without it, your Fling's default, which is only you unless it is set up otherwise, and the
+deploy says who can open it. A re-deploy never changes it. `fling ls` shows each site's level in
+its ACCESS column and `fling info` on its Access line.
+
+`fling access` shows and changes it. `--only-me`, `--members` and `--public` set the level; the
+audience options limit the site to listed people and groups (its audience); you, the owner, can
+always open it:
 
 ```sh
 fling access my-app                                   # who can open it now
+fling access my-app --only-me                         # nobody else
+fling access my-app --members                         # everyone signed in
 fling access my-app --add bob@example.com,cat@example.com
 fling access my-app --remove bob@example.com
 fling access my-app --group design                    # everyone in the design group too
 fling access my-app --remove-group design
-fling access my-app --clear                           # everyone signed in again
+fling access my-app --clear                           # empty the audience: everyone signed in
+fling access my-app --public                          # anyone, no sign-in
 ```
 
 Addresses are comma-separated or given after `--add` one by one, and each must be one that can sign
@@ -210,7 +223,8 @@ kept for later and `fling access` says so. A share link still opens a restricted
 has it, and `fling access` warns while one exists. Removing someone shuts them out within 5
 minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups:
 [{ slug, name, size }] }`) and `warnings`; `fling info` shows the same line, and `fling ls --json`
-gives each site's `restricted`, `audienceSize` and `audienceGroups` (how many of those are groups).
+gives each site's `access`, `restricted`, `audienceSize` and `audienceGroups` (how many of those
+are groups). A share link opens a site only you can see as well: it is your choice to hand it out.
 
 `fling ls --shared` lists the other side: the restricted sites whose audience names you, or a group
 you are in, with their owner and how they reached you. With `--json`, each is `{ name, url,

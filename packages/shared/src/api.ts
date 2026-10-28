@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { ManifestSchema } from './manifest.ts'
 
@@ -30,7 +31,9 @@ export const SiteSchema = z.object({
   archived: z.boolean(),
   currentVersionId: z.string().nullable(),
   shareUrl: z.string().nullable(),
-  /** private with an audience: only the owner and the people in it can open it */
+  /** who can open it (access.ts); servers before access levels omit it (`siteAccessLevel`) */
+  access: AccessLevelSchema.optional(),
+  /** private and limited to the owner and the audience (an empty one: the owner alone) */
   restricted: z.boolean().default(false),
   /** how many addresses and groups the audience names (kept, and ignored, while public) */
   audienceSize: z.number().default(0),
@@ -114,11 +117,17 @@ export const NameCheckSchema = z.object({
 })
 export type NameCheck = z.infer<typeof NameCheckSchema>
 
-/** POST /api/sites/:name/deploys */
+/**
+ * POST /api/sites/:name/deploys. `access` (and, for `groups` and `people`, `audience`) is who can
+ * open a new site: it applies only while the site has never been live, so a re-deploy never
+ * changes it. Without it a new site gets the instance's default (`defaultAccess` in the metadata).
+ */
 export const DeployRequestSchema = z.object({
   manifest: ManifestSchema,
   spa: z.boolean().optional(),
   visibility: VisibilitySchema.optional(),
+  access: AccessLevelSchema.optional(),
+  audience: AudienceInputSchema.optional(),
 })
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
@@ -148,17 +157,22 @@ export const FinalizeResponseSchema = z.object({
   status: z.literal('live'),
   versionId: z.string(),
   site: SiteSchema,
+  /** this deploy made the site live for the first time (a new site, its access just set) */
+  first: z.boolean().optional(),
 })
 
 /** POST /api/sites/:name/current  { versionId } */
 export const RollbackRequestSchema = z.object({ versionId: z.string() })
 
 /**
- * PATCH /api/sites/:name  { visibility?, spa?, audience? } → SiteWithAudienceSchema (the audience
- * when the patch set one). An address the instance wouldn't let sign in is a 400
- * `email_not_allowed`.
+ * PATCH /api/sites/:name  { access?, visibility?, spa?, audience? } → SiteWithAudienceSchema (the
+ * audience when the patch set one). `access` sets the level (access.ts), with `audience` for
+ * `groups` and `people`; it goes without `visibility`. Without `access`, `visibility` and
+ * `audience` edit those alone: an audience naming someone restricts the site, an empty one opens it
+ * to every member. An address the instance wouldn't let sign in is a 400 `email_not_allowed`.
  */
 export const UpdateSiteRequestSchema = z.object({
+  access: AccessLevelSchema.optional(),
   visibility: VisibilitySchema.optional(),
   spa: z.boolean().optional(),
   audience: AudienceInputSchema.optional(),

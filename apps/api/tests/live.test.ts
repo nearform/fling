@@ -130,11 +130,11 @@ describe('MemoryLiveHub', () => {
   })
 })
 
-async function deploy(env: Env, key: string, name: string, visibility = 'private') {
+async function deploy(env: Env, key: string, name: string, access = 'members') {
   const files = [file('index.html', '<h1>hi</h1>')]
   const res = await api(env, key, 'POST', `/api/sites/${name}/deploys`, {
     manifest: { files: files.map(f => f.meta) },
-    visibility,
+    access,
   })
   const body = await json(res)
   await upload(env, body.uploads, files)

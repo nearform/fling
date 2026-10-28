@@ -6,6 +6,7 @@
 //     [--app-host fling.example.com] [--sites-domain fling.example.com]
 //     [--email-domains example.com] [--allowed-emails you@example.com]
 //     [--admin-emails you@example.com]   (optional, never asked for; '' removes them)
+//     [--site-default-access only_me|members]   (optional, never asked for; '' removes it)
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
@@ -36,6 +37,7 @@ const { values: args } = parseArgs({
     'email-domains': { type: 'string' },
     'allowed-emails': { type: 'string' },
     'admin-emails': { type: 'string' },
+    'site-default-access': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'oidc-client-secret-file': { type: 'string' },
@@ -145,6 +147,15 @@ for (const [key, v] of [
 if (args['admin-emails'] !== undefined) {
   if (args['admin-emails'].trim()) instance.ADMIN_EMAILS = args['admin-emails'].trim()
   else delete instance.ADMIN_EMAILS
+}
+// Who can open a new site that names no access level: only from the flag, like the admins.
+if (args['site-default-access'] !== undefined) {
+  const access = args['site-default-access'].trim()
+  if (access && access !== 'only_me' && access !== 'members') {
+    throw new Error('--site-default-access must be only_me or members')
+  }
+  if (access) instance.SITE_DEFAULT_ACCESS = access
+  else delete instance.SITE_DEFAULT_ACCESS
 }
 instance.INSTANCE_NAME = await value(
   'instance-name',

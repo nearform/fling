@@ -10,21 +10,29 @@
  * decides whether the user may do the action. Refusals look exactly like a missing site (404), so
  * the API never confirms that someone else's site exists beyond what `checkName` says.
  *
+ * Access levels (access.ts): a site is open to its owner only, every member, an audience, or
+ * anyone (`applyAccess`, through `updateSite` and a new site's first deploy, `initialAccess`). A
+ * new site that names no level gets the instance's default (`SITE_DEFAULT_ACCESS`).
+ *
  * Audiences: the owner may limit a private site to listed addresses and groups (`applyAudience`
  * through `updateSite`), each address one the instance would let sign in, each group one that
- * exists (named by slug, stored by id). The route value then carries `r: 1`, and the edge wants a
- * site pass, which `/auth/login` hands to whoever policy lets view it (`signedInReturn`). Deleting
- * a group takes it out of the audiences that name it, never widening one (`dropGroup`).
+ * exists (named by slug, stored by id). A restricted site (an audience, or only the owner) has a
+ * route value carrying `r: 1`, and the edge wants a site pass, which `/auth/login` hands to whoever
+ * policy lets view it (`signedInReturn`). Deleting a group takes it out of the audiences that name
+ * it, never widening one (`dropGroup`).
  *
  * Shared with me (`listShared`): the restricted sites of others that the user may see, listed from
  * their direct grants and their groups' site items, which carry each site's listing.
  */
 import {
+  type AccessLevel,
   AUDIENCE_EMAILS_MAX,
   AUDIENCE_GROUPS_MAX,
   type Audience,
   type AudienceInput,
   AudienceInputSchema,
+  accessLevelOf,
+  accessProblem,
   deletedGroupId,
   deletedGroupRef,
   initialsFromEmail,
@@ -35,6 +43,7 @@ import {
   type ManifestFile,
   type NameCheck,
   nameSuggestions,
+  needsAudience,
   parseLabel,
   reviewUrl,
   type SharedSite,
@@ -64,7 +73,14 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
+import {
+  type Action,
+  type Actor,
+  can,
+  isRestricted,
+  restrictsToAudience,
+  userActor,
+} from './policy.ts'
 import {
   hasListing,
   listingOf,
@@ -111,6 +127,12 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
     shareUrl: site.shareToken
       ? siteUrl(shareLabel(site.shareToken), sitesDomain, protocol(deps))
       : null,
+    access: accessLevelOf({
+      visibility: site.visibility,
+      restricted: restrictsToAudience(site),
+      emails: site.audience.emails.length,
+      groups: site.audience.groups.length,
+    }),
     restricted: isRestricted(site),
     audienceSize: site.audience.emails.length + site.audience.groups.length,
     audienceGroups: site.audience.groups.length,
@@ -299,7 +321,7 @@ export function checkEmails(deps: Deps, emails: readonly string[]) {
  */
 export async function applyAudience(
   deps: Deps,
-  site: SiteRecord,
+  site: Pick<SiteRecord, 'audience'>,
   input: AudienceInput
 ): Promise<SiteAudience> {
   const audience = AudienceInputSchema.parse(input)
@@ -328,6 +350,60 @@ export async function applyAudience(
   const before = site.audience
   site.audience = { emails, groups: [...new Set(ids as string[])] }
   return before
+}
+
+/** What an access level sets on a site. */
+export type AccessFields = Pick<SiteRecord, 'visibility' | 'restricted' | 'audience'>
+
+const NO_AUDIENCE = (): SiteAudience => ({ emails: [], groups: [] })
+
+/**
+ * Set the site's access level, checked (400 when `audience` doesn't fit it, `accessProblem`):
+ * `only_me` and `members` make it private and empty the audience, `groups` and `people` make it
+ * private and restricted to `audience` (`applyAudience`), and `public` keeps the private settings
+ * for when it is private again. Returns the audience it had, for `notifyAudienceChange`.
+ */
+export async function applyAccess(
+  deps: Deps,
+  site: AccessFields,
+  level: AccessLevel,
+  audience?: AudienceInput
+): Promise<SiteAudience> {
+  const problem = accessProblem(level, audience)
+  if (problem) throw badRequest(problem)
+  const before = site.audience
+  if (level === 'public') {
+    site.visibility = 'public'
+    return before
+  }
+  site.visibility = 'private'
+  site.restricted = level !== 'members'
+  if (needsAudience(level)) await applyAudience(deps, site, audience as AudienceInput)
+  else site.audience = NO_AUDIENCE()
+  return before
+}
+
+/**
+ * Who can open a new site: the level its first deploy names (with its audience), else the
+ * instance's default (`SITE_DEFAULT_ACCESS`). A new public site keeps the default's private
+ * settings for when it is made private. Checked before the name is claimed, so a bad audience
+ * claims nothing.
+ */
+export async function initialAccess(
+  deps: Deps,
+  req: { access?: AccessLevel; audience?: AudienceInput }
+): Promise<AccessFields> {
+  const level = req.access ?? deps.config.siteDefaultAccess
+  if (req.access === undefined && req.audience !== undefined) {
+    throw badRequest('`audience` goes with `access` ("groups" or "people")')
+  }
+  const fields: AccessFields = {
+    visibility: 'private',
+    restricted: deps.config.siteDefaultAccess === 'only_me',
+    audience: NO_AUDIENCE(),
+  }
+  await applyAccess(deps, fields, level, req.audience)
+  return fields
 }
 
 /**
@@ -496,23 +572,45 @@ export async function versionFiles(
   }
 }
 
+/**
+ * PATCH /api/sites/:name. `access` sets the level (with `audience` for `groups` and `people`);
+ * without it, `visibility` and `audience` edit those alone, and an audience edit restricts the site
+ * when the audience names someone and opens it to every member when it is empty.
+ */
 export async function updateSite(
   deps: Deps,
   user: User,
   name: string,
-  patch: { spa?: boolean; visibility?: Visibility; audience?: AudienceInput },
+  patch: {
+    spa?: boolean
+    visibility?: Visibility
+    audience?: AudienceInput
+    access?: AccessLevel
+  },
   acting: Acting = {}
 ): Promise<Site & { audience?: Audience }> {
+  if (patch.access !== undefined && patch.visibility !== undefined) {
+    throw badRequest('Pass `access` or `visibility`, not both')
+  }
   const actions: Action[] = [
-    ...(patch.visibility === undefined ? [] : (['site.visibility'] as const)),
+    ...(patch.visibility === undefined && patch.access === undefined
+      ? []
+      : (['site.visibility'] as const)),
     ...(patch.spa === undefined ? [] : (['site.settings'] as const)),
-    ...(patch.audience === undefined ? [] : (['site.audience'] as const)),
+    ...(patch.audience === undefined && patch.access === undefined
+      ? []
+      : (['site.audience'] as const)),
   ]
   const [first = 'site.settings', ...rest] = actions
   const site = await requireSite(deps, user, name, first, ...rest)
   applySettings(site, patch)
-  const before =
-    patch.audience === undefined ? undefined : await applyAudience(deps, site, patch.audience)
+  let before: SiteAudience | undefined
+  if (patch.access !== undefined) {
+    before = await applyAccess(deps, site, patch.access, patch.audience)
+  } else if (patch.audience !== undefined) {
+    before = await applyAudience(deps, site, patch.audience)
+    site.restricted = site.audience.emails.length + site.audience.groups.length > 0
+  }
   await save(deps, site)
   if (before) await notifyAudienceChange(deps, user.email, site, before, acting)
   return {

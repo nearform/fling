@@ -1,4 +1,10 @@
-import type { CommentAnchor, CreateGroupRequest, GroupDetail, Visibility } from '@fling/shared'
+import type {
+  AccessLevel,
+  CommentAnchor,
+  CreateGroupRequest,
+  GroupDetail,
+  Visibility,
+} from '@fling/shared'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ADMIN_USERS_PATH } from '../lib/admin'
 import { api, errorMessage } from '../lib/api'
@@ -87,6 +93,17 @@ export function useSiteActions(name: string) {
       name,
       (visibility: Visibility) => api.updateSite(name, { visibility }),
       'Visibility updated'
+    ),
+    /**
+     * The access level (`accessLevels` capability), with the whole audience for groups and people.
+     * Refused addresses and unknown groups are the caller's to show.
+     */
+    setAccess: useSiteMutation(
+      name,
+      (choice: { access: AccessLevel; audience?: { emails: string[]; groups: string[] } }) =>
+        api.updateSite(name, choice),
+      'Access updated',
+      false
     ),
     /**
      * The whole audience: its addresses and its groups by slug. Refused addresses and unknown

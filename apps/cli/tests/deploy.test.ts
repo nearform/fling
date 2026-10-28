@@ -274,6 +274,7 @@ describe('fling [dir] command', () => {
     expect(JSON.parse(json.out.content())).toEqual({
       status: 'unchanged',
       site: site(),
+      access: 'members',
       reviewUrl: `${SERVER}/review/my-app`,
       ready: true,
       skipped: { dotfiles: [], gitignored: [] },
@@ -631,5 +632,80 @@ describe('name and index.html prompts', () => {
     })
     const e = await captureError(runDeploy(ctx, dir, {}))
     expect(e.message).toMatch(/taken.*my-app-cc/)
+  })
+})
+
+describe('fling deploy --access', () => {
+  const ACCESS_INSTANCE = {
+    ...INSTANCE,
+    capabilities: { ...INSTANCE.capabilities, accessLevels: true },
+  }
+  const mine = site({ access: 'only_me', restricted: true })
+
+  async function deployed(
+    opts: Parameters<typeof runDeploy>[2],
+    live = mine,
+    first = true
+  ): Promise<{ body: any; text: string; warnings: string }> {
+    const dir = await folder()
+    let body: any
+    const m = mockFetch({
+      'POST /api/sites/my-app/deploys': (_url, init) => {
+        body = JSON.parse(String(init.body))
+        return jsonResponse({ status: 'upload', versionId: VERSION, uploads: [] })
+      },
+      [`POST /api/sites/my-app/deploys/${VERSION}/finalize`]: () =>
+        jsonResponse({
+          status: 'live',
+          versionId: VERSION,
+          site: live,
+          ...(first ? { first } : {}),
+        }),
+    })
+    const store = await loggedInStore()
+    await store.putServer(SERVER, { instance: ACCESS_INSTANCE })
+    const { ctx, out, log } = await testContext({ store, fetch: m.fetch })
+    await runDeploy(ctx, dir, opts)
+    return { body, text: out.content(), warnings: log.lines.join('\n') }
+  }
+
+  it("a new site with no --access gets the Fling's default, and says who can open it", async () => {
+    const { body, text } = await deployed({})
+    expect(body.access).toBeUndefined()
+    expect(text).toContain('Who can open it: Only you can open it.')
+    expect(text).toContain('fling access my-app --only-me | --members')
+  })
+
+  it('sends the level, with the people and groups for an audience', async () => {
+    expect((await deployed({ access: 'members' })).body.access).toBe('members')
+    expect((await deployed({ access: 'only-me' })).body.access).toBe('only_me')
+    const people = await deployed(
+      { add: ['bob@example.test, carol@example.test'], group: ['Design'] },
+      site({ access: 'people', restricted: true, audienceSize: 3, audienceGroups: 1 })
+    )
+    expect(people.body).toMatchObject({
+      access: 'people',
+      audience: { emails: ['bob@example.test', 'carol@example.test'], groups: ['design'] },
+    })
+    expect(people.text).toContain('Only you and 2 people and 1 group can open it.')
+  })
+
+  it('refuses a level that does not fit, before any request', async () => {
+    const dir = await folder()
+    const { ctx } = await testContext({ store: await loggedInStore() })
+    const cases: [object, RegExp][] = [
+      [{ access: 'nobody' }, /Unknown access/],
+      [{ access: 'people' }, /needs someone to let in/],
+      [{ access: 'members', add: ['bob@example.test'] }, /lets no one else in/],
+      [{ access: 'public', public: true }, /not both/],
+    ]
+    for (const [opts, message] of cases) {
+      expect((await captureError(runDeploy(ctx, dir, opts))).message).toMatch(message)
+    }
+  })
+
+  it('an existing site keeps its access, and says so when --access was given', async () => {
+    const { warnings } = await deployed({ access: 'public' }, mine, false)
+    expect(warnings).toMatch(/--access only applies to a new site: my-app keeps its access/)
   })
 })

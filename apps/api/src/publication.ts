@@ -22,10 +22,15 @@
  * is recorded (manifest kept in storage). The first deploy to a name claims it; a name another
  * user owns → 409 `name_taken` with free suggestions. Going live (including unchanged/repointed)
  * unarchives the site; `spa`/`visibility` are applied when the deploy takes effect, omitted → the
- * site's current setting (new sites: private, non-SPA).
+ * site's current setting (new sites: non-SPA). `access` (with its audience) is who can open a site
+ * that has never been live, checked before the name is claimed; omitted → the instance's default
+ * (`initialAccess`). It never changes a site that has been live. When the site first goes live
+ * restricted to an audience, the audience hears it was shared with them.
  */
 import { createHash } from 'node:crypto'
 import {
+  type AccessLevel,
+  type AudienceInput,
   cacheControlFor,
   type DeployRequest,
   DeployRequestSchema,
@@ -55,10 +60,13 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
-import { can, userActor } from './policy.ts'
+import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
+import { can, isRestricted, userActor } from './policy.ts'
 import {
+  type AccessFields,
   applySettings,
   detectGeneratedIndex,
+  initialAccess,
   nameTaken,
   requireSite,
   type StoredManifest,
@@ -83,6 +91,8 @@ export type Published = {
   status: 'live' | 'unchanged' | 'repointed'
   versionId: string
   site: Site
+  /** this deploy made the site live for the first time: a new site, with its access just set */
+  first?: boolean
 }
 
 // --- admission ----------------------------------------------------------------------------------
@@ -214,6 +224,16 @@ async function prepare(
     const claim = await store.getNameClaim(name)
     if (claim && claim.email !== user.email) throw await nameTaken(deps, user, name)
   }
+  if (req.access !== undefined && req.visibility !== undefined) {
+    throw badRequest('Pass `access` or `visibility`, not both')
+  }
+  // Who can open a site that has never been live. One that has keeps its access: PATCH changes it.
+  const neverLive = !existing || existing.currentVersionId === null
+  const access = neverLive ? await initialAccess(deps, req) : null
+  if (existing && access && req.access !== undefined) {
+    Object.assign(existing, access)
+    await save(deps, existing)
+  }
 
   if (existing && existing.currentVersionId === versionId) {
     applySettings(existing, req)
@@ -247,12 +267,11 @@ async function prepare(
       id: newId(),
       email: user.email,
       name,
-      visibility: 'private',
+      ...(access as AccessFields),
       spa: false,
       archived: false,
       currentVersionId: null,
       shareToken: null,
-      audience: { emails: [], groups: [] },
       createdAt: now,
       updatedAt: now,
     }))
@@ -281,8 +300,10 @@ async function goLive(
   user: User,
   site: SiteRecord,
   version: VersionRecord,
-  files: readonly ManifestFile[]
+  files: readonly ManifestFile[],
+  acting: Acting
 ): Promise<Published> {
+  const first = site.currentVersionId === null
   if (version.status === 'pending') {
     const generatedIndex = await detectGeneratedIndex(deps, site.id, version.id, files)
     await deps.blobs.putJson(manifestKey(site.id, version.id), {
@@ -295,7 +316,15 @@ async function goLive(
   site.archived = false
   applySettings(site, version)
   await save(deps, site)
-  return { status: 'live', versionId: version.id, site: toSite(deps, user, site) }
+  if (first && isRestricted(site)) {
+    await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
+  }
+  return {
+    status: 'live',
+    versionId: version.id,
+    site: toSite(deps, user, site),
+    ...(first ? { first } : {}),
+  }
 }
 
 /** S3's `x-amz-checksum-sha256` wants base64; manifests carry hex. */
@@ -330,13 +359,14 @@ export async function publish(
   deps: Deps,
   user: User,
   name: string,
-  versionId: string
+  versionId: string,
+  acting: Acting = {}
 ): Promise<Published> {
   const { store, blobs } = deps
   const site = await requireSite(deps, user, name, 'site.deploy')
   const version = await store.getVersion(site, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
-  if (version.status === 'complete') return goLive(deps, user, site, version, [])
+  if (version.status === 'complete') return goLive(deps, user, site, version, [], acting)
 
   const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
@@ -364,7 +394,7 @@ export async function publish(
     await blobs.delete(manifestKey(site.id, versionId))
     throw secretDetected(findings)
   }
-  return goLive(deps, user, site, version, manifest.files)
+  return goLive(deps, user, site, version, manifest.files, acting)
 }
 
 /**
@@ -376,7 +406,12 @@ export async function publishBytes(
   user: User,
   name: string,
   input: readonly { path: string; bytes: Uint8Array }[],
-  opts: { spa?: boolean; visibility?: Visibility }
+  opts: {
+    spa?: boolean
+    visibility?: Visibility
+    access?: AccessLevel
+    audience?: AudienceInput
+  }
 ): Promise<Published> {
   const bytesByPath = new Map(input.map(f => [f.path, f.bytes]))
   const files: ManifestFile[] = input.map(({ path, bytes }) => ({
@@ -385,7 +420,13 @@ export async function publishBytes(
     size: bytes.byteLength,
     contentType: contentTypeFor(path),
   }))
-  const req = admit({ manifest: { files }, spa: opts.spa, visibility: opts.visibility })
+  const req = admit({
+    manifest: { files },
+    spa: opts.spa,
+    visibility: opts.visibility,
+    access: opts.access,
+    audience: opts.audience,
+  })
   // Scan exactly the bytes we are about to write, before anything is stored.
   const findings = input.flatMap(f => scanBytesForSecrets(f.bytes, f.path))
   if (findings.length > 0) throw secretDetected(findings)
@@ -400,5 +441,5 @@ export async function publishBytes(
       { contentType: f.contentType, cacheControl: cacheControlFor(f.path) }
     )
   })
-  return goLive(deps, user, site, version, prepared.files)
+  return goLive(deps, user, site, version, prepared.files, {})
 }

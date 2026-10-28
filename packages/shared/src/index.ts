@@ -1,5 +1,6 @@
 // Browser-safe exports. Node/edge-only: `@fling/shared/version-id`, `@fling/shared/site-cookie`,
 // `@fling/shared/site-routing` (the edge's routing decision).
+export * from './access.ts'
 export * from './api.ts'
 export * from './audience.ts'
 export * from './cache-control.ts'

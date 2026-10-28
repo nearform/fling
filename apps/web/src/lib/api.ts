@@ -4,6 +4,7 @@
  * `{ error: { code, message } }` (or a synthetic code when the body is not that envelope).
  */
 import {
+  type AccessLevel,
   type AdminUserList,
   AdminUserListSchema,
   ApiKeyListSchema,
@@ -169,7 +170,12 @@ export const api = {
     request(`${site(name)}/versions/${encodeURIComponent(versionId)}/files`, VersionFilesSchema),
   updateSite: (
     name: string,
-    body: { visibility?: Visibility; spa?: boolean; audience?: AudienceInput }
+    body: {
+      access?: AccessLevel
+      visibility?: Visibility
+      spa?: boolean
+      audience?: AudienceInput
+    }
   ) => request(site(name), ignoreBody, { method: 'PATCH', body }),
   /** Creates the share link, or rotates it when one exists (the old link stops working). */
   share: (name: string) => request(`${site(name)}/share`, ShareResponseParser, { method: 'POST' }),

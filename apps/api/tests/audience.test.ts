@@ -13,6 +13,7 @@ const page = [file('index.html', '<h1>hi</h1>')]
 async function deploy(env: ReturnType<typeof setup>, key: string, name: string) {
   const res = await api(env, key, 'POST', `/api/sites/${name}/deploys`, {
     manifest: { files: page.map(f => f.meta) },
+    access: 'members',
   })
   const body = await json(res)
   await upload(env, body.uploads, page)

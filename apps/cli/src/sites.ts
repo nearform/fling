@@ -3,7 +3,9 @@
  * print what these return; the MCP tools serialise it. Nothing here prints.
  */
 import {
+  type AccessLevel,
   type AudienceChange,
+  type AudienceInput,
   type CellChange,
   type Comment,
   type CommentList,
@@ -161,6 +163,33 @@ export async function setVisibility(
 ): Promise<Site> {
   const raw = await client.request('PATCH', sitePath(name), { body: { visibility } })
   return siteAfter(client, name, raw)
+}
+
+/**
+ * Set the site's access level (with the whole audience for groups and people). Returns the site
+ * with its audience.
+ */
+export async function setAccess(
+  client: ApiClient,
+  name: string,
+  access: AccessLevel,
+  audience?: AudienceInput
+): Promise<SiteWithAudience> {
+  return client.request('PATCH', sitePath(name), {
+    schema: SiteWithAudienceSchema,
+    body: { access, ...(audience ? { audience } : {}) },
+  })
+}
+
+/**
+ * Whether the instance knows access levels (`only_me` among them), by its stored metadata: its
+ * `accessLevels` capability. A stored copy from before the flag: no, so the CLI asks the server
+ * only for what it already supports.
+ */
+export function accessLevelsEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  return instance?.capabilities.accessLevels === true
 }
 
 /** The site with its audience; a server without audiences fails (it reports none). */

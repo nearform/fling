@@ -7,6 +7,11 @@
 // accepts any document that has the fields it needs.
 
 import { z } from 'zod'
+import {
+  type DefaultAccessLevel,
+  DefaultAccessLevelSchema,
+  LEGACY_DEFAULT_ACCESS,
+} from './access.ts'
 
 export const INSTANCE_METADATA_PATH = '/.well-known/fling'
 export const INSTANCE_METADATA_VERSION = 1
@@ -74,6 +79,11 @@ export const InstanceMetadataSchema = z.looseObject({
   capabilities: z.record(z.string(), z.boolean()).default({}),
   /** How to install the CLI, e.g. `npm install -g <package>`. */
   installCommand: z.string().min(1),
+  /**
+   * The access level a new site gets when its first deploy names none (`SITE_DEFAULT_ACCESS`).
+   * Missing (older servers) or unknown: `members` (`defaultAccessOf`).
+   */
+  defaultAccess: DefaultAccessLevelSchema.optional().catch(undefined),
 })
 export type InstanceMetadata = z.infer<typeof InstanceMetadataSchema>
 
@@ -93,7 +103,14 @@ export const CORE_CAPABILITIES = {
   audiences: true,
   /** named lists of people (groups.ts) that any member can use in an audience */
   groups: true,
+  /** the five access levels (access.ts), `only_me` among them, set with `access` */
+  accessLevels: true,
 } as const
+
+/** The access level the instance gives a new site when its first deploy names none. */
+export const defaultAccessOf = (
+  instance: Partial<Pick<InstanceMetadata, 'defaultAccess'>> | null | undefined
+): DefaultAccessLevel => instance?.defaultAccess ?? LEGACY_DEFAULT_ACCESS
 
 /** `https://<name>.sites.example.test/` — a site's URL on an instance. */
 export function instanceSiteUrl(

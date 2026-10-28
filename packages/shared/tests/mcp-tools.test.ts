@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { Comment, CommentList } from '../src/comments.ts'
 import {
+  ACCESS_NOTE,
   describeComments,
   mcpRemoteInstructions,
   mcpTools,
@@ -64,6 +65,23 @@ describe('mcp tool catalogue', () => {
     )
   })
 
+  it("tells the agent to ask who should see a new site, and the instance's default", () => {
+    const base = {
+      name: 'Fling',
+      sitesDomain: 'sites.example.test',
+      siteScheme: 'https' as const,
+      auth: { kind: 'dev', displayName: 'Dev', emailDomains: ['example.test'] },
+    }
+    const mine = ACCESS_NOTE(mcpWording({ ...base, defaultAccess: 'only_me' }))
+    expect(mine).toMatch(/ask the user who should be able to open it/)
+    expect(mine).toContain('Without `access` a new site is visible only to the user.')
+    expect(ACCESS_NOTE(mcpWording({ ...base, defaultAccess: 'members' }))).toContain(
+      'Without `access` a new site is open to anyone signed in to Fling (@example.test accounts).'
+    )
+    expect(ACCESS_NOTE(mcpWording())).toContain("the Fling's default")
+    expect(mcpRemoteInstructions(mcpWording({ ...base, defaultAccess: 'only_me' }))).toContain(mine)
+  })
+
   it('words a personal instance (invited addresses only) naturally', () => {
     const w = mcpWording({
       name: 'My Fling',
@@ -71,8 +89,11 @@ describe('mcp tool catalogue', () => {
       siteScheme: 'https',
       auth: { kind: 'oidc', displayName: 'Google', emailDomains: [], invitedEmails: true },
     })
-    expect(mcpToolsFor(w).setVisibility.description).toBe(
-      'Make a site private (open to anyone signed in to My Fling (invited accounts)) or public (anyone can open the site; its review page and comments still need sign-in).'
+    expect(mcpToolsFor(w).setAccess.description).toContain(
+      '`members` (anyone signed in to My Fling (invited accounts))'
+    )
+    expect(mcpToolsFor(w).setVisibility.description).toContain(
+      'only the user, anyone signed in to My Fling (invited accounts), or its audience'
     )
   })
 

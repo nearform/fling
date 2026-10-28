@@ -1,5 +1,7 @@
 /** Site management: ls, info, versions, rollback, share, visibility, access, archive/unarchive, rm. */
 import {
+  ACCESS_LABELS,
+  type AccessLevel,
   changesAudience,
   describeAudience,
   privateAudience,
@@ -7,6 +9,7 @@ import {
   type SiteDetail,
   type SiteSort,
   sharedVia,
+  siteAccessLevel,
   splitEmails,
   splitGroups,
   type Visibility,
@@ -14,8 +17,10 @@ import {
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
+import { loadInstanceWith } from '../instance.ts'
 import { waitWithSpinner } from '../ready.ts'
 import {
+  accessLevelsEnabled,
   archiveSite,
   audiencesEnabled,
   audienceWarnings,
@@ -26,6 +31,7 @@ import {
   listShared,
   listSites,
   rollback,
+  setAccess,
   setAudience,
   setVisibility,
   share,
@@ -43,8 +49,8 @@ export async function runList(
       { header: 'NAME', value: s => s.name },
       { header: 'URL', value: s => s.url },
       {
-        header: 'VISIBILITY',
-        value: s => (s.archived ? `${s.visibility} (archived)` : s.visibility),
+        header: 'ACCESS',
+        value: s => accessLabel(s) + (s.archived ? ' (archived)' : ''),
       },
       { header: 'SHARE', value: s => s.shareUrl },
       { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
@@ -70,12 +76,15 @@ export async function runListShared(ctx: CommandContext, opts: { sort?: SiteSort
   )
 }
 
+/** `Only you`, `Everyone signed in`, `Specific people`…: a site's access level, for tables. */
+const accessLabel = (site: Site) => ACCESS_LABELS[siteAccessLevel(site)]
+
 function describeSite(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
   return [
     row('Name', site.name),
     row('URL', site.url),
-    row('Visibility', site.visibility + (site.archived ? chalk.yellow(' (archived)') : '')),
+    row('Access', accessLabel(site) + (site.archived ? chalk.yellow(' (archived)') : '')),
     row('SPA', site.spa ? 'yes' : 'no'),
     row('Share link', site.shareUrl ?? '-'),
     row('Version', site.currentVersionId ?? '-'),
@@ -103,7 +112,7 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
   const site = await getSite(requireClient(ctx), name)
   const access =
     site.audience && audiencesEnabled(ctx.config.instance)
-      ? [`${chalk.bold('Access:'.padEnd(12))}${describeAudience(site, membersOf(ctx))}`]
+      ? [`${chalk.bold('Who:'.padEnd(12))}${describeAudience(site, membersOf(ctx))}`]
       : []
   ctx.out.data(site, () =>
     [
@@ -212,10 +221,23 @@ export async function runVisibility(
   ctx.out.data(site, () => site.url)
 }
 
+/** The level `fling access` sets, from `--only-me`, `--members` and `--public`. */
+function levelOf(opts: { onlyMe?: boolean; members?: boolean; public?: boolean }) {
+  const levels: AccessLevel[] = [
+    ...(opts.onlyMe ? (['only_me'] as const) : []),
+    ...(opts.members ? (['members'] as const) : []),
+    ...(opts.public ? (['public'] as const) : []),
+  ]
+  if (levels.length > 1) throw new CliError('Use one of --only-me, --members and --public')
+  return levels[0]
+}
+
 /**
- * `fling access <name> [--add …] [--remove …] [--group …] [--remove-group …] [--clear]`: show who
- * can open a site or, with options, change its audience (the addresses and groups besides the
- * owner who may open it while private).
+ * `fling access <name> [--only-me | --members | --public] [--add …] [--remove …] [--group …]
+ * [--remove-group …] [--clear]`: show who can open a site or, with options, change it: a whole
+ * access level (`--only-me`, `--members`, `--public`), or its audience (the addresses and groups
+ * besides the owner who may open it; editing the audience makes the site private to them, and
+ * `--clear` opens it to everyone signed in).
  */
 export async function runAccess(
   ctx: CommandContext,
@@ -226,8 +248,13 @@ export async function runAccess(
     group?: string[]
     removeGroup?: string[]
     clear?: boolean
+    onlyMe?: boolean
+    members?: boolean
+    public?: boolean
   }
 ): Promise<void> {
+  const level = levelOf(opts)
+  if (level) return runSetLevel(ctx, name, level, opts)
   const instance = ctx.config.instance
   if (instance && !audiencesEnabled(instance)) {
     throw new CliError(`${instance.name} can't limit a site to listed people`)
@@ -246,6 +273,41 @@ export async function runAccess(
   const site = changesAudience(change)
     ? await setAudience(client, name, change)
     : await getAudience(client, name)
+  const warnings = audienceWarnings(site)
+  for (const w of warnings) ctx.log.warn(w)
+  ctx.out.data({ ...site, warnings }, () => describeAudience(site, membersOf(ctx)))
+}
+
+async function runSetLevel(
+  ctx: CommandContext,
+  name: string,
+  level: AccessLevel,
+  opts: {
+    add?: string[]
+    remove?: string[]
+    group?: string[]
+    removeGroup?: string[]
+    clear?: boolean
+  }
+): Promise<void> {
+  if (
+    opts.add?.length ||
+    opts.remove?.length ||
+    opts.group?.length ||
+    opts.removeGroup?.length ||
+    opts.clear
+  ) {
+    throw new CliError(`--${level === 'only_me' ? 'only-me' : level} lets no one else in`, {
+      hint: 'Leave out --add, --remove, --group, --remove-group and --clear.',
+    })
+  }
+  const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'accessLevels')
+  if (instance && !accessLevelsEnabled(instance)) {
+    throw new CliError(`${instance.name} has no access levels yet`, {
+      hint: `Use \`${ctx.binName} visibility ${name} public|private\` and \`${ctx.binName} access ${name} --clear\`.`,
+    })
+  }
+  const site = await setAccess(requireClient(ctx), name, level)
   const warnings = audienceWarnings(site)
   for (const w of warnings) ctx.log.warn(w)
   ctx.out.data({ ...site, warnings }, () => describeAudience(site, membersOf(ctx)))

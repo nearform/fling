@@ -21,6 +21,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import {
+  ACCESS_NOTE,
+  type AccessLevel,
+  accessChangeHint,
   COMMENTS_NOTE,
   changesAudience,
   describeAudience,
@@ -29,6 +32,7 @@ import {
   describeGroups,
   describeNotificationSettings,
   describeSharedSite,
+  describeSiteAccess,
   describeVersionFiles,
   type InstanceMetadata,
   isSecretPath,
@@ -41,6 +45,7 @@ import {
   NEVER_PUBLISHED,
   NOT_READY_NOTE,
   NOTIFICATIONS_NOTE,
+  needsAudience,
   privateAudience,
   reviewUrl,
   shareForFeedback,
@@ -63,7 +68,7 @@ import type { OpenLike } from './context.ts'
 import { deploy, NameTakenError, resolveSiteName } from './deploy.ts'
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
-import { loadInstance } from './instance.ts'
+import { loadInstance, loadInstanceWith } from './instance.ts'
 import {
   FOUND_AS_GIVEN,
   findFiles,
@@ -96,6 +101,7 @@ import {
 import { NPX_COMMAND, VERSION } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
+  accessLevelsEnabled,
   addComment,
   archiveSite,
   audiencesEnabled,
@@ -118,6 +124,7 @@ import {
   renameGroup,
   resolveComment,
   rollback,
+  setAccess,
   setAudience,
   setNotifications,
   setVisibility,
@@ -176,7 +183,7 @@ export const mcpLocalInstructions = (
     'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
     NEVER_PUBLISHED,
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
-    `Sites are private (open to ${w.privateAudience}) by default; only make one public if asked. Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
+    `${ACCESS_NOTE(w)} Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
   ].join('\n\n')
@@ -264,6 +271,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
   }
 
+  /** Who may open a private site on the call's Fling, for copy. */
+  async function membersOn(target: Target) {
+    const instance = await target.instance()
+    return instance ? privateAudience(instance) : 'anyone signed in to this Fling'
+  }
+
+  /**
+   * Refuse an access level the call's Fling doesn't know (an older server would ignore it), its
+   * metadata fetched again when the stored copy predates them.
+   */
+  async function requireAccessLevels(target: Target) {
+    const instance = await loadInstanceWith(store, target.config, fetchImpl, 'accessLevels')
+    if (instance && !accessLevelsEnabled(instance)) {
+      throw new CliError(
+        `${instance.name} (${serverLabel(target.url)}) has no access levels yet: leave out \`access\`, then use fling_set_visibility or fling_set_audience`
+      )
+    }
+  }
+
   /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
   async function run(
     tool: string,
@@ -289,12 +315,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       nameFrom?: string
       spa?: boolean
       public?: boolean
+      /** who can open the site if this creates it, with the audience for groups and people */
+      access?: AccessLevel
+      emails?: string[]
+      groups?: string[]
       listHtml?: boolean
       retryWith: string
       /** Dotfiles already left out (from a zip or the inline files). */
       skippedDotfiles?: string[]
     }
   ): Promise<DeployOutcome> {
+    if (opts.access) await requireAccessLevels(t)
     let local = await buildManifest(dir)
     local.skipped.dotfiles.unshift(...(opts.skippedDotfiles ?? []))
     const skippedNote = describeSkipped(local.skipped)
@@ -326,7 +357,20 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
     const result = await deploy(
       { client: t.client, fetch: fetchImpl },
-      { dir, name: opts.name, manifest: local, spa: opts.spa, public: opts.public }
+      {
+        dir,
+        name: opts.name,
+        manifest: local,
+        spa: opts.spa,
+        ...(opts.access
+          ? {
+              access: opts.access,
+              ...(needsAudience(opts.access)
+                ? { audience: { emails: opts.emails ?? [], groups: opts.groups ?? [] } }
+                : {}),
+            }
+          : { public: opts.public }),
+      }
     ).catch((error: unknown) => {
       if (!(error instanceof NameTakenError)) throw error
       const how = opts.nameGiven ? '' : ` (generated from ${opts.nameFrom ?? 'the folder'})`
@@ -356,13 +400,22 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
     const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
+    const level = result.site.access ?? result.site.visibility
     const head = review
-      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${result.url} (${result.site.visibility})`
-      : `${what}: ${result.url} (${result.site.visibility})${listing}`
+      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${result.url} (${level})`
+      : `${what}: ${result.url} (${level})${listing}`
+    // A new site says who can open it (asked for, or the Fling's default) and how to change it; an
+    // existing one asked for an access level says it kept its own.
+    const who = describeSiteAccess(result.site, await membersOn(t))
+    const access = result.first
+      ? `\nWho can open it: ${who} ${accessChangeHint('mcp', result.name)}`
+      : opts.access
+        ? `\nIts access is unchanged (deploying never changes it for an existing site): ${who} ${accessChangeHint('mcp', result.name)}`
+        : ''
     return {
       kind: 'deployed',
       summary:
-        `${head}${warnings}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
+        `${head}${access}${warnings}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
       data: {
         status: result.status,
@@ -372,6 +425,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
         site: result.site,
+        ...(result.first ? { created: true } : {}),
         ...(review ? { reviewUrl: review } : {}),
         generatedIndex,
         warnings: result.warnings,
@@ -390,7 +444,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       }),
     }
   )
-  const { listHtml, spa, public: isPublic } = mcpTools.publish.inputSchema
+  const { listHtml, spa, public: isPublic, access, emails, groups } = mcpTools.publish.inputSchema
 
   server.registerTool(
     'fling_deploy',
@@ -410,7 +464,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If the name is taken it fails with free suggestions — ask the user to pick one, then retry with `name`. ' +
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
-        `Re-deploying identical content is a no-op. Sites are private (open to ${wording.privateAudience}) unless \`public\` is set. ` +
+        `Re-deploying identical content is a no-op. ${ACCESS_NOTE(wording)} ` +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
@@ -426,6 +480,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             'Site name (lowercase letters, digits, single hyphens; max 50). Defaults to a name generated from the file or folder'
           ),
         spa,
+        access,
+        emails,
+        groups,
         public: isPublic,
         listHtml,
         server: serverArg,
@@ -447,6 +504,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             nameFrom: prepared.kind === 'folder' ? 'the folder' : 'the file name',
             spa: args.spa,
             public: args.public,
+            access: args.access,
+            emails: args.emails,
+            groups: args.groups,
             listHtml: args.listHtml,
             retryWith: 'fling_deploy',
             skippedDotfiles: prepared.skippedDotfiles,
@@ -543,6 +603,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             nameGiven: true,
             spa: args.spa,
             public: args.public,
+            access: args.access,
+            emails: args.emails,
+            groups: args.groups,
             listHtml: args.listHtml,
             retryWith: 'fling_publish',
           })
@@ -791,12 +854,6 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     })
   )
 
-  /** Who may open a private site on the call's Fling, for copy. */
-  const membersOn = async (target: Target) => {
-    const instance = await target.instance()
-    return instance ? privateAudience(instance) : 'anyone signed in to this Fling'
-  }
-
   server.registerTool(t.info.name, serverTool(t.info), args =>
     run(t.info.name, args.server, async target => {
       const site = await getSite(target.client, args.name)
@@ -832,6 +889,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       return {
         summary: `Share link (${result.action}): ${result.shareUrl} — anyone with it can view the site${edge.note}`,
         data: { ...result, ready: edge.ready },
+      }
+    })
+  )
+
+  server.registerTool(t.setAccess.name, serverTool(t.setAccess), args =>
+    run(t.setAccess.name, args.server, async target => {
+      await requireAccessLevels(target)
+      const site = await setAccess(
+        target.client,
+        args.name,
+        args.access,
+        needsAudience(args.access)
+          ? { emails: args.emails ?? [], groups: args.groups ?? [] }
+          : undefined
+      )
+      const instance = await target.instance()
+      return {
+        summary: `${site.name}: ${describeAudience(site, await membersOn(target))}${onFling(target.url, instance)}`,
+        data: site,
       }
     })
   )

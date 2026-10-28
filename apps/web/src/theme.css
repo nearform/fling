@@ -392,6 +392,18 @@
     border-radius: var(--radius-panel);
   }
 
+  /* One option of a radio group laid out as a list of boxes (a site's access): an inset box that
+     takes the primary tint while its radio is chosen, with whatever the option reveals inside it. */
+  .choice-option {
+    background: var(--surface-inset);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+  }
+  .choice-option:has(> label input:checked) {
+    background: var(--tone-primary-surface);
+    border-color: var(--tone-primary-border);
+  }
+
   /* Control boundaries at ≥3:1 (WCAG 1.4.11). DaisyUI's stock border is base-content at ~20%,
      which is 1.5:1 on white — a field you cannot see the edge of. */
   .input,

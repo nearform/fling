@@ -3,9 +3,11 @@
  * to `appOrigin` only as a user would: the real CLI (apps/cli, run from source) for deploys and site
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
- *   metadata → whoami → deploy v1 (public) → view → robots.txt → 404 / trailing-slash → deploy v2 →
- *   view → rollback to v1 → private: anonymous redirect to sign-in, member view (with a site
- *   cookie) → share link (its answers send no Referer) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
+ *   metadata → whoami → deploy v1 (`--access public`) → view → robots.txt → 404 / trailing-slash →
+ *   deploy v2 (keeps its access) → view → rollback to v1 → open to members: anonymous redirect to
+ *   sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
+ *   site with no `--access` (the instance's default; only you: the member is refused, the share
+ *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list;
  *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
@@ -29,6 +31,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  defaultAccessOf,
   type InstanceMetadata,
   InstanceMetadataSchema,
   instanceMetadataUrl,
@@ -169,6 +172,7 @@ interface CliSite {
   name: string
   url: string
   visibility: string
+  access?: string
   shareUrl?: string | null
   currentVersionId?: string | null
 }
@@ -299,6 +303,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
   const name = `e2e-${nonce}`
   const raceName = `e2e-${nonce}-race`
   const mcpName = `e2e-${nonce}-mcp`
+  const mineName = `e2e-${nonce}-mine`
   const work = mkdtempSync(join(tmpdir(), 'fling-e2e-'))
   const fling = (...args: string[]) =>
     runCli(args, {
@@ -383,7 +388,15 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       'docs/index.html': page('docs', `docs ${nonce}`),
       'style.css': 'h1 { color: rebeccapurple }\n',
     })
-    const first = (await fling('deploy', v1, '--name', name, '--public')) as {
+    // Access levels: a new site says who can open it (`--access`); older instances, `--public`.
+    const levels = meta.capabilities.accessLevels === true
+    const first = (await fling(
+      'deploy',
+      v1,
+      '--name',
+      name,
+      ...(levels ? ['--access', 'public'] : ['--public'])
+    )) as {
       status: string
       ready: boolean
       site: CliSite
@@ -445,7 +458,10 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
 
     // A second version, then roll back to the first.
     const v2 = siteDir(work, 'v2', { 'index.html': page('v2', `v2 ${nonce}`) })
-    const second = (await fling('deploy', v2, '--name', name, '--public')) as { status: string }
+    // A re-deploy keeps the site's access: v2 is served to anyone, as v1 was.
+    const second = (await fling('deploy', v2, '--name', name, ...(levels ? [] : ['--public']))) as {
+      status: string
+    }
     check(second.status === 'live', `second deploy: ${JSON.stringify(second)}`)
     await eventually('v2 served', siteUrl, r => r.text.includes(`v2 ${nonce}`), {
       timeoutMs: propagationMs,
@@ -461,7 +477,8 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     step('rolled back to v1')
 
     // Private: anonymous visitors are sent to sign in; members (with the site cookie) see it.
-    await fling('visibility', name, 'private')
+    if (levels) await fling('access', name, '--members')
+    else await fling('visibility', name, 'private')
     const loginPrefix = `${appOrigin}/auth/login?return=`
     const redirect = await eventually(
       'private redirect',
@@ -506,6 +523,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `site host redirect: referrer-policy ${redirect.headers.get('referrer-policy')}, x-robots-tag ${redirect.headers.get('x-robots-tag')}`
     )
     step('share host answers say no-referrer, site host answers keep the default; both noindex')
+
+    // A new site with no access asked for gets the instance's default: only its owner, unless the
+    // instance opens new sites to everyone signed in.
+    if (levels) {
+      made.push(mineName)
+      await defaultAccessStep({
+        appOrigin,
+        meta,
+        name: mineName,
+        work,
+        nonce,
+        fling,
+        opts,
+        step,
+        propagationMs,
+      })
+    } else {
+      step('access levels: not on this instance (skipped)')
+    }
 
     // Comments (review mode's data): the owner through the CLI, a member through the API, the
     // remote MCP tools; anonymous callers refused. Only where the instance has them.
@@ -644,7 +680,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
           name: 'fling_publish',
           arguments: {
             name: mcpName,
-            public: true,
+            ...(levels ? { access: 'public' } : { public: true }),
             files: [{ path: 'index.html', content: page('mcp', `mcp ${nonce}`) }],
           },
         },
@@ -982,6 +1018,98 @@ interface CliAccess {
   restricted: boolean
   audience?: { emails: { email: string; known: boolean }[] }
   warnings: string[]
+}
+
+/**
+ * A new site deployed with no `--access`: the instance's default (`defaultAccess`). Only its
+ * owner: another member is refused (the API's 404, and at the site's address the sign-in hop and
+ * the site pass's refusal), and the share link serves it all the same. Then the owner opens it to
+ * every member, and the member sees it.
+ */
+async function defaultAccessStep(ctx: {
+  appOrigin: string
+  meta: InstanceMetadata
+  name: string
+  work: string
+  nonce: string
+  fling: (...args: string[]) => Promise<unknown>
+  opts: ScenarioOptions
+  step: (line: string) => void
+  propagationMs: number
+}) {
+  const { appOrigin, meta, name, fling, opts, step } = ctx
+  const marker = `mine ${ctx.nonce}`
+  const dir = siteDir(ctx.work, 'mine', { 'index.html': page('mine', marker) })
+  const made = (await fling('deploy', dir, '--name', name)) as {
+    site: CliSite
+    access: string
+    created?: boolean
+  }
+  const expected = defaultAccessOf(meta)
+  check(
+    made.created === true && made.access === expected && made.site.access === expected,
+    `a new site's access: ${JSON.stringify(made)} (the instance's default is ${expected})`
+  )
+  const siteUrl = made.site.url
+  step(`a new site with no --access gets the instance's default: ${expected}`)
+  if (expected !== 'only_me') return
+  // Only you is restricted: a member's site cookie (even the owner's) is not enough without a pass.
+  if (opts.session.siteCookie) {
+    const cookieOnly = await get(siteUrl, { cookie: opts.session.siteCookie })
+    check(
+      cookieOnly.status === 302,
+      `only you, with a site cookie and no pass: ${cookieOnly.status}`
+    )
+  }
+
+  const member = opts.member
+  const asMember = (path: string) =>
+    member
+      ? fetch(`${appOrigin}${path}`, {
+          headers: { authorization: `Bearer ${member.apiKey}`, accept: 'application/json' },
+        })
+      : null
+  if (member) {
+    const refused = await asMember(`/api/sites/${name}/comments`)
+    check(refused?.status === 404, `a member reads an only-you site's comments: ${refused?.status}`)
+    if (member.cookie) await refusedAt(siteUrl, appOrigin, member.cookie, 'a member')
+    step('only you: another member gets 404s, and the site pass refuses them at its address')
+  } else {
+    step('only you: no second user, so the member checks are skipped')
+  }
+
+  const shared = (await fling('share', name)) as { shareUrl?: string }
+  check(shared.shareUrl, `share: ${JSON.stringify(shared)}`)
+  const viaShare = await get(shared.shareUrl)
+  check(
+    viaShare.status === 200 && viaShare.text.includes(marker),
+    `share link on an only-you site: ${viaShare.status}`
+  )
+  step('the share link still serves a site only its owner sees')
+
+  const opened = (await fling('access', name, '--members')) as { access?: string }
+  check(opened.access === 'members', `fling access --members: ${JSON.stringify(opened)}`)
+  if (member) {
+    const reads = await asMember(`/api/sites/${name}/comments`)
+    check(
+      !meta.capabilities.comments || reads?.status === 200,
+      `a member reads the comments once it is open to members: ${reads?.status}`
+    )
+    if (member.siteCookie) {
+      await eventually(
+        'the member sees it',
+        siteUrl,
+        r => r.status === 200 && r.text.includes(marker),
+        {
+          timeoutMs: ctx.propagationMs,
+          headers: { cookie: member.siteCookie },
+        }
+      )
+    }
+    step('opened to members: the member sees it')
+  } else {
+    step('opened to members')
+  }
 }
 
 async function audienceStep(ctx: {

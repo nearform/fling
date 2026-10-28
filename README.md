@@ -15,8 +15,8 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 - **From anywhere.** The CLI, Claude Code (plugin), Claude Desktop (extension), Claude on the web
   and mobile (connector `https://<your Fling>/mcp`), and any script, CI job or background agent
   with an API key.
-- **Private by default.** Visitors sign in with your identity provider, and a site can be limited
-  to the people you name. Share links, public sites, archive and delete are one command each. Secrets and dotfiles never ship.
+- **Private by default.** A new site is yours alone until you say who else may see it: specific
+  people, teams, everyone signed in with your identity provider, or anyone. Share links, public sites, archive and delete are one command each. Secrets and dotfiles never ship.
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it.
@@ -39,12 +39,21 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 **Instances.** Each deployment of Fling (an *instance*) has its own name, domains, sign-in and look,
 which it publishes at `/.well-known/fling`. The CLI, the MCP servers and the web UI read it from
 there, so none of them is tied to one instance. People sign in through the instance's OpenID
-Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. Sites
-are private to them by default; share links open a site to anyone with the link. No site is
+Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. A new
+site is visible only to its owner unless they choose otherwise (an instance can open new sites to
+everyone signed in instead, `SITE_DEFAULT_ACCESS`); share links open a site to anyone with the
+link. No site is
 indexed: every sites host answers `/robots.txt` with Fling's own `Disallow: /`, whatever the site
 ships.
 
-**Audiences.** The owner can limit a private site to listed people and groups (`fling access <site>
+**Access levels.** Who can open a site is one of five levels: only you, teams (groups), specific
+people, everyone signed in, or public. Choose it on the first deploy (`fling deploy --access
+only_me|members|groups|people|public`, `access` on `fling_deploy` and `fling_publish`; the MCP
+servers ask the user first) and change it later (`fling access <site> --only-me | --members |
+--public`, `fling_set_access`, or the site's Access section in the web UI). A re-deploy never
+changes it.
+
+**Audiences.** The owner can limit a site to listed people and groups (`fling access <site>
 --add a@example.test --group design`, `fling_set_audience`, or the site's Access section in the web
 UI). Each address must be one that can sign in; the owner always sees the site, and share links
 still open it. A **group** is a named list of people (`fling groups`, `fling_groups`, the Groups page

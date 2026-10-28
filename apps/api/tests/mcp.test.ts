@@ -92,6 +92,7 @@ describe('/mcp tools', () => {
         'fling_list',
         'fling_publish',
         'fling_rollback',
+        'fling_set_access',
         'fling_set_audience',
         'fling_set_visibility',
         'fling_share',
@@ -135,7 +136,11 @@ describe('/mcp tools', () => {
     expect(lines[1]).toMatch(
       /^Share for feedback: https:\/\/fling\.test\/review\/q3-report \(reviewers sign in/
     )
-    expect(lines[2]).toMatch(/^Site: https:\/\/q3-report\.fling\.test\/ \(private\)\./)
+    expect(lines[2]).toMatch(/^Site: https:\/\/q3-report\.fling\.test\/ \(only_me\)\./)
+    // A new site with no access asked for gets the instance's default, and says how to change it.
+    expect(lines[2]).toContain('Who can open it: Only you can open it.')
+    expect(lines[2]).toContain('fling_set_access')
+    expect(r.structuredContent).toMatchObject({ access: 'only_me', created: true })
     expect(r.structuredContent.reviewUrl).toBe('https://fling.test/review/q3-report')
     expect(r.content[0]?.text).toContain('fling_files')
     const kvs = JSON.parse(env.routeTable.data.get(siteKvsKey('q3-report')) ?? '{}')
@@ -145,8 +150,16 @@ describe('/mcp tools', () => {
     const html = await env.blobs.head(`sites/${kvs.id}/${kvs.v}/index.html`)
     expect(html?.size).toBe(Buffer.byteLength(files[0]?.content ?? ''))
 
-    const again = await callTool(env, bearer, 'fling_publish', { name: 'q3-report', files })
+    // Re-publishing never changes who can open it, even when asked to.
+    const again = await callTool(env, bearer, 'fling_publish', {
+      name: 'q3-report',
+      files,
+      access: 'members',
+    })
     expect(again.structuredContent.status).toBe('unchanged')
+    expect(again.structuredContent.access).toBe('only_me')
+    expect(again.structuredContent.created).toBeUndefined()
+    expect(again.content[0]?.text).toContain('Its access is unchanged')
     expect(again.structuredContent.versionId).toBe(r.structuredContent.versionId)
 
     const pub = await callTool(env, bearer, 'fling_publish', {
@@ -505,11 +518,66 @@ describe('/mcp tools', () => {
   })
 })
 
+describe('/mcp access levels', () => {
+  const files = [{ path: 'index.html', content: page('Hi') }]
+
+  it('a new site takes the access asked for, with its audience', async () => {
+    await connect(env, 'bob@example.test')
+    const r = await callTool(env, bearer, 'fling_publish', {
+      name: 'team-deck',
+      files,
+      access: 'people',
+      emails: ['bob@example.test'],
+    })
+    expect(r.isError).toBeFalsy()
+    expect(r.structuredContent.access).toBe('people')
+    expect(r.content[0]?.text).toContain('Only you and 1 person can open it.')
+    const bad = await callTool(env, bearer, 'fling_publish', {
+      name: 'nobody',
+      files,
+      access: 'people',
+    })
+    expect(bad.isError).toBe(true)
+    expect(bad.content[0]?.text).toMatch(/needs at least one address or group/)
+    const members = await callTool(env, bearer, 'fling_publish', {
+      name: 'everyone',
+      files,
+      access: 'members',
+    })
+    expect(members.content[0]?.text).toContain(
+      'Anyone signed in to Fling (@example.test accounts) can open it.'
+    )
+  })
+
+  it('fling_set_access reaches every level', async () => {
+    await callTool(env, bearer, 'fling_publish', { name: 'levels', files })
+    const set = (args: object) =>
+      callTool(env, bearer, 'fling_set_access', { name: 'levels', ...args })
+    expect((await set({ access: 'members' })).structuredContent.access).toBe('members')
+    const people = await set({ access: 'people', emails: ['bob@example.test'] })
+    expect(people.structuredContent.access).toBe('people')
+    expect(people.content[0]?.text).toContain('Restricted: only you and 1 person')
+    const pub = await set({ access: 'public' })
+    expect(pub.structuredContent.access).toBe('public')
+    // Private again: the audience it kept.
+    const back = await callTool(env, bearer, 'fling_set_visibility', {
+      name: 'levels',
+      visibility: 'private',
+    })
+    expect(back.structuredContent.access).toBe('people')
+    const mine = await set({ access: 'only_me' })
+    expect(mine.structuredContent).toMatchObject({ access: 'only_me', audienceSize: 0 })
+    expect(mine.content[0]?.text).toContain('Only you: nobody else can open it.')
+    expect((await set({ access: 'groups' })).isError).toBe(true)
+  })
+})
+
 describe('/mcp comment tools', () => {
   const publish = (bearer: string, name: string) =>
     callTool(env, bearer, 'fling_publish', {
       name,
       files: [{ path: 'index.html', content: page('Hi') }],
+      access: 'members',
     })
 
   it('a member comments, the owner lists, replies, resolves and deletes', async () => {

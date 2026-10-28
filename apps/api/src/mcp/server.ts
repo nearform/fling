@@ -4,6 +4,8 @@
  * handlers call the site service layer directly.
  */
 import {
+  type AccessLevel,
+  accessChangeHint,
   type Comment,
   changesAudience,
   describeAudience,
@@ -12,6 +14,7 @@ import {
   describeGroups,
   describeNotificationSettings,
   describeSharedSite,
+  describeSiteAccess,
   describeVersionFiles,
   editAudienceInput,
   MCP_PUBLISH_MAX_BYTES,
@@ -20,6 +23,7 @@ import {
   mcpToolsFor,
   mcpWording,
   NOT_READY_NOTE,
+  needsAudience,
   preferencesUpdateOf,
   privateAudience,
   probeUrl,
@@ -89,7 +93,7 @@ export function describeError(err: unknown): string {
 }
 
 const describeSite = (s: Site) =>
-  `${s.url} (${s.visibility}${s.archived ? ', archived' : ''}${s.spa ? ', spa' : ''})` +
+  `${s.url} (${s.access ?? s.visibility}${s.archived ? ', archived' : ''}${s.spa ? ', spa' : ''})` +
   (s.shareUrl ? ` — share link: ${s.shareUrl}` : '')
 
 /** Wait (capped well inside the connector's ~10 s timeout) for the edge to route a new URL. */
@@ -111,11 +115,32 @@ async function edgeReady(deps: Deps, url: string, paths: readonly string[]) {
   return { ready, note: ready ? '' : ` Not reachable yet at ${url}: ${NOT_READY_NOTE}.` }
 }
 
+/**
+ * What a publish says about who can open the site: for a new site, its access (the one asked for,
+ * or the default) and how to change it; for an existing one asked for an access level, that
+ * publishing left it as it was.
+ */
+function accessAfterPublish(
+  deps: Deps,
+  site: Site,
+  first: boolean,
+  asked: AccessLevel | undefined
+): string {
+  const members = privateAudience(instanceMetadata(deps.config))
+  const who = describeSiteAccess(site, members)
+  if (first) return ` Who can open it: ${who} ${accessChangeHint('mcp', site.name)}`
+  if (asked) {
+    return ` Its access is unchanged (publishing never changes it for an existing site): ${who} ${accessChangeHint('mcp', site.name)}`
+  }
+  return ''
+}
+
 async function publishResult(
   deps: Deps,
   name: string,
   outcome: PublishOutcome,
-  retryWith: string
+  retryWith: string,
+  asked?: AccessLevel
 ): Promise<Result> {
   if (outcome.kind === 'needs_decision') {
     const n = outcome.htmlPages.length
@@ -145,18 +170,15 @@ async function publishResult(
         : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}`
   const extra = outcome.generatedIndex ? ' (with a generated index.html listing the pages)' : ''
   const warnings = outcome.warnings.length ? `\nWarnings:\n- ${outcome.warnings.join('\n- ')}` : ''
-  const privacy =
-    site.visibility === 'private'
-      ? ` Only ${privateAudience(instanceMetadata(deps.config))} can open it; use fling_share for a public link.`
-      : ''
+  const privacy = accessAfterPublish(deps, site, outcome.first === true, asked)
   const edge =
     status === 'unchanged'
       ? { ready: true, note: '' }
       : await edgeReady(deps, site.url, outcome.paths)
   const review = deps.config.comments ? reviewUrl(deps.config.appOrigin, site.name) : undefined
   const head = review
-    ? `${what}${extra}.\n${shareForFeedback(review, deps.config.instanceName)}\nSite: ${site.url} (${site.visibility}).`
-    : `${what}${extra}: ${site.url} (${site.visibility}).`
+    ? `${what}${extra}.\n${shareForFeedback(review, deps.config.instanceName)}\nSite: ${site.url} (${site.access ?? site.visibility}).`
+    : `${what}${extra}: ${site.url} (${site.access ?? site.visibility}).`
   return {
     text:
       `${head}${privacy}${edge.note}${warnings}` +
@@ -167,6 +189,8 @@ async function publishResult(
       url: site.url,
       ...(review ? { reviewUrl: review } : {}),
       visibility: site.visibility,
+      access: site.access,
+      ...(outcome.first ? { created: true } : {}),
       spa: site.spa,
       shareUrl: site.shareUrl,
       versionId: outcome.versionId,
@@ -181,6 +205,25 @@ async function publishResult(
 
 const visibilityOf = (pub: boolean | undefined) =>
   pub === undefined ? undefined : pub ? ('public' as const) : ('private' as const)
+
+/**
+ * A publish's access choice, for the API: the level, its audience for groups and people, and the
+ * older `public` only when no level is given.
+ */
+function accessOf(args: {
+  access?: AccessLevel
+  emails?: string[]
+  groups?: string[]
+  public?: boolean
+}) {
+  if (args.access === undefined) return { visibility: visibilityOf(args.public) }
+  return {
+    access: args.access,
+    ...(needsAudience(args.access)
+      ? { audience: { emails: args.emails ?? [], groups: args.groups ?? [] } }
+      : {}),
+  }
+}
 
 export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   const wording = mcpWording(instanceMetadata(deps.config))
@@ -303,17 +346,14 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
     const outcome = await publishFiles(deps, user, args.name, files, {
       spa: args.spa,
-      visibility: visibilityOf(args.public),
+      ...accessOf(args),
       listHtml: args.listHtml,
     })
-    return publishResult(deps, args.name, outcome, 'fling_publish')
+    return publishResult(deps, args.name, outcome, 'fling_publish', args.access)
   })
 
   register(mcpTools.uploadBegin, async args => {
-    const upload = await beginUpload(deps, user, args.name, {
-      spa: args.spa,
-      visibility: visibilityOf(args.public),
-    })
+    const upload = await beginUpload(deps, user, args.name, { spa: args.spa, ...accessOf(args) })
     return {
       text:
         `Upload ${upload.id} started for "${upload.name}". Send each file with fling_upload_file ` +
@@ -339,7 +379,13 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
   register(mcpTools.uploadFinish, async args => {
     const upload = await deps.store.getUpload(args.uploadId)
     const outcome = await finishUpload(deps, user, args.uploadId, { listHtml: args.listHtml })
-    return publishResult(deps, upload?.name ?? 'the site', outcome, 'fling_upload_finish')
+    return publishResult(
+      deps,
+      upload?.name ?? 'the site',
+      outcome,
+      'fling_upload_finish',
+      upload?.access
+    )
   })
 
   register(mcpTools.share, async args => {
@@ -378,6 +424,16 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
       text: `Share link (${action}) for ${args.name}: ${shareUrl} — anyone with it can view the site.${edge.note}`,
       data: { action, shareUrl, ready: edge.ready },
     }
+  })
+
+  register(mcpTools.setAccess, async args => {
+    const site = await sites.updateSite(deps, user, args.name, {
+      access: args.access,
+      ...(needsAudience(args.access)
+        ? { audience: { emails: args.emails ?? [], groups: args.groups ?? [] } }
+        : {}),
+    })
+    return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
   register(mcpTools.setVisibility, async args => {

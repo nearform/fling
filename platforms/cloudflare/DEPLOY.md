@@ -90,6 +90,8 @@ neither header (see
    For a personal instance, admit individual addresses with `--allowed-emails you@gmail.com`
    instead of (or as well as) `--email-domains`. `--admin-emails you@example.com` (optional, not
    asked for; `''` removes them) makes those users the instance's admins (`ADMIN_EMAILS`).
+   `--site-default-access members` (optional, not asked for; `''` removes it) opens new sites to
+   everyone signed in, where the default is only their owner (`SITE_DEFAULT_ACCESS`).
 
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
    namespace unless they exist, writes the deploy config to `--out` (nothing in it is secret, but
@@ -142,7 +144,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
 | `MAIL` | Optional: `{ "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }`, email notifications through Email Service ([Email](#email)). `FROM` is required in it; `FROM_NAME` defaults to `INSTANCE_NAME`, `REPLY_TO` to none. Not in `INSTANCE`, because the binding needs `FROM` too. `setup.mjs` keeps it when rerun |
 
 The rendered config replaces the template's local-development vars wholesale: production gets

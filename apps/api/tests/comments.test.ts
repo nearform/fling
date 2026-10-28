@@ -24,7 +24,7 @@ async function twoUsers(overrides = {}) {
   const env = setup(overrides)
   const alice = await createUser(env, 'alice@example.test')
   const bob = await createUser(env, 'bob@example.test')
-  const live = await deploy(env, alice.key, 'hello', 'v1', { visibility: 'private' })
+  const live = await deploy(env, alice.key, 'hello', 'v1', { access: 'members' })
   return { env, alice, bob, v1: live.versionId as string }
 }
 

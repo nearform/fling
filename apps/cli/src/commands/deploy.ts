@@ -1,5 +1,6 @@
 /**
- * `fling [path] [--name x] [--spa] [--public] [--yes] [--[no-]list-html]` — the default command.
+ * `fling [path] [--name x] [--spa] [--access <level> [--add …] [--group …]] [--public] [--yes]
+ * [--[no-]list-html]` — the default command.
  *
  * `path` is a folder, a single .html file, a .zip or any other file (inputs.ts). It must exist as
  * given: the CLI never goes looking for it elsewhere (the MCP server does, see locate.ts).
@@ -12,6 +13,10 @@
  * fails with suggestions (it never silently picks another name). `--list-html` / `--no-list-html`
  * decide the listing up front.
  *
+ * `--access` (access.ts in @fling/shared) is who can open a new site; without it the site gets the
+ * instance's default, and the CLI says who that is. A site that has been live keeps its access
+ * (`fling access` changes it).
+ *
  * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
  * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
  */
@@ -19,11 +24,21 @@
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import {
+  ACCESS_LABELS,
+  type AccessLevel,
+  type AudienceInput,
+  accessChangeHint,
+  describeSiteAccess,
   type InstanceMetadata,
   isValidSiteName,
+  needsAudience,
+  parseAccessLevel,
   privateAudience,
   reviewUrl,
   SITE_NAME_MAX,
+  siteAccessLevel,
+  splitEmails,
+  splitGroups,
 } from '@fling/shared'
 import chalk from 'chalk'
 import type { ApiClient } from '../api.ts'
@@ -31,7 +46,7 @@ import { type CommandContext, requireClient } from '../context.ts'
 import { deploy, resolveSiteName } from '../deploy.ts'
 import { CliError } from '../errors.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
-import { loadInstance } from '../instance.ts'
+import { loadInstance, loadInstanceWith } from '../instance.ts'
 import {
   buildManifest,
   describeSkipped,
@@ -41,7 +56,14 @@ import {
   withHtmlListing,
 } from '../manifest.ts'
 import { waitWithSpinner } from '../ready.ts'
-import { checkName, commentsEnabled, type SitesBase, sitesBaseOf, siteUrlFor } from '../sites.ts'
+import {
+  accessLevelsEnabled,
+  checkName,
+  commentsEnabled,
+  type SitesBase,
+  sitesBaseOf,
+  siteUrlFor,
+} from '../sites.ts'
 import { box, brand } from '../ui/theme.ts'
 import { formatBytes } from '../utils/output.ts'
 
@@ -49,6 +71,12 @@ export interface DeployCommandOptions {
   name?: string
   spa?: boolean
   public?: boolean
+  /** who can open a new site: an access level (or one of its aliases, `parseAccessLevel`) */
+  access?: string
+  /** with `access` people (or groups): the addresses that may open it */
+  add?: string[]
+  /** with `access` groups (or people): the groups, by slug */
+  group?: string[]
   /** never prompt */
   yes?: boolean
   /** No root index.html: true → generate a listing of the HTML pages; false → fling anyway. */
@@ -57,6 +85,37 @@ export interface DeployCommandOptions {
 
 export type NoIndexChoice = 'list' | 'fling'
 
+/** Who can open a new site, from `--access`, `--add` and `--group`; checked before anything runs. */
+export function accessChoice(
+  opts: Pick<DeployCommandOptions, 'access' | 'add' | 'group' | 'public'>,
+  bin = 'fling'
+): { access?: AccessLevel; audience?: AudienceInput } {
+  const emails = splitEmails(opts.add ?? [])
+  const groups = splitGroups(opts.group ?? [])
+  const named = emails.length + groups.length > 0
+  let level: AccessLevel | undefined
+  if (opts.access !== undefined) {
+    const parsed = parseAccessLevel(opts.access)
+    if (!parsed) {
+      throw new CliError(`Unknown access "${opts.access}"`, {
+        hint: 'Use only_me, members, groups, people or public.',
+      })
+    }
+    level = parsed
+  } else if (named) level = emails.length ? 'people' : 'groups'
+  if (!level) return {}
+  if (opts.public) throw new CliError('Use --access or --public, not both')
+  if (needsAudience(level) && !named) {
+    throw new CliError(`--access ${level} needs someone to let in`, {
+      hint: `Add --add <emails> or --group <slugs> (\`${bin} groups\` lists them).`,
+    })
+  }
+  if (!needsAudience(level) && named) {
+    throw new CliError(`--access ${level} lets no one else in: leave out --add and --group`)
+  }
+  return { access: level, ...(needsAudience(level) ? { audience: { emails, groups } } : {}) }
+}
+
 export async function runDeploy(
   ctx: CommandContext,
   input: string | undefined,
@@ -64,9 +123,18 @@ export async function runDeploy(
 ): Promise<void> {
   const client = requireClient(ctx)
   const ask = ctx.interactive && !opts.yes
+  const choice = accessChoice(opts, ctx.binName)
   // Where the site will be served and who can see it: from the instance stored at login.
-  const instance = await loadInstance(ctx.store, ctx.config, ctx.fetch)
+  // (Asked for an access level: fetched again if the stored copy predates them.)
+  const instance = choice.access
+    ? await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'accessLevels')
+    : await loadInstance(ctx.store, ctx.config, ctx.fetch)
   const base = sitesBaseOf(instance)
+  if (choice.access && instance && !accessLevelsEnabled(instance)) {
+    throw new CliError(`${instance.name} can't take --access yet`, {
+      hint: `Leave it out, then use \`${ctx.binName} access\` or \`${ctx.binName} visibility\`.`,
+    })
+  }
 
   const path = resolve(input ?? '.')
   if (!(await stat(path).catch(() => null)))
@@ -75,7 +143,8 @@ export async function runDeploy(
     })
   const prepared = await prepareInput(path)
   try {
-    await deployPrepared(ctx, client, instance, base, prepared, opts, ask)
+    const { access: _asked, ...rest } = opts
+    await deployPrepared(ctx, client, instance, base, prepared, { ...rest, ...choice }, ask)
   } finally {
     await prepared.cleanup()
   }
@@ -87,7 +156,7 @@ async function deployPrepared(
   instance: InstanceMetadata | null,
   base: SitesBase | null,
   prepared: PreparedInput,
-  opts: DeployCommandOptions,
+  opts: Omit<DeployCommandOptions, 'access'> & ReturnType<typeof accessChoice>,
   ask: boolean
 ): Promise<void> {
   let local = await buildManifest(prepared.dir)
@@ -127,6 +196,8 @@ async function deployPrepared(
       manifest: local,
       spa: opts.spa ? true : undefined,
       public: opts.public,
+      access: opts.access,
+      audience: opts.audience,
       onProgress: p => {
         if (p.total === 0) return
         progressShown = true
@@ -163,8 +234,21 @@ async function deployPrepared(
           )
         ).ready
 
-  const who = instance ? `${privateAudience(instance)} can open it` : 'sign-in required'
-  const privateNote = `Private: ${who}. Share publicly with \`${ctx.binName} share ${result.name}\`.`
+  // Who can open it: a new site's access (asked for, or the instance's default) and how to
+  // change it; an existing one's, which a deploy never changes.
+  const members = instance ? privateAudience(instance) : 'anyone signed in to this Fling'
+  const level = siteAccessLevel(result.site)
+  const who = describeSiteAccess(result.site, members)
+  if (!result.first && opts.access) {
+    ctx.log.warn(
+      `--access only applies to a new site: ${result.name} keeps its access. Change it with \`${ctx.binName} access ${result.name}\`.`
+    )
+  }
+  const accessNotes = result.first
+    ? [`Who can open it: ${who}`, accessChangeHint('cli', result.name, ctx.binName)]
+    : level === 'public'
+      ? []
+      : [`${who} Share it with a link: \`${ctx.binName} share ${result.name}\`.`]
   // With comments on, the review page is the link to share for feedback; the site URL follows.
   const review =
     instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
@@ -174,12 +258,13 @@ async function deployPrepared(
   const data = {
     status: result.status,
     site: result.site,
+    access: level,
+    ...(result.first ? { created: true } : {}),
     ...(review ? { reviewUrl: review } : {}),
     ready,
     skipped: local.skipped,
   }
   ctx.out.data(data, () => {
-    const isPrivate = result.site.visibility === 'private'
     // On a terminal the URLs get a box; piped, the site URL stays the first line on its own so
     // `fling deploy … | pbcopy` works.
     if (ctx.out.tty)
@@ -187,13 +272,13 @@ async function deployPrepared(
         [
           ...(review ? [chalk.dim(reviewNote), brand.url(review), '', chalk.dim('Site:')] : []),
           brand.url(result.url),
-          ...(isPrivate ? [chalk.dim(privateNote)] : []),
+          ...accessNotes.map(n => chalk.dim(n)),
         ],
-        isPrivate ? chalk.bold('flung · private') : chalk.bold('flung · public')
+        chalk.bold(`flung · ${ACCESS_LABELS[level].toLowerCase()}`)
       )
     const lines = [chalk.bold(result.url)]
     if (review) lines.push(chalk.dim(`${reviewNote} ${review}`))
-    if (isPrivate) lines.push(chalk.dim(privateNote))
+    for (const n of accessNotes) lines.push(chalk.dim(n))
     return lines.join('\n')
   })
 }

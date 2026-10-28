@@ -1,5 +1,7 @@
-// A site's audience: who, besides its owner, may see it while it is private. Empty means every
-// signed-in member; a private site with an audience is restricted. The contract, the edits every
+// A site's audience: who, besides its owner, may see it while it is private and restricted (its
+// access level, access.ts, is `groups` or `people`; a restricted site with an empty audience is
+// `only_me`). Editing the audience alone restricts the site when it names someone and opens it to
+// every member when it is emptied. The contract, the edits every
 // client makes (`fling access`, both servers' `fling_set_audience`, the web's Access section) and
 // the words the CLI and both MCP servers describe it (and the sites shared with someone) with.
 // Browser-safe (zod only).
@@ -161,14 +163,16 @@ export const audienceList = (emails: readonly AudienceEmail[]) =>
 
 /**
  * Who can open the site, for the CLI and both MCP servers: public, every member
- * (`privateAudience`), or the listed people; plus a warning when a share link still opens a
- * restricted site to anyone.
+ * (`privateAudience`), only the owner, or the listed people; plus a warning when a share link
+ * still opens a restricted site to anyone. `restricted` (servers before access levels omit it):
+ * private and limited to the owner and the audience.
  */
 export function describeAudience(
   site: {
     visibility: 'public' | 'private'
     audience?: Audience
     shareUrl: string | null
+    restricted?: boolean
   },
   privateAudience: string
 ): string {
@@ -177,14 +181,19 @@ export function describeAudience(
   const empty = emails.length + groups.length === 0
   const list = emails.length ? `: ${audienceList(emails)}` : ''
   if (site.visibility === 'public') {
-    return empty
-      ? 'Public: anyone can open the site; reviewing it still needs sign-in.'
-      : `Public: anyone can open the site; reviewing it still needs sign-in. Its audience (${and(whoIn(emails, groups))}${list}) applies when it is private again.`
+    const kept = empty
+      ? ''
+      : ` Its audience (${and(whoIn(emails, groups))}${list}) applies when it is private again.`
+    return `Public: anyone can open the site; reviewing it still needs sign-in.${kept}`
   }
-  if (empty) return `Private: ${privateAudience} can open it.`
   const share = site.shareUrl
     ? ` A share link is active: anyone with it can still open the site (${site.shareUrl}).`
     : ''
+  if (empty) {
+    return site.restricted
+      ? `Only you: nobody else can open it.${share}`
+      : `Private: ${privateAudience} can open it.`
+  }
   if (emails.length === 0 && groups.every(g => g.deleted)) {
     const refs = groups.map(g => g.slug).join(', ')
     return `Restricted: only you can open it. Its audience names only ${groups.length === 1 ? 'a deleted group' : 'deleted groups'} (${refs}), which let nobody in: add people or groups, or clear it.${share}`

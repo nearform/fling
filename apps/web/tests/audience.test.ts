@@ -3,13 +3,13 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { SiteBadges } from '../src/components/site/badges'
+import { audienceLevel, choiceOf } from '../src/components/site/SiteAccess'
 import {
+  accessBadgeLabel,
   addToAudience,
   addToGroup,
   audienceWho,
-  opensToEveryone,
   peopleLabel,
-  restrictedLabel,
 } from '../src/lib/audience'
 
 describe('adding people to an audience', () => {
@@ -49,15 +49,12 @@ describe('adding people to an audience', () => {
   it('counts people and groups in words, leaving out what is zero', () => {
     expect(peopleLabel(1)).toBe('1 person')
     expect(peopleLabel(3)).toBe('3 people')
-    expect(restrictedLabel(1)).toBe('Restricted · 1 person')
-    expect(restrictedLabel(2, 1)).toBe('Restricted · 2 people · 1 group')
-    expect(restrictedLabel(0, 2)).toBe('Restricted · 2 groups')
     expect(audienceWho(2, 1)).toBe('2 people and 1 group')
     expect(audienceWho(0, 3)).toBe('3 groups')
   })
 })
 
-describe('the restricted badge', () => {
+describe('the access badge', () => {
   const site = (overrides: Partial<Site>): Site => ({
     name: 'team',
     url: 'https://team.sites.example.test/',
@@ -75,36 +72,53 @@ describe('the restricted badge', () => {
   })
   const badges = (s: Site) => renderToStaticMarkup(createElement(SiteBadges, { site: s }))
 
-  it('says how many people a restricted site is limited to', () => {
-    expect(badges(site({ restricted: true, audienceSize: 2 }))).toContain('Restricted · 2 people')
-  })
-
-  it('counts the groups apart from the people', () => {
-    const html = badges(site({ restricted: true, audienceSize: 3, audienceGroups: 1 }))
-    expect(html).toContain('Restricted · 2 people · 1 group')
-    expect(badges(site({ restricted: true, audienceSize: 1, audienceGroups: 1 }))).toContain(
-      'Restricted · 1 group'
+  it("names the site's access level", () => {
+    expect(badges(site({ access: 'only_me', restricted: true }))).toContain('Only you')
+    expect(badges(site({ access: 'members' }))).toContain('Everyone signed in')
+    expect(badges(site({ access: 'public', visibility: 'public', audienceSize: 2 }))).toContain(
+      'Public'
     )
   })
 
-  it('is not worn by a site open to everyone signed in, a public site keeping its list, or an archived one', () => {
-    expect(badges(site({}))).not.toContain('Restricted')
-    expect(badges(site({ visibility: 'public', audienceSize: 2 }))).not.toContain('Restricted')
-    expect(badges(site({ restricted: true, audienceSize: 2, archived: true }))).not.toContain(
-      'Restricted'
+  it('counts the people and teams a list names, the groups apart from the people', () => {
+    expect(accessBadgeLabel(site({ access: 'people', restricted: true, audienceSize: 2 }))).toBe(
+      'Specific people · 2 people'
     )
+    expect(
+      accessBadgeLabel(
+        site({ access: 'people', restricted: true, audienceSize: 3, audienceGroups: 1 })
+      )
+    ).toBe('Specific people · 2 people · 1 group')
+    expect(
+      accessBadgeLabel(
+        site({ access: 'groups', restricted: true, audienceSize: 1, audienceGroups: 1 })
+      )
+    ).toBe('Teams · 1 group')
+  })
+
+  it('reads the level from the rest on servers that do not send it', () => {
+    expect(accessBadgeLabel(site({}))).toBe('Everyone signed in')
+    expect(accessBadgeLabel(site({ restricted: true, audienceSize: 1 }))).toBe(
+      'Specific people · 1 person'
+    )
+  })
+
+  it('an archived site wears Archived instead', () => {
+    const html = badges(
+      site({ access: 'people', restricted: true, audienceSize: 2, archived: true })
+    )
+    expect(html).toContain('Archived')
+    expect(html).not.toContain('Specific people')
   })
 })
 
-describe('opensToEveryone', () => {
-  const list = (emails: string[], groups: string[] = []) => ({ emails, groups })
-
-  it('is true only when an edit empties an audience that named someone', () => {
-    expect(opensToEveryone(list(['a@x.test']), list([]))).toBe(true)
-    expect(opensToEveryone(list([], ['design']), list([]))).toBe(true)
-    expect(opensToEveryone(list([], ['#deleted']), list([]))).toBe(true)
-    expect(opensToEveryone(list(['a@x.test'], ['design']), list([], ['design']))).toBe(false)
-    expect(opensToEveryone(list([]), list([]))).toBe(false)
-    expect(opensToEveryone(list([]), list(['a@x.test']))).toBe(false)
+describe('the Access options', () => {
+  it('fold groups and people into one option, and pick the level from the list', () => {
+    expect(choiceOf('groups')).toBe('audience')
+    expect(choiceOf('people')).toBe('audience')
+    expect(choiceOf('only_me')).toBe('only_me')
+    expect(choiceOf('public')).toBe('public')
+    expect(audienceLevel({ emails: ['a@x.test'] })).toBe('people')
+    expect(audienceLevel({ emails: [] })).toBe('groups')
   })
 })

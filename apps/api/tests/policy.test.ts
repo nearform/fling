@@ -85,6 +85,56 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'comment.delete.own': takesPart,
 }
 
+/** A site as stored at each access level; `restricted` absent: a record from before them. */
+const stored = (
+  visibility: 'public' | 'private',
+  restricted: boolean | undefined,
+  audience: { emails?: string[]; groups?: string[] } = {}
+): PolicySite => ({
+  email: OWNER,
+  visibility,
+  shareToken: TOKEN,
+  ...(restricted === undefined ? {} : { restricted }),
+  audience: { emails: audience.emails ?? [], groups: audience.groups ?? [] },
+})
+
+describe('every access level', () => {
+  // Who may open the site (site.view); those signed in among them take part in its comments.
+  const cases: [string, PolicySite, string][] = [
+    ['only you', stored('private', true), 'os'],
+    ['members', stored('private', false), 'ovms'],
+    ['people', stored('private', true, { emails: [VIEWER] }), 'ovs'],
+    ['groups', stored('private', true, { groups: ['g1'] }), 'ovs'],
+    ['public', stored('public', true), 'ovmsa'],
+    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'ovmsa'],
+    ['a record from before access levels, no audience', stored('private', undefined), 'ovms'],
+    [
+      'a record from before access levels, with an audience',
+      stored('private', undefined, { emails: [VIEWER] }),
+      'ovs',
+    ],
+  ]
+  const actors: Record<Role, Actor> = {
+    ...actorFor,
+    viewer: { kind: 'user', email: VIEWER, groups: ['g1'] },
+  }
+  for (const [name, site, view] of cases) {
+    it(`${name}: ${view}`, () => {
+      for (const role of ROLES) {
+        const letter = role[0] as string
+        expect({ role, view: can(actors[role], 'site.view', site) }).toEqual({
+          role,
+          view: view.includes(letter),
+        })
+        expect({ role, read: can(actors[role], 'comment.read', site) }).toEqual({
+          role,
+          read: view.replace(/[sa]/g, '').includes(letter),
+        })
+      }
+    })
+  }
+})
+
 describe('can', () => {
   it('covers every action', () => {
     expect(Object.keys(EXPECTED).sort()).toEqual([...ACTIONS].sort())
@@ -289,10 +339,12 @@ describe('the edge agrees with site.view', () => {
     const owner = await createUser(env, 'alice@example.test')
     const viewer = await createUser(env, 'bob@example.test')
     const member = await createUser(env, 'carol@example.test')
-    await deploy(env, owner.key, 'pub', { visibility: 'public' })
-    await deploy(env, owner.key, 'priv', { visibility: 'private' })
+    await deploy(env, owner.key, 'pub', { access: 'public' })
+    await deploy(env, owner.key, 'priv', { access: 'members' })
+    // the instance's default: only the owner
+    await deploy(env, owner.key, 'mine')
     for (const name of ['team', 'other']) {
-      await deploy(env, owner.key, name, { visibility: 'private' })
+      await deploy(env, owner.key, name, { access: 'members' })
       const res = await api(env, owner.key, 'PATCH', `/api/sites/${name}`, {
         audience: { emails: ['bob@example.test'] },
       })
@@ -322,13 +374,13 @@ describe('the edge agrees with site.view', () => {
 
   it('for every role and access', async () => {
     const { env, owner, siteCookie, pass, served } = await sites()
-    for (const name of ['pub', 'priv', 'team']) {
+    for (const name of ['pub', 'priv', 'team', 'mine']) {
       const share = await json(await api(env, owner.key, 'POST', `/api/sites/${name}/share`))
       const shareHost = new URL(share.shareUrl).host
       const site = (await env.store.findSite(name)) as PolicySite
       // What each role's browser holds: a site pass only where the API would hand one out.
       const cookieOf = async (email: string) =>
-        can({ kind: 'user', email }, 'site.view', site) && name === 'team'
+        can({ kind: 'user', email }, 'site.view', site) && (name === 'team' || name === 'mine')
           ? pass(email, name)
           : siteCookie(email)
       const requests: Record<Role, [string, string?]> = {
@@ -418,6 +470,20 @@ describe('the edge agrees with site.view', () => {
       })
     )
     expect(!isResponse(page) && page.uri).toBe('/_fling/missing')
+    // A site only its owner sees refuses everyone else the same way.
+    const mine = new URL(
+      (await login(viewer.session, 'https://mine.fling.test/')).headers.get('location') ?? ''
+    )
+    expect(`${mine.origin}${mine.pathname}`).toBe('https://mine.fling.test/_fling-pass')
+    const mineDenial = await router(
+      toCloudFrontEvent({ host: mine.host, path: mine.pathname, query: mine.search.slice(1) })
+    )
+    if (!isResponse(mineDenial)) throw new Error('expected a redirect')
+    const mineDenied = mineDenial.cookies?.fling_pass?.value
+    const minePage = await router(
+      toCloudFrontEvent({ host: mine.host, path: '/', cookieHeader: `fling_pass=${mineDenied}` })
+    )
+    expect(!isResponse(minePage) && minePage.uri).toBe('/_fling/missing')
     // Other sites go straight back, as ever.
     const priv = await login(member.session, 'https://priv.fling.test/')
     expect(priv.headers.get('location')).toBe('https://priv.fling.test/')
@@ -468,7 +534,7 @@ describe("a member can't act on another user's site", () => {
     const routes: [string, string, object?][] = [
       ['GET', '/api/sites/hello'],
       ['GET', `/api/sites/hello/versions/${versionId}/files`],
-      ['PATCH', '/api/sites/hello', { visibility: 'private' }],
+      ['PATCH', '/api/sites/hello', { access: 'members' }],
       ['PATCH', '/api/sites/hello', { spa: true }],
       ['PATCH', '/api/sites/hello', { audience: { emails: ['bob@example.test'] } }],
       ['POST', `/api/sites/hello/deploys/${versionId}/finalize`],

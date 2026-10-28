@@ -27,7 +27,8 @@ data "archive_file" "placeholder" {
 # values (ALLOWED_EMAIL_DOMAINS, OIDC_*, INSTANCE_NAME, BRAND_*) usually travel in the deploy
 # config's INSTANCE object instead (var.instance), so changing them needs no infrastructure change;
 # var.environment can still set or override any key here except the four the module owns. LIVE_URL
-# is the live rooms' WebSocket stage (live.tf); the instance turns them off with LIVE=false.
+# is the live rooms' WebSocket stage (live.tf); the instance turns them off with LIVE=false. MAIL_*
+# and SES_CONFIGURATION_SET come from var.mail (mail.tf), and only with it.
 locals {
   environment = merge(
     {
@@ -49,6 +50,7 @@ locals {
       KVS_ARN      = aws_cloudfront_key_value_store.sites.arn
       SSM_PREFIX   = local.ssm_prefix
     },
+    local.mail_environment,
   )
 }
 

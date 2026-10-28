@@ -58,6 +58,11 @@ export const EXPECTED_FAILURE: Record<
 export interface MailerConformanceOptions {
   /** A mailer whose provider answers the next send with `failure`. */
   failing?: (failure: ProviderFailure) => Mailer | Promise<Mailer>
+  /**
+   * The failures the provider can report, when not all of them: SES, for one, accepts a send to a
+   * suppressed address and drops it, so it never reports `suppressed`.
+   */
+  failures?: readonly ProviderFailure[]
 }
 
 const LINE_BREAK = /[\r\n]/
@@ -157,7 +162,7 @@ export function mailerConformance(
     })
 
     describe.runIf(opts.failing)('provider failures', () => {
-      for (const failure of PROVIDER_FAILURES) {
+      for (const failure of opts.failures ?? PROVIDER_FAILURES) {
         it(`maps ${failure} onto its result`, async () => {
           const mailer = await (opts.failing as NonNullable<typeof opts.failing>)(failure)
           const result = await mailer.send(message())

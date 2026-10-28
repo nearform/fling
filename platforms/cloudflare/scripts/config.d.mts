@@ -10,3 +10,5 @@ export declare function renderWranglerConfig(
   config: unknown,
   outDir: string
 ): Record<string, unknown> & { name: string; routes: { pattern: string }[] }
+export declare function checkMail(mail: unknown): void
+export declare const MAIL_CRON: string

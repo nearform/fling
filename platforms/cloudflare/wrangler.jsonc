@@ -38,6 +38,10 @@
   // The live rooms (review mode's realtime): one Durable Object per site, src/live.ts.
   "durable_objects": { "bindings": [{ "name": "LIVE_ROOMS", "class_name": "LiveRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveRoom"] }],
+  // Email Service (src/mail/email.ts). Locally `wrangler dev` simulates it: messages are logged and
+  // saved to files, never sent; set MAIL_DRIVER=cloudflare and MAIL_FROM in .dev.vars to use it. A
+  // deploy keeps it only with the deploy config's MAIL, restricted to MAIL.FROM.
+  "send_email": [{ "name": "EMAIL" }],
   // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
   "triggers": { "crons": ["17 * * * *"] },
   "secrets": { "required": ["SESSION_SECRET", "SITE_HMAC_KEY"] },

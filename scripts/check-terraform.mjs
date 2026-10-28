@@ -1,7 +1,8 @@
 // The Terraform gate (part of `pnpm gate`): platforms/aws/infra is formatted (`terraform fmt`) and
 // valid, checked through its example root module (the module alone can't be validated: it takes
-// an aliased provider from its caller). Offline apart from downloading the providers on first run;
-// never talks to AWS (`init -backend=false`, and validate reads no state).
+// an aliased provider from its caller), and its tests (`terraform test`, infra/tests/*.tftest.hcl:
+// plans against mocked AWS providers). Offline apart from downloading the providers on first run;
+// never talks to AWS (`init -backend=false`, validate reads no state, the tests mock AWS).
 //
 // Without terraform on PATH this skips with a notice, so the gate still passes on a laptop without
 // it. In CI (CI=true; ci.yml installs it) a missing terraform fails instead.
@@ -40,4 +41,6 @@ for (const dir of EXAMPLES) {
   run(['init', '-backend=false', '-input=false', '-no-color'], cwd)
   run(['validate', '-no-color'], cwd)
 }
-console.log(`check-terraform: ok (fmt ${MODULE}; validate ${EXAMPLES.join(', ')})`)
+run(['init', '-backend=false', '-input=false', '-no-color'], `${root}${MODULE}`)
+run(['test', '-no-color'], `${root}${MODULE}`)
+console.log(`check-terraform: ok (fmt ${MODULE}; validate ${EXAMPLES.join(', ')}; test ${MODULE})`)

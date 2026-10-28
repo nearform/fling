@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { S3Blobs } from '../src/blobs/s3.ts'
 import { buildAwsDeps } from '../src/deps.ts'
 import { ApiGatewayLiveHub, managementEndpoint } from '../src/live.ts'
+import { SesMailer } from '../src/mail/ses.ts'
 import { CloudFrontRouteTable } from '../src/route-table/cloudfront.ts'
 
 const secrets = {
@@ -51,5 +52,17 @@ describe('buildAwsDeps', () => {
     expect(deps.store).toBeInstanceOf(Records)
     expect(deps.blobs).toBeInstanceOf(FsBlobs)
     expect(deps.routeTable).toBeInstanceOf(MemoryRouteTable)
+  })
+
+  it('with MAIL_DRIVER=ses, the SES mailer; without a mail driver, none', () => {
+    const mail = loadBaseConfig({
+      APP_ENV: 'development',
+      MAIL_DRIVER: 'ses',
+      MAIL_FROM: 'fling@mail.example.test',
+      SES_CONFIGURATION_SET: 'fling-mail',
+    })
+    expect(buildAwsDeps({ ...mail, secrets }).deps.mailer).toBeInstanceOf(SesMailer)
+    const none = loadBaseConfig({ APP_ENV: 'development' })
+    expect(buildAwsDeps({ ...none, secrets }).deps.mailer).toBeUndefined()
   })
 })

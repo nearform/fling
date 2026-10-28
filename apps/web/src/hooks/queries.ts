@@ -25,7 +25,7 @@ export const queryKeys = {
   keys: ['keys'] as const,
   connections: ['connections'] as const,
   adminUsers: (q: string) => ['admin', 'users', q] as const,
-  adminSites: (q: string) => ['admin', 'sites', q] as const,
+  adminSites: ['admin', 'sites'] as const,
   adminAudit: ['admin', 'audit'] as const,
   adminMail: ['admin', 'mail'] as const,
   notifications: ['notifications'] as const,
@@ -293,15 +293,9 @@ export function useAdminUsers(q: string, enabled: boolean) {
   })
 }
 
-/** Admins: every site under a name prefix, a page at a time ("Load more"). */
-export function useAdminSites(q: string, enabled: boolean) {
-  return useInfiniteQuery({
-    enabled,
-    queryKey: queryKeys.adminSites(q),
-    queryFn: ({ pageParam }) => api.adminSites(q, pageParam),
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: last => last.cursor ?? undefined,
-  })
+/** Admins: every site on the instance, whole (up to the server's ceiling); fetched when shown. */
+export function useAdminSites(enabled: boolean) {
+  return useQuery({ enabled, queryKey: queryKeys.adminSites, queryFn: api.adminSites })
 }
 
 export function useAdminAudit() {

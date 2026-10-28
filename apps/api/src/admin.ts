@@ -18,7 +18,6 @@ import {
   type MailAdmin,
   type MailTestResult,
   type Me,
-  reviewUrl,
   siteLabel,
   siteUrl,
 } from '@fling/shared'
@@ -41,9 +40,12 @@ export const AUDIT_TTL_DAYS = 180
 /** Users per page of the list, by default and at most. */
 export const USERS_PAGE = 50
 export const USERS_PAGE_MAX = 100
-/** Sites per page of the list, by default and at most. */
-export const SITES_PAGE = 50
-export const SITES_PAGE_MAX = 100
+/**
+ * The most sites the admins' list returns, so the response stays well under Lambda's 6 MB: a
+ * typical row is about 270 bytes of JSON (370 with a 63-character name), so 10,000 rows are about
+ * 2.7 MB (3.7 MB at worst).
+ */
+export const ADMIN_SITES_MAX = 10_000
 /** Audit entries the admin page shows. */
 export const AUDIT_PAGE = 50
 /** Site counts looked up at once (one query each). */
@@ -107,32 +109,31 @@ export async function listUsers(
   return { users, cursor: page.cursor ?? null }
 }
 
-/** Every site's listing, by name, under a name prefix: nothing that would let an admin open it. */
+/**
+ * Every site's listing, by name, in one response (clients search and sort it): nothing that would
+ * let an admin open it. At most `max` sites; `truncated` when there were more.
+ */
 export async function listSites(
   deps: Deps,
   p: Principal,
-  opts: { q?: string; cursor?: string; limit?: number }
-): Promise<{ sites: AdminSite[]; cursor: string | null }> {
+  max = ADMIN_SITES_MAX
+): Promise<{ sites: AdminSite[]; truncated: boolean }> {
   ensure(p, 'admin.sites.list')
-  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? SITES_PAGE)), SITES_PAGE_MAX)
-  const page = await deps.store.listAllSites({
-    prefix: opts.q?.trim().toLowerCase() || undefined,
-    limit,
-    cursor: opts.cursor || undefined,
-  })
-  const { sitesDomain, siteScheme, appOrigin, comments } = deps.config
-  const sites = page.sites.map(s => ({
-    name: s.name,
-    url: siteUrl(siteLabel(s.name), sitesDomain, `${siteScheme}:`),
-    ...(comments ? { reviewUrl: reviewUrl(appOrigin, s.name) } : {}),
-    owner: s.owner,
-    access: s.access,
-    archived: s.archived,
-    live: s.live,
-    createdAt: s.createdAt,
-    updatedAt: s.updatedAt,
-  }))
-  return { sites, cursor: page.cursor ?? null }
+  const { sites, truncated } = await deps.store.listAllSites({ max })
+  const { sitesDomain, siteScheme } = deps.config
+  return {
+    sites: sites.map(s => ({
+      name: s.name,
+      url: siteUrl(siteLabel(s.name), sitesDomain, `${siteScheme}:`),
+      owner: s.owner,
+      access: s.access,
+      archived: s.archived,
+      live: s.live,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+    })),
+    truncated,
+  }
 }
 
 export async function auditLog(deps: Deps, p: Principal): Promise<AuditEntry[]> {

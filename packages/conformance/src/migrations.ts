@@ -483,7 +483,7 @@ export function migrationsConformance(name: string, freshTable: () => Promise<Ta
         v: 1,
       })
 
-      const listed = await new Records(table).listAllSites({ limit: 10 })
+      const listed = await new Records(table).listAllSites({ max: 10 })
       expect(listed.sites.map(x => [x.name, x.owner, x.access, x.archived, x.live])).toEqual([
         ['docs', 'alice@example.test', 'members', true, true],
         ['draft', 'alice@example.test', 'members', false, false],

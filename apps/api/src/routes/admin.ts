@@ -35,12 +35,7 @@ adminRoutes.get('/users', async c => {
 })
 
 adminRoutes.get('/sites', async c => {
-  const limit = c.req.query('limit')
-  const list = await admin.listSites(c.get('deps'), principalOf(c), {
-    q: c.req.query('q'),
-    cursor: c.req.query('cursor'),
-    limit: limit ? Number(limit) || undefined : undefined,
-  })
+  const list = await admin.listSites(c.get('deps'), principalOf(c))
   return c.json(AdminSiteListSchema.parse(list))
 })
 

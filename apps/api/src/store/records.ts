@@ -29,7 +29,8 @@
  *   SITES                  SITE#<name>                   site directory: the site's listing (as a
  *                                                        grant) and access level, written with the
  *                                                        site (migration 0004 backfilled it), so
- *                                                        an admin lists every site by one query
+ *                                                        an admin lists every site from one
+ *                                                        partition
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
  *                                                        come, first served); how a site is found
@@ -326,6 +327,9 @@ const QUEUE_ATTEMPTS = 10
 
 /** The most operations one transaction takes (the Table port's limit). */
 const TRANSACT_MAX = 25
+
+/** Site directory items read a query. */
+const DIRECTORY_PAGE = 1000
 
 /** How many single-item deletes run at once when clearing a set of items. */
 const DELETE_CONCURRENCY = 10
@@ -668,16 +672,20 @@ export class Records implements Store {
     )
   }
 
-  async listAllSites(opts: { prefix?: string; limit: number; cursor?: string }) {
-    const page = await this.table.query('SITES', {
-      skPrefix: `SITE#${opts.prefix ?? ''}`,
-      limit: opts.limit,
-      cursor: opts.cursor,
-    })
-    return {
-      sites: page.items.map(i => decode<SiteDirectoryRecord>('sitedirectory', i)),
-      ...(page.cursor ? { cursor: page.cursor } : {}),
-    }
+  async listAllSites(opts: { max: number; prefix?: string; pageSize?: number }) {
+    const sites: SiteDirectoryRecord[] = []
+    let cursor: string | undefined
+    // One more than `max`, to know whether the list was cut.
+    do {
+      const page = await this.table.query('SITES', {
+        skPrefix: `SITE#${opts.prefix ?? ''}`,
+        limit: Math.min(opts.pageSize ?? DIRECTORY_PAGE, opts.max + 1 - sites.length),
+        cursor,
+      })
+      for (const item of page.items) sites.push(decode<SiteDirectoryRecord>('sitedirectory', item))
+      cursor = page.cursor
+    } while (cursor && sites.length <= opts.max)
+    return { sites: sites.slice(0, opts.max), truncated: sites.length > opts.max }
   }
 
   listSiteGrants(email: string) {

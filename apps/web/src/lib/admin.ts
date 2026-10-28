@@ -16,26 +16,5 @@ export function impersonateBlocked(me: Me, user: AdminUser): string | null {
   return null
 }
 
-/**
- * The Sites page's count line in All sites: how many are loaded (a `+` while more pages wait), and
- * under which name prefix.
- */
-export function allSitesCountLabel({
-  loaded,
-  more,
-  prefix,
-}: {
-  loaded: number | undefined
-  more: boolean
-  prefix: string
-}): string {
-  if (loaded === undefined) return 'Every site on this instance'
-  const n = `${loaded}${more ? '+' : ''}`
-  const noun = loaded === 1 && !more ? 'site' : 'sites'
-  if (prefix) return `${n} ${noun} named “${prefix}…”`
-  if (loaded === 0) return 'Nothing flung on this instance yet'
-  return `${n} ${noun} on this instance`
-}
-
 /** Where the Admin item and the end of an impersonation lead. */
 export const ADMIN_USERS_PATH = '/admin/users'

@@ -129,8 +129,9 @@ email; the issuer's `sub` is not stored.
 
 **Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
-last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, searched by
-name prefix; the Sites page's All sites tab, shown to admins alone). They may **impersonate** a
+last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, in one
+response of at most `ADMIN_SITES_MAX` sites, with `truncated` past it; the Sites page's All sites
+tab, shown to admins alone, searched and ordered like the other tabs). They may **impersonate** a
 user: from a browser session only, they act as that user for at most 60 minutes, with a banner on
 every page, and stop to return to their own session. Listing a site gives them nothing more: they
 get no rights over anyone's site except by impersonating, and while impersonating can create

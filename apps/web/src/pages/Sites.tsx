@@ -5,8 +5,9 @@
  * remembered in localStorage. No sites yet → the CLI quick start. With the `audiences`
  * capability, a Shared tab (`?view=shared`) lists the restricted sites others have shared with
  * you, each a `SharedSiteCard`, searched and ordered the same way. Admins also get All sites
- * (`?view=all`): every site on the instance from the site directory, by name, searched on the
- * server by name prefix and paged with "Load more", each an `AdminSiteCard` (the listing only).
+ * (`?view=all`): every site on the instance from the site directory, fetched whole (up to the
+ * server's ceiling, with a note when it stops short) and searched and ordered the same way, each
+ * an `AdminSiteCard` (the listing only).
  */
 import {
   type AdminSite,
@@ -17,7 +18,7 @@ import {
   sortSites,
 } from '@fling/shared'
 import { ShieldCheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { useDeferredValue, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminSiteCard } from '../components/AdminSiteCard'
 import { SharedSiteCard } from '../components/SharedSiteCard'
@@ -26,7 +27,7 @@ import { SiteSearch } from '../components/SiteSearch'
 import { useInstance } from '../hooks/instance'
 import { useAdminSites, useMe, useSharedSites, useSites } from '../hooks/queries'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
-import { allSitesCountLabel, showsAdmin } from '../lib/admin'
+import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { countLabel, filterSites } from '../lib/search'
 import { chooseSiteSort, parseSiteSort, SITE_SORT_LABELS } from '../lib/sites'
@@ -42,14 +43,13 @@ export function greeting(hour: number): string {
 
 /**
  * A plain page header: greeting, title, the count (kept in step with the search), the search and
- * the order (none for All sites, which lists by name).
+ * the order.
  */
 function SitesHeader({
   title,
   count,
   query,
   onQueryChange,
-  searchByPrefix = false,
   sort,
   onSortChange,
 }: {
@@ -57,8 +57,7 @@ function SitesHeader({
   count: string
   query: string
   onQueryChange: (q: string) => void
-  searchByPrefix?: boolean
-  sort?: SiteSort
+  sort: SiteSort
   onSortChange: (sort: SiteSort) => void
 }) {
   const { data: me } = useMe()
@@ -79,29 +78,19 @@ function SitesHeader({
         </div>
       </div>
       <div className="flex w-full items-center gap-2 sm:w-auto">
-        <SiteSearch
-          value={query}
-          onChange={onQueryChange}
-          className="min-w-0 flex-1 sm:w-72"
-          {...(searchByPrefix && {
-            placeholder: 'Name starts with…',
-            label: 'Search every site by the start of its name',
-          })}
-        />
-        {sort && (
-          <select
-            className="select select-sm w-auto shrink-0"
-            aria-label="Order sites by"
-            value={sort}
-            onChange={e => onSortChange(parseSiteSort(e.target.value))}
-          >
-            {SITE_SORTS.map(s => (
-              <option key={s} value={s}>
-                {SITE_SORT_LABELS[s]}
-              </option>
-            ))}
-          </select>
-        )}
+        <SiteSearch value={query} onChange={onQueryChange} className="min-w-0 flex-1 sm:w-72" />
+        <select
+          className="select select-sm w-auto shrink-0"
+          aria-label="Order sites by"
+          value={sort}
+          onChange={e => onSortChange(parseSiteSort(e.target.value))}
+        >
+          {SITE_SORTS.map(s => (
+            <option key={s} value={s}>
+              {SITE_SORT_LABELS[s]}
+            </option>
+          ))}
+        </select>
       </div>
     </header>
   )
@@ -150,17 +139,17 @@ function SharedList({
   )
 }
 
-/** All sites' body (admins): loading, an error, nothing, nothing under the prefix, or the rows. */
+/** All sites' body (admins): loading, an error, nothing, nothing matching, or the rows. */
 function AllSitesList({
   list,
-  rows,
-  prefix,
+  shown,
+  query,
   me,
   onClear,
 }: {
   list: ReturnType<typeof useAdminSites>
-  rows: AdminSite[]
-  prefix: string
+  shown: AdminSite[]
+  query: string
   me: string
   onClear: () => void
 }) {
@@ -175,36 +164,27 @@ function AllSitesList({
       </div>
     )
   }
-  if (rows.length === 0) {
-    if (prefix) return <NoMatch query={prefix} label="" onClear={onClear} />
+  if (list.data.sites.length === 0) {
     return (
       <div className="surface-panel text-center text-sm text-secondary">
         Nobody has flung anything on this instance yet.
       </div>
     )
   }
+  if (shown.length === 0) return <NoMatch query={query} label="" onClear={onClear} />
   return (
     <div className="space-y-3">
       <ul className="space-y-2">
-        {rows.map(site => (
+        {shown.map(site => (
           <li key={site.name}>
             <AdminSiteCard site={site} mine={site.owner === me} />
           </li>
         ))}
       </ul>
-      {list.hasNextPage && (
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={() => list.fetchNextPage()}
-          disabled={list.isFetchingNextPage}
-        >
-          {list.isFetchingNextPage ? (
-            <span className="loading loading-spinner loading-xs" />
-          ) : (
-            'Load more'
-          )}
-        </button>
+      {list.data.truncated && (
+        <p className="text-center text-sm text-secondary">
+          The list stops at {list.data.sites.length.toLocaleString()} sites, the most it shows.
+        </p>
       )}
     </div>
   )
@@ -248,9 +228,7 @@ export default function Sites() {
   const all = admin && view === 'all'
   const query = params.get('q') ?? ''
   const searching = query.trim() !== ''
-  const prefix = useDeferredValue(query.trim().toLowerCase())
-  const allList = useAdminSites(prefix, all)
-  const allRows = allList.data?.pages.flatMap(p => p.sites) ?? []
+  const allList = useAdminSites(all)
   const [savedSort, setSavedSort] = useLocalStoragePreference<string>(
     'sitesSort',
     DEFAULT_SITE_SORT
@@ -262,6 +240,10 @@ export default function Sites() {
   const shown = useMemo(
     () => sortSites(filterSites(list.data ?? [], query), sort),
     [list.data, query, sort]
+  )
+  const allShown = useMemo(
+    () => sortSites(filterSites(allList.data?.sites ?? [], query), sort),
+    [allList.data, query, sort]
   )
   const sharedShown = useMemo(
     () => sortSites(filterSites(sharedList.data ?? [], query), sort),
@@ -292,10 +274,12 @@ export default function Sites() {
         title={all ? 'All sites' : shared ? 'Shared with you' : 'Your sites'}
         count={
           all
-            ? allSitesCountLabel({
-                loaded: allList.data ? allRows.length : undefined,
-                more: allList.hasNextPage,
-                prefix,
+            ? countLabel({
+                total: allList.data?.sites.length,
+                shown: allShown.length,
+                archived: false,
+                all: true,
+                searching,
               })
             : shared
               ? countLabel({
@@ -309,8 +293,7 @@ export default function Sites() {
         }
         query={query}
         onQueryChange={setQuery}
-        searchByPrefix={all}
-        sort={all ? undefined : sort}
+        sort={sort}
         onSortChange={setSort}
       />
 
@@ -364,8 +347,8 @@ export default function Sites() {
       {all ? (
         <AllSitesList
           list={allList}
-          rows={allRows}
-          prefix={prefix}
+          shown={allShown}
+          query={query}
           me={me?.email ?? ''}
           onClear={() => setQuery('')}
         />

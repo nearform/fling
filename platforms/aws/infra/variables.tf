@@ -105,8 +105,8 @@ variable "api_paths" {
   description = "Path patterns on the app hostname that go to the API function, uncached. Everything else is the UI."
   type        = list(string)
   # /mcp, /oauth/* and /.well-known/* are the remote MCP connector, its OAuth server and the
-  # instance metadata (/.well-known/fling).
-  default = ["/api/*", "/auth/*", "/healthz", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*"]
+  # instance metadata (/.well-known/fling); /notifications/* is the emails' unsubscribe page.
+  default = ["/api/*", "/auth/*", "/healthz", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/notifications/*"]
 }
 
 variable "generated_secrets" {

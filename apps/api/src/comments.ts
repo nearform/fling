@@ -24,6 +24,7 @@ import {
 import { ApiError, badRequest, forbidden, notFound } from './lib/errors.ts'
 import { newCommentId } from './lib/ids.ts'
 import { publishQuietly } from './live.ts'
+import { type Acting, notifyComment } from './notifications/notify.ts'
 import { type Action, type Actor, can, canDeleteComment } from './policy.ts'
 import { resolveSite } from './sites.ts'
 import type { CommentRecord, SiteRecord } from './store/types.ts'
@@ -101,12 +102,17 @@ export async function listComments(
   }
 }
 
-/** Start a thread on a page, or reply to one (`parentId`: a reply takes the thread's path). */
+/**
+ * Start a thread on a page, or reply to one (`parentId`: a reply takes the thread's path). The
+ * site's owner hears of a new thread (`comment.created`), the thread's author and earlier repliers
+ * of a reply (`comment.reply`).
+ */
 export async function addComment(
   deps: Deps,
   actor: Actor,
   name: string,
-  input: { body: string; path?: string; parentId?: string; anchor?: CommentAnchor }
+  input: { body: string; path?: string; parentId?: string; anchor?: CommentAnchor },
+  acting: Acting = {}
 ): Promise<Comment> {
   const { site, actor: who } = await commentSite(deps, actor, name, 'comment.create')
   let path = normalizeCommentPath(input.path)
@@ -142,6 +148,7 @@ export async function addComment(
   }
   if (!(await deps.store.createComment(record))) throw new Error('comment id collision')
   await publishQuietly(deps, site.id, { type: 'comments' })
+  await notifyComment(deps, site, record, acting)
   return toComment(who, site, record)
 }
 

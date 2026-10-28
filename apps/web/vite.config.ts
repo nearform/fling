@@ -47,6 +47,9 @@ export default defineConfig({
       '/mcp': { target: API, changeOrigin: false },
       '/oauth/': { target: API, changeOrigin: false },
       '/.well-known/': { target: API, changeOrigin: false },
+      // The emails' unsubscribe page, and the local notification affordances (/dev/mail, …).
+      '/notifications/': { target: API, changeOrigin: false },
+      '/dev/': { target: API, changeOrigin: false },
     },
   },
 })

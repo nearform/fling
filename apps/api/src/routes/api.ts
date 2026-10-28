@@ -38,6 +38,7 @@ import * as groups from '../groups.ts'
 import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
+import type { Acting } from '../notifications/notify.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
 import { userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
@@ -57,6 +58,12 @@ apiRoutes.use(
   })
 )
 apiRoutes.use('*', requireAuth)
+
+/** The admin acting as the user, if any: what they do then notifies nobody. */
+function acting(c: Context<AppEnv>): Acting {
+  const impersonator = c.get('impersonator')
+  return impersonator ? { impersonator } : {}
+}
 
 apiRoutes.get('/me', c => {
   const impersonator = c.get('impersonator')
@@ -175,7 +182,13 @@ apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
 
 apiRoutes.patch('/sites/:name', async c => {
   const patch = await jsonBody(c, UpdateSiteRequestSchema)
-  const site = await sites.updateSite(c.get('deps'), c.get('user'), c.req.param('name'), patch)
+  const site = await sites.updateSite(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    patch,
+    acting(c)
+  )
   return c.json(SiteWithAudienceSchema.parse(site))
 })
 
@@ -249,7 +262,8 @@ apiRoutes.post('/sites/:name/comments', async c => {
     c.get('deps'),
     userActor(c.get('user')),
     c.req.param('name'),
-    input
+    input,
+    acting(c)
   )
   return c.json(CommentSchema.parse(comment), 201)
 })
@@ -296,7 +310,7 @@ apiRoutes.get('/groups', async c => {
 
 apiRoutes.post('/groups', async c => {
   const input = await jsonBody(c, CreateGroupRequestSchema)
-  const group = await groups.createGroup(c.get('deps'), c.get('user'), input)
+  const group = await groups.createGroup(c.get('deps'), c.get('user'), input, acting(c))
   return c.json(GroupDetailSchema.parse(group), 201)
 })
 
@@ -317,7 +331,8 @@ apiRoutes.post('/groups/:slug/members', async c => {
     c.get('deps'),
     c.get('user'),
     c.req.param('slug'),
-    change
+    change,
+    acting(c)
   )
   return c.json(GroupDetailSchema.parse(group))
 })

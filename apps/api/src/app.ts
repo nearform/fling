@@ -6,7 +6,9 @@ import { instanceMetadata } from './instance.ts'
 import { errorHandler, notFoundHandler, originVerify, securityHeaders } from './middleware.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
+import { devRoutes } from './routes/dev.ts'
 import { mcpRoutes } from './routes/mcp.ts'
+import { notificationRoutes } from './routes/notifications.ts'
 import { oauthRoutes } from './routes/oauth.ts'
 import type { AppEnv, Deps } from './types.ts'
 
@@ -35,6 +37,10 @@ export function createApp(deps: Deps) {
   // Remote MCP connector: OAuth AS metadata + endpoints, and the MCP endpoint itself.
   app.route('/', oauthRoutes)
   app.route('/mcp', mcpRoutes)
+  // Email unsubscribe links: a page on the app origin, no session needed.
+  app.route('/notifications', notificationRoutes)
+  // Local only: drain the notifications outbox on demand, read the mail sent.
+  if (deps.config.devLogin) app.route('/dev', devRoutes)
 
   // Dev/tests only: the target of FsBlobs' "presigned" PUT URLs.
   const blobs = deps.blobs

@@ -202,6 +202,15 @@ update), so overlapping drains never send it twice. After a message about commen
 recipient's next batch for that site waits out a **cool-down** (`coolDownUntil` on their batch
 pointer).
 
+**Notification hub** — `apps/api/src/notifications/`: actions call `notify` (in the request: the
+event and its fan-out marker, never a send, never a failure of the action; nothing while an admin
+impersonates), and each platform's one-minute tick calls `drain` (the Cloudflare cron, the AWS
+scheduler's `{"fling":"notify"}`), which fans events out to their recipients (never the actor),
+re-checks policy, the email policy, preferences and suppression at send time, and delivers each
+batch through its channel, rendered with `TEMPLATES`. Every email carries an **unsubscribe link**,
+`/notifications/unsubscribe?t=<token>` on the app origin (a token HMAC-signed with SESSION_SECRET
+naming the address, event and channel; `GET` shows a page, `POST` unsubscribes, with Undo).
+
 **Suppression** — an address Fling does not mail, after a hard bounce or a complaint
 (`SUPPRESS#<email>/SUPPRESS`); checked at send time.
 

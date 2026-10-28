@@ -8,7 +8,9 @@
  * apps/web/dist-review/review-shell.html, filled in the same way; /_fling/robots.txt (every sites
  * host's /robots.txt) is apps/web/sites-robots.txt, as the deploy uploads it. Live rooms run in this process
  * (MemoryLiveHub): the API server also accepts `GET /api/live?ticket=` WebSocket upgrades, and
- * LIVE_URL points straight at it (the UI dev server needn't proxy sockets). The e2e
+ * LIVE_URL points straight at it (the UI dev server needn't proxy sockets). With a mail driver
+ * (MAIL_DRIVER=file, MAIL_FROM), the notifications outbox drains every minute, as the platforms'
+ * ticks drain it, and `POST /dev/notify/drain` drains it at once. The e2e
  * (packages/e2e) runs it as the AWS-flavoured local runtime.
  */
 import { randomBytes } from 'node:crypto'
@@ -27,6 +29,7 @@ import { contentTypeFor } from './lib/mime.ts'
 import { admitTicket } from './live.ts'
 import { MemoryLiveHub } from './live-memory.ts'
 import { MIGRATIONS, runMigrations } from './migrations/index.ts'
+import { drain } from './notifications/drain.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
 import { Records } from './store/records.ts'
 import { MemoryTable } from './table/memory.ts'
@@ -75,6 +78,13 @@ const deps = buildDeps(config, {
   store: new Records(table),
 })
 await routeTable.put(SITE_HMAC_KVS_KEY, config.secrets.siteHmacKey)
+
+// The notifications outbox's tick, every minute as on the platforms (with a mail driver set).
+if (deps.mailer) {
+  setInterval(() => {
+    drain(deps).catch(err => console.error('notify drain failed', err))
+  }, 60_000)
+}
 
 const apiServer = serve({ fetch: createApp(deps).fetch, port: API_PORT }, info =>
   console.log(`fling api   http://localhost:${info.port}  (app origin ${config.appOrigin})`)

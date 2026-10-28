@@ -309,6 +309,10 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   padding: 0.55rem 0.7rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2); color: var(--ink);
 }
 .verdict { font-family: var(--mono); font-size: 0.82rem; }
+.levels { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-block: 0.9rem 0.5rem; }
+.levels button { border: 1px solid var(--line); background: var(--bg-2); border-radius: 999px; padding: 0.25rem 0.6rem; cursor: pointer; font-size: 0.8rem; font-weight: 700; }
+.levels button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.levels button:active { scale: 0.96; }
 .verdict.bad { color: var(--red); }
 .verdict.good { color: var(--green); }
 
@@ -357,7 +361,19 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .thread p { color: var(--muted); font-size: 0.92rem; }
 @media (prefers-reduced-motion: no-preference) { .thread.enter { animation: drop 420ms var(--ease-out) both; } }
 
-/* ---------- 7 · versions ---------- */
+/* ---------- 7 · notifications ---------- */
+.notify { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
+.facts { margin: 0; padding-inline-start: 1.2rem; display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.95rem; }
+.prefs { display: grid; gap: 0.45rem; margin-block: 0.8rem 1rem; }
+.prefs label { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; font-size: 0.9rem; cursor: pointer; }
+.inbox { display: grid; gap: 0.5rem; }
+.mail { display: grid; gap: 0.1rem; padding: 0.6rem 0.8rem; border-radius: 12px; background: var(--bg-2); font-size: 0.88rem; }
+.mail b { font-weight: 700; }
+.mail span { color: var(--muted); font-size: 0.78rem; }
+.mail.quiet { color: var(--muted); font-style: italic; }
+@media (prefers-reduced-motion: no-preference) { .mail.enter { animation: drop 420ms var(--ease-out) both; } }
+
+/* ---------- 8 · versions ---------- */
 .versions { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
 .timeline { display: grid; gap: 0.55rem; }
 .ver {
@@ -382,7 +398,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   .preview .pv-hero { transition: background-color 350ms var(--ease-out); }
 }
 
-/* ---------- 8 · your cloud ---------- */
+/* ---------- 9 · your cloud ---------- */
 .clouds { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); }
 .seg { display: inline-flex; border: 2px solid var(--outline); border-radius: 999px; overflow: clip; inline-size: fit-content; }
 .seg button { border: 0; background: var(--card); padding: 0.5rem 1rem; cursor: pointer; font-weight: 700; }
@@ -408,7 +424,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .deploy-links { display: flex; flex-wrap: wrap; gap: 0.7rem; }
 .deploy-links a { text-decoration: none; }
 
-/* ---------- 9 · start ---------- */
+/* ---------- 10 · start ---------- */
 .start .inner { justify-items: center; text-align: center; }
 .cmds { display: grid; gap: 0.7rem; inline-size: min(720px, 100%); text-align: start; }
 .cmd {
@@ -457,7 +473,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     <div class="inner">
       <p class="eyebrow reveal">Why Fling?</p>
       <h1 class="reveal">Throw it. <span class="rainbow-text">Get a link.</span></h1>
-      <p class="lead reveal">You and your agents make things all day: reports, prototypes, dashboards, decks. Fling turns any of them into a private link your team can open, in one step, from anywhere.</p>
+      <p class="lead reveal">You and your agents make things all day: reports, prototypes, dashboards, decks. Fling turns any of them into a link only the people you choose can open, in one step, from anywhere.</p>
       <div class="stage reveal" id="stage">
         <button class="folder" id="folder" type="button" aria-label="Fling the folder">
           <svg viewBox="0 0 48 40" aria-hidden="true"><path d="M3 8a4 4 0 0 1 4-4h11l5 5h18a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4z" fill="oklch(98% 0 none)" stroke="currentColor" stroke-width="3"/><path d="M12 22h24M12 28h16" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
@@ -533,18 +549,25 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
       <h2 class="reveal">Easy to share. <span class="rainbow-text">Hard to leak.</span></h2>
       <div class="grid-auto">
         <div class="card reveal">
-          <h3><span class="badge" style="background: color-mix(in oklch, var(--blue) 18%, transparent)">🔒</span>Private until you say so</h3>
-          <p>Every new site needs a sign-in through your organisation's identity provider. Only people your Fling admits get in.</p>
-          <div class="toggle-row"><button class="switch" role="switch" aria-checked="false" id="vis" aria-label="Make the site public"></button><span id="vislabel">private · sign-in required</span></div>
+          <h3><span class="badge" style="background: color-mix(in oklch, var(--blue) 18%, transparent)">🔒</span>Only you, until you say so</h3>
+          <p>A new site opens to you alone, behind your organisation's sign-in. Widen it when you're ready; teams and people combine. Each instance sets its own default.</p>
+          <div class="levels" id="levels" role="group" aria-label="Who can open the site">
+            <button type="button" aria-pressed="true" data-level="only_me">Only you</button>
+            <button type="button" aria-pressed="false" data-level="members">Everyone signed in</button>
+            <button type="button" aria-pressed="false" data-level="groups">Teams</button>
+            <button type="button" aria-pressed="false" data-level="people">Specific people</button>
+            <button type="button" aria-pressed="false" data-level="public">Public</button>
+          </div>
+          <p class="verdict" id="levellabel" aria-live="polite">only you · sign-in required</p>
         </div>
         <div class="card reveal">
           <h3><span class="badge" style="background: color-mix(in oklch, var(--green) 20%, transparent)">🔗</span>Share links when you want them</h3>
-          <p>Need someone outside? Create a share link for one site. Replace it or revoke it whenever you like; the old one stops working.</p>
+          <p>Need someone who can't sign in? Create a share link for one site: anyone with it can open the site. Replace it or revoke it whenever you like; the old one stops working.</p>
           <div class="toggle-row"><button class="switch" role="switch" aria-checked="false" id="share" aria-label="Create a share link"></button><span id="sharelabel">no share link</span></div>
         </div>
         <div class="card reveal">
           <h3><span class="badge" style="background: color-mix(in oklch, var(--red) 18%, transparent)">🛑</span>Secrets never ship</h3>
-          <p>Every deploy is scanned for keys and tokens, and dotfiles like <code>.env</code> are never published. A finding stops the deploy; there's no override.</p>
+          <p>Every deploy is scanned for keys and tokens before it goes live, and dotfiles like <code>.env</code> are never published. A secret, or a file that is one, stops the deploy; there's no override.</p>
           <div class="scan">
             <label for="scaninput" class="verdict">Try it: type a file name to deploy</label>
             <input id="scaninput" value="index.html" spellcheck="false" autocomplete="off" />
@@ -580,7 +603,29 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 7 · versions -->
+  <!-- 7 · notifications -->
+  <section class="slide" id="hear" data-label="Hear about it">
+    <div class="inner notify">
+      <div style="display:grid; gap: var(--gap)">
+        <p class="eyebrow reveal">Hear about it</p>
+        <h2 class="reveal">Shared with you? Commented on? <span class="rainbow-text">You'll get an email.</span></h2>
+        <p class="lead reveal">With email set up, Fling tells people when a site is shared with them, directly or through a group, when they are added to a group, and when someone comments on their site or replies in their thread.</p>
+        <ul class="facts reveal">
+          <li>What arrives close together becomes one email, and after an email about comments on a site, the next about that site waits at least 15 minutes.</li>
+          <li>Never about their own actions, and access is checked again when the email goes out.</li>
+          <li>Each person chooses, per event, from the web, the CLI or Claude, and every email has a one-click unsubscribe.</li>
+          <li>Mail goes through your cloud's own sender. Admins get a Mail page with a test send and the last day's sending.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <h3>Notifications</h3>
+        <div class="prefs" id="prefs"></div>
+        <div class="inbox" id="inbox" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · versions -->
   <section class="slide" id="versions" data-label="Versions">
     <div class="inner versions">
       <div style="display:grid; gap: var(--gap)">
@@ -596,7 +641,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 8 · your cloud -->
+  <!-- 9 · your cloud -->
   <section class="slide" id="your-cloud" data-label="Your cloud">
     <div class="inner">
       <p class="eyebrow reveal">Yours, not ours</p>
@@ -604,7 +649,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
       <div class="clouds">
         <div class="card reveal">
           <h3>One codebase, two clouds</h3>
-          <p class="agentnote">Run Fling in your own account. Every feature works the same on both.</p>
+          <p class="agentnote">Run Fling in your own account. Both clouds have the same features and pass the same tests.</p>
           <div class="seg" style="margin-block-start: 1rem"><button type="button" aria-pressed="true" data-cloud="aws">AWS</button><button type="button" aria-pressed="false" data-cloud="cf">Cloudflare</button></div>
           <div class="stack" id="stack"></div>
         </div>
@@ -619,14 +664,14 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
         </div>
       </div>
       <div class="deploy-links reveal">
-        <a class="btn" href="https://github.com/nearform/fling#readme">How do I deploy it? <span aria-hidden="true">→</span></a>
+        <a class="btn" href="https://github.com/nearform/fling#deploy">How do I deploy it? <span aria-hidden="true">→</span></a>
         <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/aws/DEPLOY.md">On AWS</a>
         <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/cloudflare/DEPLOY.md">On Cloudflare</a>
       </div>
     </div>
   </section>
 
-  <!-- 9 · start -->
+  <!-- 10 · start -->
   <section class="slide start" id="start" data-label="Start">
     <div class="inner">
       <svg class="big-f reveal" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rb2" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#ff375f"/><stop offset=".2" stop-color="#ff9f0a"/><stop offset=".4" stop-color="#ffd60a"/><stop offset=".6" stop-color="#30d158"/><stop offset=".8" stop-color="#0a84ff"/><stop offset="1" stop-color="#bf5af2"/></linearGradient></defs><polygon points="12.65,6 30.65,6 29.27,12 17.77,12 16.96,15.5 24.96,15.5 23.69,21 15.69,21 13.85,29 7.35,29" fill="#1c1c3a"/><polygon points="11.15,4.5 29.15,4.5 27.77,10.5 16.27,10.5 15.46,14 23.46,14 22.19,19.5 14.19,19.5 12.35,27.5 5.85,27.5" fill="url(#rb2)" stroke="#1c1c3a" stroke-width="1.4" stroke-linejoin="round"/></svg>
@@ -636,7 +681,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
         <div class="cmd"><span class="n">2</span><code id="setupcmd">fling setup https://&lt;your Fling&gt;</code><button class="copy" type="button">Copy</button></div>
         <div class="cmd"><span class="n">3</span><code>fling deploy ./dist</code><button class="copy" type="button">Copy</button></div>
       </div>
-      <p class="lead reveal">Step 2 signs you in and adds Fling to Claude Code and Claude Desktop. On the web or your phone, add the connector <code id="mcpurl">https://&lt;your Fling&gt;/mcp</code> in Claude's settings.</p>
+      <p class="lead reveal">Step 2 signs you in and adds Fling to Claude Code and Claude Desktop, if you have them. On the web or your phone, add the connector <code id="mcpurl">https://&lt;your Fling&gt;/mcp</code> in Claude's settings.</p>
       <p class="foot reveal">This page was flung. <a href="https://github.com/nearform/fling">Fling is open source.</a></p>
     </div>
   </section>
@@ -790,31 +835,35 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   function demos() { return {
     cli: { title: 'zsh', note: 'A folder, one HTML file, a .zip or any file. Single-page apps too.', lines: [
       ['p', '$ '], ['t', 'fling deploy ./dist --name launch-plan\n'], ['w', 500],
-      ['c', '  Uploading 23 files (1.4 MB)…\n'], ['w', 600],
-      ['ok', '  ✔ Deployed launch-plan\n'], ['u', '  https://launch-plan.' + sites + '/\n'],
-      ['c', '  Share for feedback: ' + fling + '/review/launch-plan\n']
+      ['c', '  uploading 23/23 files · 1.4 MB/1.4 MB\n'], ['w', 600],
+      ['ok', '  ✔ Deployed launch-plan (23 files, 1.4 MB)\n'],
+      ['c', '  Share for feedback: '], ['u', fling + '/review/launch-plan\n'],
+      ['c', '  Site: '], ['u', 'https://launch-plan.' + sites + '/\n'],
+      ['c', '  Only you can open it.\n']
     ]},
     code: { title: 'claude', note: 'The Fling plugin for Claude Code: a skill plus the local MCP server.', lines: [
-      ['say', '> '], ['t', 'Build the pricing page prototype and fling it so the team can look\n'], ['w', 500],
+      ['say', '> '], ['t', 'Build the pricing page prototype and fling it for the design team\n'], ['w', 500],
       ['c', '  ⏺ Writing pricing/index.html, pricing/app.js…\n'], ['w', 500],
-      ['c', '  ⏺ fling_deploy(path: "pricing", name: "pricing-prototype")\n'], ['w', 700],
+      ['c', '  ⏺ fling_deploy(path: "pricing", name: "pricing-prototype", access: "groups", groups: ["design"])\n'], ['w', 700],
       ['ok', '  ✔ '], ['t2', 'Done. Here it is: '], ['u', 'https://pricing-prototype.' + sites + '/\n']
     ]},
-    desktop: { title: 'Claude Desktop', note: 'The Claude Desktop extension finds files by name in Downloads, Desktop and Documents.', lines: [
+    desktop: { title: 'Claude Desktop', note: 'The Claude Desktop extension finds files by name in Downloads, Desktop and the folders Claude saves to. Before a new site goes up, Claude asks who should see it.', lines: [
       ['say', 'You: '], ['t', 'Fling "Q3 Board Deck.html" from my Downloads\n'], ['w', 500],
-      ['c', '  fling_deploy · found ~/Downloads/Q3 Board Deck.html\n'], ['w', 700],
-      ['ok', 'Claude: '], ['t2', 'Published, private to your team: '], ['u', 'https://q3-board-deck.' + sites + '/\n']
+      ['ok', 'Claude: '], ['t2', 'Who should be able to open it: only you, everyone signed in, a team, specific people, or anyone?\n'], ['w', 500],
+      ['say', 'You: '], ['t', 'Just me for now\n'], ['w', 400],
+      ['c', '  fling_deploy · found ~/Downloads/Q3 Board Deck.html · access: only_me\n'], ['w', 700],
+      ['ok', 'Claude: '], ['t2', 'Published. Only you can open it: '], ['u', 'https://q3-board-deck.' + sites + '/\n']
     ]},
     web: { title: 'claude.ai', note: 'Add your Fling as a connector on claude.ai, and it works in the mobile apps too.', lines: [
       ['say', 'You: '], ['t', 'Make me a one-page summary of this thread and publish it\n'], ['w', 500],
       ['c', '  Connector: ' + fling + '/mcp · fling_publish\n'], ['w', 700],
       ['ok', 'Claude: '], ['t2', 'Here you go: '], ['u', 'https://thread-summary.' + sites + '/\n']
     ]},
-    bg: { title: 'nightly agent', note: 'An API key in the environment, and any script, CI job or agent can publish. No browser needed.', lines: [
+    bg: { title: 'nightly agent', note: 'Your Fling\'s address and an API key in the environment (FLING_URL, FLING_API_KEY), and any script, CI job or agent can publish. No browser needed.', lines: [
       ['c', '# agent-7 finished its analysis run\n'],
-      ['p', '$ '], ['t', 'FLING_API_KEY=$KEY fling deploy ./report --name churn-nightly --json\n'], ['w', 600],
-      ['c', '  {"status":"deployed","url":"'], ['u', 'https://churn-nightly.' + sites + '/'], ['c', '", …}\n'], ['w', 400],
-      ['ok', '# → link posted to #analytics\n']
+      ['p', '$ '], ['t', 'fling deploy ./report --name churn-nightly --access members --json\n'], ['w', 600],
+      ['c', '  {"status":"live","site":{"name":"churn-nightly","url":"'], ['u', 'https://churn-nightly.' + sites + '/'], ['c', '", …}, …}\n'], ['w', 400],
+      ['ok', '# the agent posts the link to #analytics\n']
     ]}
   }; }
   var run = 0;
@@ -891,17 +940,41 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
       label.textContent = v ? on : off;
     });
   }
-  bindSwitch('#vis', '#vislabel', 'public · anyone with the address', 'private · sign-in required');
+  // Access levels: one of five, except that teams and specific people combine.
+  var levelBtns = $$('#levels button'), levelLabel = $('#levellabel');
+  function showLevels() {
+    var on = levelBtns.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; }).map(function (b) { return b.dataset.level; });
+    var g = on.indexOf('groups') >= 0, p = on.indexOf('people') >= 0;
+    levelLabel.textContent =
+      g && p ? 'you, the teams and the people you name' :
+      g ? 'you and the members of the teams you name' :
+      p ? 'you and the people you name' :
+      on[0] === 'members' ? 'everyone signed in to your Fling' :
+      on[0] === 'public' ? 'anyone with the address · no sign-in' :
+      'only you · sign-in required';
+  }
+  levelBtns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      var l = b.dataset.level, combines = l === 'groups' || l === 'people';
+      levelBtns.forEach(function (x) {
+        var xc = x.dataset.level === 'groups' || x.dataset.level === 'people';
+        if (x === b) x.setAttribute('aria-pressed', combines ? String(x.getAttribute('aria-pressed') !== 'true') : 'true');
+        else if (!(combines && xc)) x.setAttribute('aria-pressed', 'false');
+      });
+      if (!levelBtns.some(function (x) { return x.getAttribute('aria-pressed') === 'true'; })) levelBtns[0].setAttribute('aria-pressed', 'true');
+      showLevels();
+    });
+  });
   bindSwitch('#share', '#sharelabel', 'https://s--k3v9q….' + sites, 'no share link');
   var scanIn = $('#scaninput'), verdict = $('#scanverdict');
   // A sketch of the rules, by file name: dotfiles and files that are secrets by nature are refused.
-  var secretNames = /(^|\/)(id_rsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx|credentials(\.json)?|.*\.tfstate|.*\.keystore|.*\.jks)$/i;
+  var secretNames = /(^|\/)(id_(rsa|dsa|ecdsa|ed25519)|.+\.(pem|key|p12|pfx|jks|keystore|tfstate|tfvars|kdbx)|credentials(\.json)?|secrets\.(json|ya?ml)|wp-config\.php)$/i;
   function judge() {
     var v = scanIn.value.trim() || '(nothing)';
     var base = v.split('/').pop();
     var bad = base.charAt(0) === '.' ? 'dotfile' : secretNames.test(v) ? 'secret file' : null;
     verdict.className = 'verdict ' + (bad ? 'bad' : 'good');
-    verdict.textContent = bad ? '✕ ' + v + ': refused (' + bad + '), never published' : '✓ ' + v + ': would be published (after its contents are scanned)';
+    verdict.textContent = bad === 'dotfile' ? '✕ ' + v + ': skipped (dotfile), never published' : bad ? '✕ ' + v + ': stops the deploy (secret file)' : '✓ ' + v + ': would be published (after its contents are scanned)';
   }
   scanIn.addEventListener('input', judge);
   starters.secure = async function () {
@@ -981,12 +1054,60 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     }
   };
 
-  /* ---- 7 · versions ---- */
+  /* ---- 7 · notifications: preferences filter the inbox ---- */
+  var events = [
+    ['site.shared', 'Someone shares a site with you'],
+    ['site.shared_via_group', 'Someone shares a site with a group you are in'],
+    ['group.member_added', 'Someone adds you to a group'],
+    ['comment.created', 'Someone comments on your site'],
+    ['comment.reply', 'Someone replies in your thread']
+  ];
+  var mails = [
+    ['comment.created', 'Aoife left 3 comments on churn-dashboard', 'three comments, one email'],
+    ['site.shared', 'Ben shared launch-plan with you', 'shared with you directly'],
+    ['comment.reply', 'Aoife replied in a thread on pricing-prototype', 'a reply in your thread'],
+    ['group.member_added', 'You were added to Design team', 'added to a group'],
+    ['site.shared_via_group', 'q3-board-deck was shared with Design team', 'shared with a group you are in']
+  ];
+  var prefOn = {}, prefs = $('#prefs'), inbox = $('#inbox');
+  events.forEach(function (ev) {
+    prefOn[ev[0]] = true;
+    var l = document.createElement('label');
+    var t = document.createElement('span'); t.textContent = ev[1];
+    var sw = document.createElement('button');
+    sw.type = 'button'; sw.className = 'switch'; sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', 'true');
+    sw.setAttribute('aria-label', 'Email me when ' + ev[1].charAt(0).toLowerCase() + ev[1].slice(1));
+    sw.addEventListener('click', function () {
+      prefOn[ev[0]] = !prefOn[ev[0]];
+      sw.setAttribute('aria-checked', String(prefOn[ev[0]]));
+      renderInbox(false);
+    });
+    l.appendChild(t); l.appendChild(sw); prefs.appendChild(l);
+  });
+  var shown = 0;
+  function renderInbox(animate) {
+    inbox.innerHTML = '';
+    var list = mails.slice(0, shown).filter(function (m) { return prefOn[m[0]]; }).reverse().slice(0, 3);
+    list.forEach(function (m, i) {
+      var d = document.createElement('div');
+      d.className = 'mail' + (animate && i === 0 ? ' enter' : '');
+      var b = document.createElement('b'); b.textContent = m[1];
+      var s = document.createElement('span'); s.textContent = m[2] + ' · unsubscribe in one click';
+      d.appendChild(b); d.appendChild(s); inbox.appendChild(d);
+    });
+    if (!list.length) { var q = document.createElement('div'); q.className = 'mail quiet'; q.textContent = shown ? 'Nothing: you switched these off.' : 'Inbox'; inbox.appendChild(q); }
+  }
+  renderInbox(false);
+  starters.hear = async function () {
+    while (shown < mails.length) { await sleep(1500); shown++; renderInbox(true); }
+  };
+
+  /* ---- 8 · versions ---- */
   var vers = [
-    { v: 'v1', id: 'a41f09c2', t: 'Launch plan: first draft', when: 'Mon 09:12', bg: 'oklch(55% 0.16 255)' },
-    { v: 'v2', id: '7be2d013', t: 'Launch plan: with timeline', when: 'Mon 15:40', bg: 'oklch(58% 0.18 300)' },
-    { v: 'v3', id: 'c09e55a8', t: 'Launch plan: budget added', when: 'Tue 11:03', bg: 'oklch(60% 0.17 150)' },
-    { v: 'v4', id: 'f3d8a17b', t: 'Launch plan: oops, wrong chart', when: 'Tue 17:58', bg: 'oklch(60% 0.2 25)' }
+    { v: 'v1', id: 'a41f09c2e87b3d15', t: 'Launch plan: first draft', when: 'Mon 09:12', bg: 'oklch(55% 0.16 255)' },
+    { v: 'v2', id: '7be2d0135c9a46f8', t: 'Launch plan: with timeline', when: 'Mon 15:40', bg: 'oklch(58% 0.18 300)' },
+    { v: 'v3', id: 'c09e55a8d2f1b7e0', t: 'Launch plan: budget added', when: 'Tue 11:03', bg: 'oklch(60% 0.17 150)' },
+    { v: 'v4', id: 'f3d8a17b40c6e925', t: 'Launch plan: oops, wrong chart', when: 'Tue 17:58', bg: 'oklch(60% 0.2 25)' }
   ];
   var tl = $('#timeline'), live = 3;
   function renderVersions() {
@@ -998,7 +1119,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
       b.innerHTML = '<span class="dot"></span><span><b></b><br><span class="id"></span></span><span class="live"></span>';
       b.querySelector('b').textContent = x.v + ' · ' + x.t.replace('Launch plan: ', '');
       b.querySelector('.id').textContent = x.id + ' · ' + x.when;
-      b.querySelector('.live').textContent = i === live ? 'Live' : 'Roll back';
+      b.querySelector('.live').textContent = i === live ? 'Live' : 'Restore';
       b.addEventListener('click', function () { live = i; renderVersions(); });
       tl.appendChild(b);
     });
@@ -1010,10 +1131,10 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   }
   renderVersions();
 
-  /* ---- 8 · clouds and brand ---- */
+  /* ---- 9 · clouds and brand ---- */
   var stacks = {
-    aws: [['API', 'Lambda'], ['Sites at the edge', 'CloudFront'], ['Records', 'DynamoDB'], ['Files', 'S3'], ['Live review', 'API Gateway WebSockets']],
-    cf: [['API, UI and sites', 'one Worker'], ['Records', 'D1'], ['Files', 'R2'], ['Routes', 'Workers KV'], ['Live review', 'Durable Objects']]
+    aws: [['API', 'Lambda'], ['Sites at the edge', 'CloudFront'], ['Routes', 'CloudFront KeyValueStore'], ['Records', 'DynamoDB'], ['Files', 'S3'], ['Live review', 'API Gateway WebSockets'], ['Email', 'SES']],
+    cf: [['API, UI and sites', 'one Worker'], ['Records', 'D1'], ['Files', 'R2'], ['Routes', 'Workers KV'], ['Live review', 'Durable Objects'], ['Email', 'Email Service']]
   };
   function renderStack(k) {
     var s = $('#stack'); s.innerHTML = '';
@@ -1043,7 +1164,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     $('#swatches').appendChild(s);
   });
 
-  /* ---- 9 · copy buttons ---- */
+  /* ---- 10 · copy buttons ---- */
   $$('.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var text = b.previousElementSibling.textContent;

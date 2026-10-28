@@ -232,10 +232,11 @@ then delete the two `google-client-*` parameters.
 
 **Restricted sites.** A private site with an audience is let in by a site pass, not the
 `fling_site` cookie: the API checks the audience at sign-in, then the site router sets a host-only
-`fling_pass` cookie (signed with the same key, good for 15 minutes) at `/_fling-pass` on the site's
-host. That path is outside `_fling/*`, so the site router handles it. Taking someone out of an
-audience, or out of a group it names, shuts them out within 15 minutes; nothing else needs
-configuring.
+`fling_pass` cookie (signed with the same key, good for 5 minutes) at `/_fling-pass` on the site's
+host. That path is outside `_fling/*`, so the site router handles it. Someone the audience refuses
+gets the same cookie saying so, for 10 seconds, and sees the 404 page at the address they asked for.
+Taking someone out of an audience, or out of a group it names, shuts them out within 5 minutes;
+adding someone lets them in within 10 seconds; nothing else needs configuring.
 
 ## One-time setup
 

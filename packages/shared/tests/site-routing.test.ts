@@ -4,12 +4,24 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL, SITE_HMAC_KVS_KEY } from '../src/route-keys.ts'
-import { signSiteCookie } from '../src/site-cookie.ts'
+import {
+  signDenyHandoff,
+  signPassHandoff,
+  signSiteCookie,
+  signSiteDenied,
+  signSitePass,
+  verifySiteCookie,
+  verifySiteDenial,
+  verifySitePass,
+} from '../src/site-cookie.ts'
 import {
   normalizeQuery,
   routeKeyForHost,
   routeSiteRequest,
   type SiteRequest,
+  validSiteCookie,
+  validSiteDenial,
+  validSitePass,
 } from '../src/site-routing.ts'
 
 const KEY = 'k'.repeat(40)
@@ -104,6 +116,69 @@ describe('routeSiteRequest', () => {
   it('answers 405 to anything but GET and HEAD', async () => {
     const d = await routeSiteRequest(req({ method: 'PUT' }), ctx())
     expect(d).toMatchObject({ action: 'respond', status: 405, headers: { allow: 'GET, HEAD' } })
+  })
+})
+
+describe('signed token kinds', () => {
+  const hmac = ctx().hmac
+  const x = NOW + 60
+  const tokens: Record<string, string> = {
+    site: signSiteCookie({ e: 'a@example.test', x }, KEY),
+    pass: signSitePass({ s: 'S2', e: 'a@example.test', x }, KEY),
+    handoff: signPassHandoff({ s: 'S2', e: 'a@example.test', x }, KEY),
+    deny: signDenyHandoff({ s: 'S2', x }, KEY),
+    denied: signSiteDenied({ s: 'S2', x }, KEY),
+  }
+  // What each check accepts, at the edge (site-routing.ts) and in Node (site-cookie.ts).
+  const checks: Record<string, (t: string) => boolean> = {
+    site: t => validSiteCookie(t, KEY, NOW, hmac) && verifySiteCookie(t, KEY, NOW) !== null,
+    pass: t =>
+      validSitePass(t, KEY, 'pass', 'S2', NOW, hmac) !== null &&
+      verifySitePass(t, KEY, 'pass', NOW) !== null,
+    handoff: t =>
+      validSitePass(t, KEY, 'handoff', 'S2', NOW, hmac) !== null &&
+      verifySitePass(t, KEY, 'handoff', NOW) !== null,
+    deny: t =>
+      validSiteDenial(t, KEY, 'deny', 'S2', NOW, hmac) &&
+      verifySiteDenial(t, KEY, 'deny', NOW) !== null,
+    denied: t =>
+      validSiteDenial(t, KEY, 'denied', 'S2', NOW, hmac) &&
+      verifySiteDenial(t, KEY, 'denied', NOW) !== null,
+  }
+  const either: Record<string, (t: string) => boolean> = {
+    site: t => validSiteCookie(t, KEY, NOW, hmac) || verifySiteCookie(t, KEY, NOW) !== null,
+    pass: t =>
+      validSitePass(t, KEY, 'pass', 'S2', NOW, hmac) !== null ||
+      verifySitePass(t, KEY, 'pass', NOW) !== null,
+    handoff: t =>
+      validSitePass(t, KEY, 'handoff', 'S2', NOW, hmac) !== null ||
+      verifySitePass(t, KEY, 'handoff', NOW) !== null,
+    deny: t =>
+      validSiteDenial(t, KEY, 'deny', 'S2', NOW, hmac) ||
+      verifySiteDenial(t, KEY, 'deny', NOW) !== null,
+    denied: t =>
+      validSiteDenial(t, KEY, 'denied', 'S2', NOW, hmac) ||
+      verifySiteDenial(t, KEY, 'denied', NOW) !== null,
+  }
+
+  it('each check takes its own kind, at the edge and in Node alike', () => {
+    for (const kind of Object.keys(tokens)) {
+      expect({ kind, ok: checks[kind]?.(tokens[kind] as string) }).toEqual({ kind, ok: true })
+    }
+  })
+
+  it('no check takes any other kind', () => {
+    for (const [kind, token] of Object.entries(tokens)) {
+      for (const [check, ok] of Object.entries(either)) {
+        if (check !== kind)
+          expect({ kind, check, ok: ok(token) }).toEqual({ kind, check, ok: false })
+      }
+    }
+  })
+
+  it('a refusal holds no email', () => {
+    const body = (tokens.deny as string).split('.')[0] as string
+    expect(JSON.parse(Buffer.from(body, 'base64url').toString())).toEqual({ k: 'deny', s: 'S2', x })
   })
 })
 

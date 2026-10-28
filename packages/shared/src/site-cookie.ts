@@ -7,15 +7,25 @@
 //   60 seconds, that `e` may view the restricted site `s`; it travels in the URL of
 //   `/_fling-pass` on the site's host.
 // - `fling_pass` (payload { k: 'pass', s, e, x }): the site pass the edge mints from a handoff,
-//   a host-only cookie that opens that one restricted site for 15 minutes.
+//   a host-only cookie that opens that one restricted site for 5 minutes.
+// - the deny handoff (payload { k: 'deny', s, x }): the API's word, valid for 60 seconds, that the
+//   browser's user may not view `s`; it travels in the same `/_fling-pass` URL.
+// - a refused `fling_pass` (payload { k: 'denied', s, x }): what the edge mints from a deny
+//   handoff, in the same cookie. For SITE_DENIED_TTL_SECONDS the site answers its 404 page rather
+//   than sending the browser to sign in again; a later pass simply replaces it.
 //
-// `k` keeps them apart: a handoff is never a pass, and neither is a `fling_site` cookie. The edge
+// `k` keeps them apart, strictly: each verifier takes exactly one kind, so a handoff is never a
+// pass, a refusal is never a pass or a handoff, and none of them is a `fling_site` cookie. The edge
 // verifies with the HMAC passed in as a function (for the CloudFront runtime's `crypto` module):
 // keep the two in step; edge tests check them against each other.
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
-export { SITE_PASS_COOKIE_NAME, SITE_PASS_TTL_SECONDS } from './route-keys.ts'
+export {
+  SITE_DENIED_TTL_SECONDS,
+  SITE_PASS_COOKIE_NAME,
+  SITE_PASS_TTL_SECONDS,
+} from './route-keys.ts'
 
 export const SITE_COOKIE_NAME = 'fling_site'
 export const SITE_COOKIE_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -26,6 +36,9 @@ export type SiteCookiePayload = { e: string; x: number }
 export const PASS_HANDOFF_TTL_SECONDS = 60
 
 export type SitePassPayload = { s: string; e: string; x: number }
+
+/** A refusal names only the site: no one's email travels in it. */
+export type SiteDenialPayload = { s: string; x: number }
 
 function sign(payload: object, key: string): string {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -83,4 +96,26 @@ export function verifySitePass(
   if (!p || p.k !== kind) return null
   if (typeof p.s !== 'string' || typeof p.e !== 'string' || typeof p.x !== 'number') return null
   return p.x > nowSeconds ? { s: p.s, e: p.e, x: p.x } : null
+}
+
+/** A deny handoff: the API refuses this browser restricted site `s` (the edge remembers it). */
+export function signDenyHandoff(payload: SiteDenialPayload, key: string): string {
+  return sign({ k: 'deny', ...payload }, key)
+}
+
+/** A refused `fling_pass`, as the edge mints it (tests, and checks against the edge). */
+export function signSiteDenied(payload: SiteDenialPayload, key: string): string {
+  return sign({ k: 'denied', ...payload }, key)
+}
+
+/** A valid, unexpired refusal of `kind` ('deny' or 'denied'); null otherwise. */
+export function verifySiteDenial(
+  value: string,
+  key: string,
+  kind: 'deny' | 'denied',
+  nowSeconds = Math.floor(Date.now() / 1000)
+): SiteDenialPayload | null {
+  const p = verify(value, key)
+  if (!p || p.k !== kind || typeof p.s !== 'string' || typeof p.x !== 'number') return null
+  return p.x > nowSeconds ? { s: p.s, x: p.x } : null
 }

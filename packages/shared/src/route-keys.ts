@@ -22,4 +22,9 @@ export const SITE_PASS_PATH = '/_fling-pass'
 /** The site pass cookie (host-only, on a restricted site's host). */
 export const SITE_PASS_COOKIE_NAME = 'fling_pass'
 /** How long a site pass lasts: the most a removed viewer keeps seeing the site. */
-export const SITE_PASS_TTL_SECONDS = 15 * 60
+export const SITE_PASS_TTL_SECONDS = 5 * 60
+/**
+ * How long a `fling_pass` that says the site refused this browser lasts: the site answers 404
+ * until then, and someone added to its audience waits at most this long to get in.
+ */
+export const SITE_DENIED_TTL_SECONDS = 10

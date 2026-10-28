@@ -6,7 +6,7 @@
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { routeTableConformance } from '@fling/conformance'
 import { siteKvsKey } from '@fling/shared/route-keys'
-import { signPassHandoff, signSiteCookie } from '@fling/shared/site-cookie'
+import { signDenyHandoff, signPassHandoff, signSiteCookie } from '@fling/shared/site-cookie'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CachedRouteTable } from '../src/route-table/cached.ts'
 import { WorkersKvRouteTable } from '../src/route-table/kv.ts'
@@ -160,13 +160,31 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     expect(pass.headers.get('location')).toBe('/docs/')
     const setCookie = pass.headers.get('set-cookie') ?? ''
     expect(setCookie).toMatch(
-      /^fling_pass=[^;]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=900$/
+      /^fling_pass=[^;]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=300$/
     )
     const served = await req('team.sites.example.test', '/', {
       headers: { cookie: setCookie.split(';')[0] as string },
     })
     expect(served.status).toBe(200)
     expect(await served.text()).toBe('team app')
+  })
+
+  it('answers a refused browser with the 404 page at the URL it asked for, after a deny handoff', async () => {
+    const t = signDenyHandoff({ s: 'S3', x: Math.floor(Date.now() / 1000) + 60 }, cf.siteKey)
+    const deny = await req('team.sites.example.test', `/_fling-pass?t=${t}&r=%2Fdocs%2F`)
+    expect(deny.status).toBe(302)
+    expect(deny.headers.get('location')).toBe('/docs/')
+    const setCookie = deny.headers.get('set-cookie') ?? ''
+    expect(setCookie).toMatch(
+      /^fling_pass=[^;]+; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=10$/
+    )
+    const refused = await req('team.sites.example.test', '/docs/', {
+      headers: { cookie: setCookie.split(';')[0] as string },
+    })
+    expect(refused.status).toBe(404)
+    expect(refused.headers.get('cache-control')).toBe('no-store')
+    const unknown = await req('nobody.sites.example.test', '/docs/')
+    expect(await refused.text()).toBe(await unknown.text())
   })
 
   it('refuses other methods', async () => {

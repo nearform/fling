@@ -884,11 +884,15 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       run(t.groups.name, args.server, async target => {
         const instance = await withGroups(target)
         const [groups, me] = await Promise.all([
-          listGroups(target.client, { mine: args.mine }),
+          listGroups(target.client, { mine: args.mine, members: args.members }),
           whoami(target.client),
         ])
+        const which = args.members ? ' of exactly those people' : ''
         return {
-          summary: `${groups.length} ${args.mine ? 'of your ' : ''}group(s)${onFling(target.url, instance)}\n${describeGroups(groups, me.email)}`,
+          summary:
+            args.members && groups.length === 0
+              ? `No group has exactly those people${onFling(target.url, instance)}`
+              : `${groups.length} ${args.mine ? 'of your ' : ''}group(s)${which}${onFling(target.url, instance)}\n${describeGroups(groups, me.email)}`,
           data: { groups },
         }
       })

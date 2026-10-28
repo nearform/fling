@@ -53,16 +53,19 @@ function server() {
   let audience: SiteDetail['audience'] = { emails: [], groups: [] }
   const m = mockFetch({
     'GET /api/me': () => jsonResponse(ME),
-    'GET /api/groups': () =>
-      jsonResponse({
-        groups: [
-          { ...design(), members: undefined, canManage: undefined },
-          {
-            ...design({ slug: 'ops', name: 'Ops', owner: ME.email, size: 0 }),
-            members: undefined,
-          },
-        ],
-      }),
+    // `members`: only design, whose one member is carol, matches exactly.
+    'GET /api/groups': url => {
+      const members = url.searchParams.get('members')
+      const all = [
+        { ...design(), members: undefined, canManage: undefined },
+        {
+          ...design({ slug: 'ops', name: 'Ops', owner: ME.email, size: 0 }),
+          members: undefined,
+        },
+      ]
+      if (members === null) return jsonResponse({ groups: all })
+      return jsonResponse({ groups: members === 'carol@example.test' ? all.slice(0, 1) : [] })
+    },
     'GET /api/groups/design': () => jsonResponse(design()),
     'POST /api/groups': (_url, init) => {
       record('POST', '/api/groups', init)
@@ -120,6 +123,25 @@ describe('fling groups', () => {
     await runGroups(ctx, {})
     expect(out.content()).toMatch(/design\s+Design team\s+1\s+bob@example\.test/)
     expect(out.content()).toMatch(/ops\s+Ops\s+0\s+you/)
+  })
+
+  it('--members lists only the groups of exactly those people, normalised', async () => {
+    const s = server()
+    const { ctx, out } = await testContext({ store: await loggedInStore(), fetch: s.fetch })
+    const asked = () =>
+      s.calls
+        .filter(c => c.url.pathname === '/api/groups')
+        .at(-1)
+        ?.url.searchParams.get('members')
+    await runGroups(ctx, { members: ['Carol@Example.test'] })
+    expect(asked()).toBe('carol@example.test')
+    expect(out.content()).toMatch(/design\s+Design team/)
+    expect(out.content()).not.toContain('Ops')
+    await runGroups(ctx, { members: ['carol@example.test,x@example.test'] })
+    expect(asked()).toBe('carol@example.test,x@example.test')
+    expect(out.content()).toContain('No group has exactly those people.')
+    const err = await captureError(runGroups(ctx, { members: [' '] }))
+    expect(err.message).toContain('Name at least one address')
   })
 
   it('shows a group with its members; creates one with members', async () => {
@@ -192,6 +214,20 @@ describe('MCP group tools', () => {
     const text = (list as { content: { text: string }[] }).content[0]?.text ?? ''
     expect(text).toContain('design (Design team, 1 person), owned by bob@example.test')
     expect(text).toContain('ops (Ops, 0 people), owned by you')
+    const same = await client.callTool({
+      name: 'fling_groups',
+      arguments: { members: ['carol@example.test'] },
+    })
+    const sameText = (same as { content: { text: string }[] }).content[0]?.text ?? ''
+    expect(sameText).toContain('1 group(s) of exactly those people')
+    expect(sameText).not.toContain('ops (Ops')
+    const none = await client.callTool({
+      name: 'fling_groups',
+      arguments: { members: ['nobody@example.test'] },
+    })
+    expect((none as { content: { text: string }[] }).content[0]?.text).toContain(
+      'No group has exactly those people'
+    )
     const set = await client.callTool({
       name: 'fling_set_audience',
       arguments: { name: 'my-app', addGroups: ['design'] },

@@ -32,6 +32,7 @@ import {
   SiteWithAudienceSchema,
   siteUrl,
   sortSites,
+  splitEmails,
   type VersionFiles,
   VersionFilesSchema,
   type Visibility,
@@ -222,14 +223,20 @@ export function audiencesEnabled(
 
 const groupPath = (slug: string) => `/api/groups/${encodeURIComponent(slug)}`
 
-/** Every group on the Fling, or (`mine`) the caller's own; by slug. */
+/**
+ * Every group on the Fling, or (`mine`) the caller's own; by slug. With `members`, only the groups
+ * whose members are exactly those addresses.
+ */
 export async function listGroups(
   client: ApiClient,
-  opts: { mine?: boolean } = {}
+  opts: { mine?: boolean; members?: readonly string[] } = {}
 ): Promise<GroupSummary[]> {
   const res = await client.request('GET', '/api/groups', {
     schema: GroupListSchema,
-    query: { mine: opts.mine ? 1 : undefined },
+    query: {
+      mine: opts.mine ? 1 : undefined,
+      members: opts.members ? splitEmails(opts.members).join(',') : undefined,
+    },
   })
   return res.groups
 }

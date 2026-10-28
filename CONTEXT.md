@@ -56,8 +56,12 @@ or deletes it (`canGroup` in `policy.ts`; no co-managers, and admins get nothing
 member has a **membership** item (`USER#<email>/GROUP#<id>`), what policy reads for a restricted
 site. Deleting a group never widens who sees a site: it leaves the audiences that name others too,
 and where it was the only entry its id stays, matching nobody, so the site is the owner's alone
-(shown as "a deleted group", `#<id>`) until they change it. `/api/groups`, `fling groups`, the `fling_group*` tools and
-the web's Groups pages; the `groups` capability.
+(shown as "a deleted group", `#<id>`) until they change it. The groups of exactly a given set of
+people (`GET /api/groups?members=…`, `fling groups --members`, `fling_groups { members }`) come
+from the memberships, intersected, then compared with each group's member count, never a scan:
+how clients suggest a group that already holds the people listed. `/api/groups`, `fling groups`,
+the `fling_group*` tools and the web's group editor (`apps/web/src/components/GroupEditor.tsx`,
+opened from the Groups page and a site's Access section); the `groups` capability.
 
 **Shared with me** — the restricted sites of others that someone may see because the audience
 names them, by address or through a group they are a member of (`listShared` in
@@ -71,11 +75,14 @@ nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fli
 
 **Site pass** — how the edge lets someone into a restricted site without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
-for 15 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
+for 5 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
 `/auth/login`, where the API asks policy and sends a viewer to `/_fling-pass?t=<handoff>` on the
-site's host (a 60-second signed **handoff**), and anyone else to the sites' 404 page. The edge turns
-the handoff into the pass. An expired pass renews through the same redirects, so taking someone out
-of an audience shuts them out within 15 minutes.
+site's host (a 60-second signed **handoff**), and anyone else to the same path with a **deny
+handoff** naming only the site. The edge turns the handoff into the pass, and the deny handoff into
+a `fling_pass` that says the site refused them (`SITE_DENIED_TTL_SECONDS`, 10 seconds): while it
+lasts, the site answers as a missing one, its 404 page at the address asked for. An expired pass
+renews through the same redirects, so taking someone out of an audience shuts them out within 5
+minutes, and someone added gets in within 10 seconds.
 
 **Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
 `IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The

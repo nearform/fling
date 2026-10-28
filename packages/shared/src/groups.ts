@@ -45,7 +45,10 @@ export const GroupSummarySchema = z.object({
 })
 export type GroupSummary = z.infer<typeof GroupSummarySchema>
 
-/** GET /api/groups[?mine=1]: every group on the instance (or the caller's own), by slug. */
+/**
+ * GET /api/groups[?mine=1][&members=a@x,b@y]: every group on the instance (or the caller's own),
+ * by slug. With `members`, only the groups whose members are exactly those addresses.
+ */
 export const GroupListSchema = z.object({ groups: z.array(GroupSummarySchema) })
 
 /** GET /api/groups/:slug: the group with its members; `canManage` when the caller owns it. */

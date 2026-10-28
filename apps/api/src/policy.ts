@@ -193,8 +193,8 @@ export function canDeleteComment(
  * Every action on a group. Groups are not secret: every member of the instance may know them, so
  * a refusal is a 403, not a 404.
  *
- *   group.read    GET /api/groups, GET /api/groups/:slug (members included), fling_groups,
- *                 fling_group_show; naming the group in a site's audience
+ *   group.read    GET /api/groups[?members=…], GET /api/groups/:slug (members included),
+ *                 fling_groups, fling_group_show; naming the group in a site's audience
  *   group.manage  PATCH /api/groups/:slug { name }, POST …/members, fling_group_rename,
  *                 fling_group_members
  *   group.delete  DELETE /api/groups/:slug, fling_group_delete

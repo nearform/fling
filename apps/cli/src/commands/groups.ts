@@ -25,9 +25,18 @@ function requireGroups(ctx: CommandContext) {
   return requireClient(ctx)
 }
 
-export async function runGroups(ctx: CommandContext, opts: { mine?: boolean }): Promise<void> {
+/** `--members a,b`: only the groups of exactly those people (none: say so, not "no groups yet"). */
+export async function runGroups(
+  ctx: CommandContext,
+  opts: { mine?: boolean; members?: string[] }
+): Promise<void> {
   const client = requireGroups(ctx)
-  const [groups, me] = await Promise.all([listGroups(client, opts), whoami(client)])
+  const members = opts.members ? splitEmails(opts.members) : undefined
+  if (members && members.length === 0) throw new CliError('Name at least one address')
+  const [groups, me] = await Promise.all([
+    listGroups(client, { mine: opts.mine, members }),
+    whoami(client),
+  ])
   ctx.out.data({ groups }, () =>
     groups.length
       ? renderTable(groups, [
@@ -36,7 +45,7 @@ export async function runGroups(ctx: CommandContext, opts: { mine?: boolean }): 
           { header: 'PEOPLE', value: g => g.size },
           { header: 'OWNER', value: g => (g.owner === me.email ? 'you' : g.owner) },
         ])
-      : chalk.dim(describeGroups([]))
+      : chalk.dim(members ? 'No group has exactly those people.' : describeGroups([]))
   )
 }
 

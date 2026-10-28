@@ -325,7 +325,8 @@ groups
   .alias('ls')
   .description('list the groups on this Fling')
   .option('--mine', 'only the groups you own')
-  .action(action((ctx, opts: { mine?: boolean }) => runGroups(ctx, opts)))
+  .option('--members <emails...>', 'only the groups of exactly these people (a,b or a b)')
+  .action(action((ctx, opts: { mine?: boolean; members?: string[] }) => runGroups(ctx, opts)))
 groups
   .command('create <slug>')
   .description('create a group you own (slug: lowercase letters, digits and single hyphens)')

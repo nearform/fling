@@ -236,9 +236,11 @@ a visibility change, an archived site, a rotated or revoked share link, a site b
 restricted or open again (its audience changing from or to empty).
 
 **Restricted sites** (private with an audience) are let in by a site pass: the app checks the
-audience at sign-in and the Worker sets a host-only `fling_pass` cookie, good for 15 minutes. So
-taking someone out of an audience, or out of a group it names, shuts them out within 15 minutes (plus the KV delay above when it
-was the last person and the site opens to every member again).
+audience at sign-in and the Worker sets a host-only `fling_pass` cookie, good for 5 minutes.
+Someone the audience refuses gets the same cookie saying so, for 10 seconds, and sees the 404 page
+at the address they asked for, so adding someone lets them in within 10 seconds. Taking someone
+out of an audience, or out of a group it names, shuts them out within 5 minutes (plus the KV delay
+above when it was the last person and the site opens to every member again).
 
 ## Rollback
 

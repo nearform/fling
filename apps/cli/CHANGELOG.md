@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `fling groups --members a,b` lists only the groups whose members are exactly those people, to
+  find a group to use before making another. The MCP tool `fling_groups` takes `members` for the
+  same.
+
 - **Shared with me.** `fling ls --shared` lists the restricted sites other people have shared with
   you, by address or through a group you are in, with their owner and how (`--sort` as for
   `fling ls`; `--json`: `{ name, url, reviewUrl?, owner, via: { direct, groups }, createdAt,

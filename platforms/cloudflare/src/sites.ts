@@ -28,7 +28,7 @@ export interface SitesOptions {
   bucket: R2Bucket
   assets: Bindings['ASSETS']
   now?: () => number
-  /** how long a site pass lasts (default: the routing decision's, 15 minutes) */
+  /** how long a site pass lasts (default: the routing decision's, 5 minutes) */
   passTtlSeconds?: number
 }
 

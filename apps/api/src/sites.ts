@@ -31,7 +31,6 @@ import {
   type Audience,
   type AudienceInput,
   AudienceInputSchema,
-  accessLevelOf,
   accessProblem,
   deletedGroupId,
   deletedGroupRef,
@@ -73,15 +72,9 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
+import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
 import {
-  type Action,
-  type Actor,
-  can,
-  isRestricted,
-  restrictsToAudience,
-  userActor,
-} from './policy.ts'
-import {
+  accessOfSite,
   hasListing,
   listingOf,
   type SharedListing,
@@ -127,12 +120,7 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
     shareUrl: site.shareToken
       ? siteUrl(shareLabel(site.shareToken), sitesDomain, protocol(deps))
       : null,
-    access: accessLevelOf({
-      visibility: site.visibility,
-      restricted: restrictsToAudience(site),
-      emails: site.audience.emails.length,
-      groups: site.audience.groups.length,
-    }),
+    access: accessOfSite(site),
     restricted: isRestricted(site),
     audienceSize: site.audience.emails.length + site.audience.groups.length,
     audienceGroups: site.audience.groups.length,

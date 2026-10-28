@@ -26,6 +26,10 @@
  *                                                        (name, owner, createdAt, updatedAt,
  *                                                        archived, live, restricted), so the sites
  *                                                        shared with a user are one query
+ *   SITES                  SITE#<name>                   site directory: the site's listing (as a
+ *                                                        grant) and access level, written with the
+ *                                                        site (migration 0004 backfilled it), so
+ *                                                        an admin lists every site by one query
  *   NAME#<name>            NAME                          site name claim → { name, email, siteId,
  *                                                        createdAt } (names are global, first
  *                                                        come, first served); how a site is found
@@ -56,7 +60,9 @@
  *   GROUPNAME#<slug>       NAME                          slug claim → { slug, groupId, owner,
  *                                                        createdAt }; how a group is found
  *
- * A site's record, its index item and (on creation) its claim are written in one transaction.
+ * A site's record, its index item, its directory item and (on creation) its claim are written in
+ * one transaction. `putSite` rewrites the directory item with the site whenever its listing or
+ * access level changed.
  *
  * Direct grants and group-site items (v2) carry a copy of the site's listing (`SharedListing`),
  * so Shared with me reads no site. `putSite` compares the site with the one stored and keeps
@@ -180,6 +186,7 @@ import {
   type BatchRef,
   type BatchSent,
   type CommentRecord,
+  directoryOf,
   type FanOutRecord,
   type GrantRecord,
   type GroupRecord,
@@ -203,6 +210,7 @@ import {
   type RefreshTokenRecord,
   type SentNotificationRecord,
   type SharedListing,
+  type SiteDirectoryRecord,
   type SiteGrantRecord,
   type SiteRecord,
   type SiteRef,
@@ -230,6 +238,7 @@ const key = {
   name: (name: string) => ({ pk: `NAME#${name}`, sk: 'NAME' }),
   site: (siteId: string) => ({ pk: sitePk(siteId), sk: 'SITE' }),
   siteIndex: (email: string, name: string) => ({ pk: userPk(email), sk: `SITE#${name}` }),
+  siteDirectory: (name: string) => ({ pk: 'SITES', sk: `SITE#${name}` }),
   siteGrant: (email: string, siteId: string) => ({ pk: userPk(email), sk: `SHARED#${siteId}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
   group: (id: string) => ({ pk: groupPk(id), sk: 'GROUP' }),
@@ -582,6 +591,7 @@ export class Records implements Store {
         { put: encode('name', key.name(site.name), claim), cond: ifAbsent },
         { put: encode('site', key.site(site.id), site), cond: ifAbsent },
         { put: encode('site', key.siteIndex(site.email, site.name), site), cond: ifAbsent },
+        { put: encode('sitedirectory', key.siteDirectory(site.name), directoryOf(site)) },
       ])
       return site
     } catch (err) {
@@ -600,6 +610,8 @@ export class Records implements Store {
     const after = site.audience
     const listing = listingOf(site)
     const relist = !stored || !sameListing(listingOf(stored), listing)
+    const entry = directoryOf(site)
+    const rewriteDirectory = relist || !stored || directoryOf(stored).access !== entry.access
     const removed: TransactOp[] = [
       ...before.emails
         .filter(email => !after.emails.includes(email) && email !== site.email)
@@ -630,6 +642,9 @@ export class Records implements Store {
     const ops: TransactOp[] = [
       { put: encode('site', key.site(site.id), site) },
       { put: encode('site', key.siteIndex(site.email, site.name), site) },
+      ...(rewriteDirectory
+        ? [{ put: encode('sitedirectory', key.siteDirectory(site.name), entry) }]
+        : []),
       ...written,
     ]
     for (let i = 0; i < ops.length; i += TRANSACT_MAX) {
@@ -651,6 +666,18 @@ export class Records implements Store {
       (newest, s) => (newest && newest.updatedAt >= s.updatedAt ? newest : s),
       null
     )
+  }
+
+  async listAllSites(opts: { prefix?: string; limit: number; cursor?: string }) {
+    const page = await this.table.query('SITES', {
+      skPrefix: `SITE#${opts.prefix ?? ''}`,
+      limit: opts.limit,
+      cursor: opts.cursor,
+    })
+    return {
+      sites: page.items.map(i => decode<SiteDirectoryRecord>('sitedirectory', i)),
+      ...(page.cursor ? { cursor: page.cursor } : {}),
+    }
   }
 
   listSiteGrants(email: string) {
@@ -675,17 +702,18 @@ export class Records implements Store {
     const grants = site.audience.emails.map(email => key.siteGrant(email, site.id))
     const groups = site.audience.groups.map(groupId => key.groupSite(groupId, site.id))
     await this.deleteAll([...rest, ...legacy.items, ...grants, ...groups])
-    // Release the name claim only if it is this site's (or absent). If another site holds it,
-    // the site is still deleted and the claim kept.
+    // Release the name claim and the directory item only if they are this site's (or absent). If
+    // another site holds the name, the site is still deleted and the holder's items kept.
     const ops: TransactOp[] = [
       { delete: key.site(site.id) },
       { delete: key.siteIndex(site.email, site.name) },
     ]
-    const claim = {
-      delete: key.name(site.name),
-      cond: fieldEquals('siteId', site.id, { orAbsent: true }),
-    }
-    if (!(await unless(this.table.transact([...ops, claim])))) await this.table.transact(ops)
+    const ours = fieldEquals('siteId', site.id, { orAbsent: true })
+    const named: TransactOp[] = [
+      { delete: key.siteDirectory(site.name), cond: ours },
+      { delete: key.name(site.name), cond: ours },
+    ]
+    if (!(await unless(this.table.transact([...ops, ...named])))) await this.table.transact(ops)
   }
 
   // --- groups ---

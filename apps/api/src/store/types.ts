@@ -9,7 +9,8 @@ import type {
   NotificationPreferences,
   Visibility,
 } from '@fling/shared'
-import { isRestricted } from '../policy.ts'
+import { accessLevelOf } from '@fling/shared'
+import { isRestricted, restrictsToAudience } from '../policy.ts'
 
 export interface User {
   email: string
@@ -127,6 +128,27 @@ export function listingOf(site: SiteRecord): SharedListing {
     restricted: isRestricted(site),
   }
 }
+
+/** The site's access level (`packages/shared/src/access.ts`), from what is stored. */
+export function accessOfSite(site: SiteRecord): AccessLevel {
+  return accessLevelOf({
+    visibility: site.visibility,
+    restricted: restrictsToAudience(site),
+    emails: site.audience.emails.length,
+    groups: site.audience.groups.length,
+  })
+}
+
+/**
+ * A site in the instance's site directory (`SITES/SITE#<name>`): its listing and access level,
+ * written with the site, so the admins' list of every site is one query.
+ */
+export type SiteDirectoryRecord = SharedListing & { access: AccessLevel }
+
+export const directoryOf = (site: SiteRecord): SiteDirectoryRecord => ({
+  ...listingOf(site),
+  access: accessOfSite(site),
+})
 
 /**
  * The listing on an index item. v1 items (written before the listing was copied) carry only the
@@ -370,24 +392,36 @@ export interface Store extends NotificationStore {
   /** Who owns `name` globally (null → free). */
   getNameClaim(name: string): Promise<NameClaim | null>
   /**
-   * Claim `site.name` for `site.email` and insert the site, atomically. Returns the stored
+   * Claim `site.name` for `site.email` and insert the site (with its index and directory items),
+   * atomically. Returns the stored
    * record (the existing one if this user already has it), or null when another user owns
    * the name.
    */
   createSite(site: SiteRecord): Promise<SiteRecord | null>
   /**
-   * Write the site and keep its index items in step with the stored one: emails that leave the
-   * audience lose their direct grant and groups their group-site item; those that join gain one;
-   * and when the listing (`SharedListing`) changed, every grant and group-site item is rewritten.
+   * Write the site and its index item, and keep its other index items in step with the stored
+   * one: the directory item is rewritten when the listing or access level changed; emails that
+   * leave the audience lose their direct grant and groups their group-site item; those that join
+   * gain one; and when the listing (`SharedListing`) changed, every grant and group-site item is
+   * rewritten.
    */
   putSite(site: SiteRecord): Promise<void>
   /**
-   * Delete the site with its versions, grants and group-site items, and release its name claim (if
-   * the claim is its).
+   * Delete the site with its versions, grants, group-site items and directory item, and release
+   * its name claim (if the claim is its).
    */
   deleteSite(site: SiteRecord): Promise<void>
   /** The sites shared with `email` directly (its grants, with their listings), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
+  /**
+   * Every site on the instance by name (byte order), optionally only those whose name starts with
+   * `prefix`, a page at a time: the site directory, for admins.
+   */
+  listAllSites(opts: {
+    prefix?: string
+    limit: number
+    cursor?: string
+  }): Promise<{ sites: SiteDirectoryRecord[]; cursor?: string }>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
 

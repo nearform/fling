@@ -2,7 +2,13 @@
  * The badges a site wears in the list and on its page: its access level (or archived), with how
  * many people and teams a list names, and whether it has a share link.
  */
-import { type AccessLevel, accessDescription, type Site, siteAccessLevel } from '@fling/shared'
+import {
+  type AccessLevel,
+  accessDescription,
+  type Site,
+  type SiteAccessFields,
+  siteAccessLevel,
+} from '@fling/shared'
 import {
   GlobeAltIcon,
   LinkIcon,
@@ -23,7 +29,7 @@ const ICONS: Record<AccessLevel, typeof GlobeAltIcon> = {
 }
 
 /** `Only you`, `Everyone signed in`, `Specific people · 2 people · 1 group`, `Public`. */
-export function AccessBadge({ site }: { site: Site }) {
+export function AccessBadge({ site }: { site: SiteAccessFields }) {
   const members = audienceFor(useInstance())
   const level = siteAccessLevel(site)
   const Icon = ICONS[level]

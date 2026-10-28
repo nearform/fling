@@ -9,6 +9,7 @@ import {
 } from '../src/components/SideNav'
 import {
   ADMIN_USERS_PATH,
+  allSitesCountLabel,
   impersonateBlocked,
   impersonationNotice,
   showsAdmin,
@@ -94,5 +95,23 @@ describe('the users list', () => {
     expect(impersonateBlocked(boss, user({ email: 'other@example.test', admin: true }))).toBe(
       'Admin'
     )
+  })
+})
+
+describe('All sites count', () => {
+  it('says what is loaded, with a + while more pages wait, and the prefix searched', () => {
+    expect(allSitesCountLabel({ loaded: undefined, more: false, prefix: '' })).toBe(
+      'Every site on this instance'
+    )
+    expect(allSitesCountLabel({ loaded: 0, more: false, prefix: '' })).toBe(
+      'Nothing flung on this instance yet'
+    )
+    expect(allSitesCountLabel({ loaded: 1, more: false, prefix: '' })).toBe(
+      '1 site on this instance'
+    )
+    expect(allSitesCountLabel({ loaded: 50, more: true, prefix: '' })).toBe(
+      '50+ sites on this instance'
+    )
+    expect(allSitesCountLabel({ loaded: 0, more: false, prefix: 'q3' })).toBe('0 sites named “q3…”')
   })
 })

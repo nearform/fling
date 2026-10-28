@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - `fling groups --members a,b` lists only the groups whose members are exactly those people, to
   find a group to use before making another. The MCP tool `fling_groups` takes `members` for the

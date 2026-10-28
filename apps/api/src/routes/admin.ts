@@ -1,10 +1,11 @@
 /**
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
- * check): the users list, the audit log, the mail page (settings, health and a test email), and
+ * check): the users list, every site's listing, the audit log, the mail page (settings, health and a test email), and
  * starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
+  AdminSiteListSchema,
   AdminUserListSchema,
   AuditListSchema,
   ImpersonateRequestSchema,
@@ -31,6 +32,16 @@ adminRoutes.get('/users', async c => {
     limit: limit ? Number(limit) || undefined : undefined,
   })
   return c.json(AdminUserListSchema.parse(list))
+})
+
+adminRoutes.get('/sites', async c => {
+  const limit = c.req.query('limit')
+  const list = await admin.listSites(c.get('deps'), principalOf(c), {
+    q: c.req.query('q'),
+    cursor: c.req.query('cursor'),
+    limit: limit ? Number(limit) || undefined : undefined,
+  })
+  return c.json(AdminSiteListSchema.parse(list))
 })
 
 adminRoutes.get('/audit', async c => {

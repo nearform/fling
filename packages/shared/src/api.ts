@@ -255,6 +255,31 @@ export const AdminUserListSchema = z.object({
 })
 export type AdminUserList = z.infer<typeof AdminUserListSchema>
 
+/**
+ * GET /api/admin/sites?q=<name prefix>&cursor=&limit= — every site on the instance, a page at a
+ * time, by name: its listing, nothing of the owner's (versions, share link, audience).
+ */
+export const AdminSiteSchema = z.object({
+  name: z.string(),
+  url: z.string(),
+  /** the site's review page (`comments` capability) */
+  reviewUrl: z.string().optional(),
+  owner: z.string(),
+  access: AccessLevelSchema,
+  archived: z.boolean(),
+  /** it has a current version */
+  live: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+export type AdminSite = z.infer<typeof AdminSiteSchema>
+export const AdminSiteListSchema = z.object({
+  sites: z.array(AdminSiteSchema),
+  /** pass back as `cursor` for the next page; null: no more */
+  cursor: z.string().nullable(),
+})
+export type AdminSiteList = z.infer<typeof AdminSiteListSchema>
+
 /** GET /api/admin/audit — the latest admin actions, newest first. */
 export const AuditEntrySchema = z.object({
   id: z.string(),

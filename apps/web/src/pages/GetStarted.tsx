@@ -60,8 +60,7 @@ export function QuickStart() {
       <Step n={3} title="Fling a folder">
         <p className="text-sm text-secondary">
           Point it at your build output. You get back a stable URL, <code>{example}</code>, that
-          only {audienceFor(instance)} can open. Fling it again to update; identical content is a
-          no-op.
+          {audienceFor(instance)} can open. Fling it again to update; identical content is a no-op.
         </p>
         <CommandLine command="fling deploy ./dist --name my-app" />
       </Step>

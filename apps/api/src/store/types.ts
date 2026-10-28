@@ -1,5 +1,13 @@
 /** The persistence façade routes use, implemented once by `Records` (records.ts) over Table. */
-import type { CommentAnchor, CommentAuthor, LivePeer, Visibility } from '@fling/shared'
+import type {
+  ChannelId,
+  CommentAnchor,
+  CommentAuthor,
+  EventKey,
+  LivePeer,
+  NotificationPreferences,
+  Visibility,
+} from '@fling/shared'
 import { isRestricted } from '../policy.ts'
 
 export interface User {
@@ -309,7 +317,7 @@ export interface UploadFileRecord {
   expiresAt: string
 }
 
-export interface Store {
+export interface Store extends NotificationStore {
   getUser(email: string): Promise<User | null>
   /**
    * A sign-in: create the user (claiming a unique userSlug derived from `preferredSlug`) or
@@ -478,6 +486,270 @@ export interface Store {
    */
   appendUploadPart(file: Omit<UploadFileRecord, 'parts'>): Promise<number | null>
   listUploadFiles(uploadId: string): Promise<UploadFileRecord[]>
+}
+
+// --- notifications ---
+
+/** A UTC minute, `2026-10-28T14:05`: what the outbox schedules by (`NDUE#<minute>`). */
+export type Minute = string
+/** A UTC hour, `2026-10-28T14`: what the hourly counters are keyed by. */
+export type Hour = string
+
+export const minuteOf = (at: Date): Minute => at.toISOString().slice(0, 16)
+export const hourOf = (at: Date): Hour => at.toISOString().slice(0, 13)
+/** The instant a minute starts. */
+export const minuteStart = (minute: Minute) => new Date(`${minute}:00.000Z`)
+export const addMinutes = (minute: Minute, n: number): Minute =>
+  minuteOf(new Date(minuteStart(minute).getTime() + n * 60_000))
+
+/** A recipient's notification preferences (`USER#<email>/NOTIFYPREFS`): only their overrides. */
+export interface NotificationPreferencesRecord extends NotificationPreferences {
+  email: string
+  updatedAt: string
+}
+
+/**
+ * Something that happened that may concern people (`NOTIFY#<eventId>/EVENT`). Its id is derived
+ * from its cause (`comment.created:<siteId>:<commentId>`), so writing it is idempotent. Kept 30
+ * days.
+ */
+export interface NotificationEventRecord {
+  id: string
+  key: EventKey
+  /** who did it: never notified about it */
+  actor: string
+  siteId: string | null
+  /** what the hub needs to find the recipients and render (added addresses, comment id, …) */
+  data: Record<string, unknown>
+  createdAt: string
+  expiresAt: string
+}
+
+/** An event still to fan out (`NDUE#<minute>/FANOUT#<eventId>`), with how far it got. */
+export interface FanOutRecord {
+  eventId: string
+  due: Minute
+  /** how many recipients are queued: where a resumed fan-out carries on */
+  done: number
+  createdAt: string
+  expiresAt: string
+}
+
+/**
+ * A notification waiting for one recipient on one channel
+ * (`USER#<email>/NPEND#<channel>#<batch site or ->#<eventId>`). Kept 7 days.
+ */
+export interface PendingNotificationRecord {
+  email: string
+  channel: ChannelId
+  /**
+   * Which of the recipient's batches it goes in: the site it folds with, or null for events
+   * batched apart from any site (shares, groups).
+   */
+  batchSiteId: string | null
+  eventId: string
+  key: EventKey
+  /** the event's site, if any */
+  siteId: string | null
+  actor: string
+  /** a short excerpt (a comment's first characters), when the event has one */
+  excerpt?: string
+  data?: Record<string, unknown>
+  createdAt: string
+  expiresAt: string
+}
+
+/**
+ * A batch: what goes out as one message to one recipient on one channel about one site (or none),
+ * due at a minute (`NDUE#<minute>/<channel>#<email>#<site or ->`). `due` until a drainer leases
+ * it; a lease lasts until `leaseUntil`, and an expired one can be taken over.
+ */
+export interface NotificationBatchRecord {
+  /** random; what logs and the provider's tags name, never the address */
+  id: string
+  email: string
+  channel: ChannelId
+  siteId: string | null
+  due: Minute
+  state: 'due' | 'leased'
+  /** failed sends so far */
+  attempts: number
+  /** the current lease's token */
+  lease?: string
+  leaseUntil?: string
+  createdAt: string
+  expiresAt: string
+}
+
+/** Names one batch: its recipient, channel, site and due minute. */
+export type BatchRef = Pick<NotificationBatchRecord, 'email' | 'channel' | 'siteId' | 'due'>
+
+/**
+ * The pointer to a recipient's open batch for a channel and site
+ * (`USER#<email>/NBATCH#<channel>#<site or ->`): its due minute, and after a send of cool-down
+ * events, `coolDownUntil`, before which the next batch may not be due.
+ */
+export interface BatchPointerRecord {
+  email: string
+  channel: ChannelId
+  siteId: string | null
+  due?: Minute
+  coolDownUntil?: string
+  expiresAt: string
+}
+
+/** What the drainer counts per hour (`NOTIFY/STATS#<hour>`), for the admin page. */
+export const NOTIFY_COUNTERS = ['sent', 'retrying', 'givenUp', 'suppressed', 'dropped'] as const
+export type NotifyCounter = (typeof NOTIFY_COUNTERS)[number]
+export type NotifyStats = { hour: Hour } & Record<NotifyCounter, number>
+
+/** A failed send, for the admin page (`NOTIFY/FAILURE#<sortable id>`, 48 h). No address. */
+export interface NotifyFailureRecord {
+  id: string
+  at: string
+  batchId: string
+  eventKeys: EventKey[]
+  reason: string
+  /** the provider's error code (MailResult `detail`) */
+  detail?: string
+  expiresAt: string
+}
+
+/** A message that went out (`USER#<email>/NSENT#<sortable id>`, 30 days): the user's record. */
+export interface SentNotificationRecord {
+  id: string
+  email: string
+  channel: ChannelId
+  batchId: string
+  siteId: string | null
+  eventIds: string[]
+  eventKeys: EventKey[]
+  subject: string
+  providerId?: string
+  sentAt: string
+  expiresAt: string
+}
+
+/** An address not to send to (`SUPPRESS#<email>/SUPPRESS`), after a hard bounce or a complaint. */
+export interface SuppressionRecord {
+  email: string
+  kind: 'bounce' | 'complaint'
+  at: string
+}
+
+/** The persistence of notifications, part of the Store. Nothing here scans. */
+export interface NotificationStore {
+  // --- preferences ---
+  /** The recipient's preferences (only cells the catalogue still has), or null: all defaults. */
+  getNotificationPreferences(email: string): Promise<NotificationPreferencesRecord | null>
+  /** Replace them; cells for events or channels the catalogue lacks are dropped. */
+  putNotificationPreferences(
+    email: string,
+    prefs: NotificationPreferences,
+    at: string
+  ): Promise<NotificationPreferencesRecord>
+
+  // --- events and fan-out ---
+  /**
+   * Store the event with its fan-out marker due at `due`, in one transaction. false when an event
+   * with its id exists already (a retried request): nothing is written.
+   */
+  putNotificationEvent(
+    event: Omit<NotificationEventRecord, 'expiresAt'>,
+    due: Minute
+  ): Promise<boolean>
+  getNotificationEvent(id: string): Promise<NotificationEventRecord | null>
+  /** Everything due at `minute`: fan-outs to carry on and batches to send. One query. */
+  listDueNotifications(
+    minute: Minute
+  ): Promise<{ fanOuts: FanOutRecord[]; batches: NotificationBatchRecord[] }>
+  /** Record how many recipients a fan-out has queued. */
+  saveFanOutProgress(minute: Minute, eventId: string, done: number): Promise<void>
+  /** Move a fan-out marker to a later minute, keeping its progress. */
+  moveFanOut(from: Minute, to: Minute, eventId: string): Promise<void>
+  /** The fan-out is complete: forget its marker. */
+  finishFanOut(minute: Minute, eventId: string): Promise<void>
+
+  // --- pending notifications and batches ---
+  /**
+   * Queue a notification for its recipient: fold it into their open batch for its channel and
+   * batch site while that batch is still due, else open one due at `earliest` or the end of the
+   * cool-down, whichever is later (the pointer and the batch in one transaction, so racing
+   * fan-outs open one batch). `queued` is false when the same event was pending already.
+   * `earliest` must be later than the drain cursor.
+   */
+  queueNotification(
+    item: Omit<PendingNotificationRecord, 'expiresAt'>,
+    earliest: Minute
+  ): Promise<{ batch: NotificationBatchRecord; opened: boolean; queued: boolean }>
+  getBatchPointer(
+    email: string,
+    channel: ChannelId,
+    siteId: string | null
+  ): Promise<BatchPointerRecord | null>
+  /**
+   * Lease a batch until `leaseUntil`: one that is due, or whose lease expired by `now`. Null when
+   * it is gone or someone else holds it; of concurrent leases exactly one wins.
+   */
+  leaseNotificationBatch(
+    batch: BatchRef,
+    now: string,
+    leaseUntil: string
+  ): Promise<NotificationBatchRecord | null>
+  /** The notifications pending for one batch (its recipient, channel and site), oldest event id first. */
+  listPendingNotifications(
+    email: string,
+    channel: ChannelId,
+    siteId: string | null
+  ): Promise<PendingNotificationRecord[]>
+  /**
+   * Done with a leased batch (sent, or dropped): delete it and the pending notifications it
+   * handled, close the pointer (keeping `coolDownUntil` when given) and write `sent`, in one
+   * transaction where they fit. false when the lease was lost (nothing of the batch is changed).
+   */
+  finishNotificationBatch(
+    batch: NotificationBatchRecord,
+    done: {
+      eventIds: readonly string[]
+      coolDownUntil: string | null
+      sent?: Omit<SentNotificationRecord, 'expiresAt'>
+    }
+  ): Promise<boolean>
+  /**
+   * Move a leased batch to `to` (a later minute), due again (it keeps folding), with `attempts`.
+   * `merged`: another batch already holds its notifications, so it was deleted instead; `lost`:
+   * the lease was lost and nothing changed.
+   */
+  rescheduleNotificationBatch(
+    batch: NotificationBatchRecord,
+    to: Minute,
+    attempts: number
+  ): Promise<'moved' | 'merged' | 'lost'>
+  /** The last minute fully drained, or null before the first drain. */
+  getNotifyCursor(): Promise<Minute | null>
+  /** Move the cursor from `previous` (what was read) to `minute`. false when it moved meanwhile. */
+  setNotifyCursor(minute: Minute, previous: Minute | null): Promise<boolean>
+
+  // --- records, counters and suppression ---
+  /** Add to the hour's counters (48 h). */
+  addNotifyStats(hour: Hour, counts: Partial<Record<NotifyCounter, number>>): Promise<void>
+  /** The counters of every hour from `since` on, oldest first. */
+  listNotifyStats(since: Hour): Promise<NotifyStats[]>
+  addNotifyFailure(failure: Omit<NotifyFailureRecord, 'id' | 'expiresAt'>): Promise<void>
+  /** The latest failures, newest first. */
+  listNotifyFailures(limit: number): Promise<NotifyFailureRecord[]>
+  /** What was sent to `email`, newest first. */
+  listSentNotifications(email: string, limit: number): Promise<SentNotificationRecord[]>
+  getSuppression(email: string): Promise<SuppressionRecord | null>
+  putSuppression(suppression: SuppressionRecord): Promise<void>
+  /** Count one more message to `email` this hour (`NRATE`); returns the count. */
+  countRecipientSend(email: string, hour: Hour): Promise<number>
+  /** Messages to `email` counted this hour, without counting one. */
+  recipientSends(email: string, hour: Hour): Promise<number>
+  /** Count one more message from the instance this minute (`NOTIFY/RATE`); returns the count. */
+  countInstanceSend(minute: Minute): Promise<number>
+  /** Count one more test email by the admin `email` this hour (`NTEST`); returns the count. */
+  countMailTest(email: string, hour: Hour): Promise<number>
 }
 
 /** `alice` → `alice`, `alice-2`, `alice-3`… within USER_SLUG_MAX. */

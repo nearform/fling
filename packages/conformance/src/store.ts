@@ -23,6 +23,7 @@ import type {
 } from '@fling/api/store'
 import { compareSk } from '@fling/api/table'
 import { describe, expect, it } from 'vitest'
+import { notificationStoreConformance } from './store-notifications.ts'
 
 const NOW = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-01T01:00:00.000Z'
@@ -998,5 +999,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect((await store.listUploadFiles(u.id))[0]?.parts).toBe(8)
       })
     })
+
+    notificationStoreConformance(factory)
   })
 }

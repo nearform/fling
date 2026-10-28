@@ -114,6 +114,40 @@
  *                                                        stop) — 180 days; ids sort by time, so the
  *                                                        latest are one reverse query
  *
+ * Notifications (the outbox: the queue the drainer works through, by key and prefix only):
+ *
+ *   USER#<email>           NOTIFYPREFS                   preferences: muted and the recipient's own
+ *                                                        cells (overrides only)
+ *   NOTIFY#<eventId>       EVENT                         an event, written once (ifAbsent): its
+ *                                                        derived id makes a retried request a
+ *                                                        no-op — 30 days
+ *   NDUE#<minute>          FANOUT#<eventId>              an event still to fan out, and how far it
+ *                                                        got; written with the event — 30 days
+ *   USER#<email>           NPEND#<ch>#<site|->#<eventId> a notification pending for the recipient,
+ *                                                        under the batch it folds into — 7 days
+ *   USER#<email>           NBATCH#<ch>#<site|->          the pointer to the recipient's open batch
+ *                                                        (due minute) and the cool-down after a send
+ *   NDUE#<minute>          <ch>#<email>#<site|->         a batch due at that minute (state, lease,
+ *                                                        attempts) — 8 days past due
+ *   NOTIFY                 CURSOR                        the last minute fully drained
+ *   NOTIFY                 STATS#<hour>                  the drainer's counters — 48 h
+ *   NOTIFY                 FAILURE#<sortable id>         a failed send (batch id, event keys,
+ *                                                        reason; no address) — 48 h
+ *   NOTIFY                 RATE#<minute>                 messages the instance sent that minute — 1 h
+ *   USER#<email>           NRATE#<hour>                  messages sent to the recipient that hour
+ *                                                        — 2 h
+ *   USER#<email>           NTEST#<hour>                  test emails the admin sent that hour — 2 h
+ *   USER#<email>           NSENT#<sortable id>           a message that went out — 30 days
+ *   SUPPRESS#<email>       SUPPRESS                      an address not to send to
+ *
+ * Folding: a pending notification joins the batch its pointer names while that batch is `due`
+ * (the pending item and the unchanged batch, conditioned on its state, in one transaction), so
+ * nothing joins a batch a drainer has leased. Otherwise it opens a batch: the pointer (conditioned
+ * on the value read, or absent), the batch and the pending item in one transaction, so two
+ * fan-outs racing for one recipient open one batch. A lease is a conditional update (the batch is
+ * `due`, or its expired lease is still the one read); finishing and rescheduling are conditioned
+ * on the lease token, so a drainer that lost its lease changes nothing.
+ *
  * Every item also carries `type` (its kind; not the API-key lookup) and `v` (see evolution.ts).
  * MIGRATION#<id> items belong to the migration runner (migrations/runner.ts).
  *
@@ -123,7 +157,9 @@
  * the claim. The API key and its lookup are written/deleted together. Version manifests are not
  * records (they can be large); they live in blobs.
  */
+import { type ChannelId, knownCells, type NotificationPreferences } from '@fling/shared'
 import { mapLimit } from '../lib/concurrency.ts'
+import { newId, newSortableId } from '../lib/ids.ts'
 import {
   ConditionFailed,
   compareSk,
@@ -131,6 +167,7 @@ import {
   ifAbsent,
   ifExists,
   type Table,
+  type TableItem,
   type TransactOp,
 } from '../table/types.ts'
 import { decode, encode, type Kind } from './evolution.ts'
@@ -138,21 +175,38 @@ import {
   type ApiKeyRecord,
   type AuditRecord,
   type AuthCodeRecord,
+  addMinutes,
+  type BatchPointerRecord,
+  type BatchRef,
   type CommentRecord,
+  type FanOutRecord,
   type GrantRecord,
   type GroupRecord,
   type GroupSiteRecord,
+  type Hour,
   type LiveConnectionRecord,
   listingOf,
+  type Minute,
+  minuteStart,
   type NameClaim,
+  NOTIFY_COUNTERS,
+  type NotificationBatchRecord,
+  type NotificationEventRecord,
+  type NotificationPreferencesRecord,
+  type NotifyCounter,
+  type NotifyFailureRecord,
+  type NotifyStats,
   type OAuthClientRecord,
   type OAuthRequestRecord,
+  type PendingNotificationRecord,
   type RefreshTokenRecord,
+  type SentNotificationRecord,
   type SharedListing,
   type SiteGrantRecord,
   type SiteRecord,
   type SiteRef,
   type Store,
+  type SuppressionRecord,
   slugCandidate,
   type UploadFileRecord,
   type UploadRecord,
@@ -205,7 +259,60 @@ const key = {
     pk: `UPLOAD#${uploadId}`,
     sk: `FILE#${path}`,
   }),
+  notifyPrefs: (email: string) => ({ pk: userPk(email), sk: 'NOTIFYPREFS' }),
+  notifyEvent: (id: string) => ({ pk: `NOTIFY#${id}`, sk: 'EVENT' }),
+  fanOut: (minute: Minute, eventId: string) => ({ pk: duePk(minute), sk: `FANOUT#${eventId}` }),
+  pending: (email: string, channel: ChannelId, siteId: string | null, eventId: string) => ({
+    pk: userPk(email),
+    sk: `${pendingPrefix(channel, siteId)}${eventId}`,
+  }),
+  batchPointer: (email: string, channel: ChannelId, siteId: string | null) => ({
+    pk: userPk(email),
+    sk: `NBATCH#${channel}#${siteKey(siteId)}`,
+  }),
+  batch: (b: BatchRef) => ({
+    pk: duePk(b.due),
+    sk: `${b.channel}#${b.email}#${siteKey(b.siteId)}`,
+  }),
+  notifyCursor: () => ({ pk: 'NOTIFY', sk: 'CURSOR' }),
+  notifyStats: (hour: Hour) => ({ pk: 'NOTIFY', sk: `STATS#${hour}` }),
+  notifyFailure: (id: string) => ({ pk: 'NOTIFY', sk: `FAILURE#${id}` }),
+  instanceRate: (minute: Minute) => ({ pk: 'NOTIFY', sk: `RATE#${minute}` }),
+  recipientRate: (email: string, hour: Hour) => ({ pk: userPk(email), sk: `NRATE#${hour}` }),
+  mailTests: (email: string, hour: Hour) => ({ pk: userPk(email), sk: `NTEST#${hour}` }),
+  sent: (email: string, id: string) => ({ pk: userPk(email), sk: `NSENT#${id}` }),
+  suppression: (email: string) => ({ pk: `SUPPRESS#${email}`, sk: 'SUPPRESS' }),
 }
+
+/** The outbox's partition for a minute. */
+function duePk(minute: Minute) {
+  return `NDUE#${minute}`
+}
+/** A batch's site in keys: `-` for events batched apart from any site. */
+function siteKey(siteId: string | null) {
+  return siteId ?? '-'
+}
+function pendingPrefix(channel: ChannelId, siteId: string | null) {
+  return `NPEND#${channel}#${siteKey(siteId)}#`
+}
+
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+/** How long outbox items live, from the time each names (§5.3 of the notifications design). */
+const TTL = {
+  event: 30 * DAY_MS,
+  pending: 7 * DAY_MS,
+  /** past its due minute: longer than a pending item lives, so a batch outlasts its items */
+  batch: 8 * DAY_MS,
+  stats: 48 * HOUR_MS,
+  sent: 30 * DAY_MS,
+  instanceRate: HOUR_MS,
+  hourly: 2 * HOUR_MS,
+}
+const after = (at: string | Date, ms: number) => new Date(new Date(at).getTime() + ms).toISOString()
+const minuteAfter = (minute: Minute, ms: number) => after(minuteStart(minute), ms)
+/** How many times queueNotification re-reads after losing a race before it gives up. */
+const QUEUE_ATTEMPTS = 10
 
 /** The most operations one transaction takes (the Table port's limit). */
 const TRANSACT_MAX = 25
@@ -959,4 +1066,434 @@ export class Records implements Store {
   listUploadFiles(uploadId: string) {
     return this.list<UploadFileRecord>('uploadfile', `UPLOAD#${uploadId}`, 'FILE#')
   }
+
+  // --- notifications: preferences ---
+
+  async getNotificationPreferences(email: string) {
+    const prefs = await this.read<NotificationPreferencesRecord>(
+      'notifyprefs',
+      key.notifyPrefs(email)
+    )
+    return prefs ? { ...prefs, cells: knownCells(prefs.cells) } : null
+  }
+
+  async putNotificationPreferences(email: string, prefs: NotificationPreferences, at: string) {
+    const record: NotificationPreferencesRecord = {
+      email,
+      muted: prefs.muted,
+      cells: knownCells(prefs.cells),
+      updatedAt: at,
+    }
+    await this.table.put(encode('notifyprefs', key.notifyPrefs(email), record))
+    return record
+  }
+
+  // --- notifications: events and fan-out ---
+
+  putNotificationEvent(event: Omit<NotificationEventRecord, 'expiresAt'>, due: Minute) {
+    const expiresAt = after(event.createdAt, TTL.event)
+    const fanOut: FanOutRecord = {
+      eventId: event.id,
+      due,
+      done: 0,
+      createdAt: event.createdAt,
+      expiresAt,
+    }
+    return unless(
+      this.table.transact([
+        {
+          put: encode('notifyevent', key.notifyEvent(event.id), { ...event, expiresAt }),
+          cond: ifAbsent,
+        },
+        { put: encode('fanout', key.fanOut(due, event.id), fanOut), cond: ifAbsent },
+      ])
+    )
+  }
+
+  getNotificationEvent(id: string) {
+    return this.read<NotificationEventRecord>('notifyevent', key.notifyEvent(id))
+  }
+
+  async listDueNotifications(minute: Minute) {
+    const fanOuts: FanOutRecord[] = []
+    const batches: NotificationBatchRecord[] = []
+    let cursor: string | undefined
+    do {
+      const page = await this.table.query(duePk(minute), { cursor })
+      for (const item of page.items) {
+        if (item.sk.startsWith('FANOUT#')) fanOuts.push(decode<FanOutRecord>('fanout', item))
+        else batches.push(decode<NotificationBatchRecord>('nbatch', item))
+      }
+      cursor = page.cursor
+    } while (cursor)
+    return { fanOuts, batches }
+  }
+
+  async saveFanOutProgress(minute: Minute, eventId: string, done: number) {
+    const { pk, sk } = key.fanOut(minute, eventId)
+    await unless(this.table.update(pk, sk, { set: { done } }))
+  }
+
+  async moveFanOut(from: Minute, to: Minute, eventId: string) {
+    const fanOut = await this.read<FanOutRecord>('fanout', key.fanOut(from, eventId))
+    if (!fanOut || from === to) return
+    await this.table.transact([
+      { delete: key.fanOut(from, eventId) },
+      { put: encode('fanout', key.fanOut(to, eventId), { ...fanOut, due: to }) },
+    ])
+  }
+
+  async finishFanOut(minute: Minute, eventId: string) {
+    const { pk, sk } = key.fanOut(minute, eventId)
+    await this.table.delete(pk, sk)
+  }
+
+  // --- notifications: pending notifications and batches ---
+
+  getBatchPointer(email: string, channel: ChannelId, siteId: string | null) {
+    return this.read<BatchPointerRecord>('nbatchptr', key.batchPointer(email, channel, siteId))
+  }
+
+  private readBatch(b: BatchRef) {
+    return this.read<NotificationBatchRecord>('nbatch', key.batch(b))
+  }
+
+  async queueNotification(item: Omit<PendingNotificationRecord, 'expiresAt'>, earliest: Minute) {
+    const { email, channel, batchSiteId: siteId } = item
+    const pendingKey = key.pending(email, channel, siteId, item.eventId)
+    const pending = encode('npending', pendingKey, {
+      ...item,
+      expiresAt: after(item.createdAt, TTL.pending),
+    })
+    for (let attempt = 0; attempt < QUEUE_ATTEMPTS; attempt++) {
+      const pointer = await this.getBatchPointer(email, channel, siteId)
+      const open = pointer?.due
+        ? await this.readBatch({ email, channel, siteId, due: pointer.due })
+        : null
+      let batch: NotificationBatchRecord
+      let ops: TransactOp[]
+      if (open?.state === 'due') {
+        // Fold: the batch is rewritten as read, only while it is still due.
+        batch = open
+        ops = [
+          { put: pending, cond: ifAbsent },
+          { put: encode('nbatch', key.batch(open), open), cond: fieldEquals('state', 'due') },
+        ]
+      } else {
+        const coolDown = pointer?.coolDownUntil
+        const due =
+          coolDown && coolDown > minuteStart(earliest).toISOString()
+            ? ceilMinute(coolDown)
+            : earliest
+        batch = {
+          id: newId(),
+          email,
+          channel,
+          siteId,
+          due,
+          state: 'due',
+          attempts: 0,
+          createdAt: item.createdAt,
+          expiresAt: minuteAfter(due, TTL.batch),
+        }
+        const next: BatchPointerRecord = {
+          email,
+          channel,
+          siteId,
+          due,
+          ...(coolDown ? { coolDownUntil: coolDown } : {}),
+          expiresAt: batch.expiresAt,
+        }
+        ops = [
+          { put: pending, cond: ifAbsent },
+          { put: encode('nbatch', key.batch(batch), batch), cond: ifAbsent },
+          {
+            put: encode('nbatchptr', key.batchPointer(email, channel, siteId), next),
+            cond: pointer ? fieldEquals('due', pointer.due) : ifAbsent,
+          },
+        ]
+      }
+      try {
+        await this.table.transact(ops)
+        return { batch, opened: batch !== open, queued: true }
+      } catch (err) {
+        if (!(err instanceof ConditionFailed)) throw err
+      }
+      if (await this.table.get(pendingKey.pk, pendingKey.sk)) {
+        const pointer = await this.getBatchPointer(email, channel, siteId)
+        const current = pointer?.due
+          ? await this.readBatch({ email, channel, siteId, due: pointer.due })
+          : null
+        if (current) return { batch: current, opened: false, queued: false }
+      }
+    }
+    throw new Error('queueNotification: the batch kept changing; try again')
+  }
+
+  async leaseNotificationBatch(b: BatchRef, now: string, leaseUntil: string) {
+    const batch = await this.readBatch(b)
+    if (!batch) return null
+    let cond: ReturnType<typeof fieldEquals>
+    if (batch.state === 'due') cond = fieldEquals('state', 'due')
+    else if (batch.leaseUntil !== undefined && batch.leaseUntil <= now) {
+      cond = fieldEquals('lease', batch.lease)
+    } else return null
+    const { pk, sk } = key.batch(b)
+    try {
+      const item = await this.table.update(
+        pk,
+        sk,
+        { set: { state: 'leased', lease: newId(), leaseUntil } },
+        cond
+      )
+      return decode<NotificationBatchRecord>('nbatch', item)
+    } catch (err) {
+      if (err instanceof ConditionFailed) return null
+      throw err
+    }
+  }
+
+  async listPendingNotifications(email: string, channel: ChannelId, siteId: string | null) {
+    const items = await this.list<PendingNotificationRecord>(
+      'npending',
+      userPk(email),
+      pendingPrefix(channel, siteId)
+    )
+    return items.sort((a, b) => compareSk(a.eventId, b.eventId))
+  }
+
+  /** Whether the batch is still under the lease the caller holds. */
+  private async holdsLease(batch: NotificationBatchRecord) {
+    const stored = await this.readBatch(batch)
+    return stored !== null && stored.state === 'leased' && stored.lease === batch.lease
+  }
+
+  async finishNotificationBatch(
+    batch: NotificationBatchRecord,
+    done: {
+      eventIds: readonly string[]
+      coolDownUntil: string | null
+      sent?: Omit<SentNotificationRecord, 'expiresAt'>
+    }
+  ) {
+    const { email, channel, siteId } = batch
+    const pointerKey = key.batchPointer(email, channel, siteId)
+    const closePointer: TransactOp = done.coolDownUntil
+      ? {
+          put: encode('nbatchptr', pointerKey, {
+            email,
+            channel,
+            siteId,
+            coolDownUntil: done.coolDownUntil,
+            expiresAt: after(done.coolDownUntil, DAY_MS),
+          } satisfies BatchPointerRecord),
+          cond: fieldEquals('due', batch.due),
+        }
+      : { delete: pointerKey, cond: fieldEquals('due', batch.due) }
+    const head: TransactOp[] = [
+      { delete: key.batch(batch), cond: fieldEquals('lease', batch.lease) },
+      ...(done.sent
+        ? [
+            {
+              put: encode('nsent', key.sent(email, done.sent.id), {
+                ...done.sent,
+                expiresAt: after(done.sent.sentAt, TTL.sent),
+              }),
+            },
+          ]
+        : []),
+    ]
+    const deletes: TransactOp[] = done.eventIds.map(id => ({
+      delete: key.pending(email, channel, siteId, id),
+    }))
+    const room = TRANSACT_MAX - head.length - 1
+    // Pending items beyond one transaction go first, while the lease still holds the batch.
+    const extra = deletes.slice(room)
+    if (extra.length > 0) {
+      if (!(await this.holdsLease(batch))) return false
+      for (let i = 0; i < extra.length; i += TRANSACT_MAX) {
+        await this.table.transact(extra.slice(i, i + TRANSACT_MAX))
+      }
+    }
+    const last = deletes.slice(0, room)
+    if (await unless(this.table.transact([...head, closePointer, ...last]))) return true
+    if (!(await this.holdsLease(batch))) return false
+    // The pointer names a newer batch (opened while this one was leased): leave it, but carry the
+    // cool-down over to it.
+    if (!(await unless(this.table.transact([...head, ...last])))) return false
+    if (done.coolDownUntil) {
+      const { pk, sk } = pointerKey
+      await unless(this.table.update(pk, sk, { set: { coolDownUntil: done.coolDownUntil } }))
+    }
+    return true
+  }
+
+  async rescheduleNotificationBatch(batch: NotificationBatchRecord, to: Minute, attempts: number) {
+    if (to <= batch.due)
+      throw new Error('rescheduleNotificationBatch: move a batch to a later minute')
+    const { email, channel, siteId } = batch
+    const pointer = await this.getBatchPointer(email, channel, siteId)
+    const moved: NotificationBatchRecord = {
+      id: batch.id,
+      email,
+      channel,
+      siteId,
+      due: to,
+      state: 'due',
+      attempts,
+      createdAt: batch.createdAt,
+      expiresAt: minuteAfter(to, TTL.batch),
+    }
+    const next: BatchPointerRecord = {
+      email,
+      channel,
+      siteId,
+      due: to,
+      ...(pointer?.coolDownUntil ? { coolDownUntil: pointer.coolDownUntil } : {}),
+      expiresAt: moved.expiresAt,
+    }
+    const release: TransactOp = {
+      delete: key.batch(batch),
+      cond: fieldEquals('lease', batch.lease),
+    }
+    if (pointer?.due === batch.due) {
+      const written = await unless(
+        this.table.transact([
+          release,
+          { put: encode('nbatch', key.batch(moved), moved), cond: ifAbsent },
+          {
+            put: encode('nbatchptr', key.batchPointer(email, channel, siteId), next),
+            cond: fieldEquals('due', batch.due),
+          },
+        ])
+      )
+      if (written) return 'moved'
+    }
+    // Another batch is open for this recipient and site: it sends these notifications too.
+    return (await unless(this.table.transact([release]))) ? 'merged' : 'lost'
+  }
+
+  async getNotifyCursor() {
+    const cursor = await this.read<{ minute: Minute }>('notifycursor', key.notifyCursor())
+    return cursor?.minute ?? null
+  }
+
+  setNotifyCursor(minute: Minute, previous: Minute | null) {
+    return unless(
+      this.table.put(
+        encode('notifycursor', key.notifyCursor(), { minute }),
+        previous === null ? ifAbsent : fieldEquals('minute', previous)
+      )
+    )
+  }
+
+  // --- notifications: records, counters and suppression ---
+
+  /**
+   * Add to a counter item, creating it (with `fields` and `expiresAt`) when absent: an update
+   * never creates an item, so a miss puts it, and losing that race means it exists now.
+   */
+  private async bump(
+    k: { pk: string; sk: string },
+    kind: Kind,
+    add: Record<string, number>,
+    fields: Record<string, unknown>,
+    expiresAt: string
+  ): Promise<TableItem> {
+    for (;;) {
+      try {
+        return await this.table.update(k.pk, k.sk, { add })
+      } catch (err) {
+        if (!(err instanceof ConditionFailed)) throw err
+      }
+      const item = encode(kind, k, { ...fields, ...add, expiresAt })
+      if (await unless(this.table.put(item, ifAbsent))) return item
+    }
+  }
+
+  private async count(k: { pk: string; sk: string }, expiresAt: string) {
+    const item = await this.bump(k, 'counter', { count: 1 }, {}, expiresAt)
+    return Number(item.count)
+  }
+
+  async addNotifyStats(hour: Hour, counts: Partial<Record<NotifyCounter, number>>) {
+    const add = Object.fromEntries(Object.entries(counts).filter(([, n]) => n)) as Record<
+      string,
+      number
+    >
+    if (Object.keys(add).length === 0) return
+    const zero = Object.fromEntries(NOTIFY_COUNTERS.map(c => [c, 0]))
+    await this.bump(
+      key.notifyStats(hour),
+      'notifystats',
+      add,
+      { hour, ...zero },
+      after(`${hour}:00:00.000Z`, TTL.stats)
+    )
+  }
+
+  async listNotifyStats(since: Hour) {
+    const stats = await this.list<NotifyStats>('notifystats', 'NOTIFY', 'STATS#')
+    return stats
+      .filter(s => s.hour >= since)
+      .map(s => ({
+        ...(Object.fromEntries(NOTIFY_COUNTERS.map(c => [c, Number(s[c] ?? 0)])) as Record<
+          NotifyCounter,
+          number
+        >),
+        hour: s.hour,
+      }))
+  }
+
+  async addNotifyFailure(failure: Omit<NotifyFailureRecord, 'id' | 'expiresAt'>) {
+    const id = newSortableId(new Date(failure.at))
+    const record: NotifyFailureRecord = { ...failure, id, expiresAt: after(failure.at, TTL.stats) }
+    await this.table.put(encode('notifyfailure', key.notifyFailure(id), record))
+  }
+
+  async listNotifyFailures(limit: number) {
+    const page = await this.table.query('NOTIFY', { skPrefix: 'FAILURE#', reverse: true, limit })
+    return page.items.map(i => decode<NotifyFailureRecord>('notifyfailure', i))
+  }
+
+  async listSentNotifications(email: string, limit: number) {
+    const page = await this.table.query(userPk(email), {
+      skPrefix: 'NSENT#',
+      reverse: true,
+      limit,
+    })
+    return page.items.map(i => decode<SentNotificationRecord>('nsent', i))
+  }
+
+  getSuppression(email: string) {
+    return this.read<SuppressionRecord>('suppression', key.suppression(email))
+  }
+
+  async putSuppression(suppression: SuppressionRecord) {
+    await this.table.put(encode('suppression', key.suppression(suppression.email), suppression))
+  }
+
+  countRecipientSend(email: string, hour: Hour) {
+    return this.count(key.recipientRate(email, hour), after(`${hour}:00:00.000Z`, TTL.hourly))
+  }
+
+  async recipientSends(email: string, hour: Hour) {
+    const k = key.recipientRate(email, hour)
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? Number(item.count) : 0
+  }
+
+  countInstanceSend(minute: Minute) {
+    return this.count(key.instanceRate(minute), minuteAfter(minute, TTL.instanceRate))
+  }
+
+  countMailTest(email: string, hour: Hour) {
+    return this.count(key.mailTests(email, hour), after(`${hour}:00:00.000Z`, TTL.hourly))
+  }
+}
+
+/** The minute an instant falls in, rounded up: the first minute that starts at or after it. */
+function ceilMinute(at: string): Minute {
+  const minute = at.slice(0, 16)
+  return minuteStart(minute).toISOString() === at ? minute : addMinutes(minute, 1)
 }

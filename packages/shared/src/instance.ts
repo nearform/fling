@@ -79,7 +79,8 @@ export type InstanceMetadata = z.infer<typeof InstanceMetadataSchema>
 
 /**
  * What every instance has. Features an instance can turn off are added by its config (`comments`,
- * COMMENTS); missing means unsupported.
+ * COMMENTS; `live`; `notifications`, the hub and its settings, on when at least one channel is;
+ * `email`, the email channel, on with a mail driver); missing means unsupported.
  */
 export const CORE_CAPABILITIES = {
   /** the remote MCP connector at `/mcp` */

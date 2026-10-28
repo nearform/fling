@@ -4,6 +4,7 @@
  * wording the remote MCP server renders its tool descriptions with.
  */
 import {
+  type ChannelId,
   CORE_CAPABILITIES,
   INSTANCE_METADATA_VERSION,
   type InstanceAuth,
@@ -30,6 +31,19 @@ function authInfo(config: Config): InstanceAuth {
   return { kind: 'dev', displayName: 'Dev login', ...allowed }
 }
 
+/**
+ * The channels that are on: `email` with a mail driver. Notifications (the hub and the settings)
+ * are on when at least one is.
+ */
+export function notificationChannels(config: Pick<Config, 'mail'>): ChannelId[] {
+  return config.mail ? ['email'] : []
+}
+
+function notificationCapabilities(config: Config) {
+  const channels = notificationChannels(config)
+  return { notifications: channels.length > 0, email: channels.includes('email') }
+}
+
 export function instanceMetadata(config: Config): InstanceMetadata {
   return {
     version: INSTANCE_METADATA_VERSION,
@@ -39,7 +53,12 @@ export function instanceMetadata(config: Config): InstanceMetadata {
     siteScheme: config.siteScheme,
     auth: authInfo(config),
     brand: config.brand,
-    capabilities: { ...CORE_CAPABILITIES, comments: config.comments, live: config.live },
+    capabilities: {
+      ...CORE_CAPABILITIES,
+      comments: config.comments,
+      live: config.live,
+      ...notificationCapabilities(config),
+    },
     installCommand: config.installCommand,
   }
 }

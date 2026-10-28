@@ -1,11 +1,18 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { validateCliRedirectUri } from '../src/auth/cli.ts'
 import { admitIdentity, type Identity } from '../src/auth/identity.ts'
 import { safeReturnUrl } from '../src/auth/return-url.ts'
+import type { Config } from '../src/config.ts'
+import { buildDeps } from '../src/deps.ts'
 import { newCommentId } from '../src/lib/ids.ts'
+import { FileMailer } from '../src/mail/file.ts'
+import { MemoryMailer } from '../src/mail/memory.ts'
+import { headerSafe } from '../src/mail/types.ts'
 import { Records } from '../src/store/records.ts'
 import { slugCandidate } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
+import { testConfig } from './helpers.ts'
 
 describe('admitIdentity', () => {
   const policy = { allowedDomains: ['example.test'] }
@@ -182,5 +189,39 @@ describe('newCommentId', () => {
     for (const id of ids) expect(id).toMatch(/^[0-9a-v]{18}$/)
     expect([...ids].sort()).toEqual(ids)
     expect(newCommentId(new Date(0))).not.toBe(newCommentId(new Date(0)))
+  })
+})
+
+describe('buildDeps: the mailer', () => {
+  const config = (mail?: Config['mail']) => ({ ...testConfig(), ...(mail ? { mail } : {}) })
+  const mail = (driver: NonNullable<Config['mail']>['driver']) => ({
+    driver,
+    from: 'fling@mail.example.test',
+    fromName: 'Fling',
+  })
+
+  it('has none without a mail driver', () => {
+    expect(buildDeps(config()).mailer).toBeUndefined()
+  })
+
+  it('builds the core’s memory and file mailers itself', () => {
+    expect(buildDeps(config(mail('memory'))).mailer).toBeInstanceOf(MemoryMailer)
+    const file = buildDeps(config(mail('file')), { fsRoot: '/tmp/fling-x' }).mailer
+    expect(file).toBeInstanceOf(FileMailer)
+    expect((file as FileMailer).dir).toBe(join('/tmp/fling-x', 'mail'))
+  })
+
+  it('takes a cloud driver’s mailer from the platform, and refuses to run without one', () => {
+    const mailer = new MemoryMailer()
+    for (const driver of ['ses', 'cloudflare'] as const) {
+      expect(buildDeps(config(mail(driver)), { mailer }).mailer).toBe(mailer)
+      expect(() => buildDeps(config(mail(driver)))).toThrow(/platform adapter/)
+    }
+  })
+})
+
+describe('mail headers', () => {
+  it('headerSafe puts text on one line', () => {
+    expect(headerSafe('a\r\nBcc: x\tb\u0000')).toBe('a Bcc: x b')
   })
 })

@@ -55,6 +55,22 @@ describe('GET /.well-known/fling', () => {
     expect(JSON.stringify(body)).not.toContain('live.example.test')
   })
 
+  it('advertises notifications and email only with a mail driver, never the addresses', async () => {
+    const off = await (await setup().app.request(INSTANCE_METADATA_PATH)).json()
+    expect(off.capabilities.notifications).toBe(false)
+    expect(off.capabilities.email).toBe(false)
+    const mail = loadBaseConfig({
+      ...PROD,
+      MAIL_DRIVER: 'ses',
+      MAIL_FROM: 'fling@mail.fling.example.test',
+      MAIL_REPLY_TO: 'help@example.test',
+    }).mail
+    const body = await (await setup({ mail }).app.request(INSTANCE_METADATA_PATH)).json()
+    expect(body.capabilities.notifications).toBe(true)
+    expect(body.capabilities.email).toBe(true)
+    expect(JSON.stringify(body)).not.toMatch(/mail\.fling|help@/)
+  })
+
   it('says there are invited addresses, never which', async () => {
     const base = loadBaseConfig({
       ALLOWED_EMAIL_DOMAINS: 'example.test',
@@ -201,5 +217,72 @@ describe('instance config', () => {
     expect(loadBaseConfig({ ...ok, BRAND_ACCENT: '#166BFF' }).brand).toEqual({
       colors: { accent: '#166BFF' },
     })
+  })
+})
+
+describe('mail configuration', () => {
+  const MAIL = { ...PROD, MAIL_DRIVER: 'ses', MAIL_FROM: 'fling@mail.fling.example.test' }
+  const mail = (env: Record<string, string>) => loadBaseConfig(env).mail
+
+  it('is off without a driver, and a driver needs MAIL_FROM', () => {
+    expect(mail(PROD)).toBeUndefined()
+    expect(mail({ ...PROD, MAIL_FROM: 'fling@mail.fling.example.test' })).toBeUndefined()
+    expect(() => mail({ ...PROD, MAIL_DRIVER: 'ses' })).toThrow(/MAIL_FROM/)
+    expect(() => mail({ MAIL_DRIVER: 'file' })).toThrow(/MAIL_FROM/)
+  })
+
+  it('defaults the sender name to the instance name and keeps the rest', () => {
+    expect(mail({ ...MAIL, INSTANCE_NAME: 'Acme Fling' })).toEqual({
+      driver: 'ses',
+      from: 'fling@mail.fling.example.test',
+      fromName: 'Acme Fling',
+    })
+    expect(
+      mail({
+        ...MAIL,
+        MAIL_FROM: ' Fling@Mail.Example.test ',
+        MAIL_FROM_NAME: 'Acme',
+        MAIL_REPLY_TO: 'help@example.test',
+        SES_CONFIGURATION_SET: 'transactional',
+      })
+    ).toEqual({
+      driver: 'ses',
+      from: 'fling@mail.example.test',
+      fromName: 'Acme',
+      replyTo: 'help@example.test',
+      sesConfigurationSet: 'transactional',
+    })
+  })
+
+  it('takes only the cloud drivers in production; file and memory in development', () => {
+    expect(mail({ ...MAIL, MAIL_DRIVER: 'cloudflare' })?.driver).toBe('cloudflare')
+    for (const driver of ['file', 'memory']) {
+      expect(() => mail({ ...MAIL, MAIL_DRIVER: driver })).toThrow(/ses or cloudflare/)
+      expect(mail({ MAIL_DRIVER: driver, MAIL_FROM: 'fling@example.test' })?.driver).toBe(driver)
+    }
+    expect(() => mail({ ...MAIL, MAIL_DRIVER: 'pigeon' })).toThrow()
+  })
+
+  it('refuses invalid addresses and a multi-line sender name', () => {
+    expect(() => mail({ ...MAIL, MAIL_FROM: 'not an address' })).toThrow()
+    expect(() => mail({ ...MAIL, MAIL_REPLY_TO: 'nobody' })).toThrow()
+    expect(() => mail({ ...MAIL, MAIL_FROM_NAME: 'Acme\r\nBcc: x@example.test' })).toThrow()
+  })
+
+  it('refuses a sender on the sites domain, or on a name a site could hold, in production', () => {
+    expect(() => mail({ ...MAIL, MAIL_FROM: 'fling@fling.example.test' })).toThrow(/sites domain/)
+    expect(() => mail({ ...MAIL, MAIL_FROM: 'fling@q3-report.fling.example.test' })).toThrow(
+      /shadow/
+    )
+    expect(() => mail({ ...MAIL, MAIL_FROM: 'fling@a.q3-report.fling.example.test' })).toThrow(
+      /shadow/
+    )
+    expect(mail({ ...MAIL, MAIL_FROM: 'fling@x.mail.fling.example.test' })?.from).toBe(
+      'fling@x.mail.fling.example.test'
+    )
+    expect(mail({ ...MAIL, MAIL_FROM: 'fling@example.test' })?.from).toBe('fling@example.test')
+    expect(
+      mail({ MAIL_DRIVER: 'file', SITES_DOMAIN: 'localhost:47102', MAIL_FROM: 'f@localhost' })
+    ).toBeDefined()
   })
 })

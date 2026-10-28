@@ -24,6 +24,7 @@ import { GROUP_MEMBERS_MAX, GROUP_NAME_MAX, GROUP_SLUG_RULES } from './groups.ts
 import { SITE_NAME_MAX } from './hosts.ts'
 import { type InstanceMetadata, instanceSitesPattern, privateAudience } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
+import { CellChangeSchema } from './notifications.ts'
 import { SITE_SORTS } from './site-sort.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -541,6 +542,39 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { destructiveHint: true, openWorldHint: false },
     }),
 
+    notifications: tool({
+      name: 'fling_notifications',
+      title: 'Notification settings',
+      description:
+        `Show what ${w.name} tells the user about and how: each event (a site shared with them, added to a ` +
+        'group, a comment on their site, a reply in their thread…) with its key and, per channel (email), whether it ' +
+        'is on or off, marking the ones the user chose themselves; and whether everything is muted. Use it before ' +
+        'fling_notifications_set, or when the user asks why they get (or do not get) emails.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    notificationsSet: tool({
+      name: 'fling_notifications_set',
+      title: 'Change notification settings',
+      description:
+        `Change what ${w.name} tells the user about: \`muted: true\` stops everything (false turns it back on, with ` +
+        'their choices kept), and `cells` turns single events on or off per channel, or back to the default ' +
+        '(`value: "default"`). Event keys come from fling_notifications. Only change what the user asked for. ' +
+        'Returns the settings after the change.',
+      inputSchema: {
+        muted: z.boolean().optional().describe('true: send nothing at all; false: unmute'),
+        cells: z
+          .array(CellChangeSchema)
+          .max(50)
+          .optional()
+          .describe(
+            'Events to change: `{ event, channel, value }`, value "on", "off" or "default"'
+          ),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
     rollback: tool({
       name: 'fling_rollback',
       title: 'Roll back',
@@ -564,7 +598,10 @@ export type McpTools = ReturnType<typeof mcpToolsFor>
 export const mcpTools: McpTools = mcpToolsFor(mcpWording())
 
 /** Sent at `initialize` by the remote server. */
-export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean } = {}) =>
+export const mcpRemoteInstructions = (
+  w: McpWording,
+  opts: { comments?: boolean; notifications?: boolean } = {}
+) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
     'To publish content you created in this conversation (an HTML page, a report, a small app): call fling_publish with ' +
@@ -589,7 +626,14 @@ export const mcpRemoteInstructions = (w: McpWording, opts: { comments?: boolean 
       'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
       'exactly which files a site has (e.g. when the user reports a 404).',
     ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
+    ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
   ].join('\n\n')
+
+/** What the servers say about notifications, when the instance has them. */
+export const NOTIFICATIONS_NOTE = (w: McpWording) =>
+  `${w.name} emails people when a site is shared with them, they are added to a group, or someone comments on ` +
+  'their site or replies in their thread. fling_notifications shows what the user hears about; change it with ' +
+  'fling_notifications_set only when they ask.'
 
 /** What the servers say about comments, when the instance has them. */
 export const COMMENTS_NOTE = (w: McpWording) =>

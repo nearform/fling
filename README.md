@@ -20,6 +20,8 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it.
+- **Hear about it.** With email set up, people are told when a site is shared with them, they join a
+  group, or someone comments on their site, and choose what they hear about from any client.
 - **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.
 
 ## Use it

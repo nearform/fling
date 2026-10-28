@@ -241,3 +241,163 @@ export const NOTIFICATION_SETTINGS_PATH = '/settings/notifications'
  * API: `GET` shows it, `POST` unsubscribes (the RFC 8058 one-click POST too).
  */
 export const UNSUBSCRIBE_PATH = '/notifications/unsubscribe'
+
+/** `GET /api/me/notifications/sent`: one message that went out to the caller, newest first. */
+export const SentNotificationSchema = z.looseObject({
+  id: z.string(),
+  channel: z.string(),
+  /** the events it told them about (several when folded) */
+  eventKeys: z.array(z.string()),
+  subject: z.string(),
+  /** the provider's message id, when it gave one */
+  providerId: z.string().nullable(),
+  sentAt: z.string(),
+})
+export type SentNotification = z.infer<typeof SentNotificationSchema>
+export const SentNotificationListSchema = z.object({ sent: z.array(SentNotificationSchema) })
+export type SentNotificationList = z.infer<typeof SentNotificationListSchema>
+
+/** How many sent messages `GET /api/me/notifications/sent` returns (they are kept 30 days). */
+export const SENT_NOTIFICATIONS_MAX = 50
+
+/** What the drainer counts per hour, as the admin's mail page shows it. */
+export const MAIL_COUNTERS = ['sent', 'retrying', 'givenUp', 'suppressed', 'dropped'] as const
+export type MailCounter = (typeof MAIL_COUNTERS)[number]
+
+const MailCountsSchema = z.object({
+  sent: z.number(),
+  retrying: z.number(),
+  givenUp: z.number(),
+  suppressed: z.number(),
+  dropped: z.number(),
+})
+
+/**
+ * `GET /api/admin/mail` (admins only, on an instance with the `email` capability): the mail
+ * settings, read only, and the last 24 hours of sending. No address but the instance's own
+ * sender and reply-to, and no content.
+ */
+export const MailAdminSchema = z.object({
+  config: z.object({
+    driver: z.string(),
+    from: z.string(),
+    fromName: z.string(),
+    replyTo: z.string().nullable(),
+    configurationSet: z.string().nullable(),
+  }),
+  health: z.object({
+    /** the first hour counted (UTC, `2026-10-28T14`) */
+    since: z.string(),
+    /** the hours with any activity, oldest first */
+    hours: z.array(MailCountsSchema.extend({ hour: z.string() })),
+    totals: MailCountsSchema,
+    /** the latest failed sends, newest first */
+    failures: z.array(
+      z.object({
+        at: z.string(),
+        batchId: z.string(),
+        eventKeys: z.array(z.string()),
+        reason: z.string(),
+        detail: z.string().nullable(),
+      })
+    ),
+  }),
+  /** test emails this admin may still send this hour, of `limit` */
+  tests: z.object({ remaining: z.number(), limit: z.number() }),
+})
+export type MailAdmin = z.infer<typeof MailAdminSchema>
+
+/** `POST /api/admin/mail/test`: send a test email to any address. */
+export const MailTestRequestSchema = z.object({
+  to: z.string().trim().toLowerCase().min(3).max(254),
+})
+export type MailTestRequest = z.infer<typeof MailTestRequestSchema>
+
+/**
+ * Its answer: the provider took it (with its message id, when it gives one), or why not
+ * (`error`: the reason and the provider's code in words, e.g. `rejected: sender not verified`).
+ */
+export const MailTestResultSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), providerId: z.string().nullable(), subject: z.string() }),
+  z.object({
+    ok: z.literal(false),
+    reason: z.string(),
+    detail: z.string().nullable(),
+    error: z.string(),
+  }),
+])
+export type MailTestResult = z.infer<typeof MailTestResultSchema>
+
+/** Test emails an admin may send per hour. */
+export const MAIL_TESTS_PER_HOUR = 10
+
+/** One cell to change, as the CLI and the MCP tools take it: `default` goes back to the catalogue's. */
+export const CellChangeSchema = z.object({
+  event: EventKeySchema,
+  channel: ChannelIdSchema,
+  value: z.enum(['on', 'off', 'default']),
+})
+export type CellChange = z.infer<typeof CellChangeSchema>
+
+/** The `PUT /api/me/notifications` body for `muted` and a list of cell changes. */
+export function preferencesUpdateOf(change: {
+  muted?: boolean
+  cells?: readonly CellChange[]
+}): NotificationPreferencesUpdate {
+  const cells: NonNullable<NotificationPreferencesUpdate['cells']> = {}
+  for (const c of change.cells ?? []) {
+    cells[c.event] = { ...cells[c.event], [c.channel]: c.value === 'default' ? null : c.value }
+  }
+  return {
+    ...(change.muted === undefined ? {} : { muted: change.muted }),
+    ...(Object.keys(cells).length ? { cells } : {}),
+  }
+}
+
+const SECTION_TITLES: Record<string, string> = {
+  sharing: 'Sharing',
+  groups: 'Groups',
+  comments: 'Comments',
+}
+
+/** A section's heading; an unknown section is shown as its key. */
+export const sectionTitle = (section: string) => SECTION_TITLES[section] ?? section
+
+/**
+ * The text of a `fling_notifications` result (both servers): muted or not, then each event with
+ * its key and, per channel, its effective value (`(yours)` where the user set it).
+ */
+export function describeNotificationSettings(settings: NotificationSettings): string {
+  const lines = [
+    settings.muted
+      ? 'All notifications are muted: nothing is sent, whatever the settings below say.'
+      : `Notifications are on. Channels: ${settings.channels.join(', ')}.`,
+  ]
+  let section = ''
+  for (const e of settings.events) {
+    if (e.section !== section) {
+      section = e.section
+      lines.push('', `${sectionTitle(section)}:`)
+    }
+    const cells = settings.channels.map(ch => {
+      const value = settings.cells[e.key]?.[ch] ?? 'off'
+      const own = settings.overrides[e.key]?.[ch] !== undefined
+      return `${ch} ${value}${own ? ' (yours)' : ''}`
+    })
+    lines.push(`- ${e.key}: ${e.title} — ${cells.join(', ')}`)
+  }
+  return lines.join('\n')
+}
+
+/** The text of what was sent to someone (`fling notifications sent`). */
+export function describeSentNotifications(sent: readonly SentNotification[]): string {
+  if (sent.length === 0) return 'Nothing was sent to you in the last 30 days.'
+  return [
+    `${sent.length} message(s) sent to you in the last 30 days, newest first:`,
+    ...sent.map(
+      s =>
+        `- ${s.sentAt} ${s.channel}: ${s.subject} (${s.eventKeys.join(', ')})` +
+        (s.providerId ? ` [${s.providerId}]` : '')
+    ),
+  ].join('\n')
+}

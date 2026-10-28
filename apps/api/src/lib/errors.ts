@@ -1,7 +1,7 @@
 /** Errors that become the `{ error: { code, message } }` envelope (see `error-handler.ts`). */
 export class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 500,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500,
     readonly code: string,
     message: string,
     /** extra fields merged into `error` (e.g. `missing` paths on a 409 finalize) */

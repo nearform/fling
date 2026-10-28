@@ -1,12 +1,16 @@
 /**
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
- * check): the users list, the audit log, and starting and stopping an impersonation. admin.ts
+ * check): the users list, the audit log, the mail page (settings, health and a test email), and
+ * starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
   AdminUserListSchema,
   AuditListSchema,
   ImpersonateRequestSchema,
+  MailAdminSchema,
+  MailTestRequestSchema,
+  MailTestResultSchema,
   MeSchema,
 } from '@fling/shared'
 import { Hono } from 'hono'
@@ -32,6 +36,20 @@ adminRoutes.get('/users', async c => {
 adminRoutes.get('/audit', async c => {
   const entries = await admin.auditLog(c.get('deps'), principalOf(c))
   return c.json(AuditListSchema.parse({ entries }))
+})
+
+adminRoutes.get('/mail', async c => {
+  const overview = await admin.mail(c.get('deps'), principalOf(c))
+  return c.json(MailAdminSchema.parse(overview))
+})
+
+adminRoutes.post('/mail/test', async c => {
+  const p = principalOf(c)
+  // Only admins learn that the body was wrong: everyone else gets the 404 first.
+  admin.ensure(p, 'admin.mail.test')
+  const { to } = await jsonBody(c, MailTestRequestSchema)
+  const result = await admin.mailTest(c.get('deps'), p, to)
+  return c.json(MailTestResultSchema.parse(result))
 })
 
 adminRoutes.post('/impersonate', async c => {

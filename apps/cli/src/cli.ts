@@ -18,6 +18,12 @@ import {
   runGroupShow,
   runGroups,
 } from './commands/groups.ts'
+import {
+  runNotifications,
+  runNotificationsMute,
+  runNotificationsSent,
+  runNotificationsSet,
+} from './commands/notifications.ts'
 import { runSetup } from './commands/setup.ts'
 import {
   runAccess,
@@ -416,6 +422,37 @@ program
       runUncomment(ctx, name, id, opts)
     )
   )
+
+// ---- notifications -------------------------------------------------------------------------
+
+const notifications = program
+  .command('notifications')
+  .helpGroup('Notifications:')
+  .description('what this Fling tells you about, and how (default: show the table)')
+notifications
+  .command('show', { isDefault: true })
+  .description('show each event and channel: on or off, * where you chose it')
+  .action(action(ctx => runNotifications(ctx)))
+notifications
+  .command('set <event> <channel> <value>')
+  .description('turn one event on or off on a channel, or back to its default (on|off|default)')
+  .action(
+    action((ctx, event: string, channel: string, value: string) =>
+      runNotificationsSet(ctx, event, channel, value)
+    )
+  )
+notifications
+  .command('mute')
+  .description('stop all notifications (your choices are kept)')
+  .action(action(ctx => runNotificationsMute(ctx, true)))
+notifications
+  .command('unmute')
+  .description('turn notifications back on')
+  .action(action(ctx => runNotificationsMute(ctx, false)))
+notifications
+  .command('sent')
+  .description('list what was sent to you in the last 30 days')
+  .action(action(ctx => runNotificationsSent(ctx)))
 
 // ---- agents --------------------------------------------------------------------------------
 

@@ -190,7 +190,12 @@ with any channel on, the `notifications` capability.
 and a `muted` switch (`USER#<email>/NOTIFYPREFS`, keyed by address, so someone who never signed in
 has them too). Only the cells they set are stored; the rest take the catalogue's defaults
 (`effectivePreference`). A cell for an event the catalogue no longer has is ignored and dropped on
-the next write.
+the next write. Everyone sees and changes theirs from every client (`GET`/`PUT
+/api/me/notifications`, the web's Settings → Notifications at `/settings/notifications`,
+`fling notifications`, the MCP tools `fling_notifications` and `fling_notifications_set`;
+`apps/api/src/notifications/settings.ts`), with what was sent to them in the last 30 days
+(`GET /api/me/notifications/sent`). An admin impersonating them may read them but not change them
+(`account.notifications.change`): they are the person's consent.
 
 **Outbox** — notifications on their way, in Records (`apps/api/src/store/records.ts`): the event,
 a fan-out marker, a **pending** notification per recipient, and batches due at a minute
@@ -210,6 +215,12 @@ re-checks policy, the email policy, preferences and suppression at send time, an
 batch through its channel, rendered with `TEMPLATES`. Every email carries an **unsubscribe link**,
 `/notifications/unsubscribe?t=<token>` on the app origin (a token HMAC-signed with SESSION_SECRET
 naming the address, event and channel; `GET` shows a page, `POST` unsubscribes, with Undo).
+
+**Test email** — the one message Fling sends on request: an admin sends it from the mail page
+(`/admin/mail`, `apps/api/src/notifications/mail-admin.ts`) to any address, straight to the
+Mailer, not through the outbox, to check the sender's setup. Browser session only, at most 10 an
+hour per admin (`USER#<admin>/NTEST#<hour>`). The same page shows the mail settings and the last 24
+hours of sending, with no addresses or content.
 
 **Suppression** — an address Fling does not mail, after a hard bounce or a complaint
 (`SUPPRESS#<email>/SUPPRESS`); checked at send time.

@@ -178,6 +178,7 @@ import {
   addMinutes,
   type BatchPointerRecord,
   type BatchRef,
+  type BatchSent,
   type CommentRecord,
   type FanOutRecord,
   type GrantRecord,
@@ -1077,15 +1078,25 @@ export class Records implements Store {
     return prefs ? { ...prefs, cells: knownCells(prefs.cells) } : null
   }
 
-  async putNotificationPreferences(email: string, prefs: NotificationPreferences, at: string) {
+  async putNotificationPreferences(
+    email: string,
+    prefs: NotificationPreferences,
+    at: string,
+    previous: string | null
+  ) {
     const record: NotificationPreferencesRecord = {
       email,
       muted: prefs.muted,
       cells: knownCells(prefs.cells),
       updatedAt: at,
     }
-    await this.table.put(encode('notifyprefs', key.notifyPrefs(email), record))
-    return record
+    const written = await unless(
+      this.table.put(
+        encode('notifyprefs', key.notifyPrefs(email), record),
+        previous === null ? ifAbsent : fieldEquals('updatedAt', previous)
+      )
+    )
+    return written ? record : null
   }
 
   // --- notifications: events and fan-out ---
@@ -1095,7 +1106,6 @@ export class Records implements Store {
     const fanOut: FanOutRecord = {
       eventId: event.id,
       due,
-      done: 0,
       createdAt: event.createdAt,
       expiresAt,
     }
@@ -1129,17 +1139,23 @@ export class Records implements Store {
     return { fanOuts, batches }
   }
 
-  async saveFanOutProgress(minute: Minute, eventId: string, done: number) {
+  async saveFanOutProgress(minute: Minute, eventId: string, after: string) {
     const { pk, sk } = key.fanOut(minute, eventId)
-    await unless(this.table.update(pk, sk, { set: { done } }))
+    await unless(this.table.update(pk, sk, { set: { after } }))
   }
 
-  async moveFanOut(from: Minute, to: Minute, eventId: string) {
+  async moveFanOut(
+    from: Minute,
+    to: Minute,
+    eventId: string,
+    changes: { after?: string; attempts?: number } = {}
+  ) {
     const fanOut = await this.read<FanOutRecord>('fanout', key.fanOut(from, eventId))
     if (!fanOut || from === to) return
+    const moved: FanOutRecord = { ...fanOut, ...changes, due: to }
     await this.table.transact([
-      { delete: key.fanOut(from, eventId) },
-      { put: encode('fanout', key.fanOut(to, eventId), { ...fanOut, due: to }) },
+      { delete: key.fanOut(from, eventId), cond: ifExists },
+      { put: encode('fanout', key.fanOut(to, eventId), moved) },
     ])
   }
 
@@ -1158,7 +1174,12 @@ export class Records implements Store {
     return this.read<NotificationBatchRecord>('nbatch', key.batch(b))
   }
 
-  async queueNotification(item: Omit<PendingNotificationRecord, 'expiresAt'>, earliest: Minute) {
+  async queueNotification(
+    item: Omit<PendingNotificationRecord, 'expiresAt'>,
+    queueAt: Minute,
+    floor?: Minute
+  ) {
+    const earliest = floor && floor > queueAt ? floor : queueAt
     const { email, channel, batchSiteId: siteId } = item
     const pendingKey = key.pending(email, channel, siteId, item.eventId)
     const pending = encode('npending', pendingKey, {
@@ -1172,7 +1193,9 @@ export class Records implements Store {
         : null
       let batch: NotificationBatchRecord
       let ops: TransactOp[]
-      if (open?.state === 'due') {
+      // A due batch before the floor is stranded (no drain reads its minute again): a new batch
+      // takes over, and finds its pending notifications under the same prefix.
+      if (open?.state === 'due' && (!floor || open.due >= floor)) {
         // Fold: the batch is rewritten as read, only while it is still due.
         batch = open
         ops = [
@@ -1328,7 +1351,17 @@ export class Records implements Store {
     return true
   }
 
-  async rescheduleNotificationBatch(batch: NotificationBatchRecord, to: Minute, attempts: number) {
+  async markNotificationBatchSent(batch: NotificationBatchRecord, sent: BatchSent) {
+    const { pk, sk } = key.batch(batch)
+    return unless(this.table.update(pk, sk, { set: { sent } }, fieldEquals('lease', batch.lease)))
+  }
+
+  async rescheduleNotificationBatch(
+    batch: NotificationBatchRecord,
+    to: Minute,
+    attempts: number,
+    floor?: Minute
+  ) {
     if (to <= batch.due)
       throw new Error('rescheduleNotificationBatch: move a batch to a later minute')
     const { email, channel, siteId } = batch
@@ -1356,20 +1389,26 @@ export class Records implements Store {
       delete: key.batch(batch),
       cond: fieldEquals('lease', batch.lease),
     }
-    if (pointer?.due === batch.due) {
+    // The pointer names this batch, no batch, or a stranded one (due before the floor): this batch
+    // moves and the pointer follows it. Otherwise another batch is open for the recipient and
+    // site, and it sends these notifications too.
+    const takesPointer =
+      !pointer?.due || pointer.due === batch.due || (floor !== undefined && pointer.due < floor)
+    if (takesPointer) {
       const written = await unless(
         this.table.transact([
           release,
           { put: encode('nbatch', key.batch(moved), moved), cond: ifAbsent },
           {
             put: encode('nbatchptr', key.batchPointer(email, channel, siteId), next),
-            cond: fieldEquals('due', batch.due),
+            cond: pointer ? fieldEquals('due', pointer.due) : ifAbsent,
           },
         ])
       )
       if (written) return 'moved'
+      if (!(await this.holdsLease(batch))) return 'lost'
+      // The pointer changed meanwhile: a newer batch holds these notifications.
     }
-    // Another batch is open for this recipient and site: it sends these notifications too.
     return (await unless(this.table.transact([release]))) ? 'merged' : 'lost'
   }
 
@@ -1469,6 +1508,7 @@ export class Records implements Store {
     return this.read<SuppressionRecord>('suppression', key.suppression(email))
   }
 
+  /** Store a suppression; one with `expiresAt` lapses then. */
   async putSuppression(suppression: SuppressionRecord) {
     await this.table.put(encode('suppression', key.suppression(suppression.email), suppression))
   }

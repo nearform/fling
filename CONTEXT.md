@@ -198,7 +198,8 @@ the next write. Everyone sees and changes theirs from every client (`GET`/`PUT
 `fling notifications`, the MCP tools `fling_notifications` and `fling_notifications_set`;
 `apps/api/src/notifications/settings.ts`), with what was sent to them in the last 30 days
 (`GET /api/me/notifications/sent`). An admin impersonating them may read them but not change them
-(`account.notifications.change`): they are the person's consent.
+(`account.notifications.change`): they are the person's consent. Nor may that admin read what was
+sent to them (`account.notifications.sent`): admins never read other people's mail.
 
 **Outbox** — notifications on their way, in Records (`apps/api/src/store/records.ts`): the event,
 a fan-out marker, a **pending** notification per recipient, and batches due at a minute
@@ -229,7 +230,8 @@ hour per admin (`USER#<admin>/NTEST#<hour>`). The same page shows the mail setti
 hours of sending, with no addresses or content.
 
 **Suppression** — an address Fling does not mail, after a hard bounce or a complaint
-(`SUPPRESS#<email>/SUPPRESS`); checked at send time.
+(`SUPPRESS#<email>/SUPPRESS`); checked at send time. One the provider reported at send time
+expires after 30 days (`SUPPRESSION_MS`, `apps/api/src/notifications/drain.ts`).
 
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three

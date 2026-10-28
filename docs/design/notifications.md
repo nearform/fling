@@ -150,8 +150,12 @@ Every email carries a link to `/notifications/unsubscribe?t=<token>` and the RFC
   button, and "stop all email from <instance>". Only `POST` changes anything, so mail scanners
   that follow links unsubscribe nobody. The one-click `POST` from the mail client turns that
   event's email cell off.
-- After unsubscribing, the page offers **Undo** (the same token, `POST` with `undo`), and, for a
-  signed-in visitor, a link to the settings page.
+- After unsubscribing, the page offers **Undo** (the same token, `POST` with `undo`), which puts
+  back what the change replaced (the cell's earlier value, or `muted` as it was), carried in the
+  Undo form as `previous`. It names only that address's own setting, which the token's holder may
+  change anyway, so forging it gains nothing. The page also links to the settings page.
+- Preference writes are conditional on the record as read (its `updatedAt`, or its absence) and
+  read again on a race, so a one-click unsubscribe and a settings save made at once both hold.
 - Any well-formed but invalid token gets the same neutral page, so the endpoint reveals nothing.
 
 ## 5. Delivery
@@ -242,10 +246,14 @@ The email channel renders the batch with `TEMPLATES` and the instance metadata, 
 | `CloudflareMailer` | `platforms/cloudflare/src/mail/email.ts`: the Email Service `send_email` binding | Cloudflare, and `wrangler dev`, where the binding is simulated (§6) |
 
 Errors map onto `MailResult` in the adapter: SES `Throttling`/`TooManyRequests` and Cloudflare
-`E_RATE_LIMIT_EXCEEDED` → `throttled`; Cloudflare `E_DAILY_LIMIT_EXCEEDED` and an SES daily
-sending quota → `throttled` with a `quota` flag (§5.5); Cloudflare `E_RECIPIENT_SUPPRESSED` →
-`suppressed`; SES `MessageRejected`, Cloudflare `E_RECIPIENT_NOT_ALLOWED` and
-`E_SENDER_NOT_VERIFIED` → `rejected` (and an error log, because they mean misconfiguration).
+`E_RATE_LIMIT_EXCEEDED` → `throttled`; Cloudflare `E_DAILY_LIMIT_EXCEEDED`, and an SES throttle or
+`LimitExceededException` whose message names the daily quota → `throttled` with a `quota` flag
+(§5.5); Cloudflare `E_RECIPIENT_SUPPRESSED` → `suppressed`; SES `MessageRejected`,
+`MailFromDomainNotVerifiedException`, `SendingPausedException`, `AccountSuspendedException`,
+`NotFoundException`, `BadRequestException` and any other `LimitExceededException`, and Cloudflare
+`E_RECIPIENT_NOT_ALLOWED` and `E_SENDER_NOT_VERIFIED` → `rejected` (and an error log, because they
+mean misconfiguration). The log names the error and its code, never the provider's message: SES's
+sandbox quotes the recipient's address in it.
 
 The in-app inbox, when it comes, is a Channel with no port: it writes `USER#<email>/NOTE#<id>`
 items through Records and, through a per-user LiveHub room, tells open tabs to refetch.
@@ -257,17 +265,17 @@ All keys are reached by key or prefix query; nothing scans.
 | pk | sk | Item |
 |---|---|---|
 | `NOTIFY#<eventId>` | `EVENT` | The event, written `ifAbsent`. The idempotency key: a retried request makes the same `eventId`, finds it and queues nothing. Expires after 30 days |
-| `NDUE#<minute>` | `FANOUT#<eventId>` | An event still to fan out (with how far it got), written with the event |
+| `NDUE#<minute>` | `FANOUT#<eventId>` | An event still to fan out, written with the event: how far it got (the last address queued, in address order) and its failed attempts |
 | `USER#<email>` | `NPEND#<channel>#<siteId or ->#<eventId>` | A pending notification for one recipient (event key, site id, actor, what the event recorded for them), under the batch site it folds into, so a batch's items are one prefix query. Expires after 7 days |
 | `USER#<email>` | `NBATCH#<channel>#<siteId or ->` | The pointer to the recipient's open batch for that site (`-` for events with no site): its due minute, and `coolDownUntil` after a send. How fan-out finds the batch to fold into |
-| `NDUE#<minute>` | `<channel>#<email>#<siteId or ->` | The **batch**: due at `<minute>` (UTC, `2026-10-28T14:05`), with `state`, `attempts`, `leaseUntil` and the lease's token. Expires 8 days after it is due |
+| `NDUE#<minute>` | `<channel>#<email>#<siteId or ->` | The **batch**: due at `<minute>` (UTC, `2026-10-28T14:05`), with `state`, `attempts`, `leaseUntil`, the lease's token and, once the provider has accepted its message, `sent` (what finishing it records). Expires 8 days after it is due |
 | `NOTIFY` | `CURSOR` | The last minute fully drained |
 | `NOTIFY` | `STATS#<hour>` | Counters for the admin page (§10.2): sent, retrying, given up, suppressed, dropped (by the send-time checks). Expires after 48 hours |
 | `NOTIFY` | `FAILURE#<sortable id>` | One failed send: batch id, event keys, reason and the provider's code; no address. The admin page lists the latest. Expires after 48 hours |
 | `NOTIFY` | `RATE#<minute>` | Messages the instance sent that minute (§5.5). Expires after an hour |
 | `USER#<email>` | `NRATE#<hour>`, `NTEST#<hour>` | Messages sent to the recipient that hour, and test emails an admin sent (§5.5, §10.2). Expire after 2 hours |
 | `USER#<email>` | `NSENT#<sortable id>` | What was sent: event keys, subject, provider id, when. Expires after 30 days. Delivery status for the e2e and the user |
-| `SUPPRESS#<email>` | `SUPPRESS` | Suppressed after a hard bounce or complaint (§5.6) |
+| `SUPPRESS#<email>` | `SUPPRESS` | Suppressed after a hard bounce or complaint (§5.6). One the provider reported at send time expires after 30 days |
 | `USER#<email>` | `NOTIFYPREFS` | Preferences (§4) |
 
 Event ids are derived, not random, so the same cause makes the same id:
@@ -276,30 +284,48 @@ addresses and groups added), `group.member_added:<groupId>:<group updatedAt>`.
 
 Folding: fan-out reads the recipient's `NBATCH` pointer. If it points at a batch still `due`, the
 pending item joins it (the pending item and the unchanged batch, conditioned on its state, in one
-`transact`, so nothing joins a batch a drainer has leased). Otherwise it opens a batch at `max(now + 2 minutes, coolDownUntil)` and
-writes the pointer and the batch in one `transact` (the pointer `ifAbsent` or on its previous
-value, so two fan-outs racing for one recipient open one batch).
+`transact`, so nothing joins a batch a drainer has leased), unless that batch is due before the
+**floor**, the first minute the walk has yet to reach: no drain reads such a minute again, so a
+new batch takes over the pointer and, under the same prefix, its pending items. Otherwise it opens
+a batch at `max(now + 2 minutes, coolDownUntil, floor)` and writes the pointer and the batch in one
+`transact` (the pointer `ifAbsent` or on its previous value, so two fan-outs racing for one
+recipient open one batch). Reschedules never land before the floor either, and a rescheduled
+batch takes the pointer back from a stranded batch or from a pointer that names none.
 
 The drainer queries `NDUE#<minute>` for each minute from the cursor to about 75 seconds before
 now (the minute before `now − 15 s`), so a minute is complete before it is read, and a missed tick
-only delays mail. The cursor moves by compare-and-set. A batch is leased with a conditional update
+only delays mail. The cursor moves by compare-and-set, past a minute only once everything in it is
+done; a minute that is not (a batch another drain holds) keeps the cursor before it while the walk
+goes on to later minutes. In each minute the batches go first, then the fan-outs. A batch is leased with a conditional update
 (`state` is `due`, or its expired lease is still the one read) that writes a fresh lease token;
 finishing and rescheduling are conditioned on that token, so a drainer that lost its lease changes
-nothing and overlapping ticks never send twice. After a send it deletes the pending items
-and the batch, sets the pointer's `coolDownUntil` (for cool-down events, §5.4) in one `transact`,
-and writes `NSENT`. A failed send with `retry` moves the batch to a later minute with backoff (1,
-5, 15, 60 minutes; given up after 6 attempts and logged), except for quota throttling (§5.5);
-`rejected` or `suppressed` drops it. Every failure is also written as a `NOTIFY/FAILURE#` item.
+nothing and overlapping ticks never send twice. The lease runs 5 minutes from when it is taken,
+and a drain never runs longer than 20 seconds. After a send it first marks the batch `sent`, then
+counts the send and finishes: it deletes the pending items the delivery loaded and the batch, sets
+the pointer's `coolDownUntil` (for cool-down events, §5.4) in one `transact`, and writes `NSENT`.
+None of that bookkeeping can lead to another send: a failure is logged, the batch stays leased and
+marked, and the drain that next leases it finishes it without sending. A failed send with `retry`
+moves the batch to a later minute with backoff (1, 5, 15, 60 minutes; given up after 6 attempts
+and logged, deleting only the pending items that delivery loaded), except for quota throttling
+(§5.5); `rejected` or `suppressed` drops it. Every failure is also written as a `NOTIFY/FAILURE#`
+item.
 
-A drain walks at most 120 minutes and stops starting new work after 20 seconds; the first drain
-ever starts an hour back. `POST /dev/notify/drain` (dev login only, never mounted in production)
+Fan-outs get at most half of a drain's time, so a large one never holds up the batches of later
+minutes. A fan-out saves its progress as the last address queued and resumes after it, so a
+recipient who joins or leaves meanwhile never shifts it past anyone. One that runs out of time
+moves to the floor with its progress (`moveFanOut`); one that fails (reading the recipients, say)
+moves on with the same backoff and is given up after 5 attempts, logged with the event key and no
+addresses. Either way its minute is done and the cursor goes on.
+
+A drain walks at most 120 minutes and stops starting new work after 20 seconds (on AWS, less when
+the invocation has less left); the first drain ever starts an hour back. `POST /dev/notify/drain` (dev login only, never mounted in production)
 runs it with `flush`: it also fans out and delivers what is due in the next hour, without moving
 the cursor past the lagged minute, so local runs and the e2e need not wait for a tick or a fold.
 
 The provider call is the one place a send could be duplicated: neither SES nor the Cloudflare
 binding documents an idempotency key, so a crash after the provider accepted a message but before
-the batch is deleted sends it again on the next lease. The lease is longer than any send, so only
-that crash window remains. That is acceptable for notifications.
+the batch is marked sent sends it again on the next lease. The lease is longer than any drain, so
+only that crash window remains. That is acceptable for notifications.
 
 ### 5.4 Folding and the cool-down
 
@@ -330,7 +356,9 @@ Counters are items with `expiresAt` and the Table's atomic `add` (`table/types.t
 ### 5.6 Bounces and complaints (phase 2)
 
 A hard bounce or a complaint writes `SUPPRESS#<email>`, and a complaint also turns the address's
-email off. Suppressed addresses are skipped at send time. Both providers also keep their own
+email off. A suppression the provider reports at send time (Cloudflare's `E_RECIPIENT_SUPPRESSED`)
+is phase 1, and expires after 30 days, so an address that works again is tried again; the
+provider's own list still guards it meanwhile. Suppressed addresses are skipped at send time. Both providers also keep their own
 suppression list, the guard until then. The handler, `recordDeliveryEvent(deps, {email, kind})`,
 is core code. Events reach it differently on each platform:
 
@@ -422,8 +450,12 @@ With it, the module:
 - adds the `aws_scheduler_schedule` `rate(1 minute)` → the API Lambda with `{"fling":"notify"}`.
   Scheduler invokes through its own role (allowed `lambda:InvokeFunction` on the function), so no
   `aws_lambda_permission` is needed;
-- adds `/notifications/*` (the unsubscribe page) to the app distribution's `api_paths`, as the
-  Worker routes `/notifications/` to the API.
+- adds `/notifications/*` (the unsubscribe page) to the app distribution's API behaviours, on top
+  of `api_paths` (so a custom `api_paths` keeps it, and without `mail` the plan is unchanged), as
+  the Worker routes `/notifications/` to the API;
+- refuses `MAIL_*` and `SES_*` in `environment` and `instance`, and the build refuses them in the
+  deploy config's `INSTANCE` (`platforms/aws/scripts/instance-config.mjs`), as Cloudflare refuses
+  them in its `INSTANCE`: email is set only through `mail`.
 
 It creates no SES resources. DEPLOY.md gives a recipe for an operator without an identity (domain
 identity with Easy DKIM, custom MAIL FROM, DMARC, a configuration set with suppression on).
@@ -532,7 +564,8 @@ development), CONTEXT.md, README, `apps/cli/README.md`, the plugin's `SKILL.md`,
   address, a comment excerpt for comment events. Never the audience, other recipients, versions or
   the share link.
 - **No phishing relay.** A comment by a guest (author kind `guest`, guest-reviews.md) is unverified,
-  so its email carries no excerpt and no guest name: "A guest left 3 comments on *q3-report*", with
+  so its email carries no excerpt, no guest name and no page path: "A guest left 3 comments on
+  *q3-report*", with
   the button to the review page, where the guest badge shows. Excerpts come only from signed-in
   members, who are attributable and inside the allowlist.
 - **Reply-To** is the operator's fixed address or none, never the actor's, so a reply never goes
@@ -543,7 +576,8 @@ development), CONTEXT.md, README, `apps/cli/README.md`, the plugin's `SKILL.md`,
   hash of the address (`sha256(email)` first 12 hex characters) only.
 - **Audit.** `NSENT` items keep what was sent for 30 days; the user sees theirs
   (`GET /api/me/notifications/sent`). Admins see totals and failure reasons (§10.2), never other
-  people's mail.
+  people's mail: while an admin impersonates someone, the sent list is refused
+  (`account.notifications.sent` in `policy.ts`), and the settings page leaves it out.
 
 ## 10. Clients, with parity
 

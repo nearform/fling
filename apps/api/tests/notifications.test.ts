@@ -10,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailConfig } from '../src/config.ts'
 import { drain } from '../src/notifications/drain.ts'
 import { notifyComment } from '../src/notifications/notify.ts'
-import { signUnsubscribeToken, verifyUnsubscribeToken } from '../src/notifications/unsubscribe.ts'
+import {
+  applyUnsubscribe,
+  signUnsubscribeToken,
+  verifyUnsubscribeToken,
+} from '../src/notifications/unsubscribe.ts'
 import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
 
@@ -322,12 +326,14 @@ describe('the recipient decides', () => {
     await env.store.putNotificationPreferences(
       BOB,
       { muted: false, cells: { 'site.shared': { email: 'off' } } },
-      env.deps.clock.now().toISOString()
+      env.deps.clock.now().toISOString(),
+      null
     )
     await env.store.putNotificationPreferences(
       CAROL,
       { muted: true, cells: {} },
-      env.deps.clock.now().toISOString()
+      env.deps.clock.now().toISOString(),
+      null
     )
     await share(env, alice.key, { emails: [BOB, CAROL, DAN] })
     await settle(env)
@@ -482,6 +488,150 @@ describe('delivery', () => {
   })
 })
 
+describe('the drainer under failure', () => {
+  it('never sends again when the bookkeeping after a send fails', async () => {
+    const { env, alice } = await world()
+    const count = vi
+      .spyOn(env.store, 'countRecipientSend')
+      .mockRejectedValueOnce(new Error('table unavailable'))
+    const finishBatch = vi
+      .spyOn(env.store, 'finishNotificationBatch')
+      .mockRejectedValueOnce(new Error('table unavailable'))
+    await share(env, alice.key, { emails: [BOB] })
+    await settle(env)
+    expect(count).toHaveBeenCalled()
+    expect(subjects(env, BOB)).toHaveLength(1)
+    // The batch is still leased, marked sent: once the lease runs out, a drain finishes it.
+    await tick(env, 10)
+    expect(finishBatch.mock.calls.length).toBeGreaterThan(1)
+    expect(subjects(env, BOB)).toHaveLength(1)
+    expect(await env.store.listSentNotifications(BOB, 10)).toHaveLength(1)
+    expect(await env.store.listPendingNotifications(BOB, 'email', null)).toEqual([])
+    expect(await env.store.listNotifyFailures(10)).toEqual([])
+    expect(logs.some(l => l.includes('finishing a sent batch failed'))).toBe(true)
+    // Nothing is left to send, and the cursor went on.
+    await tick(env, 10)
+    expect(subjects(env, BOB)).toHaveLength(1)
+    expect(await env.store.getNotifyCursor()).toBe('2026-01-01T00:23')
+  })
+
+  it('a give-up deletes only what it loaded, never what was queued since', async () => {
+    const { env, alice } = await world()
+    const fail = { ok: false as const, retry: true, reason: 'transient' as const }
+    env.mailer.failNext(fail, fail, fail, fail, fail, fail)
+    const send = env.mailer.send.bind(env.mailer)
+    let calls = 0
+    vi.spyOn(env.mailer, 'send').mockImplementation(async message => {
+      if (++calls === 6) {
+        // Queued while the last attempt is in flight (the batch is leased, so a new one opens).
+        const [item] = await env.store.listPendingNotifications(BOB, 'email', null)
+        if (!item) throw new Error('nothing pending')
+        const { expiresAt: _, ...rest } = item
+        await env.store.queueNotification(
+          {
+            ...rest,
+            eventId: `${item.eventId}-later`,
+            createdAt: env.deps.clock.now().toISOString(),
+          },
+          '2026-01-01T03:00'
+        )
+      }
+      return send(message)
+    })
+    await share(env, alice.key, { emails: [BOB] })
+    await tick(env, 5 + 1 + 5 + 15 + 60 + 60 + 15)
+    expect(logs.some(l => l.includes('notification given up'))).toBe(true)
+    const left = await env.store.listPendingNotifications(BOB, 'email', null)
+    expect(left.map(p => p.eventId)).toEqual([expect.stringMatching(/-later$/)])
+    while (env.deps.clock.now() < new Date('2026-01-01T03:05:00Z')) await tick(env)
+    expect(subjects(env, BOB)).toHaveLength(1)
+  })
+
+  it('a provider-reported suppression lapses after 30 days', async () => {
+    const { env, alice } = await world()
+    env.mailer.failNext({ ok: false, retry: false, reason: 'suppressed' })
+    await share(env, alice.key, { emails: [BOB] })
+    await settle(env)
+    const suppression = await env.store.getSuppression(BOB)
+    expect(suppression?.expiresAt).toBe(
+      new Date(Date.parse(suppression?.at ?? '') + 30 * 86_400_000).toISOString()
+    )
+    env.advance(30 * 86_400_000)
+    expect(await env.store.getSuppression(BOB)).toBeNull()
+  })
+})
+
+describe('fan-outs', () => {
+  const members = Array.from(
+    { length: 30 },
+    (_, i) => `m${String(i).padStart(2, '0')}@example.test`
+  )
+
+  /** A drain where every queued notification takes a second of (fake) wall time. */
+  async function slowDrain(env: Env, budgetMs: number) {
+    let wall = 1_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => wall)
+    const queue = env.store.queueNotification.bind(env.store)
+    const spy = vi.spyOn(env.store, 'queueNotification').mockImplementation(async (...args) => {
+      wall += 1000
+      return queue(...args)
+    })
+    try {
+      return await drain(env.deps, { deadline: wall + budgetMs })
+    } finally {
+      vi.mocked(Date.now).mockRestore()
+      spy.mockRestore()
+    }
+  }
+
+  it('one out of time moves on with its progress; nobody is skipped or told twice', async () => {
+    const { env, alice, bob } = await world()
+    await api(env, bob.key, 'POST', '/api/groups', { slug: 'big', name: 'Big', members })
+    await settle(env)
+    env.mailer.clear()
+    const sharedAt = env.deps.clock.now().toISOString().slice(0, 16)
+    await share(env, alice.key, { groups: ['big'], emails: [CAROL] })
+    env.advance(2 * 60_000)
+    // 20 s of budget: fan-outs get 10 s, so about ten recipients per drain.
+    const first = await slowDrain(env, 20_000)
+    expect(first.queued).toBeGreaterThan(0)
+    expect(first.queued).toBeLessThan(members.length)
+    // The event's minute is done: the cursor passed it.
+    expect(first.cursor).toBe(sharedAt)
+    // Someone early in address order leaves the group: nobody after them is skipped.
+    await api(env, bob.key, 'POST', '/api/groups/big/members', { remove: ['m00@example.test'] })
+    for (let i = 0; i < 6; i++) {
+      env.advance(60_000)
+      await slowDrain(env, 20_000)
+    }
+    await settle(env)
+    for (const m of members.slice(1)) expect(subjects(env, m)).toHaveLength(1)
+    // The direct share went out meanwhile, not held up by the fan-out.
+    expect(subjects(env, CAROL)).toHaveLength(1)
+  })
+
+  it('one that keeps failing is given up after five attempts, and holds nothing up', async () => {
+    const { env, alice, bob } = await world()
+    await api(env, bob.key, 'POST', '/api/groups', { slug: 'big', name: 'Big', members })
+    await settle(env)
+    env.mailer.clear()
+    vi.spyOn(env.store, 'listGroupMembers').mockRejectedValue(new Error('table unavailable'))
+    await share(env, alice.key, { groups: ['big'], emails: [CAROL] })
+    await settle(env)
+    expect(subjects(env, CAROL)).toHaveLength(1)
+    await tick(env, 1 + 5 + 15 + 60 + 60 + 10)
+    const failed = logs.filter(l => l.includes('"fan-out failed"'))
+    expect(failed).toHaveLength(4)
+    expect(logs.filter(l => l.includes('"fan-out given up"'))).toHaveLength(1)
+    for (const line of logs.filter(l => l.includes('fan-out'))) {
+      expect(line).not.toMatch(/@example\.test/)
+    }
+    // The marker is gone: nothing more is tried.
+    await tick(env, 120)
+    expect(logs.filter(l => l.includes('fan-out'))).toHaveLength(5)
+  })
+})
+
 describe('when notify records nothing', () => {
   it('without a mail channel', async () => {
     const env = setup()
@@ -591,6 +741,63 @@ describe('unsubscribing', () => {
       body: 'scope=all&undo=1',
     })
     expect((await env.store.getNotificationPreferences(BOB))?.muted).toBe(false)
+  })
+
+  it('Undo puts back what the stop replaced, muted or a cell already off', async () => {
+    const { env } = await world()
+    const token = signUnsubscribeToken(env.config.secrets.sessionSecret, {
+      email: BOB,
+      event: 'site.shared',
+      channel: 'email',
+    })
+    const post = async (body: string) => {
+      const res = await env.app.request(`${UNSUBSCRIBE_PATH}?t=${token}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body,
+      })
+      return res.text()
+    }
+    /** The Undo form's fields, as the page renders them. */
+    const undoOf = (html: string) =>
+      [...html.matchAll(/<input type="hidden" name="(\w+)" value="([^"]*)">/g)]
+        .map(([, k, v]) => `${k}=${v}`)
+        .join('&')
+    await env.store.putNotificationPreferences(
+      BOB,
+      { muted: true, cells: { 'site.shared': { email: 'off' } } },
+      env.deps.clock.now().toISOString(),
+      null
+    )
+    await post(undoOf(await post('scope=all')))
+    expect(await env.store.getNotificationPreferences(BOB)).toMatchObject({ muted: true })
+    await post(undoOf(await post('scope=event')))
+    expect((await env.store.getNotificationPreferences(BOB))?.cells).toEqual({
+      'site.shared': { email: 'off' },
+    })
+  })
+
+  it('a one-click unsubscribe and a settings save made at once both hold', async () => {
+    const { env, bob } = await world()
+    const read = env.store.getNotificationPreferences.bind(env.store)
+    vi.spyOn(env.store, 'getNotificationPreferences').mockImplementationOnce(async email => {
+      const before = await read(email)
+      // The unsubscribe lands between the save's read and its write.
+      await applyUnsubscribe(
+        env.deps,
+        { email: BOB, event: 'site.shared', channel: 'email' },
+        { scope: 'event', undo: false }
+      )
+      return before
+    })
+    const res = await api(env, bob.key, 'PUT', '/api/me/notifications', {
+      cells: { 'comment.created': { email: 'off' } },
+    })
+    expect(res.status).toBe(200)
+    expect((await env.store.getNotificationPreferences(BOB))?.cells).toEqual({
+      'site.shared': { email: 'off' },
+      'comment.created': { email: 'off' },
+    })
   })
 
   it('answers every invalid token with the same neutral page, changing nothing', async () => {

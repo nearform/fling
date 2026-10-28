@@ -188,7 +188,7 @@ notifications' outbox and sends each message with the binding, from `MAIL.FROM`.
    check the setup on its own.
 
 Email Service suppresses hard-bouncing addresses itself and refuses a send to one
-(`E_RECIPIENT_SUPPRESSED`), which Fling records as suppressed. Its daily quota starts conservative
+(`E_RECIPIENT_SUPPRESSED`), which Fling records as suppressed for 30 days. Its daily quota starts conservative
 and grows, and is not published; when it is spent (`E_DAILY_LIMIT_EXCEEDED`), Fling defers the
 batch to the next UTC day and logs a warning the first time each day. Each message carries
 `List-Unsubscribe` and one-click unsubscribe headers and the batch id in `X-Fling-Batch`.

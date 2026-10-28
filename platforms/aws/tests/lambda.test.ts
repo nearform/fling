@@ -1,11 +1,13 @@
 /**
  * The Lambda's migrate event against DynamoDB Local (skipped without it, see services.ts): what
- * deploy.yml invokes after updating the code.
+ * deploy.yml invokes after updating the code. And the notify tick's time budget.
  */
+
+import { DRAIN_BUDGET_MS } from '@fling/api/notifications'
 import { legacyItems } from '@fling/conformance'
 import type { LambdaContext } from 'hono/aws-lambda'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { handler } from '../src/lambda.ts'
+import { handler, notifyBudget } from '../src/lambda.ts'
 import { DynamoTable } from '../src/table/dynamo.ts'
 import { DYNAMODB_ENDPOINT, dynamoTable } from './services.ts'
 
@@ -57,5 +59,13 @@ describe.runIf(DYNAMODB_ENDPOINT)('{"fling":"migrate"}', () => {
     expect(again).toMatchObject({ done: true })
     for (const status of statuses(again)) expect(['up-to-date', 'skipped']).toContain(status)
     expect(log).toHaveBeenCalledWith(expect.stringContaining('"msg":"migrations"'))
+  })
+})
+
+describe('{"fling":"notify"}', () => {
+  it('drains for the drainer budget at most, and less when the invocation has less left', () => {
+    expect(notifyBudget(15 * 60_000)).toBe(DRAIN_BUDGET_MS)
+    expect(notifyBudget(12_000)).toBe(7_000)
+    expect(notifyBudget(1_000)).toBe(0)
   })
 })

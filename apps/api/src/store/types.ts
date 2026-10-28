@@ -529,8 +529,13 @@ export interface NotificationEventRecord {
 export interface FanOutRecord {
   eventId: string
   due: Minute
-  /** how many recipients are queued: where a resumed fan-out carries on */
-  done: number
+  /**
+   * The last recipient queued, in address order: a resumed fan-out carries on after it, so
+   * recipients added or removed meanwhile never shift it past anyone
+   */
+  after?: string
+  /** failed attempts so far; the fan-out is given up after a few */
+  attempts?: number
   createdAt: string
   expiresAt: string
 }
@@ -577,8 +582,29 @@ export interface NotificationBatchRecord {
   /** the current lease's token */
   lease?: string
   leaseUntil?: string
+  /**
+   * Set once the provider has accepted the message, before the bookkeeping: a later lease finishes
+   * the batch with it instead of sending again.
+   */
+  sent?: BatchSent
   createdAt: string
   expiresAt: string
+}
+
+/** What a batch's send did, kept on the batch until it is finished. */
+export interface BatchSent {
+  /** the `NSENT` record's id */
+  id: string
+  /** every pending notification the batch loaded: deleted when it is finished */
+  pendingIds: string[]
+  /** the ones the message carried */
+  eventIds: string[]
+  eventKeys: EventKey[]
+  subject: string
+  providerId?: string
+  sentAt: string
+  /** whether the cool-down starts */
+  coolDown: boolean
 }
 
 /** Names one batch: its recipient, channel, site and due minute. */
@@ -630,11 +656,16 @@ export interface SentNotificationRecord {
   expiresAt: string
 }
 
-/** An address not to send to (`SUPPRESS#<email>/SUPPRESS`), after a hard bounce or a complaint. */
+/**
+ * An address not to send to (`SUPPRESS#<email>/SUPPRESS`), after a hard bounce or a complaint.
+ * One the provider reported at send time expires after 30 days (`SUPPRESSION_MS`, drain.ts), so
+ * an address that works again is tried again; the provider's own list still guards it meanwhile.
+ */
 export interface SuppressionRecord {
   email: string
   kind: 'bounce' | 'complaint'
   at: string
+  expiresAt?: string
 }
 
 /** The persistence of notifications, part of the Store. Nothing here scans. */
@@ -642,12 +673,17 @@ export interface NotificationStore {
   // --- preferences ---
   /** The recipient's preferences (only cells the catalogue still has), or null: all defaults. */
   getNotificationPreferences(email: string): Promise<NotificationPreferencesRecord | null>
-  /** Replace them; cells for events or channels the catalogue lacks are dropped. */
+  /**
+   * Replace them, only while they are as read: `previous` is the `updatedAt` read, or null when
+   * there were none. Null when they changed meanwhile (nothing is written): read and try again.
+   * Cells for events or channels the catalogue lacks are dropped.
+   */
   putNotificationPreferences(
     email: string,
     prefs: NotificationPreferences,
-    at: string
-  ): Promise<NotificationPreferencesRecord>
+    at: string,
+    previous: string | null
+  ): Promise<NotificationPreferencesRecord | null>
 
   // --- events and fan-out ---
   /**
@@ -663,10 +699,18 @@ export interface NotificationStore {
   listDueNotifications(
     minute: Minute
   ): Promise<{ fanOuts: FanOutRecord[]; batches: NotificationBatchRecord[] }>
-  /** Record how many recipients a fan-out has queued. */
-  saveFanOutProgress(minute: Minute, eventId: string, done: number): Promise<void>
-  /** Move a fan-out marker to a later minute, keeping its progress. */
-  moveFanOut(from: Minute, to: Minute, eventId: string): Promise<void>
+  /** Record the last recipient (in address order) a fan-out has queued. */
+  saveFanOutProgress(minute: Minute, eventId: string, after: string): Promise<void>
+  /**
+   * Move a fan-out marker to a later minute, keeping its progress, or setting it and the failed
+   * attempts when given.
+   */
+  moveFanOut(
+    from: Minute,
+    to: Minute,
+    eventId: string,
+    changes?: { after?: string; attempts?: number }
+  ): Promise<void>
   /** The fan-out is complete: forget its marker. */
   finishFanOut(minute: Minute, eventId: string): Promise<void>
 
@@ -676,11 +720,14 @@ export interface NotificationStore {
    * batch site while that batch is still due, else open one due at `earliest` or the end of the
    * cool-down, whichever is later (the pointer and the batch in one transaction, so racing
    * fan-outs open one batch). `queued` is false when the same event was pending already.
-   * `earliest` must be later than the drain cursor.
+   * `floor` is the first minute the drainer has yet to walk (later than the cursor): a batch due
+   * before it is never folded into, since no drain would read it again, and `earliest` is never
+   * before it.
    */
   queueNotification(
     item: Omit<PendingNotificationRecord, 'expiresAt'>,
-    earliest: Minute
+    earliest: Minute,
+    floor?: Minute
   ): Promise<{ batch: NotificationBatchRecord; opened: boolean; queued: boolean }>
   getBatchPointer(
     email: string,
@@ -716,14 +763,21 @@ export interface NotificationStore {
     }
   ): Promise<boolean>
   /**
+   * Record on a leased batch that the provider accepted its message, so a later lease finishes it
+   * without sending again. false when the lease was lost.
+   */
+  markNotificationBatchSent(batch: NotificationBatchRecord, sent: BatchSent): Promise<boolean>
+  /**
    * Move a leased batch to `to` (a later minute), due again (it keeps folding), with `attempts`.
-   * `merged`: another batch already holds its notifications, so it was deleted instead; `lost`:
-   * the lease was lost and nothing changed.
+   * `merged`: another batch, due at or after `floor` (the first minute the drainer has yet to
+   * walk), already holds its notifications, so it was deleted instead; `lost`: the lease was lost
+   * and nothing changed.
    */
   rescheduleNotificationBatch(
     batch: NotificationBatchRecord,
     to: Minute,
-    attempts: number
+    attempts: number,
+    floor?: Minute
   ): Promise<'moved' | 'merged' | 'lost'>
   /** The last minute fully drained, or null before the first drain. */
   getNotifyCursor(): Promise<Minute | null>

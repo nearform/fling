@@ -260,13 +260,15 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   account.oauth.approve    /oauth/authorize and /api/oauth/requests/…: approve (or deny) an app
  *   account.revoke           DELETE /api/keys/:id, /api/connections/:id
  *   account.notifications.change  PUT /api/me/notifications (and fling_notifications_set)
+ *   account.notifications.sent    GET /api/me/notifications/sent: the mail sent to them
  *
  * Admins have no extra rights over sites: `can` never asks whether someone is an admin, so an
  * admin is a member of other people's sites like anyone else, and acts on them only by
  * impersonating. Impersonation is for seeing and doing what the user sees and does with their
  * sites, never for creating anything that outlives it in their name: no API keys, no app
  * approvals, no other impersonation; and not for undoing what they set up either (revoking their
- * keys or apps), nor changing what they hear about (preferences are their consent). Starting one
+ * keys or apps), nor changing what they hear about (preferences are their consent), nor reading
+ * the mail sent to them (admins never read other people's mail). Starting one
  * needs the admin's browser session: a key or token that leaked must not be able to become someone
  * else.
  */
@@ -281,6 +283,7 @@ export const INSTANCE_ACTIONS = [
   'account.oauth.approve',
   'account.revoke',
   'account.notifications.change',
+  'account.notifications.sent',
 ] as const
 
 export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
@@ -300,6 +303,7 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'account.oauth.approve': notImpersonating,
   'account.revoke': notImpersonating,
   'account.notifications.change': notImpersonating,
+  'account.notifications.sent': notImpersonating,
 }
 
 export function principalRole(p: Principal): PrincipalRole {

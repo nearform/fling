@@ -22,7 +22,7 @@
 import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-types'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
-import { drain } from '@fling/api/notifications'
+import { drain, errorName, logNotify } from '@fling/api/notifications'
 import type { Deps } from '@fling/api/types'
 import { R2Blobs, UPLOAD_ROUTE } from './blobs/r2.ts'
 import { buildCloudflareDeps, CLOUDFLARE_DRIVERS } from './deps.ts'
@@ -153,9 +153,11 @@ export default {
       instance ??= init(env)
       const { deps } = instance
       ctx.waitUntil(
-        drain(deps).then(result => {
-          console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
-        })
+        drain(deps)
+          .then(result => {
+            console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
+          })
+          .catch(err => logNotify('error', 'notify drain failed', { err: errorName(err) }))
       )
       return
     }

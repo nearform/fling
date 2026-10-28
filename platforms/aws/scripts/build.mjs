@@ -4,10 +4,12 @@
 // FLING_INSTANCE_CONFIG (optional): a JSON object of instance env keys (INSTANCE_NAME,
 // ALLOWED_EMAIL_DOMAINS, BRAND_*, …) written into the zip as instance.json, which the function
 // reads under its own environment. deploy.yml passes AWS_DEPLOY_CONFIG's `INSTANCE` object.
+// MAIL_* and SES_* are refused there (scripts/instance-config.mjs): email comes from var.mail.
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { parseInstanceConfig } from './instance-config.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const outdir = `${root}dist/lambda`
@@ -33,15 +35,7 @@ await build({
 
 const instance = process.env.FLING_INSTANCE_CONFIG?.trim()
 if (instance) {
-  const parsed = JSON.parse(instance)
-  const ok =
-    typeof parsed === 'object' &&
-    parsed !== null &&
-    !Array.isArray(parsed) &&
-    Object.entries(parsed).every(
-      ([k, v]) => /^[A-Z][A-Z0-9_]*$/.test(k) && ['string', 'number', 'boolean'].includes(typeof v)
-    )
-  if (!ok) throw new Error('FLING_INSTANCE_CONFIG must be a flat JSON object of ENV_STYLE keys')
+  const parsed = parseInstanceConfig(instance)
   writeFileSync(`${outdir}/instance.json`, `${JSON.stringify(parsed, null, 2)}\n`)
   console.log(`instance.json: ${Object.keys(parsed).join(', ')}`)
 }

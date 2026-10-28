@@ -6,7 +6,10 @@
 #   configuration set, when one is named. SES authorises a send on the identity and on the
 #   configuration set it uses, so a named set needs its own grant; the identity's default set is
 #   already covered by the identity's.
-# - MAIL_* and SES_CONFIGURATION_SET reach the function's environment (api.tf).
+# - MAIL_* and SES_CONFIGURATION_SET reach the function's environment (api.tf); var.environment
+#   and var.instance may not set them.
+# - /notifications/* (the emails' unsubscribe page) joins the app distribution's API behaviours
+#   (edge.tf), whatever var.api_paths is.
 # - EventBridge Scheduler invokes the function every minute with {"fling":"notify"}, which drains
 #   the notifications' outbox. The scheduler invokes through its own role, so the function needs no
 #   resource-based permission for it (unlike an EventBridge rule).
@@ -27,6 +30,8 @@ locals {
       ])
     )
   )
+
+  api_paths = local.mail == null ? var.api_paths : distinct(concat(var.api_paths, ["/notifications/*"]))
 
   mail_environment = local.mail == null ? {} : {
     for k, v in {

@@ -135,9 +135,22 @@ describe('CloudflareMailer', () => {
     expect(emailFailure(coded())).toMatchObject({ reason: 'transient', detail: 'Error' })
   })
 
-  it('logs a refusal with its code and never the address', async () => {
+  it('logs a refusal with its code, never its message or the address', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const binding: EmailBinding = {
+      send: async () => {
+        throw Object.assign(new Error('recipient reader@example.test is not allowed'), {
+          code: 'E_RECIPIENT_NOT_ALLOWED',
+        })
+      },
+    }
     try {
+      await new CloudflareMailer(binding).send(message())
+      const refused = String(error.mock.calls[0]?.[0])
+      expect(refused).toContain('E_RECIPIENT_NOT_ALLOWED')
+      expect(refused).not.toContain('reader@example.test')
+      expect(refused).not.toContain('not allowed')
+      error.mockClear()
       await new CloudflareMailer(failingBinding('E_SENDER_NOT_VERIFIED')).send(message())
       const line = String(error.mock.calls[0]?.[0])
       expect(line).toContain('E_SENDER_NOT_VERIFIED')

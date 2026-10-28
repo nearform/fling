@@ -10,6 +10,7 @@
  */
 import {
   applyPreferencesUpdate,
+  type NotificationPreferences,
   type NotificationPreferencesUpdate,
   type NotificationSettings,
   notificationSettings,
@@ -17,8 +18,9 @@ import {
   type SentNotification,
 } from '@fling/shared'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
-import { forbidden, notFound } from '../lib/errors.ts'
+import { ApiError, forbidden, notFound } from '../lib/errors.ts'
 import { canInstance, type Principal } from '../policy.ts'
+import type { NotificationPreferencesRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
 
 /** The channels that are on; 404 when there are none. */
@@ -59,14 +61,35 @@ export async function updateNotificationSettings(
       'impersonating'
     )
   }
-  const prefs = await deps.store.getNotificationPreferences(p.email)
-  const next = applyPreferencesUpdate(prefs, update)
-  const saved = await deps.store.putNotificationPreferences(
-    p.email,
-    next,
-    deps.clock.now().toISOString()
+  const saved = await changePreferences(deps, p.email, prefs =>
+    applyPreferencesUpdate(prefs, update)
   )
   return settingsOf(deps, saved)
+}
+
+/** Rereads after losing a race this many times before giving up. */
+const PREFERENCE_ATTEMPTS = 5
+
+/**
+ * Change someone's preferences from what is stored: written only while they are as read, and read
+ * again on a race, so a one-click unsubscribe and a settings save never undo each other.
+ */
+export async function changePreferences(
+  deps: Pick<Deps, 'store' | 'clock'>,
+  email: string,
+  change: (prefs: NotificationPreferencesRecord | null) => NotificationPreferences
+): Promise<NotificationPreferencesRecord> {
+  for (let attempt = 0; attempt < PREFERENCE_ATTEMPTS; attempt++) {
+    const prefs = await deps.store.getNotificationPreferences(email)
+    const saved = await deps.store.putNotificationPreferences(
+      email,
+      change(prefs),
+      deps.clock.now().toISOString(),
+      prefs?.updatedAt ?? null
+    )
+    if (saved) return saved
+  }
+  throw new ApiError(409, 'conflict', 'Your notification settings changed meanwhile: try again')
 }
 
 /** What was sent to `email` in the last 30 days, newest first. */

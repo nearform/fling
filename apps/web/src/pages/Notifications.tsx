@@ -3,7 +3,8 @@
  * instance tells you about, as a matrix built from the server's catalogue (a section per group of
  * events, a row per event, a column per channel that is on), a switch that mutes everything, and
  * what was sent to you in the last 30 days. Only on an instance with the `notifications`
- * capability. While an admin impersonates you, it is read only: your preferences are your consent.
+ * capability. While an admin impersonates you, it is read only (your preferences are your consent)
+ * and leaves out what was sent to you (admins never read other people's mail).
  */
 import type { NotificationSettings } from '@fling/shared'
 import { BellSlashIcon, EnvelopeIcon } from '@heroicons/react/24/outline'
@@ -24,6 +25,7 @@ import {
   eventTitles,
   matrixSections,
   showsNotifications,
+  showsSentMail,
 } from '../lib/notifications'
 
 function Loading() {
@@ -209,7 +211,15 @@ export default function Notifications() {
           <Matrix settings={settings.data} readOnly={readOnly} />
         </section>
       )}
-      <Sent settings={settings.data} />
+      {showsSentMail(me) ? (
+        <Sent settings={settings.data} />
+      ) : (
+        me && (
+          <p className="text-sm text-secondary">
+            What was sent to {me.email} is not shown while you impersonate them.
+          </p>
+        )
+      )}
     </div>
   )
 }

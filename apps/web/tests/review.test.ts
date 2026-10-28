@@ -4,6 +4,9 @@ import {
   frameUrl,
   linkHost,
   openCountsByPath,
+  openThreadCount,
+  panelChoice,
+  panelOpen,
   pinsFor,
   reviewHref,
   reviewPath,
@@ -106,5 +109,31 @@ describe('review helpers', () => {
     expect(linkHost('https://example.com/a?b')).toBe('example.com')
     expect(linkHost('http://fling.lvh.me:47100/')).toBe('fling.lvh.me:47100')
     expect(linkHost('not a url')).toBe('not a url')
+  })
+
+  it('counts the open threads on every page', () => {
+    expect(openThreadCount([])).toBe(0)
+    expect(openThreadCount([thread('a', '/'), thread('b', '/docs/'), thread('c', '/', true)])).toBe(
+      2
+    )
+  })
+
+  it('reads a stored panel choice; anything else is auto', () => {
+    expect(panelChoice('open')).toBe('open')
+    expect(panelChoice('closed')).toBe('closed')
+    expect(panelChoice(null)).toBe('auto')
+    expect(panelChoice('true')).toBe('auto')
+  })
+
+  it('shows the panel beside a wide frame and hides the sheet until asked', () => {
+    const open = (choice: 'open' | 'closed' | 'auto', sheet: boolean, revealed = false) =>
+      panelOpen({ choice, sheet, revealed })
+    expect(open('auto', false)).toBe(true)
+    expect(open('auto', true)).toBe(false)
+    expect(open('closed', false)).toBe(false)
+    expect(open('open', true)).toBe(true)
+    // A thread link or a pin opens it, whatever was chosen.
+    expect(open('closed', false, true)).toBe(true)
+    expect(open('auto', true, true)).toBe(true)
   })
 })

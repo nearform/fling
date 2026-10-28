@@ -157,7 +157,12 @@ untouched (the edge only rewrites), in a frame beside its comments. The frame ho
 shell, which reports where the frame is; comments attach to that path and the path bar follows it.
 Clicking a pin selects its thread, and selecting a thread scrolls to its pin. With a live room,
 the header shows who else is reviewing (one circle per person, you first) and the shell draws
-their pointers on the same page. It needs the sites
+their pointers on the same page. The **comments panel** sits beside the frame while the frame
+keeps most of the width, and over the site as a sheet from the bottom when it can't (a container
+query in `theme.css`); the header's toggle shows and hides it, the choice is kept per browser
+(`panelOpen`, `apps/web/src/lib/review.ts`), and a thread link or a clicked pin shows it. Its
+threads scroll as one list with the new-comment box at the top, one line until it is used. On a
+narrow header the path bar, reload, open, presence and theme fold behind one button. It needs the sites
 domain under the app's registrable domain: the `fling_site` cookie is on that parent, a same-site
 frame sends it (and a restricted site's pass is set within the frame), and nothing in front of the sites may forbid framing (the e2e checks).
 `COMMENTS=false` turns comments off (the `comments` capability). Publish results (CLI, both MCP

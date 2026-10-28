@@ -252,8 +252,11 @@ function onSubmit(e: SubmitEvent) {
 let lastQuote = ''
 let selectionTimer: ReturnType<typeof setTimeout> | undefined
 
-/** Report a finished text selection (after the pointer or a key lets go), once per selection. */
-function checkSelection() {
+/**
+ * Report a finished text selection, once per selection: after the pointer or a key lets go, or,
+ * for a touch selection (made and adjusted with handles, with no pointerup), once it has settled.
+ */
+function checkSelection(settle = 50) {
   clearTimeout(selectionTimer)
   selectionTimer = setTimeout(() => {
     const win = site()
@@ -263,7 +266,7 @@ function checkSelection() {
     if (key === lastQuote) return
     lastQuote = key
     if (anchor) post({ type: 'textSelected', anchor })
-  }, 50)
+  }, settle)
 }
 
 function onKey(e: KeyboardEvent) {
@@ -292,8 +295,9 @@ function attach(win: Window) {
   doc.addEventListener('click', onClick, true)
   doc.addEventListener('submit', onSubmit, true)
   doc.addEventListener('keydown', onKey)
-  doc.addEventListener('pointerup', checkSelection)
-  doc.addEventListener('keyup', checkSelection)
+  doc.addEventListener('pointerup', () => checkSelection())
+  doc.addEventListener('keyup', () => checkSelection())
+  doc.addEventListener('selectionchange', () => checkSelection(600))
   doc.addEventListener('pointermove', e => trackCursor(e.clientX, e.clientY), { passive: true })
   doc.documentElement.addEventListener('pointerleave', () => trackCursor(null))
   const RO = (win as unknown as typeof globalThis).ResizeObserver

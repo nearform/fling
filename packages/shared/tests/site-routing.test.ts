@@ -3,7 +3,13 @@
 // function's contract: lookups made, decisions returned.
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { MISSING_KEY, NOT_FOUND_PAGE, REVIEW_SHELL, SITE_HMAC_KVS_KEY } from '../src/route-keys.ts'
+import {
+  MISSING_KEY,
+  NOT_FOUND_PAGE,
+  REVIEW_SHELL,
+  ROBOTS_TXT,
+  SITE_HMAC_KVS_KEY,
+} from '../src/route-keys.ts'
 import {
   signDenyHandoff,
   signPassHandoff,
@@ -19,6 +25,7 @@ import {
   routeKeyForHost,
   routeSiteRequest,
   type SiteRequest,
+  siteResponseHeaders,
   validSiteCookie,
   validSiteDenial,
   validSitePass,
@@ -29,7 +36,10 @@ const NOW = 1_800_000_000
 const routes = new Map([
   ['site:pub', JSON.stringify({ id: 'S1', v: 'V1', vis: 'public', spa: false })],
   ['site:priv', JSON.stringify({ id: 'S2', v: 'V2', vis: 'private', spa: true })],
+  [`share:${'t'.repeat(20)}`, JSON.stringify({ id: 'S2', v: 'V2', vis: 'private', spa: false })],
 ])
+const SHARE = `s--${'t'.repeat(20)}.sites.example.test`
+const NOINDEX = { 'x-robots-tag': 'noindex' }
 
 function ctx(lookups: string[] = []) {
   return {
@@ -66,6 +76,7 @@ describe('routeSiteRequest', () => {
         expect(await routeSiteRequest(req({ host, uri }), ctx(lookups))).toEqual({
           action: 'rewrite',
           uri,
+          headers: NOINDEX,
         })
         expect(lookups).toEqual([])
       }
@@ -76,6 +87,7 @@ describe('routeSiteRequest', () => {
     expect(await routeSiteRequest(req({ uri: '/a/' }), ctx())).toEqual({
       action: 'rewrite',
       uri: '/sites/S1/V1/a/index.html',
+      headers: NOINDEX,
     })
   })
 
@@ -92,6 +104,7 @@ describe('routeSiteRequest', () => {
       headers: {
         location: `https://app.example.test/auth/login?return=${encodeURIComponent('https://priv.sites.example.test/x?q=1')}`,
         'cache-control': 'no-store',
+        ...NOINDEX,
       },
     })
     expect(lookups).toEqual(['site:priv'])
@@ -101,7 +114,7 @@ describe('routeSiteRequest', () => {
     const cookie = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
     expect(
       await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
-    ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html' })
+    ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: NOINDEX })
   })
 
   it('rewrites unknown hosts to the missing key without a lookup for malformed labels', async () => {
@@ -109,6 +122,7 @@ describe('routeSiteRequest', () => {
     expect(await routeSiteRequest(req({ host: 'a--b.sites.example.test' }), ctx(lookups))).toEqual({
       action: 'rewrite',
       uri: MISSING_KEY,
+      headers: NOINDEX,
     })
     expect(lookups).toEqual([])
   })
@@ -116,6 +130,86 @@ describe('routeSiteRequest', () => {
   it('answers 405 to anything but GET and HEAD', async () => {
     const d = await routeSiteRequest(req({ method: 'PUT' }), ctx())
     expect(d).toMatchObject({ action: 'respond', status: 405, headers: { allow: 'GET, HEAD' } })
+  })
+})
+
+describe('indexing', () => {
+  it("answers /robots.txt with Fling's on every host, before any lookup", async () => {
+    for (const host of ['pub.sites.example.test', SHARE, 'nope.sites.example.test', '']) {
+      const lookups: string[] = []
+      const d = await routeSiteRequest(req({ host, uri: '/robots.txt' }), ctx(lookups))
+      expect(d).toMatchObject({ action: 'rewrite', uri: ROBOTS_TXT, headers: NOINDEX })
+      expect(lookups).toEqual([])
+    }
+    const head = await routeSiteRequest(req({ method: 'HEAD', uri: '/robots.txt' }), ctx())
+    expect(head).toMatchObject({ action: 'rewrite', uri: ROBOTS_TXT })
+    // only the root's: elsewhere it is the site's own file
+    expect(await routeSiteRequest(req({ uri: '/a/robots.txt' }), ctx())).toMatchObject({
+      uri: '/sites/S1/V1/a/robots.txt',
+    })
+  })
+
+  it('says noindex on every decision, on every host', async () => {
+    for (const r of [
+      req({}),
+      req({ uri: '/docs' }),
+      req({ method: 'POST' }),
+      req({ host: 'priv.sites.example.test' }),
+      req({ host: SHARE }),
+      req({ host: 'a--b.sites.example.test' }),
+      req({ uri: NOT_FOUND_PAGE }),
+    ]) {
+      expect((await routeSiteRequest(r, ctx())).headers).toMatchObject(NOINDEX)
+    }
+  })
+})
+
+describe('the referrer policy', () => {
+  const NO_REFERRER = { 'referrer-policy': 'no-referrer' }
+
+  it('says no-referrer on every decision for a share host: rewrites and answers alike', async () => {
+    const decisions = await Promise.all(
+      [
+        req({ host: SHARE, uri: '/a.html' }),
+        req({ host: SHARE.toUpperCase(), uri: '/' }),
+        req({ host: `${SHARE}:8443`, uri: '/missing/' }),
+        req({ host: SHARE, uri: NOT_FOUND_PAGE }),
+        req({ host: SHARE, uri: REVIEW_SHELL }),
+        req({ host: SHARE, uri: '/.env' }),
+        req({ host: `s--${'z'.repeat(20)}.sites.example.test` }), // unknown or revoked
+        req({ host: SHARE, uri: '/docs' }), // 301
+        req({ host: SHARE, method: 'POST' }), // 405
+      ].map(r => routeSiteRequest(r, ctx()))
+    )
+    expect(decisions.map(d => (d.action === 'respond' ? d.status : d.action))).toEqual([
+      'rewrite',
+      'rewrite',
+      'rewrite',
+      'rewrite',
+      'rewrite',
+      'rewrite',
+      'rewrite',
+      301,
+      405,
+    ])
+    for (const d of decisions) expect(d.headers).toMatchObject(NO_REFERRER)
+  })
+
+  it('leaves site-name hosts and other hosts the browser default', async () => {
+    for (const r of [
+      req({}),
+      req({ uri: '/docs' }),
+      req({ method: 'POST' }),
+      req({ host: 'priv.sites.example.test' }),
+      req({ uri: REVIEW_SHELL }),
+      req({ host: 'a--b.sites.example.test' }),
+      req({ host: '' }),
+    ]) {
+      const d = await routeSiteRequest(r, ctx())
+      expect(d.headers['referrer-policy']).toBeUndefined()
+    }
+    expect(siteResponseHeaders('pub.sites.example.test')).toEqual(NOINDEX)
+    expect(siteResponseHeaders(SHARE)).toEqual({ ...NOINDEX, ...NO_REFERRER })
   })
 })
 

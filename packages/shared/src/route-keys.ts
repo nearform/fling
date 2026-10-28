@@ -13,6 +13,8 @@ export const MISSING_KEY = '/_fling/missing'
 export const NOT_FOUND_PAGE = '/_fling/404.html'
 /** The review shell (review-bridge.ts): a static page on every sites host that frames the site. */
 export const REVIEW_SHELL = '/_fling/review.html'
+/** Every sites host's `/robots.txt` (site-routing.ts): `Disallow: /`, so no site is indexed. */
+export const ROBOTS_TXT = '/_fling/robots.txt'
 /**
  * Where a restricted site's host turns a pass handoff into a site pass:
  * `/_fling-pass?t=<handoff>&r=<path>` (site-cookie.ts, site-routing.ts). Not under `/_fling/`:

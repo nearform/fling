@@ -45,7 +45,9 @@ Delete either folder to start over.
 **Pages on site hosts.** The sites' 404 page and the review shell (`/_fling/review.html`, the page
 review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
 `vite.review-shell.config.ts`), served on every site host by both runtimes. Run
-`pnpm --filter @fling/web build` before trying them locally, and again after changing them.
+`pnpm --filter @fling/web build` before trying them locally, and again after changing them. Both
+say `noindex` and `no-referrer` in meta tags, since share hosts serve them too. Every sites host's
+`/robots.txt` is `apps/web/sites-robots.txt`, served as is.
 
 **Signing in.** Local dev uses a dev login form: any `@example.test` address gets in, and
 `admin@example.test` is an admin. The metadata publishes the allowed domains as for OIDC
@@ -135,7 +137,7 @@ A platform is `platforms/<cloud>/` with:
   plus a `LIVE_URL` where clients connect. A hub whose connections outlive one process keeps them
   as live connection records through the `Store` (as AWS does). Without one, leave `LIVE_URL` unset
   and the `live` capability is off;
-- a sites host that calls `routeSiteRequest`;
+- a sites host that calls `routeSiteRequest` and adds the decision's `headers` to what it serves;
 - infrastructure and deploy scripts, plus a `DEPLOY.md`;
 - a local runtime added to `packages/e2e/src/local.ts`.
 
@@ -146,7 +148,8 @@ Differences between platforms are capability flags, never `if (platform === …)
 - `main` is protected. Open a PR, wait for the **Gate** check, then rebase-merge
   (`gh pr merge --rebase`).
 - A merge to `main` deploys the AWS production instance (`deploy.yml` runs after CI passes). That
-  deploy covers the API, data migrations, the smoke check, the UI, the 404 page, the review shell and the site router.
+  deploy covers the API, data migrations, the smoke check, the UI, the 404 page, the review shell,
+  the sites' robots.txt and the site router.
 - The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow, or
   locally with `pnpm --filter @fling/platform-cloudflare run deploy`. It ends with the e2e smoke
   test.

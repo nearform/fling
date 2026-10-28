@@ -1,11 +1,11 @@
 /**
  * The Worker's sites host beyond the e2e: the route table's KV-miss fallback, and serving files
  * from R2 the way the AWS sites distribution does (stored headers, ETag revalidation, ranges, HEAD,
- * the 404 page, the review shell). R2, KV and D1 are Miniflare's (tests/miniflare.ts).
+ * the 404 page, the review shell), robots.txt and the headers every sites host adds. R2, KV and D1 are Miniflare's (tests/miniflare.ts).
  */
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { routeTableConformance } from '@fling/conformance'
-import { siteKvsKey } from '@fling/shared/route-keys'
+import { shareKvsKey, siteKvsKey } from '@fling/shared/route-keys'
 import { signDenyHandoff, signPassHandoff, signSiteCookie } from '@fling/shared/site-cookie'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { CachedRouteTable } from '../src/route-table/cached.ts'
@@ -42,6 +42,8 @@ describe('CachedRouteTable', () => {
 describe('the sites host (src/sites.ts, in workerd)', () => {
   const APP = 'https://app.example.test'
   const html = '<!doctype html><title>hi</title>'
+  const TOKEN = 'abcdefghij0123456789'
+  const SHARE = `s--${TOKEN}.sites.example.test`
 
   beforeAll(async () => {
     const table = routes()
@@ -62,6 +64,10 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     await cf.bucket.put('sites/S1/V1/a b.txt', '0123456789', {
       httpMetadata: { contentType: 'text/plain' },
     })
+    await table.put(
+      shareKvsKey(TOKEN),
+      JSON.stringify({ id: 'S1', v: 'V1', vis: 'private', spa: false })
+    )
     await table.put(
       siteKvsKey('team'),
       JSON.stringify({ id: 'S3', v: 'V3', vis: 'private', spa: false, r: 1 })
@@ -185,6 +191,48 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     expect(refused.headers.get('cache-control')).toBe('no-store')
     const unknown = await req('nobody.sites.example.test', '/docs/')
     expect(await refused.text()).toBe(await unknown.text())
+  })
+
+  it('says no-referrer on every response on a share host, and leaves site hosts the default', async () => {
+    const file = await req(SHARE)
+    expect(file.status).toBe(200)
+    const etag = file.headers.get('etag') as string
+    const responses = [
+      file,
+      await req(SHARE, '/', { headers: { 'if-none-match': etag } }), // 304
+      await req(SHARE, '/', { method: 'HEAD' }),
+      await req(SHARE, '/missing.html'), // the 404 page
+      await req(SHARE, '/_fling/404.html'),
+      await req(SHARE, '/_fling/review.html?path=%2F'),
+      await req(SHARE, '/docs'), // 301 to add the slash
+      await req(SHARE, '/', { method: 'POST' }), // 405
+      await req(`s--${'z'.repeat(20)}.sites.example.test`), // a revoked or unknown link
+    ]
+    expect(responses.map(r => r.status)).toEqual([200, 304, 200, 404, 200, 200, 301, 405, 404])
+    for (const res of responses) {
+      expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(res.headers.get('x-robots-tag')).toBe('noindex')
+    }
+    for (const res of [
+      await req('pub.sites.example.test'),
+      await req('pub.sites.example.test', '/missing.html'),
+      await req('pub.sites.example.test', '/_fling/review.html?path=%2F'),
+      await req('priv.sites.example.test', '/x'),
+      await req('nope.sites.example.test'),
+    ]) {
+      expect(res.headers.get('referrer-policy')).toBeNull()
+      expect(res.headers.get('x-robots-tag')).toBe('noindex')
+    }
+  })
+
+  it("answers /robots.txt on every sites host with Fling's Disallow, over the site's own", async () => {
+    await cf.bucket.put('sites/S1/V1/robots.txt', 'User-agent: *\nAllow: /\n')
+    for (const host of ['pub.sites.example.test', SHARE, 'nope.sites.example.test']) {
+      const res = await req(host, '/robots.txt')
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toBe('text/plain; charset=utf-8')
+      expect(await res.text()).toBe('User-agent: *\nDisallow: /\n')
+    }
   })
 
   it('refuses other methods', async () => {

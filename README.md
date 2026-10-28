@@ -38,7 +38,9 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 which it publishes at `/.well-known/fling`. The CLI, the MCP servers and the web UI read it from
 there, so none of them is tied to one instance. People sign in through the instance's OpenID
 Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. Sites
-are private to them by default; share links open a site to anyone with the link.
+are private to them by default; share links open a site to anyone with the link. No site is
+indexed: every sites host answers `/robots.txt` with Fling's own `Disallow: /`, whatever the site
+ships.
 
 **Audiences.** The owner can limit a private site to listed people and groups (`fling access <site>
 --add a@example.test --group design`, `fling_set_audience`, or the site's Access section in the web

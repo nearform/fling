@@ -6,10 +6,24 @@
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
 //   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile,
-//     restricted site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host
+//     restricted site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
+//     and `/robots.txt` on any host is ROBOTS_TXT
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie; restricted site without a valid `fling_pass` naming it), 301 to add a
 //     trailing slash (extensionless path, not an SPA).
+//   → either way, with the headers every response on that host carries (siteResponseHeaders).
+//
+// Sites are not indexed: every sites host answers `/robots.txt` with Fling's own `Disallow: /`
+// (ROBOTS_TXT, so a site's own robots.txt is never served), and responses say `X-Robots-Tag:
+// noindex`. A share host's origin is its secret, so its responses also say `Referrer-Policy:
+// no-referrer`: otherwise every cross-origin request its pages make (images, fonts, analytics,
+// links) would send `Referer: https://s--<token>.<sitesDomain>/` to a third party. Site-name hosts
+// keep the browser's default, because authors may rely on Referer (referrer-restricted API keys,
+// analytics). Known limits: a page can still set its own `<meta name="referrer">`, which the
+// browser obeys over the header; and on AWS only the responses decided here carry the headers
+// (see siteResponseHeaders), so a share host's files keep the default policy and a site's files
+// rely on robots.txt alone. Fling's own pages on sites hosts (the 404 page, the review shell) say
+// `noindex` and `no-referrer` in meta tags on every host.
 //
 // Restricted sites (private with an audience; route value `r: 1`) need a site pass, not just
 // `fling_site`, because the edge holds no access lists. The app's `/auth/login` asks policy and,
@@ -37,6 +51,7 @@ import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
   REVIEW_SHELL,
+  ROBOTS_TXT,
   SITE_DENIED_TTL_SECONDS,
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
@@ -97,6 +112,8 @@ export interface SiteResponse {
 export interface SiteRewrite {
   action: 'rewrite'
   uri: string
+  /** to add to the response served for it (siteResponseHeaders) */
+  headers: Record<string, string>
 }
 
 export type SiteDecision = SiteResponse | SiteRewrite
@@ -122,6 +139,20 @@ export function routeKeyForHost(host: string): { key: string; share: boolean } |
   if (!parsed) return null
   if (parsed.kind === 'site') return { key: siteKvsKey(parsed.name), share: false }
   return { key: shareKvsKey(parsed.token), share: true }
+}
+
+/**
+ * The headers every response on `host` carries, whatever is served: `X-Robots-Tag: noindex`, and
+ * `Referrer-Policy: no-referrer` on a share host. Every decision carries them: a response has them
+ * already, a rewrite's are for the shell to add to what it serves. The Worker does; the CloudFront
+ * Function runs at viewer-request only and never sees what S3 serves, so on AWS a share host's
+ * files keep the browser's default (see edge/src/cloudfront.js).
+ */
+export function siteResponseHeaders(host: string): Record<string, string> {
+  const target = routeKeyForHost(host)
+  const headers: Record<string, string> = { 'x-robots-tag': 'noindex' }
+  if (target && target.share) headers['referrer-policy'] = 'no-referrer'
+  return headers
 }
 
 function safeEqual(a: string, b: string) {
@@ -296,10 +327,23 @@ function parseRoute(raw: string | null): RouteValue | null {
   }
 }
 
+function rewrite(uri: string): SiteRewrite {
+  return { action: 'rewrite', uri: uri, headers: {} }
+}
+
 export async function routeSiteRequest(
   req: SiteRequest,
   ctx: SiteRoutingContext
 ): Promise<SiteDecision> {
+  const decision = await decide(req, ctx)
+  const extra = siteResponseHeaders(req.host)
+  Object.keys(extra).forEach(name => {
+    decision.headers[name] = extra[name]
+  })
+  return decision
+}
+
+async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDecision> {
   const uri = req.uri
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     return {
@@ -309,9 +353,11 @@ export async function routeSiteRequest(
       headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
     }
   }
-  // Static pages that hold no site data, on any host: the 404 page, and the review shell (the
-  // site it frames is requested separately and goes through the checks below).
-  if (uri === NOT_FOUND_PAGE || uri === REVIEW_SHELL) return { action: 'rewrite', uri: uri }
+  // Static pages that hold no site data, on any host: the 404 page, the review shell (the site it
+  // frames is requested separately and goes through the checks below), and Fling's robots.txt in
+  // place of any the site has.
+  if (uri === NOT_FOUND_PAGE || uri === REVIEW_SHELL) return rewrite(uri)
+  if (uri === '/robots.txt') return rewrite(ROBOTS_TXT)
 
   const host = req.host.toLowerCase()
   const target = routeKeyForHost(host)
@@ -319,7 +365,7 @@ export async function routeSiteRequest(
   if (target) raw = await ctx.getRoute(target.key)
   const site = parseRoute(raw)
   if (!target || !site || !site.id || !site.v || DOT_SEGMENT_RE.test(uri)) {
-    return { action: 'rewrite', uri: MISSING_KEY }
+    return rewrite(MISSING_KEY)
   }
 
   if (site.vis !== 'public' && !target.share && site.r) {
@@ -329,7 +375,7 @@ export async function routeSiteRequest(
     if (pass) key = await ctx.getCookieKey()
     // Refused a moment ago: answer as a missing site, until the refusal runs out.
     if (key && pass && validSiteDenial(pass, key, 'denied', site.id, ctx.nowSeconds, ctx.hmac)) {
-      return { action: 'rewrite', uri: MISSING_KEY }
+      return rewrite(MISSING_KEY)
     }
     if (!key || !pass || !validSitePass(pass, key, 'pass', site.id, ctx.nowSeconds, ctx.hmac)) {
       return toSignIn(req, ctx, host)
@@ -350,7 +396,7 @@ export async function routeSiteRequest(
     if (!site.spa) return redirect(301, `${uri}/${req.query}`, false)
     path = '/index.html'
   }
-  return { action: 'rewrite', uri: `/sites/${site.id}/${site.v}${path}` }
+  return rewrite(`/sites/${site.id}/${site.v}${path}`)
 }
 
 /**

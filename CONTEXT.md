@@ -23,7 +23,12 @@ site at a complete version.
 and files containing secrets. The CLI and local MCP check first for early, specific messages;
 Publication is the guarantee.
 
-**Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link.
+**Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link. The address
+is the secret, so responses on a share host say `Referrer-Policy: no-referrer` and the browser
+sends it to no one (`siteResponseHeaders` in `packages/shared/src/site-routing.ts`). Known limits:
+a page's own `<meta name="referrer">` still wins, and on AWS only the responses the CloudFront
+Function makes itself carry the header; the files S3 serves keep the browser's default
+(`strict-origin-when-cross-origin`, which sends the origin cross-site).
 
 **Site page** — `/sites/<name>` on the app origin (`apps/web/src/pages/Site.tsx`): everything about
 one of your sites (overview, access, versions, archive and delete), in sections under
@@ -190,6 +195,12 @@ scans the table.
 or the 404 page: one pure decision, `routeSiteRequest` (`packages/shared/src/site-routing.ts`).
 The edge only rewrites: the CloudFront Function (`edge/`, generated around it) and the Cloudflare
 Worker's sites host are thin shells that do the lookups and map the decision to their runtime.
+
+**Indexing** — sites are not indexed. `/robots.txt` on every sites host is Fling's own
+`Disallow: /` (`ROBOTS_TXT`, from `apps/web/sites-robots.txt`), in place of any the site has, and
+responses say `X-Robots-Tag: noindex`: all of them on Cloudflare, those the CloudFront Function
+makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shell) also say
+`noindex` and `no-referrer` in meta tags.
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one

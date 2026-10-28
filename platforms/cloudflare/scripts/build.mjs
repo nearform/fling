@@ -1,8 +1,10 @@
 // Build what the Worker deploys besides its code:
 //   dist/assets/            the web UI (apps/web/dist), `_fling/404.html` (the sites' 404 page,
 //                           apps/web/dist-404), `_fling/review.html` (the review shell,
-//                           apps/web/dist-review) and `downloads/fling.mcpb` when apps/cli built it
-//                           (required with `--require-mcpb`, as deploy.mjs passes);
+//                           apps/web/dist-review), `_fling/robots.txt` (every sites host's
+//                           robots.txt, apps/web/sites-robots.txt) and `downloads/fling.mcpb`
+//                           when apps/cli built it (required with `--require-mcpb`, as deploy.mjs
+//                           passes);
 // then bundle the Worker as `wrangler deploy --dry-run` would (dist/worker/) and check the bundle:
 // no AWS SDK, and under the Workers size limit. No account is needed. `--assets-only` stops after
 // the assets (local dev, the e2e). FLING_WRANGLER_CONFIG checks another config (the rendered one).
@@ -17,6 +19,7 @@ const assets = join(root, 'dist', 'assets')
 const web = join(repo, 'apps', 'web', 'dist')
 const page404 = join(repo, 'apps', 'web', 'dist-404', '404.html')
 const reviewShell = join(repo, 'apps', 'web', 'dist-review', 'review-shell.html')
+const robots = join(repo, 'apps', 'web', 'sites-robots.txt')
 const mcpb = join(repo, 'apps', 'cli', 'dist', 'fling.mcpb')
 
 for (const [path, what] of [
@@ -35,6 +38,7 @@ cpSync(web, assets, { recursive: true })
 mkdirSync(join(assets, '_fling'), { recursive: true })
 cpSync(page404, join(assets, '_fling', '404.html'))
 cpSync(reviewShell, join(assets, '_fling', 'review.html'))
+cpSync(robots, join(assets, '_fling', 'robots.txt'))
 if (process.argv.includes('--require-mcpb') && !existsSync(mcpb)) {
   console.error(`build: ${mcpb} is missing (pnpm --filter ./apps/cli build:mcpb)`)
   process.exit(1)

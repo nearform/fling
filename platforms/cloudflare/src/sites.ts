@@ -5,7 +5,10 @@
  * decision into a response. Unknown hosts, archived sites and missing files get the sites' 404
  * page (`_fling/404.html` from the Worker's assets, its `__APP_ORIGIN__` filled in), never cached.
  * The review shell (`_fling/review.html`) comes from the assets the same way, revalidated on every
- * use and with no header that would stop the app from framing it.
+ * use and with no header that would stop the app from framing it. `/robots.txt` on every sites
+ * host is Fling's `Disallow: /` (`_fling/robots.txt` from the assets), whatever the site has. Every
+ * response carries the decision's headers: `X-Robots-Tag: noindex`, and on a share host
+ * `Referrer-Policy: no-referrer`, so its address never leaks as a Referer.
  */
 import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
@@ -14,6 +17,7 @@ import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
   REVIEW_SHELL,
+  ROBOTS_TXT,
   SITE_PASS_COOKIE_NAME,
 } from '@fling/shared/route-keys'
 import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
@@ -46,7 +50,7 @@ function cookieValue(header: string | null, name: string): string | null {
 
 const pages = new Map<string, { origin: string; html: string | null }>()
 
-/** A page from the Worker's assets with this instance's app origin filled in (cached per isolate). */
+/** A file from the Worker's assets with this instance's app origin filled in (cached per isolate). */
 async function assetPage(opts: SitesOptions, asset: string): Promise<string | null> {
   let page = pages.get(asset)
   if (page?.origin !== opts.appOrigin) {
@@ -78,6 +82,19 @@ async function reviewShell(opts: SitesOptions, method: string): Promise<Response
   return new Response(method === 'HEAD' ? null : html, {
     status: 200,
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
+  })
+}
+
+/** Fling's robots.txt for every sites host. */
+async function robotsTxt(opts: SitesOptions, method: string): Promise<Response> {
+  const text = await assetPage(opts, ROBOTS_TXT)
+  if (text === null) return notFound(opts, 404, method)
+  return new Response(method === 'HEAD' ? null : text, {
+    status: 200,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+    },
   })
 }
 
@@ -145,13 +162,21 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
     }
     return new Response(null, { status: decision.status, headers })
   }
-  if (decision.uri === NOT_FOUND_PAGE) return notFound(opts, 200, request.method)
-  if (decision.uri === REVIEW_SHELL) return reviewShell(opts, request.method)
-  if (decision.uri === MISSING_KEY) return notFound(opts, 404, request.method)
+  // The host's headers on whatever is served: file, 404 page, review shell or robots.txt.
+  const res = await serveRewrite(request, opts, decision.uri)
+  for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)
+  return res
+}
+
+function serveRewrite(request: Request, opts: SitesOptions, uri: string): Promise<Response> {
+  if (uri === NOT_FOUND_PAGE) return notFound(opts, 200, request.method)
+  if (uri === REVIEW_SHELL) return reviewShell(opts, request.method)
+  if (uri === ROBOTS_TXT) return robotsTxt(opts, request.method)
+  if (uri === MISSING_KEY) return notFound(opts, 404, request.method)
   let key: string
   try {
     // The object key is the decoded path, as S3 reads a CloudFront origin request's.
-    key = decodeURIComponent(decision.uri.slice(1))
+    key = decodeURIComponent(uri.slice(1))
   } catch {
     return notFound(opts, 404, request.method)
   }

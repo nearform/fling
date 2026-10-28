@@ -310,7 +310,10 @@ and, with the deploy role over OIDC:
    same for the review shell (`apps/web/dist-review/review-shell.html` → `_fling/review.html`,
    `no-cache`), the page review mode frames on each site's own origin. The sites distribution's
    `_fling/*` behaviour serves both from the bucket without the site router and without a response
-   headers policy, so nothing stops the app from framing the shell.
+   headers policy, so nothing stops the app from framing the shell. Last, it uploads
+   `apps/web/sites-robots.txt` to `_fling/robots.txt` (`text/plain`, 5-minute cache): the site
+   router rewrites `/robots.txt` on every sites host to it (see
+   [Indexing and share-link referrers](#indexing-and-share-link-referrers)).
 4. Builds the site router (`edge/dist/site-router.js`: the shared routing decision,
    `packages/shared/src/site-routing.ts`, in a CloudFront Function shell), fills its
    `__APP_ORIGIN__` and `__SITE_SCHEME__`, updates the CloudFront Function (keeping its KeyValueStore association) and publishes it to LIVE.
@@ -318,6 +321,31 @@ and, with the deploy role over OIDC:
 
 Site content is never touched by a deploy. Terraform ignores the code, so a plan after a deploy
 reads "No changes".
+
+## Indexing and share-link referrers
+
+Sites are not indexed, and a share link's address (`s--<token>.<sites domain>`, the secret) is not
+sent on as a Referer. What the site router can do on its own, at viewer-request:
+
+- `/robots.txt` on every sites host, share links and unknown hosts included, is rewritten to
+  `_fling/robots.txt` (`User-agent: *`, `Disallow: /`) before any lookup. A site's own
+  `robots.txt` is never served. The object is in the sites bucket, so this needs no Terraform: the
+  rewritten request goes to the same S3 origin, and a request for `/_fling/robots.txt` itself takes
+  the `_fling/*` behaviour to the same object.
+- The responses the router makes itself (the redirects to sign in, the trailing-slash 301, the
+  405, the `/_fling-pass` redirects) say `X-Robots-Tag: noindex` on every sites host, and
+  `Referrer-Policy: no-referrer` on a share host.
+- The 404 page and the review shell say `noindex` and `no-referrer` in meta tags, on every host.
+
+Known limits: a viewer-request function never sees the response, so the files S3 serves get
+neither header. On a site-name host, `robots.txt` alone keeps them out of search engines. On a
+share host the browser applies its default policy (`strict-origin-when-cross-origin`), so a page's
+cross-origin requests send `Referer: https://s--<token>.<sites domain>/`. Adding the headers to
+those responses takes infrastructure: the site router (or a second function) associated at
+viewer-response on the sites distribution, adding `siteResponseHeaders(host)` from
+`packages/shared/src/site-routing.ts`, or a response headers policy (which cannot tell share hosts
+from site hosts, so it would set `no-referrer` on every site). Separately, on any platform, a page
+can set its own `<meta name="referrer">`, which the browser obeys over the header.
 
 ## Rollback
 

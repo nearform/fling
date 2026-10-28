@@ -2,14 +2,17 @@
  * Proof that the generated router decides exactly as the hand-written one it replaced
  * (tests/fixtures/site-router.legacy.js, edge/src/site-router.js as of 86d595e): both run on the
  * same events over a matrix of hosts, paths, queries, methods, cookies and route-table states, and
- * every result (rewritten request or response) must be identical.
+ * every result (rewritten request or response) must be identical, except for the headers added
+ * since (every answer's `X-Robots-Tag: noindex`, a share host's `Referrer-Policy: no-referrer`),
+ * checked and then set aside. `/robots.txt`, rewritten since, is not in the matrix.
  */
 import nodeCrypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
 import { signSiteCookie } from '@fling/shared/site-cookie'
+import { routeKeyForHost } from '@fling/shared/site-routing'
 import { describe, expect, it } from 'vitest'
-import { type CloudFrontEvent, createSiteRouter, toCloudFrontEvent } from '../index.mjs'
+import { type CloudFrontEvent, createSiteRouter, isResponse, toCloudFrontEvent } from '../index.mjs'
 
 const LEGACY = readFileSync(new URL('./fixtures/site-router.legacy.js', import.meta.url), 'utf8')
 
@@ -145,9 +148,16 @@ describe('the generated router decides exactly as the legacy one', () => {
                   const event = toCloudFrontEvent({ method, host, path, query, cookieHeader })
                   if (!host) delete (event.request.headers as Record<string, unknown>).host
                   const [was, now] = [await legacy(event), await current(event)]
-                  expect(now, JSON.stringify({ method, host, path, query, cookieHeader })).toEqual(
-                    was
-                  )
+                  const label = JSON.stringify({ method, host, path, query, cookieHeader })
+                  if (isResponse(now)) {
+                    const policy = now.headers?.['referrer-policy']
+                    const share = routeKeyForHost(host)?.share === true
+                    expect(policy, label).toEqual(share ? { value: 'no-referrer' } : undefined)
+                    expect(now.headers?.['x-robots-tag'], label).toEqual({ value: 'noindex' })
+                    delete now.headers?.['referrer-policy']
+                    delete now.headers?.['x-robots-tag']
+                  }
+                  expect(now, label).toEqual(was)
                   compared++
                 }
               }

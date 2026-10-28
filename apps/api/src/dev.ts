@@ -5,7 +5,8 @@
  * (edge/build.mjs, via the @fling/edge harness) against the same in-memory route table, then
  * serves the rewritten object from the blobs. Missing objects get apps/web/dist-404/404.html with
  * a 404 (its `__APP_ORIGIN__` filled in, as the deploy does), and /_fling/review.html is
- * apps/web/dist-review/review-shell.html, filled in the same way. Live rooms run in this process
+ * apps/web/dist-review/review-shell.html, filled in the same way; /_fling/robots.txt (every sites
+ * host's /robots.txt) is apps/web/sites-robots.txt, as the deploy uploads it. Live rooms run in this process
  * (MemoryLiveHub): the API server also accepts `GET /api/live?ticket=` WebSocket upgrades, and
  * LIVE_URL points straight at it (the UI dev server needn't proxy sockets). The e2e
  * (packages/e2e) runs it as the AWS-flavoured local runtime.
@@ -15,7 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSiteRouter, isResponse, toCloudFrontEvent } from '@fling/edge'
-import { MISSING_KEY, REVIEW_SHELL_PATH, SITE_HMAC_KVS_KEY } from '@fling/shared'
+import { MISSING_KEY, REVIEW_SHELL_PATH, ROBOTS_TXT, SITE_HMAC_KVS_KEY } from '@fling/shared'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { WebSocketServer } from 'ws'
@@ -36,6 +37,7 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const fsRoot = resolve(repoRoot, process.env.FS_ROOT ?? '.fling-dev')
 const notFoundPage = resolve(repoRoot, 'apps/web/dist-404/404.html')
 const reviewShell = resolve(repoRoot, 'apps/web/dist-review/review-shell.html')
+const robotsTxt = resolve(repoRoot, 'apps/web/sites-robots.txt')
 
 const devSecret = () => randomBytes(32).toString('base64url')
 const appOrigin = `http://fling.lvh.me:${process.env.UI_PORT ?? 47100}`
@@ -138,6 +140,11 @@ sites.all('*', async c => {
     } catch {
       return c.text('Not found (build apps/web for the review shell)', 404)
     }
+  }
+  if (result.uri === ROBOTS_TXT) {
+    return new Response(await readFile(robotsTxt), {
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    })
   }
   const file = resolve(fsRoot, `.${decodeURIComponent(result.uri)}`)
   if (result.uri !== MISSING_KEY && file.startsWith(fsRoot + sep)) {

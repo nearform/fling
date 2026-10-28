@@ -2,7 +2,11 @@
 // around the shared routing decision, @fling/shared/site-routing. It reads the request, looks
 // routes and the cookie key up in the associated KeyValueStore and turns the decision into a
 // rewritten request (an S3 object key; unknown hosts go to `/_fling/missing`, which S3 404s into
-// the error page) or a response, with the cookies it sets (the site pass).
+// the error page) or a response, with the cookies it sets (the site pass) and the host's headers
+// (a share host's `Referrer-Policy: no-referrer`). A rewrite's headers cannot be applied here: a
+// viewer-request function never sees the response. So files S3 serves on a share host keep the
+// browser's default referrer policy; adding the header to them would take a viewer-response
+// association or a response headers policy on the sites distribution.
 //
 // edge/build.mjs bundles this into dist/site-router.js, the code deploy.yml publishes, after
 // filling `__APP_ORIGIN__` and `__SITE_SCHEME__`. Same syntax rules as site-routing.ts.

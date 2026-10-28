@@ -2,7 +2,7 @@
  * The Worker the tests run in workerd (bundled by miniflare.ts): R2Blobs' upload route, so signed
  * uploads arrive as real requests and stream into R2 the way they will in production; and
  * `*.sites.example.test` is the sites host (src/sites.ts) over the KV + D1 route table and R2,
- * with a stub for the assets' 404 page and review shell.
+ * with a stub for the assets' 404 page, review shell and robots.txt.
  */
 import type { D1Database, KVNamespace, R2Bucket } from '@cloudflare/workers-types'
 import { TableRouteTable } from '@fling/api/route-table/table'
@@ -44,7 +44,9 @@ export default {
           new Response(
             url.endsWith('/_fling/review')
               ? '<p>shell for __APP_ORIGIN__</p>'
-              : '<p>404 for __APP_ORIGIN__</p>'
+              : url.endsWith('/_fling/robots.txt')
+                ? 'User-agent: *\nDisallow: /\n'
+                : '<p>404 for __APP_ORIGIN__</p>'
           ),
       } as never,
     })

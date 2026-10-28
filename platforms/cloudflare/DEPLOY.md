@@ -32,6 +32,14 @@ The sites host runs the same routing function as the AWS CloudFront Function
 (`packages/shared/src/site-routing.ts`): one place decides how a host and path become a site
 version's file, a sign-in redirect or the 404 page.
 
+Sites are not indexed and share links do not leak their address: `/robots.txt` on every sites host
+is Fling's `Disallow: /` (`_fling/robots.txt` from the assets), in place of any the site has, and
+the Worker adds the decision's headers to every sites-host response: `X-Robots-Tag: noindex`, and
+`Referrer-Policy: no-referrer` on a share host. A page can still set its own
+`<meta name="referrer">`, which the browser obeys over the header. On AWS the files S3 serves get
+neither header (see
+[Indexing and share-link referrers](../aws/DEPLOY.md#indexing-and-share-link-referrers)).
+
 | Who | Owns |
 | --- | --- |
 | `scripts/setup.mjs` (once, with your Cloudflare login) | The D1 database, R2 bucket and KV namespace; the D1 schema; the Worker's secrets; your deploy config |
@@ -163,7 +171,7 @@ pnpm exec wrangler secret put OIDC_CLIENT_SECRET --config dist/wrangler.jsonc
    is the same extension whichever Fling serves it, so installing it from another updates it;
 2. assembles `dist/assets`: the web UI (`apps/web/dist`), the sites' 404 page at `_fling/404.html`
    and the review shell at `_fling/review.html` (the Worker fills their `__APP_ORIGIN__` when
-   serving them) and the extension at `downloads/fling.mcpb` (a deploy without it stops here);
+   serving them), every sites host's robots.txt at `_fling/robots.txt` and the extension at `downloads/fling.mcpb` (a deploy without it stops here);
    then bundles the Worker without deploying it and checks the bundle (no
    AWS SDK, under 10 MB);
 3. applies the D1 schema migrations (`migrations/*.sql`, `wrangler d1 migrations apply --remote`).

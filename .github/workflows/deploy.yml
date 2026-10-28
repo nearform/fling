@@ -22,7 +22,7 @@ name: Deploy
 #      other public files, then index.html last; plus the Claude Desktop extension at
 #      downloads/fling.mcpb (built from apps/cli);
 #   3. the sites' error page and review shell (_fling/404.html and _fling/review.html in the sites
-#      bucket, their __APP_ORIGIN__ filled in);
+#      bucket, their __APP_ORIGIN__ filled in), and _fling/robots.txt, every sites host's robots.txt;
 #   4. the site router (CloudFront Function, built by edge/build.mjs around the shared routing
 #      decision in packages/shared/src/site-routing.ts): update, then publish to LIVE;
 #   5. invalidate index.html on the app and _fling/* on the sites.
@@ -212,7 +212,7 @@ jobs:
           aws s3 cp index.html "s3://$BUCKET/index.html" --no-progress \
             --content-type "text/html; charset=utf-8" --cache-control "no-cache"
 
-      - name: Upload the sites' error page and review shell
+      - name: Upload the sites' error page, review shell and robots.txt
         env:
           BUCKET: ${{ steps.config.outputs.SITES_BUCKET }}
           APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
@@ -238,6 +238,10 @@ jobs:
           fi
           aws s3 cp "$shell" "s3://$BUCKET/_fling/review.html" --no-progress \
             --content-type "text/html; charset=utf-8" --cache-control "no-cache"
+          # The site router answers /robots.txt on every sites host with this object (Disallow: /),
+          # so no site is indexed. Before the router is published, so it is there when asked for.
+          aws s3 cp apps/web/sites-robots.txt "s3://$BUCKET/_fling/robots.txt" --no-progress \
+            --content-type "text/plain; charset=utf-8" --cache-control "public, max-age=300"
 
       - name: Publish the site router
         env:

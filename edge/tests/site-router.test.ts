@@ -445,6 +445,41 @@ describe('path rewriting', () => {
   })
 })
 
+describe('indexing and the referrer policy', () => {
+  it("rewrites /robots.txt to Fling's on every host, the site's own included", async () => {
+    for (const host of [PUBLIC, PRIVATE, SHARE, 'nope.fling.example.test']) {
+      expect((await asRequest({ host, path: '/robots.txt' })).uri).toBe('/_fling/robots.txt')
+    }
+  })
+
+  it('answers on a share host with no-referrer and noindex: 301 and 405', async () => {
+    for (const res of [
+      await asResponse({ host: SHARE, path: '/docs' }),
+      await asResponse({ host: SHARE, method: 'POST' }),
+    ]) {
+      expect(res.headers?.['referrer-policy']?.value).toBe('no-referrer')
+      expect(res.headers?.['x-robots-tag']?.value).toBe('noindex')
+    }
+  })
+
+  it('answers on a site-name host with noindex and the default referrer policy', async () => {
+    for (const res of [
+      await asResponse({ host: PUBLIC, path: '/docs' }),
+      await asResponse({ host: PUBLIC, method: 'POST' }),
+      await asResponse({ host: PRIVATE, path: '/' }),
+      await asResponse({ host: RESTRICTED, path: '/' }),
+    ]) {
+      expect(res.headers?.['referrer-policy']).toBeUndefined()
+      expect(res.headers?.['x-robots-tag']?.value).toBe('noindex')
+    }
+  })
+
+  it('forwards a rewritten request without adding headers to it', async () => {
+    const req = await asRequest({ host: SHARE, path: '/a.html' })
+    expect(Object.keys(req.headers)).toEqual(['host'])
+  })
+})
+
 describe('label parsing parity with shared/hosts.ts', () => {
   it.each([
     'my-app',

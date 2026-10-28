@@ -3,9 +3,9 @@
  * to `appOrigin` only as a user would: the real CLI (apps/cli, run from source) for deploys and site
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
- *   metadata → whoami → deploy v1 (public) → view → 404 / trailing-slash → deploy v2 → view →
- *   rollback to v1 → private: anonymous redirect to sign-in, member view (with a site cookie) →
- *   share link → comments (owner and member; anonymous refused) → live room (two peers: pointers,
+ *   metadata → whoami → deploy v1 (public) → view → robots.txt → 404 / trailing-slash → deploy v2 →
+ *   view → rollback to v1 → private: anonymous redirect to sign-in, member view (with a site
+ *   cookie) → share link (its answers send no Referer) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list;
  *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
@@ -277,6 +277,13 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `review shell: ${shell.status} ${shell.headers.get('content-type')}, x-frame-options ${shell.headers.get('x-frame-options')}, csp ${shellCsp}`
     )
     step('review shell served on the site host, frameable')
+    // Sites are not indexed: every sites host's robots.txt is Fling's.
+    const robots = await get(`${siteUrl}robots.txt`)
+    check(
+      robots.status === 200 && /^Disallow: \/$/m.test(robots.text),
+      `robots.txt: ${robots.status} ${robots.text.slice(0, 80)}`
+    )
+    step('robots.txt on the site host disallows everything')
 
     const css = await get(`${siteUrl}style.css`)
     check(css.status === 200 && css.text.includes('rebeccapurple'), `style.css: ${css.status}`)
@@ -339,6 +346,21 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `share link ${shared.shareUrl}: ${viaShare.status}`
     )
     step(`share link ${shared.shareUrl} serves it without signing in`)
+    // A share host's address is its secret: what the edge answers there sends no Referer on, and
+    // a site host's keeps the browser's default. Both say noindex.
+    const shareAnswer = await get(new URL('docs', shared.shareUrl).href)
+    check(
+      shareAnswer.status === 301 &&
+        shareAnswer.headers.get('referrer-policy') === 'no-referrer' &&
+        shareAnswer.headers.get('x-robots-tag') === 'noindex',
+      `share host ${shareAnswer.status}: referrer-policy ${shareAnswer.headers.get('referrer-policy')}, x-robots-tag ${shareAnswer.headers.get('x-robots-tag')}`
+    )
+    check(
+      !redirect.headers.get('referrer-policy') &&
+        redirect.headers.get('x-robots-tag') === 'noindex',
+      `site host redirect: referrer-policy ${redirect.headers.get('referrer-policy')}, x-robots-tag ${redirect.headers.get('x-robots-tag')}`
+    )
+    step('share host answers say no-referrer, site host answers keep the default; both noindex')
 
     // Comments (review mode's data): the owner through the CLI, a member through the API, the
     // remote MCP tools; anonymous callers refused. Only where the instance has them.

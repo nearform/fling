@@ -131,6 +131,24 @@ describe('fling notifications', () => {
     expect(JSON.parse(json.out.content()).sent[0].providerId).toBe('p-2')
   })
 
+  it("passes on the server's refusal of the sent mail", async () => {
+    const refusing = mockFetch({
+      'GET /api/me/notifications/sent': () =>
+        jsonResponse(
+          {
+            error: {
+              code: 'impersonating',
+              message: 'Not while impersonating member@example.test: the mail sent to them',
+            },
+          },
+          403
+        ),
+    })
+    const { ctx } = await testContext({ store: await storeWith(), fetch: refusing.fetch })
+    const err = await captureError(runNotificationsSent(ctx))
+    expect(err.message).toBe('Not while impersonating member@example.test: the mail sent to them')
+  })
+
   it('says so on a Fling without notifications', async () => {
     const off = await storeWith({ ...INSTANCE, capabilities: { notifications: false } })
     const { ctx } = await testContext({ store: off, fetch: server().fetch })

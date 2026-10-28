@@ -44,7 +44,7 @@ import { issueLiveTicket } from '../live.ts'
 import type { Acting } from '../notifications/notify.ts'
 import * as notifications from '../notifications/settings.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
-import { userActor } from '../policy.ts'
+import { canInstance, userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
@@ -98,7 +98,13 @@ apiRoutes.put('/me/notifications', async c => {
 })
 
 apiRoutes.get('/me/notifications/sent', async c => {
-  const sent = await notifications.sentNotifications(c.get('deps'), c.get('user').email)
+  notifications.channelsOn(c.get('deps'))
+  const p = principalOf(c)
+  // Admins never read other people's mail, impersonating or not.
+  if (!canInstance(p, 'account.notifications.sent')) {
+    throw forbidden(`Not while impersonating ${p.email}: the mail sent to them`, 'impersonating')
+  }
+  const sent = await notifications.sentNotifications(c.get('deps'), p.email)
   return c.json(SentNotificationListSchema.parse({ sent }))
 })
 

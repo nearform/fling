@@ -115,14 +115,21 @@ describe('SesMailer', () => {
     expect(ses.requests[0]).not.toHaveProperty('ReplyToAddresses')
   })
 
-  it('logs a rejection without the address', async () => {
+  it('logs a rejection by name and code, never its message (the sandbox quotes the address)', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await new SesMailer({}, new StubSes(SES_ERRORS.rejected)).send(message())
+      const sandbox = () =>
+        new MessageRejected({
+          message:
+            'Email address is not verified. The following identities failed the check in region EU-WEST-1: reader@example.test',
+          $metadata,
+        })
+      await new SesMailer({}, new StubSes(sandbox)).send(message())
       expect(error).toHaveBeenCalledOnce()
       const line = String(error.mock.calls[0]?.[0])
       expect(line).toContain('MessageRejected')
       expect(line).not.toContain('reader@example.test')
+      expect(line).not.toContain('not verified')
     } finally {
       error.mockRestore()
     }
@@ -138,6 +145,30 @@ describe('SesMailer', () => {
     expect(sesFailure(named('MailFromDomainNotVerifiedException'))).toMatchObject({
       reason: 'rejected',
       retry: false,
+    })
+    expect(
+      sesFailure(named('LimitExceededException', 'Daily message quota exceeded.'))
+    ).toMatchObject({ reason: 'throttled', quota: true, retry: true })
+    // Any other limit (too many configuration sets, a request too large) is a setup problem.
+    expect(sesFailure(named('LimitExceededException', 'Too many tags.'))).toMatchObject({
+      reason: 'rejected',
+      retry: false,
+    })
+    for (const name of [
+      'SendingPausedException',
+      'AccountSuspendedException',
+      'NotFoundException',
+      'BadRequestException',
+    ]) {
+      expect(sesFailure(named(name))).toMatchObject({
+        reason: 'rejected',
+        retry: false,
+        detail: name,
+      })
+    }
+    expect(sesFailure(named('TooManyRequestsException'))).toMatchObject({
+      reason: 'throttled',
+      retry: true,
     })
     expect(sesFailure(named('InternalServiceErrorException'))).toMatchObject({
       reason: 'transient',

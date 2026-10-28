@@ -23,6 +23,13 @@ type Capabilities = Pick<InstanceMetadata, 'capabilities'> | null | undefined
 export const showsNotifications = (instance: Capabilities) =>
   instance?.capabilities.notifications === true
 
+/**
+ * Whether the settings page lists the mail sent to the person: never while an admin impersonates
+ * them (admins never read other people's mail; the API refuses it), nor before `me` is known.
+ */
+export const showsSentMail = (me: Pick<Me, 'impersonator'> | null | undefined) =>
+  me != null && !me.impersonator
+
 /** Whether Admin offers Mail: an admin, in their own session, on an instance that sends email. */
 export const showsMailAdmin = (me: Me | null | undefined, instance: Capabilities) =>
   showsAdmin(me) && instance?.capabilities.email === true

@@ -70,15 +70,46 @@ export function notificationStoreConformance(factory: () => Store | Promise<Stor
       const written = await store.putNotificationPreferences(
         e,
         { muted: true, cells },
-        at(minute())
+        at(minute()),
+        null
       )
-      expect(written.cells).toEqual({
+      expect(written?.cells).toEqual({
         'comment.created': { email: 'off' },
         'comment.reply': { email: 'on' },
       })
       expect(await store.getNotificationPreferences(e)).toEqual(written)
-      await store.putNotificationPreferences(e, { muted: false, cells: {} }, written.updatedAt)
+      const next = at(minute())
+      expect(
+        await store.putNotificationPreferences(
+          e,
+          { muted: false, cells: {} },
+          next,
+          written?.updatedAt ?? null
+        )
+      ).not.toBeNull()
       expect(await store.getNotificationPreferences(e)).toMatchObject({ muted: false, cells: {} })
+    })
+
+    it('race: a write made from a stale read changes nothing', async () => {
+      const store = await factory()
+      const e = email()
+      const t1 = at(minute())
+      const t2 = at(minute())
+      // Two writers both read "none".
+      const both = await Promise.all([
+        store.putNotificationPreferences(e, { muted: true, cells: {} }, t1, null),
+        store.putNotificationPreferences(e, { muted: false, cells: {} }, t2, null),
+      ])
+      expect(both.filter(Boolean)).toHaveLength(1)
+      const stored = await store.getNotificationPreferences(e)
+      const won = both.find(Boolean)
+      expect(stored).toEqual(won)
+      // A writer that read an older updatedAt loses too.
+      const stale = won?.updatedAt === t1 ? t2 : t1
+      expect(
+        await store.putNotificationPreferences(e, { muted: true, cells: {} }, at(minute()), stale)
+      ).toBeNull()
+      expect(await store.getNotificationPreferences(e)).toEqual(won)
     })
   })
 
@@ -98,18 +129,26 @@ export function notificationStoreConformance(factory: () => Store | Promise<Stor
       expect(await store.putNotificationEvent({ ...event, data: { other: true } }, m)).toBe(false)
       expect(await store.getNotificationEvent(event.id)).toMatchObject(event)
       const due = await store.listDueNotifications(m)
-      expect(due.fanOuts).toEqual([expect.objectContaining({ eventId: event.id, due: m, done: 0 })])
+      expect(due.fanOuts).toEqual([expect.objectContaining({ eventId: event.id, due: m })])
+      expect(due.fanOuts[0]?.after).toBeUndefined()
       expect(due.batches).toEqual([])
-      await store.saveFanOutProgress(m, event.id, 7)
-      expect((await store.listDueNotifications(m)).fanOuts[0]?.done).toBe(7)
+      await store.saveFanOutProgress(m, event.id, 'g@example.test')
+      expect((await store.listDueNotifications(m)).fanOuts[0]?.after).toBe('g@example.test')
       const later = plus(m, 1)
       await store.moveFanOut(m, later, event.id)
       expect((await store.listDueNotifications(m)).fanOuts).toEqual([])
       expect((await store.listDueNotifications(later)).fanOuts).toEqual([
-        expect.objectContaining({ eventId: event.id, due: later, done: 7 }),
+        expect.objectContaining({ eventId: event.id, due: later, after: 'g@example.test' }),
       ])
-      await store.finishFanOut(later, event.id)
+      // Moving can set the progress and the failed attempts.
+      const again = plus(m, 6)
+      await store.moveFanOut(later, again, event.id, { after: 'k@example.test', attempts: 2 })
       expect((await store.listDueNotifications(later)).fanOuts).toEqual([])
+      expect((await store.listDueNotifications(again)).fanOuts).toEqual([
+        expect.objectContaining({ due: again, after: 'k@example.test', attempts: 2 }),
+      ])
+      await store.finishFanOut(again, event.id)
+      expect((await store.listDueNotifications(again)).fanOuts).toEqual([])
       expect(await store.getNotificationEvent(event.id)).not.toBeNull()
     })
   })
@@ -339,6 +378,83 @@ export function notificationStoreConformance(factory: () => Store | Promise<Stor
     })
   })
 
+  describe('batches and the drain floor', () => {
+    it('never folds into a batch due before the floor: a new batch takes over its pointer', async () => {
+      const store = await factory()
+      const m = minute()
+      const to = email()
+      const stranded = await store.queueNotification(pending(to, m), plus(m, 2))
+      // The walk is past plus(m, 2): its batch is never read again.
+      const next = await store.queueNotification(pending(to, m), plus(m, 4), plus(m, 3))
+      expect(next.opened).toBe(true)
+      expect(next.batch.id).not.toBe(stranded.batch.id)
+      expect(next.batch.due).toBe(plus(m, 4))
+      expect((await store.getBatchPointer(to, 'email', 'site1'))?.due).toBe(plus(m, 4))
+      // The new batch finds every pending notification, the stranded one's too.
+      expect(await store.listPendingNotifications(to, 'email', 'site1')).toHaveLength(2)
+      // Never before the floor, whatever `earliest` says.
+      const other = email()
+      const floored = await store.queueNotification(pending(other, m), plus(m, 2), plus(m, 5))
+      expect(floored.batch.due).toBe(plus(m, 5))
+    })
+
+    it('rescheduling takes the pointer back from a stranded batch, or from none', async () => {
+      const store = await factory()
+      const m = minute()
+      const to = email()
+      const { batch } = await store.queueNotification(pending(to, m), plus(m, 2))
+      const leased = await store.leaseNotificationBatch(ref(batch), at(m, 120), at(m, 180))
+      if (!leased) throw new Error('not leased')
+      // A batch opened meanwhile, then stranded behind the walk.
+      const strandedBy = await store.queueNotification(pending(to, m), plus(m, 3))
+      expect(strandedBy.opened).toBe(true)
+      expect(await store.rescheduleNotificationBatch(leased, plus(m, 9), 1, plus(m, 5))).toBe(
+        'moved'
+      )
+      expect((await store.getBatchPointer(to, 'email', 'site1'))?.due).toBe(plus(m, 9))
+      // A pointer with only a cool-down names no batch: the rescheduled one takes it.
+      const other = email()
+      const first = await store.queueNotification(pending(other, m), plus(m, 2))
+      const l1 = await store.leaseNotificationBatch(ref(first.batch), at(m, 120), at(m, 180))
+      if (!l1) throw new Error('not leased')
+      // Opened while l1 is leased, then sent and finished first.
+      const second = await store.queueNotification(pending(other, m), plus(m, 3))
+      const l2 = await store.leaseNotificationBatch(ref(second.batch), at(m, 180), at(m, 240))
+      if (!l2) throw new Error('not leased')
+      await store.finishNotificationBatch(l2, { eventIds: [], coolDownUntil: at(m, 900) })
+      expect((await store.getBatchPointer(other, 'email', 'site1'))?.due).toBeUndefined()
+      expect(await store.rescheduleNotificationBatch(l1, plus(m, 30), 1, plus(m, 20))).toBe('moved')
+      expect(await store.getBatchPointer(other, 'email', 'site1')).toMatchObject({
+        due: plus(m, 30),
+        coolDownUntil: at(m, 900),
+      })
+    })
+
+    it('a batch marked sent keeps the mark through a later lease; marking needs the lease', async () => {
+      const store = await factory()
+      const m = minute()
+      const to = email()
+      const { batch } = await store.queueNotification(pending(to, m), plus(m, 2))
+      const leased = await store.leaseNotificationBatch(ref(batch), at(m, 120), at(m, 180))
+      if (!leased) throw new Error('not leased')
+      const sent = {
+        id: `${m}-sent`,
+        pendingIds: ['a', 'b'],
+        eventIds: ['a'],
+        eventKeys: ['comment.created' as const],
+        subject: 'One comment',
+        providerId: 'p-9',
+        sentAt: at(m, 121),
+        coolDown: true,
+      }
+      expect(await store.markNotificationBatchSent(leased, sent)).toBe(true)
+      // The lease runs out before the batch is finished: the next lease sees the mark.
+      const again = await store.leaseNotificationBatch(ref(batch), at(m, 180), at(m, 240))
+      expect(again?.sent).toEqual(sent)
+      expect(await store.markNotificationBatchSent(leased, sent)).toBe(false)
+    })
+  })
+
   describe('the drain cursor', () => {
     it('moves only from the value read', async () => {
       const store = await factory()
@@ -425,6 +541,15 @@ export function notificationStoreConformance(factory: () => Store | Promise<Stor
       await store.putSuppression(record)
       expect(await store.getSuppression(e)).toEqual(record)
       expect(await store.getSuppression(email())).toBeNull()
+      // One with an expiry lapses then.
+      const lapsed = email()
+      await store.putSuppression({
+        email: lapsed,
+        kind: 'bounce',
+        at: '2000-01-01T00:00:00.000Z',
+        expiresAt: '2000-01-31T00:00:00.000Z',
+      })
+      expect(await store.getSuppression(lapsed)).toBeNull()
     })
   })
 }

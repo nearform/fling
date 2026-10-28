@@ -123,6 +123,7 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'account.oauth.approve': 'atu',
   'account.revoke': 'atu',
   'account.notifications.change': 'atu',
+  'account.notifications.sent': 'atu',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {

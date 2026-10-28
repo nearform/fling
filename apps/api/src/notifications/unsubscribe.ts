@@ -9,19 +9,24 @@
  *
  * `GET` only shows a page; `POST` changes the preferences, so mail scanners that follow links
  * unsubscribe nobody. The mail client's one-click `POST` (RFC 8058) turns the event's cell off;
- * the page's buttons do that or mute everything, and Undo reverts either. Any token that does not
- * verify gets the same neutral page.
+ * the page's buttons do that or mute everything, and Undo puts back what either replaced. Writes
+ * are conditional on the preferences read (settings.ts `changePreferences`), so an unsubscribe and
+ * a settings save never undo each other. Any token that does not verify gets the same neutral
+ * page.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import {
   applyPreferencesUpdate,
   type ChannelId,
+  type Delivery,
+  DeliverySchema,
   type EventKey,
   isChannelId,
   isEventKey,
   UNSUBSCRIBE_PATH,
 } from '@fling/shared'
 import type { Deps } from '../types.ts'
+import { changePreferences } from './settings.ts'
 
 /** What a token names: whose email about which event on which channel. */
 export interface UnsubscribeTarget {
@@ -76,24 +81,40 @@ export function unsubscribeUrl(
   return `${config.appOrigin}${UNSUBSCRIBE_PATH}?t=${token}`
 }
 
-/** What a POST does: stop this event (or, `all`, every email), or undo that. */
+/**
+ * What a POST does: stop this event (or, `all`, every email), or undo that. An undo restores
+ * `previous`, what the stop reported it replaced (carried in the page's Undo form). It names only
+ * this address's own setting, which the token's holder may change anyway, so nothing is gained by
+ * forging it; anything unrecognised restores the default.
+ */
 export interface UnsubscribeChange {
   scope: 'event' | 'all'
   undo: boolean
+  previous?: string
 }
 
-/** Apply a change to the target's preferences. */
+/** Apply a change to the target's preferences; returns what it replaced, for the Undo form. */
 export async function applyUnsubscribe(
   deps: Deps,
   target: UnsubscribeTarget,
   change: UnsubscribeChange
-): Promise<void> {
-  const prefs = await deps.store.getNotificationPreferences(target.email)
-  const next =
-    change.scope === 'all'
-      ? applyPreferencesUpdate(prefs, { muted: !change.undo })
-      : applyPreferencesUpdate(prefs, {
-          cells: { [target.event]: { [target.channel]: change.undo ? null : 'off' } },
-        })
-  await deps.store.putNotificationPreferences(target.email, next, deps.clock.now().toISOString())
+): Promise<string> {
+  let replaced = ''
+  await changePreferences(deps, target.email, prefs => {
+    if (change.scope === 'all') {
+      replaced = prefs?.muted ? 'muted' : ''
+      return applyPreferencesUpdate(prefs, {
+        muted: change.undo ? change.previous === 'muted' : true,
+      })
+    }
+    replaced = prefs?.cells[target.event]?.[target.channel] ?? ''
+    const restore = isDelivery(change.previous) ? change.previous : null
+    return applyPreferencesUpdate(prefs, {
+      cells: { [target.event]: { [target.channel]: change.undo ? restore : 'off' } },
+    })
+  })
+  return replaced
 }
+
+const isDelivery = (value: string | undefined): value is Delivery =>
+  DeliverySchema.safeParse(value).success

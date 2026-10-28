@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
-import { type DrainResult, drain } from '@fling/api/notifications'
+import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
@@ -86,6 +86,13 @@ const isNotify = (event: unknown): event is NotifyEvent => isFlingEvent(event, '
 /** Leave this much of the invocation when draining. */
 const NOTIFY_MARGIN_MS = 5_000
 
+/**
+ * How long a tick drains: the drainer's own budget, shorter when the invocation has less left. Never
+ * the whole of a long timeout, so a drain stays well inside the batch leases it takes.
+ */
+export const notifyBudget = (remainingMs: number) =>
+  Math.max(0, Math.min(remainingMs - NOTIFY_MARGIN_MS, DRAIN_BUDGET_MS))
+
 const isMigrate = (event: unknown): event is MigrateEvent => isFlingEvent(event, 'migrate')
 
 /** Leave this much of the invocation for the last page and the response. */
@@ -122,7 +129,7 @@ export const handler = async (
   const { http, deps, live } = await ready
   if (isNotify(event)) {
     const result: DrainResult = await drain(deps, {
-      deadline: Date.now() + context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS,
+      deadline: Date.now() + notifyBudget(context.getRemainingTimeInMillis()),
     })
     console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
     return result

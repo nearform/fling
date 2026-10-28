@@ -13,9 +13,9 @@ export type {
   EventDetails,
 } from './channel.ts'
 export { channelsOf } from './channel.ts'
-export { type DrainOptions, type DrainResult, drain } from './drain.ts'
+export { DRAIN_BUDGET_MS, type DrainOptions, type DrainResult, drain } from './drain.ts'
 export { emailChannel, renderBatchEmail } from './email.ts'
-export { addressHash } from './log.ts'
+export { addressHash, errorName, logNotify } from './log.ts'
 export {
   type Acting,
   type EventData,

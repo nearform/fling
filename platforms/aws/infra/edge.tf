@@ -174,7 +174,7 @@ resource "aws_cloudfront_distribution" "app" {
   }
 
   dynamic "ordered_cache_behavior" {
-    for_each = var.api_paths
+    for_each = local.api_paths
 
     content {
       path_pattern               = ordered_cache_behavior.value

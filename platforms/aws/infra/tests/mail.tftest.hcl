@@ -1,7 +1,7 @@
 # var.mail (mail.tf), planned against mocked providers: no AWS account or credentials needed
 # (scripts/check-terraform.mjs runs it in the gate). Without mail nothing of mail.tf exists and the
 # function's environment carries no mail settings; with it, the grant, the environment and the
-# every-minute schedule.
+# every-minute schedule, and /notifications/* among the app distribution's API behaviours.
 
 mock_provider "aws" {
   mock_data "aws_region" {
@@ -69,6 +69,13 @@ run "without_mail" {
     condition     = length([for k in keys(local.environment) : k if startswith(k, "MAIL_") || startswith(k, "SES_")]) == 0
     error_message = "Without mail, the function gets no mail settings."
   }
+
+  assert {
+    condition = jsonencode([
+      for b in aws_cloudfront_distribution.app.ordered_cache_behavior : b.path_pattern if b.target_origin_id == "api"
+    ]) == jsonencode(["/api/*", "/auth/*", "/healthz", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*"])
+    error_message = "Without mail, the API behaviours are var.api_paths' default, unchanged."
+  }
 }
 
 run "with_mail" {
@@ -114,6 +121,52 @@ run "with_mail" {
     )
     error_message = "The schedule invokes the function with {\"fling\":\"notify\"} every minute."
   }
+
+  assert {
+    condition = contains([
+      for b in aws_cloudfront_distribution.app.ordered_cache_behavior : b.path_pattern if b.target_origin_id == "api"
+    ], "/notifications/*")
+    error_message = "With mail, the unsubscribe page (/notifications/*) goes to the API."
+  }
+}
+
+run "with_mail_and_custom_api_paths" {
+  command = plan
+
+  variables {
+    api_paths = ["/api/*", "/auth/*"]
+    mail = {
+      from         = "fling@mail.fling.example.test"
+      identity_arn = "arn:aws:ses:eu-west-1:123456789012:identity/mail.fling.example.test"
+    }
+  }
+
+  assert {
+    condition = jsonencode([
+      for b in aws_cloudfront_distribution.app.ordered_cache_behavior : b.path_pattern if b.target_origin_id == "api"
+    ]) == jsonencode(["/api/*", "/auth/*", "/notifications/*"])
+    error_message = "With mail, /notifications/* is added to a custom api_paths too."
+  }
+}
+
+run "refuses_mail_settings_in_environment" {
+  command = plan
+
+  variables {
+    environment = { MAIL_DRIVER = "ses" }
+  }
+
+  expect_failures = [var.environment]
+}
+
+run "refuses_mail_settings_in_instance" {
+  command = plan
+
+  variables {
+    instance = { SES_CONFIGURATION_SET = "fling-mail" }
+  }
+
+  expect_failures = [var.instance]
 }
 
 run "without_configuration_set" {

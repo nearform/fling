@@ -21,7 +21,7 @@ The examples below use these placeholders; substitute your own:
 ```
 $APP_DOMAIN       CloudFront ─┬─ /api/*, /auth/*, /healthz,
                               │  /mcp, /oauth/*, /.well-known/*,
-                              │  /notifications/*  → Lambda $FUNCTION (function URL)
+                              │  /notifications/* (with mail)  → Lambda $FUNCTION (function URL)
                               └─ everything else          → S3 UI bucket (SPA)
 *.$SITES_DOMAIN   CloudFront ── site router (CloudFront Function + KeyValueStore)
                               └─ S3 sites bucket
@@ -67,8 +67,11 @@ send with SES (`ses:SendEmail` on the identity, and on the configuration set whe
 only from `mail.from`), sets `MAIL_DRIVER=ses`, `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` and
 `SES_CONFIGURATION_SET` on the function, and adds an EventBridge Scheduler schedule
 (`<namespace>-<env>-<name>-notify`, `rate(1 minute)`) that invokes the function with
-`{"fling":"notify"}` through its own role, to drain the notifications' outbox. Without `mail`, none
-of it exists and the plan is the same as without the input.
+`{"fling":"notify"}` through its own role, to drain the notifications' outbox. It also adds
+`/notifications/*` (the emails' unsubscribe page) to the app distribution's API paths, whatever
+`api_paths` is. Without `mail`, none of it exists and the plan is the same as without the input.
+`MAIL_*` and `SES_*` come only from `mail`: the module refuses them in `environment` and
+`instance`, and the build refuses them in `INSTANCE`.
 
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
 provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
@@ -91,7 +94,7 @@ resources with the providers' `default_tags`.
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
 | `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
 | `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }` |
-| `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*`, `/notifications/*` | App paths routed to the function, uncached |
+| `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*` | App paths routed to the function, uncached. With `mail`, `/notifications/*` is added |
 | `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
 | `log_retention_days` | `30` | The function's log retention |
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |

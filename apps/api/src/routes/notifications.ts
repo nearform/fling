@@ -6,8 +6,8 @@
  *   follow links unsubscribe nobody.
  * - `POST` changes the preferences: the mail client's RFC 8058 one-click POST (body
  *   `List-Unsubscribe=One-Click`) and the page's first button turn the event's cell off;
- *   `scope=all` mutes everything; `undo=1` reverts either. The answer offers Undo and the settings
- *   page.
+ *   `scope=all` mutes everything; `undo=1` puts back what either replaced (`previous`, carried in
+ *   the Undo form). The answer offers Undo and the settings page.
  * - A token that does not verify gets the same neutral page, whatever it was.
  *
  * Server-rendered, so it works in any mail client's browser; inline styles only, and a CSP that
@@ -118,13 +118,17 @@ notificationRoutes.post('/unsubscribe', async c => {
   if (!target) return invalid(c)
   const scope = fields.scope === 'all' ? 'all' : 'event'
   const undo = fields.undo === '1'
-  await applyUnsubscribe(deps, target, { scope, undo })
+  const replaced = await applyUnsubscribe(deps, target, {
+    scope,
+    undo,
+    ...(fields.previous !== undefined ? { previous: fields.previous } : {}),
+  })
   const name = instanceMetadata(deps.config).name
   if (undo) {
     return page(
       c,
-      'Emails are back on',
-      `<p>${e(target.email)} gets ${scope === 'all' ? `email from ${e(name)}` : `an email when ${e(what(target))}`} again.</p>${settingsLink(c)}`
+      'Undone',
+      `<p>${e(target.email)} has its earlier setting for ${scope === 'all' ? `all email from ${e(name)}` : `emails when ${e(what(target))}`} back.</p>${settingsLink(c)}`
     )
   }
   return page(
@@ -133,7 +137,7 @@ notificationRoutes.post('/unsubscribe', async c => {
     `<p>${e(target.email)} gets no more ${scope === 'all' ? `email from ${e(name)}` : `emails when ${e(what(target))}`}.</p>${form(
       token,
       'Undo',
-      { scope, undo: '1' },
+      { scope, undo: '1', previous: replaced },
       'secondary'
     )}${settingsLink(c)}`
   )

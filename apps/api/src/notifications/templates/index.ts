@@ -1,8 +1,8 @@
 /**
  * TEMPLATES: what each event says, per channel, folded (several of the same event in one
  * message: "Ben and Ana left 4 comments on q3-report"). Plain text in, plain text out: the layout
- * escapes. A guest's comment carries neither a name nor an excerpt (design §9): it is unverified,
- * and mail clients may turn a URL in it into a link.
+ * escapes. A guest's comment carries neither a name, an excerpt nor its page path (design §9): it is
+ * unverified, and mail clients may turn a URL in it into a link.
  */
 import type { ActorView, DeliveryItem, SiteView } from '../channel.ts'
 import type { Section, TemplateContext, Templates } from './types.ts'
@@ -49,7 +49,11 @@ export function actorsPhrase(actors: readonly ActorView[], full = true): string 
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-const onPage = (path: string) => (path === '/' ? '' : `, on ${path}`)
+/** ", on /docs/": the comment's page, unless a guest wrote it (a path is text they chose). */
+const onPage = (item: DeliveryItem<'comment.created' | 'comment.reply'>) => {
+  const { path } = item.details.comment
+  return item.actor.kind === 'guest' || path === '/' ? '' : `, on ${path}`
+}
 
 function moreLine(total: number, what: string): string[] {
   return total > LIST_MAX ? [`And ${total - LIST_MAX} more ${what}.`] : []
@@ -178,7 +182,7 @@ const commentCreated = (
   if (items.length === 1) {
     return {
       subject: `${short} commented on ${site.name}`,
-      lead: `${who} commented on ${site.name}${onPage(comment.path)}${comment.excerpt ? ':' : '.'}`,
+      lead: `${who} commented on ${site.name}${onPage(first)}${comment.excerpt ? ':' : '.'}`,
       quotes: commentQuotes(items),
       action: { label: 'Open the thread', url: comment.url },
       why: `someone commented on ${site.name}, your site on ${ctx.instance}`,
@@ -206,7 +210,7 @@ const commentReply = (items: DeliveryItem<'comment.reply'>[], ctx: TemplateConte
   if (items.length === 1) {
     return {
       subject: `${short} replied in a thread on ${site.name}`,
-      lead: `${who} replied in a thread on ${site.name}${onPage(comment.path)}${comment.excerpt ? ':' : '.'}`,
+      lead: `${who} replied in a thread on ${site.name}${onPage(first)}${comment.excerpt ? ':' : '.'}`,
       quotes: commentQuotes(items),
       action: { label: 'Open the thread', url: comment.url },
       why: `you took part in a thread on ${site.name} on ${ctx.instance}`,

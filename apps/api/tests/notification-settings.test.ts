@@ -1,7 +1,8 @@
 /**
  * The clients' side of notifications: a person's settings and what was sent to them (the API and
- * both MCP tools on the remote server), refused while impersonating; and the admins' mail page
- * (settings, health, the test email and its hourly limit). Without a channel none of it exists.
+ * both MCP tools on the remote server), with changes and the sent mail refused while
+ * impersonating; and the admins' mail page (settings, health, the test email and its hourly
+ * limit). Without a channel none of it exists.
  */
 import { MAIL_TESTS_PER_HOUR } from '@fling/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -163,6 +164,17 @@ describe('my notification settings', () => {
     expect(put.status).toBe(403)
     expect((await json(put)).error.code).toBe('impersonating')
     expect(await env.store.getNotificationPreferences(ALICE)).toBeNull()
+  })
+
+  it('never shows an impersonating admin the mail sent to the user', async () => {
+    const { env, boss } = await world()
+    const start = await browser(env, boss.session, 'POST', '/api/admin/impersonate', {
+      email: ALICE,
+    })
+    const session = cookiesOf(start)[SESSION]?.value ?? ''
+    const sent = await browser(env, session, 'GET', '/api/me/notifications/sent')
+    expect(sent.status).toBe(403)
+    expect((await json(sent)).error.code).toBe('impersonating')
   })
 
   it('does not exist without a channel', async () => {

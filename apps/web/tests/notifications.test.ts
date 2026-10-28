@@ -12,6 +12,7 @@ import {
   matrixSections,
   showsMailAdmin,
   showsNotifications,
+  showsSentMail,
 } from '../src/lib/notifications'
 
 const me = (over: Partial<Me> = {}): Me => ({
@@ -49,6 +50,12 @@ describe('where notifications show', () => {
         caps({ email: true })
       )
     ).toBe(false)
+  })
+
+  it('lists the sent mail in your own session only, never to an impersonating admin', () => {
+    expect(showsSentMail(me())).toBe(true)
+    expect(showsSentMail(me({ impersonator: 'boss@example.test' }))).toBe(false)
+    expect(showsSentMail(undefined)).toBe(false)
   })
 
   it('shows the Admin tabs only when there is more than Users', () => {

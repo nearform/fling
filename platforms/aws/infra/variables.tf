@@ -74,10 +74,16 @@ variable "environment" {
     Extra or overriding environment variables for the function. The module already sets APP_ENV,
     APP_ORIGIN, SITES_DOMAIN, SITE_SCHEME, SITE_COOKIE_DOMAIN, the drivers and NODE_OPTIONS (from the
     hostname) and LIVE_URL (the live rooms' stage, live.tf), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN and SSM_PREFIX. Not secret: they are
-    in the function's configuration. Instance values belong in var.instance instead.
+    in the function's configuration. Instance values belong in var.instance instead. MAIL_* and
+    SES_CONFIGURATION_SET are refused: email is set in var.mail.
   EOT
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = length([for k in keys(var.environment) : k if can(regex("^(MAIL|SES)_", k))]) == 0
+    error_message = "environment may not set MAIL_* or SES_*: email is set in var.mail."
+  }
 }
 
 variable "instance" {
@@ -86,9 +92,15 @@ variable "instance" {
     OIDC_CLIENT_ID, INSTANCE_NAME, BRAND_*...; see platforms/aws/DEPLOY.md, Instance configuration),
     passed through as INSTANCE in the deploy output. The deploy workflow writes them into the
     function's bundle, so they need no apply to reach it, only a redeploy. Empty: the deploy output has no INSTANCE (add it yourself).
+    MAIL_* and SES_CONFIGURATION_SET are refused: email is set in var.mail.
   EOT
   type        = map(string)
   default     = {}
+
+  validation {
+    condition     = length([for k in keys(var.instance) : k if can(regex("^(MAIL|SES)_", k))]) == 0
+    error_message = "instance may not set MAIL_* or SES_*: email is set in var.mail."
+  }
 }
 
 variable "lambda" {
@@ -105,8 +117,9 @@ variable "api_paths" {
   description = "Path patterns on the app hostname that go to the API function, uncached. Everything else is the UI."
   type        = list(string)
   # /mcp, /oauth/* and /.well-known/* are the remote MCP connector, its OAuth server and the
-  # instance metadata (/.well-known/fling); /notifications/* is the emails' unsubscribe page.
-  default = ["/api/*", "/auth/*", "/healthz", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/notifications/*"]
+  # instance metadata (/.well-known/fling). With var.mail, mail.tf adds /notifications/* (the
+  # emails' unsubscribe page) to whatever this is.
+  default = ["/api/*", "/auth/*", "/healthz", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*"]
 }
 
 variable "generated_secrets" {

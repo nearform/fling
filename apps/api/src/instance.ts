@@ -12,20 +12,22 @@ import {
 import { oidcSettings } from './auth/oidc.ts'
 import type { Config } from './config.ts'
 
-/** The sign-in method people see: the instance's OIDC issuer, or dev-login in local dev. */
+/**
+ * The sign-in method people see (the instance's OIDC issuer, or dev-login in local dev) and who it
+ * lets in. Dev login applies the same email policy, so it publishes the same domains: clients
+ * describe and complete addresses alike on every instance.
+ */
 function authInfo(config: Config): InstanceAuth {
+  const allowed = {
+    emailDomains: config.allowedEmailDomains,
+    // Only that there are invited addresses: the metadata is public, the addresses are not.
+    ...(config.allowedEmails.length > 0 && { invitedEmails: true }),
+  }
   const oidc = oidcSettings(config)
   if (oidc) {
-    return {
-      kind: 'oidc',
-      issuer: oidc.issuer,
-      displayName: oidc.displayName,
-      emailDomains: config.allowedEmailDomains,
-      // Only that there are invited addresses: the metadata is public, the addresses are not.
-      ...(config.allowedEmails.length > 0 && { invitedEmails: true }),
-    }
+    return { kind: 'oidc', issuer: oidc.issuer, displayName: oidc.displayName, ...allowed }
   }
-  return { kind: 'dev', displayName: 'Dev login', emailDomains: [] }
+  return { kind: 'dev', displayName: 'Dev login', ...allowed }
 }
 
 export function instanceMetadata(config: Config): InstanceMetadata {

@@ -1,7 +1,8 @@
 import { CORE_CAPABILITIES, INSTANCE_METADATA_PATH, InstanceMetadataSchema } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import { loadBaseConfig } from '../src/config.ts'
-import { setup } from './helpers.ts'
+import { instanceMetadata } from '../src/instance.ts'
+import { setup, testConfig } from './helpers.ts'
 
 const PROD = {
   APP_ENV: 'production',
@@ -70,6 +71,23 @@ describe('GET /.well-known/fling', () => {
       invitedEmails: true,
     })
     expect(InstanceMetadataSchema.parse(JSON.parse(text)).auth.invitedEmails).toBe(true)
+  })
+
+  it('dev login publishes the domains its email policy admits, as OIDC does', () => {
+    const dev = (env: Record<string, string>) =>
+      instanceMetadata({ ...testConfig(), ...loadBaseConfig({ DEV_LOGIN: '1', ...env }) }).auth
+    expect(dev({})).toEqual({
+      kind: 'dev',
+      displayName: 'Dev login',
+      emailDomains: ['example.test'],
+    })
+    expect(dev({ ALLOWED_EMAIL_DOMAINS: 'a.test,b.test' }).emailDomains).toEqual([
+      'a.test',
+      'b.test',
+    ])
+    const invited = dev({ ALLOWED_EMAILS: 'me@gmail.test' })
+    expect(invited).toMatchObject({ emailDomains: [], invitedEmails: true })
+    expect(JSON.stringify(invited)).not.toContain('gmail')
   })
 
   it('never names the admins', async () => {

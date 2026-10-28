@@ -173,7 +173,7 @@ servers) lead with the review page as the link to share for feedback (`reviewUrl
 frames the site on the site's own origin, so it can see what the app can't: the path and hash
 route (SPA navigation included), scroll and the element under a click. It keeps the frame on the
 site (an other-origin link or form is stopped and the review page offers to open it in a new
-tab), turns a click (a spot) or a drag (a box) into an anchor while placing a pin, reports text the
+tab), turns a click (a spot) or a drag (a box) into an anchor while placing a pin or with Alt held (no pin mode needed), reports text the
 reviewer selects as an anchor with its quote (the review page pins the new comment to it unless a
 pin was placed), and draws pins (the selected one with its area)
 and other reviewers' pointers. It talks to the review page over the **review bridge**

@@ -98,3 +98,36 @@ export function linkHost(href: string): string {
     return href
   }
 }
+
+/** How many threads are open, on every page: the count on the comments toggle. */
+export function openThreadCount(threads: readonly CommentThread[]): number {
+  return threads.reduce((n, t) => (t.comment.resolvedAt === null ? n + 1 : n), 0)
+}
+
+/**
+ * The comments panel as the reviewer last left it in this browser: `open`, `closed`, or `auto`
+ * until they choose (shown beside a wide frame, hidden as a sheet over a narrow one).
+ */
+export type PanelChoice = 'open' | 'closed' | 'auto'
+
+/** The localStorage key of the reviewer's panel choice. */
+export const PANEL_CHOICE_KEY = 'reviewCommentsPanel'
+
+/** A stored panel choice; anything else is `auto`. */
+export function panelChoice(raw: string | null): PanelChoice {
+  return raw === 'open' || raw === 'closed' ? raw : 'auto'
+}
+
+/**
+ * Whether the comments panel shows. Something that points at a thread (a `?thread=` link, a pin
+ * clicked in the page) reveals it for this visit without changing the stored choice. With no
+ * choice, it shows beside the frame and starts hidden when it would be a sheet over the site.
+ */
+export function panelOpen(opts: {
+  choice: PanelChoice
+  revealed: boolean
+  sheet: boolean
+}): boolean {
+  if (opts.revealed) return true
+  return opts.choice === 'auto' ? !opts.sheet : opts.choice === 'open'
+}

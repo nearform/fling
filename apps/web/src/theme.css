@@ -485,39 +485,128 @@
   }
 }
 
-/* Review mode (pages/Review.tsx): the site in a frame beside its comments. The two sit side by
-   side while the frame keeps at least 60% of the width, and stack (frame first) below that. Side
-   by side, the layout is one screen tall and the comments scroll on their own. The frame holds the
-   review shell, which draws the pins and pointers itself. */
+/* Review mode (pages/Review.tsx): the site in a frame beside its comments. The page is one screen
+   tall and never scrolls itself: the frame fills what the header leaves, and the panel's thread
+   list scrolls between the panel's heading and composer above it. The panel sits beside the frame
+   while the frame keeps 60% of the review body (wider than 55rem, where the 22rem panel fits),
+   and over the site as a sheet from the bottom below that; `--review-sheet` tells the page which.
+   Hidden, it leaves the frame the whole width. The frame holds the review shell, which draws the
+   pins and pointers itself. */
 @layer components {
   .review-layout {
+    position: relative;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    block-size: 100dvh;
+  }
+  /* The header is one row. Wide, it holds everything; narrower than 52rem, the path bar, reload,
+     open, presence and theme fold into a panel behind one button, the brand and the word
+     "Review" drop, and the site's name takes what is left, with an ellipsis. Under 30rem the
+     comments toggle is its icon and count. Every control is the small button height. */
+  .review-header {
+    container: review-header / inline-size;
+    position: relative;
+    z-index: 20;
+  }
+  .review-header-row {
     display: flex;
-    flex-direction: column;
-    min-block-size: 100dvh;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+  .review-header-row > * {
+    flex: none;
+  }
+  .review-divider {
+    block-size: 1.25rem;
+    border-inline-start: 1px solid var(--border-default);
+  }
+  .review-title {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1rem;
+  }
+  .review-header-row > .review-tools {
+    flex: 1;
+    min-inline-size: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
   .review-pathbar {
     flex: 1 1 14rem;
     min-inline-size: 0;
     max-inline-size: 36rem;
   }
+  @container review-header (width < 52rem) {
+    .review-brand {
+      display: none;
+    }
+    .review-title-label {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: clip;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    .review-header-row > .review-title {
+      flex: 1;
+    }
+    .review-header-row > .review-tools {
+      position: absolute;
+      inset-block-start: calc(100% + 0.25rem);
+      inset-inline: 0.5rem;
+      flex-wrap: wrap;
+      padding: 0.5rem;
+      background: var(--surface-raised);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-popover);
+      box-shadow: var(--shadow-popover);
+    }
+    .review-header-row > .review-tools:not([data-open]) {
+      display: none;
+    }
+    .review-tools .review-pathbar {
+      flex-basis: 100%;
+      max-inline-size: none;
+    }
+  }
+  @container review-header (width < 30rem) {
+    .review-toggle-label {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: clip;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+  }
   .review-pathbar .input {
     flex: 1;
     min-inline-size: 0;
   }
+  .review-count {
+    min-inline-size: 1.25rem;
+    padding-inline: 0.3rem;
+    border-radius: 999px;
+    background: var(--tone-primary-surface);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
   .review-body {
-    flex: 1;
-    display: flex;
-    flex-wrap: wrap;
+    container: review-body / inline-size;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
   }
   .review-frame {
+    --review-sheet: 0;
     display: grid;
-    flex-basis: 0;
-    flex-grow: 999;
-    min-inline-size: 60%;
-    /* Beside the comments (wider than 55rem, where the 22rem aside fits next to 60%): the whole
-       screen under the header. Stacked above them: 65% of it, so the comments show below. */
-    block-size: max(65dvh, min(calc(100dvh - 3.5rem), (100vw - 55rem) * 999));
-    min-block-size: 24rem;
     /* What a page without a background of its own shows on, in either theme. */
     background: oklch(100% 0 none);
   }
@@ -530,20 +619,86 @@
     border: 0;
   }
   .review-aside {
-    flex-basis: 22rem;
-    flex-grow: 1;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+    inline-size: 22rem;
+    min-block-size: 0;
     padding: 0.75rem;
-    max-block-size: calc(100dvh - 3.5rem);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-gutter: stable;
     border-inline-start: 1px solid var(--border-default);
     background: var(--surface-app);
   }
+  .review-aside > :not(.review-threads) {
+    flex: none;
+  }
+  /* The new comment scrolls with the threads, one line until it is used; while it has focus it
+     stays in view as the threads scroll under it. */
+  .review-composer {
+    display: grid;
+    gap: 0.5rem;
+    margin-block-end: 0.75rem;
+  }
+  .review-composer:focus-within {
+    position: sticky;
+    /* Flush with the scroller's edge, over its padding. */
+    inset-block-start: -0.25rem;
+    z-index: 1;
+    box-shadow: var(--shadow-popover);
+  }
+  .review-reply {
+    display: grid;
+    gap: 0.5rem;
+  }
 
+  /* The one scroller. Positioned, so the screen-reader text inside its threads scrolls with them
+     instead of stretching the page; padded so a selected thread's outline isn't clipped. */
+  .review-threads {
+    position: relative;
+    flex: 1;
+    min-block-size: 0;
+    margin: -0.25rem;
+    padding: 0.25rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  @container review-body (width < 55rem) {
+    .review-frame {
+      --review-sheet: 1;
+      grid-column: 1 / -1;
+    }
+    .review-aside {
+      position: absolute;
+      inset-inline: 0;
+      inset-block-end: 0;
+      z-index: 10;
+      inline-size: auto;
+      max-block-size: min(80%, 40rem);
+      border-inline-start: 0;
+      border-block-start: 1px solid var(--border-default);
+      border-start-start-radius: var(--radius-panel);
+      border-start-end-radius: var(--radius-panel);
+      box-shadow: var(--shadow-popover);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @container review-body (width < 55rem) {
+      .review-aside {
+        transition:
+          translate 0.2s ease-out,
+          display 0.2s allow-discrete;
+      }
+      .review-aside[hidden] {
+        translate: 0 100%;
+      }
+      @starting-style {
+        .review-aside:not([hidden]) {
+          translate: 0 100%;
+        }
+      }
+    }
+  }
   /* Presence: overlapping circles, a ring of the panel's colour between them. */
   .review-presence {
     display: flex;
@@ -649,12 +804,6 @@
     outline-offset: 1px;
   }
 
-  .review-textarea {
-    field-sizing: content;
-    min-block-size: 3lh;
-    max-block-size: 12lh;
-    resize: none;
-  }
   .review-number {
     cursor: pointer;
     display: inline-grid;
@@ -687,6 +836,33 @@
   .review-text {
     white-space: pre-wrap;
     overflow-wrap: break-word;
+  }
+}
+
+/* Review mode's sizes for daisyUI controls. daisyUI's layers come after `components`, so these
+   are unlayered to apply. A comment field is one line until it is used, then at least three (two
+   in the sheet, which shares the site's height), growing with its text. */
+.review-textarea {
+  field-sizing: content;
+  min-block-size: 3lh;
+  max-block-size: 12lh;
+  resize: none;
+}
+.review-composer:not([data-expanded]) .review-textarea,
+.review-reply:not([data-expanded]) .review-textarea {
+  min-block-size: 0;
+}
+.review-header-row > .review-tools-button {
+  display: none;
+}
+@container review-body (width < 55rem) {
+  .review-composer[data-expanded] .review-textarea {
+    min-block-size: 2lh;
+  }
+}
+@container review-header (width < 52rem) {
+  .review-header-row > .review-tools-button {
+    display: inline-flex;
   }
 }
 

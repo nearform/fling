@@ -232,3 +232,12 @@ export function notificationSettings(
     overrides,
   }
 }
+
+/** Where the web app lets someone choose what they hear about (Settings → Notifications). */
+export const NOTIFICATION_SETTINGS_PATH = '/settings/notifications'
+
+/**
+ * The page an email's unsubscribe link opens (`?t=<token>`), on the app origin and answered by the
+ * API: `GET` shows it, `POST` unsubscribes (the RFC 8058 one-click POST too).
+ */
+export const UNSUBSCRIBE_PATH = '/notifications/unsubscribe'

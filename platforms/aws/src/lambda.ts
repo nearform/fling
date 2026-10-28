@@ -11,7 +11,8 @@
  * timeout and returns the runner's report; invoke again until `done`. Optional `only: ["NNNN"]`
  * runs those migrations (opt-in ones included), `dryRun: true` writes nothing. Only callers with
  * lambda:InvokeFunction can send it: a function URL request is always an HTTP event whose body is
- * a string, so no visitor can.
+ * a string, so no visitor can. The same holds for `{"fling":"notify"}`, the scheduler's one-minute
+ * tick, which drains the notifications outbox (@fling/api/notifications) and returns its result.
  *
  * Instance values (INSTANCE_NAME, ALLOWED_EMAIL_DOMAINS, BRAND_*, …) can also ship inside the zip as
  * `instance.json` (a flat object of env-style keys, written by scripts/build.mjs from
@@ -22,6 +23,7 @@ import { readFileSync } from 'node:fs'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
+import { type DrainResult, drain } from '@fling/api/notifications'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
@@ -68,11 +70,23 @@ export interface MigrateEvent {
   dryRun?: boolean
 }
 
-const isMigrate = (event: unknown): event is MigrateEvent =>
+/** The scheduler's one-minute tick: drain the notifications outbox. */
+export interface NotifyEvent {
+  fling: 'notify'
+}
+
+const isFlingEvent = (event: unknown, name: string) =>
   typeof event === 'object' &&
   event !== null &&
-  (event as { fling?: unknown }).fling === 'migrate' &&
+  (event as { fling?: unknown }).fling === name &&
   !('requestContext' in event)
+
+const isNotify = (event: unknown): event is NotifyEvent => isFlingEvent(event, 'notify')
+
+/** Leave this much of the invocation when draining. */
+const NOTIFY_MARGIN_MS = 5_000
+
+const isMigrate = (event: unknown): event is MigrateEvent => isFlingEvent(event, 'migrate')
 
 /** Leave this much of the invocation for the last page and the response. */
 const MIGRATE_MARGIN_MS = 20_000
@@ -97,7 +111,7 @@ export async function migrate(event: MigrateEvent, context: LambdaContext): Prom
 let ready: ReturnType<typeof init> | undefined
 
 export const handler = async (
-  event: LambdaEvent | MigrateEvent | LiveEvent,
+  event: LambdaEvent | MigrateEvent | NotifyEvent | LiveEvent,
   context: LambdaContext
 ) => {
   if (isMigrate(event)) return migrate(event, context)
@@ -106,6 +120,13 @@ export const handler = async (
     throw err
   })
   const { http, deps, live } = await ready
+  if (isNotify(event)) {
+    const result: DrainResult = await drain(deps, {
+      deadline: Date.now() + context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS,
+    })
+    console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
+    return result
+  }
   if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }
   return http(event as LambdaEvent, context)
 }

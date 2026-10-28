@@ -297,6 +297,19 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
     }
   }, [selectedId])
 
+  // A link to a thread (`&thread=<id>`, as notification emails make) selects it once the shell is
+  // ready and the thread is listed.
+  const [linkedThread, setLinkedThread] = useState(() => params.get('thread'))
+  useEffect(() => {
+    if (!linkedThread || !ready) return
+    const thread = threads.find(t => t.comment.id === linkedThread)
+    if (!thread) return
+    setLinkedThread(null)
+    if (thread.comment.path !== atRef.current.path) setScope('all')
+    if (thread.comment.resolvedAt !== null) setShowResolved(true)
+    select(linkedThread)
+  }, [linkedThread, ready, threads, select])
+
   const instanceName = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
 
   return (

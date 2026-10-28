@@ -22,6 +22,7 @@ import {
 } from '@fling/shared'
 import { badRequest, conflict, forbidden, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
+import { type Acting, notifyMembersAdded } from './notifications/notify.ts'
 import { canGroup, type GroupAction, userActor } from './policy.ts'
 import { checkEmails, dropGroup } from './sites.ts'
 import type { GroupRecord, User } from './store/types.ts'
@@ -119,7 +120,8 @@ const capped = (n: number) => {
 export async function createGroup(
   deps: Deps,
   user: User,
-  input: CreateGroupRequest
+  input: CreateGroupRequest,
+  acting: Acting = {}
 ): Promise<GroupDetail> {
   const { slug, name, members = [] } = CreateGroupRequestSchema.parse(input)
   const emails = [...new Set(members)]
@@ -137,6 +139,7 @@ export async function createGroup(
   }
   const created = await deps.store.createGroup(group, emails)
   if (!created) throw conflict(`There is already a group named "${slug}"`, 'group_taken')
+  await notifyMembersAdded(deps, user.email, created, emails, acting)
   return detailOf(deps, user, created)
 }
 
@@ -157,13 +160,15 @@ export async function renameGroup(
 /**
  * POST /api/groups/:slug/members { add?, remove? } — the owner adds people, then takes people out.
  * Taking someone out shuts them out of the sites it opens at once for the API, and within a site
- * pass's lifetime at the edge.
+ * pass's lifetime at the edge. The people added hear of it (`group.member_added`); those taken
+ * out don't.
  */
 export async function changeMembers(
   deps: Deps,
   user: User,
   slug: string,
-  input: GroupMembersRequest
+  input: GroupMembersRequest,
+  acting: Acting = {}
 ): Promise<GroupDetail> {
   const change = GroupMembersRequestSchema.parse(input)
   const group = await requireGroup(deps, user, slug, 'group.manage')
@@ -178,6 +183,7 @@ export async function changeMembers(
   group.size = size
   group.updatedAt = deps.clock.now().toISOString()
   await deps.store.putGroup(group, { add, remove })
+  await notifyMembersAdded(deps, user.email, group, add, acting)
   return detailOf(deps, user, group)
 }
 

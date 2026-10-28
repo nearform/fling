@@ -20,7 +20,8 @@ The examples below use these placeholders; substitute your own:
 
 ```
 $APP_DOMAIN       CloudFront ─┬─ /api/*, /auth/*, /healthz,
-                              │  /mcp, /oauth/*, /.well-known/* → Lambda $FUNCTION (function URL)
+                              │  /mcp, /oauth/*, /.well-known/*,
+                              │  /notifications/*  → Lambda $FUNCTION (function URL)
                               └─ everything else          → S3 UI bucket (SPA)
 *.$SITES_DOMAIN   CloudFront ── site router (CloudFront Function + KeyValueStore)
                               └─ S3 sites bucket
@@ -82,7 +83,7 @@ resources with the providers' `default_tags`.
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
 | `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
 | `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }` |
-| `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*` | App paths routed to the function, uncached |
+| `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*`, `/notifications/*` | App paths routed to the function, uncached |
 | `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
 | `log_retention_days` | `30` | The function's log retention |
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |

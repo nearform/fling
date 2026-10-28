@@ -63,6 +63,7 @@ import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
+import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
 import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
 import {
   hasListing,
@@ -293,7 +294,8 @@ export function checkEmails(deps: Deps, emails: readonly string[]) {
 /**
  * A new audience for the site, checked: every address one the instance would let sign in, every
  * group slug one that exists (400 `unknown_group`, naming them), stored by id. A deleted group's
- * reference (`#<id>`) keeps it, if the audience already names it. Returns the audience it had.
+ * reference (`#<id>`) keeps it, if the audience already names it. Returns the audience it had:
+ * once the site is saved, `notifyAudienceChange` tells the addresses and groups it added.
  */
 export async function applyAudience(
   deps: Deps,
@@ -498,7 +500,8 @@ export async function updateSite(
   deps: Deps,
   user: User,
   name: string,
-  patch: { spa?: boolean; visibility?: Visibility; audience?: AudienceInput }
+  patch: { spa?: boolean; visibility?: Visibility; audience?: AudienceInput },
+  acting: Acting = {}
 ): Promise<Site & { audience?: Audience }> {
   const actions: Action[] = [
     ...(patch.visibility === undefined ? [] : (['site.visibility'] as const)),
@@ -511,6 +514,7 @@ export async function updateSite(
   const before =
     patch.audience === undefined ? undefined : await applyAudience(deps, site, patch.audience)
   await save(deps, site)
+  if (before) await notifyAudienceChange(deps, user.email, site, before, acting)
   return {
     ...toSite(deps, user, site),
     ...(before ? { audience: await audienceOf(deps, site) } : {}),

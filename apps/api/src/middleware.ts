@@ -7,7 +7,7 @@ import { ZodError } from 'zod'
 import { ApiError } from './lib/errors.ts'
 import type { AppEnv } from './types.ts'
 
-/** Minimal security headers on every response (rocketpod pattern; JSON API, never framed). */
+/** Minimal security headers on every response (JSON API and the odd server-rendered page, never framed). */
 export const securityHeaders = createMiddleware<AppEnv>(async (c, next) => {
   await next()
   if (c.get('deps').config.secureCookies) {
@@ -15,8 +15,13 @@ export const securityHeaders = createMiddleware<AppEnv>(async (c, next) => {
   }
   c.header('X-Content-Type-Options', 'nosniff')
   c.header('X-Frame-Options', 'DENY')
-  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
-  c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  // A page the API renders itself (the unsubscribe page) sets its own, stricter where it can.
+  if (!c.res.headers.has('Referrer-Policy')) {
+    c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  }
+  if (!c.res.headers.has('Content-Security-Policy')) {
+    c.header('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  }
   if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store')
 })
 

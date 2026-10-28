@@ -66,6 +66,12 @@ the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets its
 `wrangler dev` runs the `LiveRoom` Durable Objects locally at `ws://flingcf.lvh.me:47103/api/live`.
 Open the same review page in two browser profiles to see each other's pointers.
 
+**Notifications locally.** With `MAIL_DRIVER=file` and `MAIL_FROM` set before `pnpm dev`, email goes
+to `.fling-dev/mail/` (an `.eml` and an `.html` per message). `pnpm dev` drains the outbox every
+minute, as the platforms' ticks do; `POST /dev/notify/drain` (dev login only) sends what is queued
+at once, including what is due within the hour, and `/dev/mail` lists what was sent, each message's
+HTML a click away.
+
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
 `pnpm cli deploy <folder>`. The CLI remembers it beside any other Fling you are signed in to:
 `pnpm cli use` lists them and `pnpm cli use <url>` switches back. To keep a throwaway login away

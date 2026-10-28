@@ -1,7 +1,7 @@
 /**
  * CloudFront KeyValueStore via its data-plane API. Writes need the store's current ETag
- * (DescribeKeyValueStore) as `IfMatch`; a concurrent writer makes that stale → ConflictException,
- * so we refresh and retry. The endpoint is global and signed with SigV4A, hence the side-effect
+ * (DescribeKeyValueStore) as `IfMatch`. Each warm instance caches it, so a write by any other
+ * instance makes it stale (`staleEtag`), and we refresh and retry. The endpoint is global and signed with SigV4A, hence the side-effect
  * import that registers the SigV4A signer.
  */
 import '@aws-sdk/signature-v4a'
@@ -17,6 +17,15 @@ import type { RouteTable } from '@fling/api/route-table'
 const MAX_ATTEMPTS = 6
 
 const named = (err: unknown, ...names: string[]) => err instanceof Error && names.includes(err.name)
+
+/**
+ * A stale `IfMatch`. The API reports it as ConflictException, PreconditionFailed or, when another
+ * Lambda instance has written since this one cached the ETag, a ValidationException saying
+ * "Pre-Condition failed".
+ */
+const staleEtag = (err: unknown) =>
+  named(err, 'ConflictException', 'PreconditionFailed') ||
+  (named(err, 'ValidationException') && /pre-?condition failed/i.test((err as Error).message))
 
 export class CloudFrontRouteTable implements RouteTable {
   private etag: string | undefined
@@ -42,7 +51,7 @@ export class CloudFrontRouteTable implements RouteTable {
         this.etag = res.ETag
         return
       } catch (err) {
-        if (!named(err, 'ConflictException', 'PreconditionFailed') || attempt >= MAX_ATTEMPTS) {
+        if (!staleEtag(err) || attempt >= MAX_ATTEMPTS) {
           throw err
         }
         await new Promise(r => setTimeout(r, 25 * 2 ** attempt + Math.random() * 25))

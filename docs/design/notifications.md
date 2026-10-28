@@ -2,7 +2,7 @@
 
 # Design: notifications (email first)
 
-Status: reviewed 2026-10-28, ready to build. Nothing here is built yet.
+Status: phase 1 (§12) is built, as described here. Phases 2 to 4 are designs.
 
 Fling tells people when something happens that concerns them: a site is shared with them (directly
 or through a group), they are added to a group, someone comments on their site or replies to their
@@ -11,9 +11,9 @@ fans them out to **channels**. Email is the first channel, sent through each clo
 service from a sender the operator already has. An in-app inbox, webhooks and Slack can follow
 without touching the hub.
 
-Terms are CONTEXT.md's. New ones this design adds (to go into CONTEXT.md when built): **event**,
-**event catalogue**, **channel**, **notification preferences**, **outbox**, **batch**,
-**cool-down**, **suppression**.
+Terms are CONTEXT.md's, which defines the ones this design adds: **event**, **event catalogue**,
+**channel**, **Mailer**, **notification preferences**, **outbox**, **batch**, **cool-down**,
+**notification hub**, **unsubscribe link**, **test email**, **suppression**.
 
 ## 1. Goals and non-goals
 
@@ -215,13 +215,24 @@ export interface MailMessage {
 
 export type MailResult =
   | { ok: true; providerId?: string }
-  | { ok: false; retry: boolean; reason: 'throttled' | 'transient' | 'rejected' | 'suppressed' }
+  | {
+      ok: false
+      retry: boolean
+      reason: 'throttled' | 'transient' | 'rejected' | 'suppressed'
+      quota?: boolean    // throttled by the daily quota, not the rate (§5.5)
+      detail?: string    // the provider's error code, for logs and the admin page
+    }
 ```
 
+Every adapter tags the message with the batch id in an `X-Fling-Batch` header; SES also gets
+message tags `fling-batch` and `fling-events`.
+
 The email channel renders the batch with `TEMPLATES` and the instance metadata, then calls
-`deps.mailer.send`. `Deps` gains `mailer?: Mailer` beside `live?`; `buildDeps` takes it from the
-platform for the `ses` and `cloudflare` drivers and refuses a cloud driver without one, as it does
-for the other ports (`apps/api/src/deps.ts`).
+`deps.mailer.send`. `Deps` has `mailer?: Mailer` beside `live?`. `buildDeps`
+(`apps/api/src/deps.ts`) builds `MemoryMailer` and `FileMailer` itself; for the `ses` and
+`cloudflare` drivers it takes the mailer the platform builds in its own `deps.ts`
+(`platforms/aws/src/deps.ts`, `platforms/cloudflare/src/deps.ts`, from the SES client or the
+`EMAIL` binding) and refuses a cloud driver without one, as it does for the other ports.
 
 | Adapter | Where | Used by |
 |---|---|---|
@@ -247,11 +258,14 @@ All keys are reached by key or prefix query; nothing scans.
 |---|---|---|
 | `NOTIFY#<eventId>` | `EVENT` | The event, written `ifAbsent`. The idempotency key: a retried request makes the same `eventId`, finds it and queues nothing. Expires after 30 days |
 | `NDUE#<minute>` | `FANOUT#<eventId>` | An event still to fan out (with how far it got), written with the event |
-| `USER#<email>` | `NPEND#<channel>#<eventId>` | A pending notification for one recipient (event key, site id, actor, a short excerpt). Expires after 7 days |
+| `USER#<email>` | `NPEND#<channel>#<siteId or ->#<eventId>` | A pending notification for one recipient (event key, site id, actor, what the event recorded for them), under the batch site it folds into, so a batch's items are one prefix query. Expires after 7 days |
 | `USER#<email>` | `NBATCH#<channel>#<siteId or ->` | The pointer to the recipient's open batch for that site (`-` for events with no site): its due minute, and `coolDownUntil` after a send. How fan-out finds the batch to fold into |
-| `NDUE#<minute>` | `<channel>#<email>#<siteId or ->` | The **batch**: due at `<minute>` (UTC, `2026-10-28T14:05`), with `state`, `attempts`, `leaseUntil` |
+| `NDUE#<minute>` | `<channel>#<email>#<siteId or ->` | The **batch**: due at `<minute>` (UTC, `2026-10-28T14:05`), with `state`, `attempts`, `leaseUntil` and the lease's token. Expires 8 days after it is due |
 | `NOTIFY` | `CURSOR` | The last minute fully drained |
-| `NOTIFY` | `STATS#<hour>` | Counters for the admin page (§10.2): sent, retrying, given up, suppressed, and the last few failure reasons with batch id and event key. Expires after 48 hours |
+| `NOTIFY` | `STATS#<hour>` | Counters for the admin page (§10.2): sent, retrying, given up, suppressed, dropped (by the send-time checks). Expires after 48 hours |
+| `NOTIFY` | `FAILURE#<sortable id>` | One failed send: batch id, event keys, reason and the provider's code; no address. The admin page lists the latest. Expires after 48 hours |
+| `NOTIFY` | `RATE#<minute>` | Messages the instance sent that minute (§5.5). Expires after an hour |
+| `USER#<email>` | `NRATE#<hour>`, `NTEST#<hour>` | Messages sent to the recipient that hour, and test emails an admin sent (§5.5, §10.2). Expire after 2 hours |
 | `USER#<email>` | `NSENT#<sortable id>` | What was sent: event keys, subject, provider id, when. Expires after 30 days. Delivery status for the e2e and the user |
 | `SUPPRESS#<email>` | `SUPPRESS` | Suppressed after a hard bounce or complaint (§5.6) |
 | `USER#<email>` | `NOTIFYPREFS` | Preferences (§4) |
@@ -261,17 +275,26 @@ Event ids are derived, not random, so the same cause makes the same id:
 addresses and groups added), `group.member_added:<groupId>:<group updatedAt>`.
 
 Folding: fan-out reads the recipient's `NBATCH` pointer. If it points at a batch still `due`, the
-pending item joins it. Otherwise it opens a batch at `max(now + 2 minutes, coolDownUntil)` and
+pending item joins it (the pending item and the unchanged batch, conditioned on its state, in one
+`transact`, so nothing joins a batch a drainer has leased). Otherwise it opens a batch at `max(now + 2 minutes, coolDownUntil)` and
 writes the pointer and the batch in one `transact` (the pointer `ifAbsent` or on its previous
 value, so two fan-outs racing for one recipient open one batch).
 
-The drainer queries `NDUE#<minute>` for each minute from the cursor to now, so a missed tick only
-delays mail. A batch is leased with a conditional update (`fieldEquals('state','due')` or an expired
-`leaseUntil`), so overlapping ticks never send twice. After a send it deletes the pending items
+The drainer queries `NDUE#<minute>` for each minute from the cursor to about 75 seconds before
+now (the minute before `now − 15 s`), so a minute is complete before it is read, and a missed tick
+only delays mail. The cursor moves by compare-and-set. A batch is leased with a conditional update
+(`state` is `due`, or its expired lease is still the one read) that writes a fresh lease token;
+finishing and rescheduling are conditioned on that token, so a drainer that lost its lease changes
+nothing and overlapping ticks never send twice. After a send it deletes the pending items
 and the batch, sets the pointer's `coolDownUntil` (for cool-down events, §5.4) in one `transact`,
 and writes `NSENT`. A failed send with `retry` moves the batch to a later minute with backoff (1,
 5, 15, 60 minutes; given up after 6 attempts and logged), except for quota throttling (§5.5);
-`rejected` or `suppressed` drops it.
+`rejected` or `suppressed` drops it. Every failure is also written as a `NOTIFY/FAILURE#` item.
+
+A drain walks at most 120 minutes and stops starting new work after 20 seconds; the first drain
+ever starts an hour back. `POST /dev/notify/drain` (dev login only, never mounted in production)
+runs it with `flush`: it also fans out and delivers what is due in the next hour, without moving
+the cursor past the lagged minute, so local runs and the e2e need not wait for a tick or a fold.
 
 The provider call is the one place a send could be duplicated: neither SES nor the Cloudflare
 binding documents an idempotency key, so a crash after the provider accepted a message but before
@@ -396,8 +419,11 @@ With it, the module:
   reading), with a `ses:FromAddress` condition of `from`;
 - sets `MAIL_DRIVER=ses`, `MAIL_FROM`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` and
   `SES_CONFIGURATION_SET` on the function;
-- adds the `aws_scheduler_schedule` `rate(1 minute)` → the API Lambda with `{"fling":"notify"}`,
-  with its role and an `aws_lambda_permission`.
+- adds the `aws_scheduler_schedule` `rate(1 minute)` → the API Lambda with `{"fling":"notify"}`.
+  Scheduler invokes through its own role (allowed `lambda:InvokeFunction` on the function), so no
+  `aws_lambda_permission` is needed;
+- adds `/notifications/*` (the unsubscribe page) to the app distribution's `api_paths`, as the
+  Worker routes `/notifications/` to the API.
 
 It creates no SES resources. DEPLOY.md gives a recipe for an operator without an identity (domain
 identity with Easy DKIM, custom MAIL FROM, DMARC, a configuration set with suppression on).
@@ -426,9 +452,13 @@ How it fits:
 
 - The deploy config gains a top-level `MAIL: { FROM, FROM_NAME?, REPLY_TO? }`, beside `INSTANCE`
   rather than in it, because `scripts/render-config.mjs` needs `FROM` for the binding.
-- **wrangler.jsonc** gains `"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["<MAIL.FROM>"] }]`
-  and the crons `["17 * * * *", "* * * * *"]`; `render-config.mjs` fills them in and sets
-  `MAIL_DRIVER=cloudflare` and the `MAIL_*` vars. No `MAIL` block: no binding, no email.
+- The template **wrangler.jsonc** has an unrestricted `"send_email": [{ "name": "EMAIL" }]`, for
+  `wrangler dev`, and only the hourly cron. `render-config.mjs` (`scripts/config.mjs`), given
+  `MAIL`, renders `"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["<MAIL.FROM>"] }]`
+  and the crons `["17 * * * *", "* * * * *"]`, and sets `MAIL_DRIVER=cloudflare` and the `MAIL_*`
+  vars. No `MAIL` block: no binding, no minute cron, no email. `MAIL_*` in `INSTANCE` is refused.
+- Locally, `scripts/dev.mjs --mail` sets `MAIL_DRIVER=cloudflare` and `MAIL_FROM`, so the real
+  `CloudflareMailer` sends through the simulated binding.
 - Onboarding the sending domain is a one-time dashboard step in DEPLOY.md: the docs show no API or
   wrangler command for it.
 - `CloudflareMailer` builds the message (`to`, `from`, `replyTo`, `subject`, `text`, `html`,
@@ -443,7 +473,7 @@ How it fits:
   as Markdown or links by Fling (mail clients may still link a URL in the text, which is why guest
   comments carry no excerpt; §9).
 - Branded from the instance metadata (`instanceMetadata(config)`, `apps/api/src/instance.ts`): the
-  instance `name` in the subject and as a styled text header, `brand.colors.primary` and
+  instance `name` as the subject's prefix (`<name>: <subject>`) and as a styled text header, `brand.colors.primary` and
   `primaryContent` for the button, `ink` for text. No logo: most mail clients render neither the
   `data:` URLs `BRAND_LOGO_URL` allows nor SVG. No instance literal appears, and the de-branding
   check (`scripts/check-names.mjs`) covers the templates.
@@ -476,7 +506,9 @@ Defaults are the catalogue's. Instance-wide defaults can come later as config if
 them.
 
 Production checks: `MAIL_DRIVER` is `ses` or `cloudflare`; `MAIL_FROM` is set, a valid address,
-and its domain is not `SITES_DOMAIN` (§6); `MAIL_REPLY_TO`, if set, is a valid address.
+and its domain is not `SITES_DOMAIN`, nor under it unless the label just below the sites domain is
+a reserved site name (`mail.<sites domain>`, `x.mail.<sites domain>`; §6); `MAIL_REPLY_TO`, if
+set, is a valid address. A driver without `MAIL_FROM` is refused everywhere.
 
 Docs that change: `platforms/aws/DEPLOY.md` (Instance configuration table; Infrastructure, for the
 `mail` variable and the scheduler; a new "Email" section: bringing an identity, the recipe for
@@ -521,7 +553,7 @@ Every client gates on `notifications` (and `email` for the email column).
 
 | | API | MCP (both servers, `packages/shared/src/mcp-tools.ts`) | CLI | Web |
 |---|---|---|---|---|
-| Read the catalogue and my preferences | `GET /api/me/notifications` → `{ channels, events, muted, cells }` with effective values | `fling_notifications` | `fling notifications` (a table) | Settings → Notifications: a matrix generated from the catalogue |
+| Read the catalogue and my preferences | `GET /api/me/notifications` → `{ channels, events, muted, cells, overrides }`: effective values, and the cells the person set | `fling_notifications` | `fling notifications` (a table) | Settings → Notifications: a matrix generated from the catalogue |
 | Change them | `PUT /api/me/notifications { muted?, cells? }` | `fling_notifications_set` | `fling notifications set <event> <channel> on\|off`, `fling notifications mute\|unmute` | the same page |
 | What was sent to me | `GET /api/me/notifications/sent` | — | `fling notifications sent` | the same page |
 | Unsubscribe | `GET`/`POST /notifications/unsubscribe?t=` (no session) | — | — | the page it serves, with Undo |
@@ -537,11 +569,14 @@ Beside `/admin/users`, behind `canInstance`; API and web, like the other admin p
 
 - **Configuration**, read only: driver, `MAIL_FROM`, from name, Reply-To, configuration set.
 - **Send a test email** to any address the admin types (outside the allowlist too, so external
-  deliverability checkers work). It goes straight through the channel, not the outbox, and shows
-  the provider's message id or the mapped error (`rejected: sender not verified`, …). At most 10
-  an hour per admin (`USER#<admin>/NTEST#<hour>`).
-- **Health**: the last 24 hours of `NOTIFY/STATS#<hour>` (sent, retrying, given up, suppressed)
-  and the most recent failure reasons with batch id and event key. No addresses, no content.
+  deliverability checkers work). It is rendered with the same layout and goes straight to the
+  Mailer, not through the outbox, and shows the provider's message id or the mapped error
+  (`rejected: sender not verified`, …). At most 10 an hour per admin
+  (`USER#<admin>/NTEST#<hour>`). Only from a browser session (`admin.mail.test` needs the `admin`
+  role): an API key or OAuth token, even an admin's, may read the page but not send.
+- **Health**: the last 24 hours of `NOTIFY/STATS#<hour>` (sent, retrying, given up, suppressed,
+  dropped) and the most recent `NOTIFY/FAILURE#` items: reason, provider code, batch id and event
+  keys. No addresses, no content.
 
 This is the only way Fling sends a message on request: nothing sends one automatically to check
 the setup.
@@ -566,13 +601,16 @@ Nothing in CI or the deploy sends real email.
   unsubscribe tokens and Undo, the `MAIL_FROM` domain check.
 - **The e2e scenario**: the Node runtime uses `MemoryMailer` and the `wrangler dev` runtime the
   real `CloudflareMailer` over the simulated binding. The scenario only uses HTTP, the CLI and MCP.
-  It forces a drain with `POST /dev/notify/drain` (dev login only). Then, signed in as each
-  recipient, it reads `GET /api/me/notifications/sent` (the `NSENT` items, with subject and event
-  keys). It asserts the share, group share, group, comment and reply emails, one email for a burst
-  of comments, nothing after an opt-out, and nothing for the actor. Against a live instance the
-  drain route does not exist, so these steps are skipped.
-- **Post-deploy smoke test**: checks that `/.well-known/fling` advertises `email` when the deploy
-  config has mail, and that `GET /api/me/notifications` answers. It sends nothing.
+  It forces a drain with `POST /dev/notify/drain` (dev login only; `flush`, so nothing waits for the
+  lag or a fold). Then, signed in as each recipient, it reads `GET /api/me/notifications/sent` (the
+  `NSENT` items, with subject and event keys). Where the shares, groups and comments already
+  happen, it asserts the share, group add, group share, comment and reply emails, one email for a
+  burst of comments (a reply and two new threads), nothing for the actor, and nothing after an
+  opt-out (the settings read with the CLI, changed with MCP `fling_notifications_set`, read back
+  with `fling_notifications`, and set back with the CLI). Against a live instance the drain route
+  does not exist, so these steps are skipped.
+- **Post-deploy smoke test** (the same scenario): where `/.well-known/fling` advertises `email`, it
+  checks that `GET /api/me/notifications` answers with the email channel. It sends nothing.
 - **By hand**, once at setup and after any change to the mail settings: send a test email from
   `/admin/mail` to a real mailbox and check SPF, DKIM and DMARC alignment in its headers.
 

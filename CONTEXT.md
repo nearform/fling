@@ -182,9 +182,12 @@ needs; clients build their settings from it.
 
 **Channel** — a way a notification reaches someone: `email` so far (`ChannelId`,
 `packages/shared/src/notifications.ts`). Email goes out through the **Mailer** port
-(`apps/api/src/mail/types.ts`): `MemoryMailer` and `FileMailer` in the core, each cloud's own on its
-platform, all passing `mailerConformance`. `MAIL_DRIVER` turns it on (the `email` capability), and
-with any channel on, the `notifications` capability.
+(`apps/api/src/mail/types.ts`): `MemoryMailer` (tests, the e2e's Node runtime) and `FileMailer`
+(`pnpm dev`, into `.fling-dev/mail/`) in the core, `SesMailer` (`platforms/aws/src/mail/ses.ts`)
+and `CloudflareMailer` (`platforms/cloudflare/src/mail/email.ts`, over the `send_email` binding)
+on the platforms, each built in its platform's `deps.ts`; all pass `mailerConformance`.
+`MAIL_DRIVER` turns it on (the `email` capability), and with any channel on, the `notifications`
+capability.
 
 **Notification preferences** — what one person hears about: per event and channel `on` or `off`,
 and a `muted` switch (`USER#<email>/NOTIFYPREFS`, keyed by address, so someone who never signed in
@@ -199,11 +202,14 @@ the next write. Everyone sees and changes theirs from every client (`GET`/`PUT
 
 **Outbox** — notifications on their way, in Records (`apps/api/src/store/records.ts`): the event,
 a fan-out marker, a **pending** notification per recipient, and batches due at a minute
-(`NDUE#<minute>`), drained a minute at a time from a cursor. The outbox is the queue on every
-platform; each only supplies the one-minute tick. A **batch** is what goes out as one message: one
+(`NDUE#<minute>`), drained a minute at a time from a cursor that stays about 75 seconds behind
+the clock, so a minute is complete before it is read. The outbox is the queue on every platform;
+each only supplies the one-minute tick. A **batch** is what goes out as one message: one
 recipient, one channel, one site (or none, for shares and groups), due 2 minutes after its first
 notification, with everything that arrives meanwhile folded in. A drainer leases it (a conditional
-update), so overlapping drains never send it twice. After a message about comments on a site, the
+update that sets a lease token; finishing or rescheduling it is conditioned on that token), so
+overlapping drains never send it twice. A failed send is recorded (`NOTIFY/FAILURE#<id>`, no
+address) for the admins' mail page, and retried with backoff or given up. After a message about comments on a site, the
 recipient's next batch for that site waits out a **cool-down** (`coolDownUntil` on their batch
 pointer).
 

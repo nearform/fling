@@ -13,6 +13,8 @@
  * runs it. Without the key the admin checks are skipped. With the member and admin keys, the
  * audience and group checks run through the API (the admin as the outsider, and as the one the
  * member's group lets in); the site pass needs browser sessions, so only `pnpm e2e` follows it.
+ * On an instance with email, it checks that the notification settings answer and sends nothing:
+ * there is no dev drain, so what each person is sent is only checked by `pnpm e2e`.
  */
 import { parseArgs } from 'node:util'
 import { runScenario } from './scenario.ts'

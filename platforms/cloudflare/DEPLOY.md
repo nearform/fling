@@ -256,7 +256,10 @@ The deploy ends with the e2e scenario (`packages/e2e`) against the live instance
 with the CLI, view it, a trailing-slash redirect and the 404 page, a second version and a rollback,
 make it private (anonymous visitors are sent to sign in), a share link, four concurrent first
 deploys of one name (conditional writes: exactly one site), an MCP publish, then it removes the
-three sites it made (`e2e-<random>…`).
+three sites it made (`e2e-<random>…`). With `MAIL`, the instance advertises the `email` capability
+and the test checks that the notification settings (`GET /api/me/notifications`) answer; it sends
+no email. What each person is sent is checked by the local e2e, which can drain the outbox at once
+(`POST /dev/notify/drain`, dev login only).
 
 It signs in with an API key: as a test user that `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` admits, run
 `FLING_CONFIG_DIR=$(mktemp -d) fling login https://$APP_HOST` and take the server's `apiKey`
@@ -321,8 +324,12 @@ local Durable Objects at `ws://flingcf.lvh.me:47103/api/live`. `pnpm e2e` (part 
 
 `wrangler dev` simulates the `send_email` binding (`EMAIL`, in the template `wrangler.jsonc`):
 it accepts any recipient, logs each message's From, To and Subject, and saves its text and HTML
-parts to local files whose paths it prints. Nothing is sent. To turn email on locally, add
-`MAIL_DRIVER=cloudflare` and `MAIL_FROM=fling@mail.flingcf.lvh.me` to `.dev.vars`.
+parts to local files whose paths it prints. Nothing is sent. To turn email on locally, run
+`pnpm --filter @fling/platform-cloudflare dev --mail` (it sets `MAIL_DRIVER=cloudflare` and
+`MAIL_FROM=fling@mail.flingcf.lvh.me`; the same two lines in `.dev.vars` do it too). The real
+`CloudflareMailer` then sends through the simulated binding. `wrangler dev` runs no crons, so
+`POST /dev/notify/drain` sends what is queued, including what is due within the hour. The e2e runs
+this runtime with `--mail`.
 
 ## Costs
 

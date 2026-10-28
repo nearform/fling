@@ -2,9 +2,11 @@
  * `pnpm e2e`: the scenario on each platform's local runtime, signed in with dev login.
  *
  *   aws         apps/api/src/dev.ts: the core on Node with the memory table, fs blobs and the
- *               real CloudFront Function (the generated bundle) in front of the sites
+ *               real CloudFront Function (the generated bundle) in front of the sites; mail
+ *               through MemoryMailer (MAIL_DRIVER=memory)
  *   cloudflare  platforms/cloudflare under `wrangler dev`: the Worker with local D1, R2 and KV
- *               (scripts/dev.mjs applies the D1 schema and the data migrations first)
+ *               (scripts/dev.mjs applies the D1 schema and the data migrations first); mail
+ *               through the real CloudflareMailer over wrangler's simulated `send_email` binding
  *
  *   tsx src/local.ts [aws] [cloudflare]      (default: both, one after the other)
  *
@@ -63,6 +65,8 @@ async function awsRuntime(): Promise<Runtime> {
           FS_ROOT: state,
           SESSION_SECRET: secret(),
           SITE_HMAC_KEY: secret(),
+          MAIL_DRIVER: 'memory',
+          MAIL_FROM: 'fling@mail.fling.lvh.me',
         },
       }),
   }
@@ -84,6 +88,7 @@ async function cloudflareRuntime(): Promise<Runtime> {
           String(inspector),
           '--persist-to',
           state,
+          '--mail',
         ],
         {
           cwd: REPO,

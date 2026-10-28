@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "The end-to-end scenario every platform must pass (log in, deploy with the CLI, view, private redirect, share link, rollback, comments, admin impersonation, MCP publish, a conditional-write race), against a base URL: on each platform's local runtime (`pnpm e2e`) and as the post-deploy smoke test (`smoke`).",
+  "description": "The end-to-end scenario every platform must pass (log in, deploy with the CLI, view, private redirect, share link, rollback, comments, admin impersonation, MCP publish, a conditional-write race, the notification emails each person is sent), against a base URL: on each platform's local runtime (`pnpm e2e`) and as the post-deploy smoke test (`smoke`).",
   "type": "module",
   "scripts": {
     "e2e": "tsx src/local.ts",

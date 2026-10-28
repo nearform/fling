@@ -8,7 +8,7 @@
  *   sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
  *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
- *   comment changes) → admin (the users list;
+ *   comment changes) → admin (the users list; every site's listing, the owner's site included;
  *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
  *   group (the member makes one the owner can see and use but not change; the owner names it in
@@ -1512,25 +1512,39 @@ async function adminStep(ctx: {
     const row = body.users.find(u => u.email === owner)
     check(row && row.siteCount >= 1, `users list: ${JSON.stringify(body.users)}`)
   }
+  /** Every site's listing, searched by the name of the owner's site. */
+  const allSites = async (how: { cookie: string } | { key: string }) => {
+    const res = await call(how, 'GET', `/api/admin/sites?q=${encodeURIComponent(name)}`)
+    check(res.status === 200, `admin sites list: ${res.status}`)
+    const body = (await res.json()) as { sites: { name: string; owner: string }[] }
+    const row = body.sites.find(s => s.name === name)
+    check(row?.owner === owner, `sites list: ${JSON.stringify(body.sites)}`)
+  }
 
   // Not admins: nothing there. A smoke run may sign in as one admin for both roles (a personal
   // instance has no second account), and then there is no non-admin to ask.
   if (admin.email !== owner) {
     const refused = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/users')
     check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
+    const noSites = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/sites')
+    check(noSites.status === 404, `a non-admin listing every site: ${noSites.status}`)
   }
 
   await listed({ key: admin.apiKey })
+  await allSites({ key: admin.apiKey })
   const viaKey = await call({ key: admin.apiKey }, 'POST', '/api/admin/impersonate', {
     email: owner,
   })
   check(viaKey.status === 403, `impersonating with an API key: ${viaKey.status}`)
   if (!admin.cookie) {
-    step(`admin (API key): lists users (${owner} included); may not impersonate with a key`)
+    step(
+      `admin (API key): lists users (${owner} included) and every site (${name} included); may not impersonate with a key`
+    )
     return
   }
   const own = { cookie: admin.cookie }
   await listed(own)
+  await allSites(own)
 
   const started = await call(own, 'POST', '/api/admin/impersonate', { email: owner })
   check(started.status === 200, `impersonate ${owner}: ${started.status} ${await started.text()}`)
@@ -1586,7 +1600,7 @@ async function adminStep(ctx: {
     `audit: ${JSON.stringify(audit.entries.slice(0, 2))}`
   )
   step(
-    `admin: lists users; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
+    `admin: lists users and every site (${name} included); impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
   )
 }
 

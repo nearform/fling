@@ -2,6 +2,9 @@
 
 **Site** — a named folder of static files served at `<name>.<sites domain>`. Names are one global
 namespace, first come first served. A site has many versions and at most one current version.
+Every site is in the instance's **site directory** (`SITES/SITE#<name>` in
+`apps/api/src/store/records.ts`): an index item carrying its listing and access level, written with
+the site and listed to admins alone.
 
 **Version** — one immutable set of files, identified by a hash of its manifest (path + sha256 of
 every file). `pending` until it passes publication, then `complete`. Rollback only ever points a
@@ -126,12 +129,14 @@ email; the issuer's `sub` is not stored.
 
 **Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
-last sign-in) and may **impersonate** one: from a browser session only, they act as that user for
-at most 60 minutes, with a banner on every page, and stop to return to their own session. They get
-no rights over anyone's site except by impersonating, and while impersonating can create nothing
-that outlives the session (no API keys or `fling login`, no OAuth approvals, no further
+last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, searched by
+name prefix; the Sites page's All sites tab, shown to admins alone). They may **impersonate** a
+user: from a browser session only, they act as that user for at most 60 minutes, with a banner on
+every page, and stop to return to their own session. Listing a site gives them nothing more: they
+get no rights over anyone's site except by impersonating, and while impersonating can create
+nothing that outlives the session (no API keys or `fling login`, no OAuth approvals, no further
 impersonation). Every start and stop is audited (`AUDIT` items, kept 180 days, and a log line).
-The `admin.*` actions are in `policy.ts` (`canAdmin`).
+The `admin.*` actions are in `policy.ts` (`canInstance`).
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:

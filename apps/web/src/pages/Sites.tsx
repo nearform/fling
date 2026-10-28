@@ -16,7 +16,7 @@ import {
   type SiteSort,
   sortSites,
 } from '@fling/shared'
-import { XMarkIcon } from '@heroicons/react/24/outline'
+import { ShieldCheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useDeferredValue, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminSiteCard } from '../components/AdminSiteCard'
@@ -355,6 +355,7 @@ export default function Sites() {
             onClick={() => setView('all')}
             title="Every site on this instance (admins)"
           >
+            <ShieldCheckIcon className="mr-1.5 h-4 w-4" aria-hidden />
             All sites
           </button>
         )}

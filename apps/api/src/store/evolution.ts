@@ -21,6 +21,7 @@ export type Kind =
   | 'name'
   | 'site'
   | 'sitegrant'
+  | 'sitedirectory'
   | 'group'
   | 'groupname'
   | 'groupmember'

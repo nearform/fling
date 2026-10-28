@@ -478,6 +478,80 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const store = await factory()
         await expect(store.deleteSite(site(email()))).resolves.toBeUndefined()
       })
+
+      describe('site directory', () => {
+        /** Site names that share a prefix no other test's do. */
+        const family = () => {
+          const p = `d${uid()}`
+          return { prefix: p, name: (s: string) => `${p}-${s}` }
+        }
+
+        it('createSite and putSite write the listing and access level; deleteSite removes it', async () => {
+          const store = await factory()
+          const f = family()
+          const s = site(email(), f.name('a'), { restricted: true })
+          await store.createSite(s)
+          expect(await store.listAllSites({ prefix: f.prefix, limit: 10 })).toEqual({
+            sites: [{ ...listing(s), restricted: true, access: 'only_me' }],
+          })
+          const shared = {
+            ...s,
+            currentVersionId: 'v1',
+            audience: { emails: [email()], groups: [] },
+            updatedAt: LATER,
+          }
+          await store.putSite(shared)
+          expect((await store.listAllSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
+            { ...listing(shared), access: 'people' },
+          ])
+          const archived = { ...shared, visibility: 'public' as const, archived: true }
+          await store.putSite(archived)
+          expect((await store.listAllSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
+            { ...listing(archived), access: 'public' },
+          ])
+          await store.deleteSite(archived)
+          expect(await store.listAllSites({ prefix: f.prefix, limit: 10 })).toEqual({ sites: [] })
+        })
+
+        it('lists every owner’s sites by name in byte order, a page at a time, only under the prefix', async () => {
+          const store = await factory()
+          const f = family()
+          for (const n of ['c', 'a', 'B', 'd', 'e'])
+            await store.createSite(site(email(), f.name(n)))
+          await store.createSite(site(email(), `x${f.prefix}`))
+          const seen: string[] = []
+          let cursor: string | undefined
+          let pages = 0
+          do {
+            const page = await store.listAllSites({ prefix: f.prefix, limit: 2, cursor })
+            expect(page.sites.length).toBeLessThanOrEqual(2)
+            seen.push(...page.sites.map(x => x.name))
+            cursor = page.cursor
+            pages++
+          } while (cursor && pages < 10)
+          expect(seen).toEqual(['B', 'a', 'c', 'd', 'e'].map(f.name))
+          expect(pages).toBeGreaterThanOrEqual(3)
+          expect((await store.listAllSites({ prefix: f.name('d'), limit: 5 })).sites).toEqual([
+            expect.objectContaining({ name: f.name('d') }),
+          ])
+        })
+
+        it("another user's createSite on a held name leaves the holder's entry; an access change rewrites it", async () => {
+          const store = await factory()
+          const f = family()
+          const s = site(email(), f.name('held'))
+          await store.createSite(s)
+          expect(await store.createSite(site(email(), s.name))).toBeNull()
+          expect((await store.listAllSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
+            { ...listing(s), access: 'members' },
+          ])
+          // Only the access level changed (nothing in the listing did): rewritten all the same.
+          await store.putSite({ ...s, visibility: 'public' })
+          expect((await store.listAllSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
+            { ...listing(s), access: 'public' },
+          ])
+        })
+      })
     })
 
     describe('groups', () => {

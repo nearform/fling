@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { currentVersion, decode, encode, type Upgrade } from '../src/store/evolution.ts'
 import { Records } from '../src/store/records.ts'
-import type { SiteRecord, VersionRecord } from '../src/store/types.ts'
+import { listingOf, type SiteRecord, type VersionRecord } from '../src/store/types.ts'
 import { MemoryTable } from '../src/table/memory.ts'
 
 const NOW = '2026-01-01T00:00:00.000Z'
@@ -64,13 +64,21 @@ async function items(table: MemoryTable) {
 }
 
 describe('site-centric keys', () => {
-  it('createSite writes the claim, the record in the site partition and the user index item', async () => {
+  it('createSite writes the claim, the record in the site partition, the user index item and the directory item', async () => {
     const table = new MemoryTable()
     const s = site('a@example.test', 'hello')
     await new Records(table).createSite(s)
     expect(await items(table)).toEqual([
       { ...old.claim('hello', s.email), v: 1 },
       { pk: 'SITE#site1', sk: 'SITE', type: 'site', v: SITE_V, ...s },
+      {
+        pk: 'SITES',
+        sk: 'SITE#hello',
+        type: 'sitedirectory',
+        v: 1,
+        ...listingOf(s),
+        access: 'members',
+      },
       { pk: 'USER#a@example.test', sk: 'SITE#hello', type: 'site', v: SITE_V, ...s },
     ])
   })
@@ -94,7 +102,7 @@ describe('site-centric keys', () => {
     })
   })
 
-  it('deleteSite removes the partition, the index item, the old version keys and its claim', async () => {
+  it('deleteSite removes the partition, the index and directory items, the old version keys and its claim', async () => {
     const table = new MemoryTable()
     const s = site('a@example.test', 'hello')
     const records = new Records(table)
@@ -106,6 +114,7 @@ describe('site-centric keys', () => {
     expect((await items(table)).map(i => `${i.pk} ${i.sk}`)).toEqual([
       'NAME#other NAME',
       'SITE#site2 SITE',
+      'SITES SITE#other',
       'USER#a@example.test SITE#other',
     ])
   })
@@ -120,6 +129,20 @@ describe('site-centric keys', () => {
     expect(await table.get('SITE#stale', 'SITE')).toBeNull()
     expect(await records.listSites('a@example.test')).toEqual([])
     expect((await records.getNameClaim('hello'))?.email).toBe('b@example.test')
+  })
+
+  it("deleteSite of a stale copy keeps the holder's directory item", async () => {
+    const table = new MemoryTable()
+    const records = new Records(table)
+    const holder = site('b@example.test', 'hello', { id: 'holder' })
+    await records.createSite(holder)
+    const stale = site('a@example.test', 'hello', { id: 'stale' })
+    await table.put({ ...old.site(stale), pk: 'SITE#stale', sk: 'SITE' })
+    await records.deleteSite(stale)
+    expect((await records.listAllSites({ limit: 10 })).sites).toEqual([
+      { ...listingOf(holder), access: 'members' },
+    ])
+    expect(await records.findSite('hello')).toEqual(holder)
   })
 
   it('findSite ignores a stale copy whose id is not the claim’s', async () => {
@@ -247,7 +270,8 @@ describe('listing copies', () => {
     expect(transact).toHaveBeenCalledTimes(1)
     expect(transact.mock.calls[0]?.[0]).toHaveLength(2)
     await records.putSite({ ...s, updatedAt: '2026-02-01T00:00:00.000Z' })
-    expect(transact.mock.calls.slice(1).flatMap(([ops]) => ops)).toHaveLength(2 + emails.length)
+    // The site, its index and directory items, and every grant.
+    expect(transact.mock.calls.slice(1).flatMap(([ops]) => ops)).toHaveLength(3 + emails.length)
     expect((await records.listSiteGrants('u29@example.test'))[0]?.updatedAt).toBe(
       '2026-02-01T00:00:00.000Z'
     )

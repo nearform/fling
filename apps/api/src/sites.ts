@@ -273,10 +273,13 @@ export function checkEmails(deps: Deps, emails: readonly string[]) {
   }
   const refused = emails.filter(e => !/^[^@\s]+@[^@\s]+$/.test(e) || !emailAllowed(e, policy))
   if (refused.length) {
+    // The domains are public (the metadata names them); the listed addresses never are.
+    const domains = policy.allowedDomains.map(d => `@${d}`).join(', ')
+    const which = domains ? ` (it admits ${domains} addresses)` : ''
     throw new ApiError(
       400,
       'email_not_allowed',
-      `Not an address that can sign in to ${deps.config.instanceName}: ${refused.join(', ')}`,
+      `Not an address that can sign in to ${deps.config.instanceName}${which}: ${refused.join(', ')}`,
       { emails: refused }
     )
   }

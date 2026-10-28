@@ -25,9 +25,15 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Sites', icon: GlobeAltIcon },
-  { to: '/get-started', label: 'Get started', icon: RocketLaunchIcon },
   { to: '/connections', label: 'Connections', icon: KeyIcon },
 ]
+
+/** Get started, always last: a guide people come back to rarely once they have a site. */
+export const GET_STARTED_NAV_ITEM: NavItem = {
+  to: '/get-started',
+  label: 'Get started',
+  icon: RocketLaunchIcon,
+}
 
 /** Admin → Users, for admins in their own session. */
 export const ADMIN_NAV_ITEM: NavItem = {
@@ -41,7 +47,7 @@ export const GROUPS_NAV_ITEM: NavItem = { to: '/groups', label: 'Groups', icon: 
 
 /**
  * The side nav's items for this user: everyone's (with Groups where the instance has them), then
- * Admin for admins.
+ * Admin for admins, then Get started.
  */
 export function navItemsFor(
   me: Me | null | undefined,
@@ -50,7 +56,7 @@ export function navItemsFor(
   const [first, ...rest] = NAV_ITEMS
   const items =
     instance?.capabilities.groups === true && first ? [first, GROUPS_NAV_ITEM, ...rest] : NAV_ITEMS
-  return showsAdmin(me) ? [...items, ADMIN_NAV_ITEM] : items
+  return [...items, ...(showsAdmin(me) ? [ADMIN_NAV_ITEM] : []), GET_STARTED_NAV_ITEM]
 }
 
 /** `/` matches only itself; every other path matches itself and its descendants. */

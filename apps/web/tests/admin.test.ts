@@ -1,6 +1,12 @@
 import type { AdminUser, Me } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { ADMIN_NAV_ITEM, GROUPS_NAV_ITEM, NAV_ITEMS, navItemsFor } from '../src/components/SideNav'
+import {
+  ADMIN_NAV_ITEM,
+  GET_STARTED_NAV_ITEM,
+  GROUPS_NAV_ITEM,
+  NAV_ITEMS,
+  navItemsFor,
+} from '../src/components/SideNav'
 import {
   ADMIN_USERS_PATH,
   impersonateBlocked,
@@ -37,11 +43,21 @@ const impersonating = me({
 
 describe('the side nav', () => {
   it('offers Admin → Users to admins only', () => {
-    expect(navItemsFor(me({ admin: true }))).toEqual([...NAV_ITEMS, ADMIN_NAV_ITEM])
+    expect(navItemsFor(me({ admin: true }))).toEqual([
+      ...NAV_ITEMS,
+      ADMIN_NAV_ITEM,
+      GET_STARTED_NAV_ITEM,
+    ])
     expect(ADMIN_NAV_ITEM).toMatchObject({ to: ADMIN_USERS_PATH, label: 'Admin' })
-    expect(navItemsFor(me())).toEqual(NAV_ITEMS)
-    expect(navItemsFor(null)).toEqual(NAV_ITEMS)
-    expect(navItemsFor(undefined)).toEqual(NAV_ITEMS)
+    expect(navItemsFor(me())).toEqual([...NAV_ITEMS, GET_STARTED_NAV_ITEM])
+    expect(navItemsFor(null)).toEqual([...NAV_ITEMS, GET_STARTED_NAV_ITEM])
+    expect(navItemsFor(undefined)).toEqual([...NAV_ITEMS, GET_STARTED_NAV_ITEM])
+  })
+
+  it('puts Get started last', () => {
+    expect(navItemsFor(me({ admin: true }), { capabilities: { groups: true } }).at(-1)).toBe(
+      GET_STARTED_NAV_ITEM
+    )
   })
 
   it('offers Groups, after Sites, only where the instance has the groups capability', () => {
@@ -55,7 +71,10 @@ describe('the side nav', () => {
 
   it('not while impersonating, even if the server said admin', () => {
     expect(showsAdmin(impersonating)).toBe(false)
-    expect(navItemsFor({ ...impersonating, admin: true })).toEqual(NAV_ITEMS)
+    expect(navItemsFor({ ...impersonating, admin: true })).toEqual([
+      ...NAV_ITEMS,
+      GET_STARTED_NAV_ITEM,
+    ])
   })
 })
 

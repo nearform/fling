@@ -326,6 +326,24 @@
 }
 
 @layer utilities {
+  /* The tone triples as reusable marks (the avatar fallback, the site badges). Utilities, so they
+     win over DaisyUI's component styles (a `.badge` sets its own background and border). */
+  .tone-primary {
+    color: var(--text-primary); /* ink on the primary tint — primary-coloured TEXT is banned */
+    background: var(--tone-primary-surface);
+    border-color: var(--tone-primary-border);
+  }
+  .tone-info {
+    color: var(--text-primary);
+    background: var(--tone-info-surface);
+    border-color: var(--tone-info-border);
+  }
+  .tone-warning {
+    color: var(--text-primary);
+    background: var(--tone-warning-surface);
+    border-color: var(--tone-warning-border);
+  }
+
   .btn:not(
       .btn-ghost,
       .btn-link,
@@ -392,23 +410,6 @@
   }
   .text-muted {
     color: var(--text-muted);
-  }
-
-  /* The tone triples as reusable marks (the avatar fallback, the public badge). */
-  .tone-primary {
-    color: var(--text-primary); /* ink on the primary tint — primary-coloured TEXT is banned */
-    background: var(--tone-primary-surface);
-    border-color: var(--tone-primary-border);
-  }
-  .tone-info {
-    color: var(--text-primary);
-    background: var(--tone-info-surface);
-    border-color: var(--tone-info-border);
-  }
-  .tone-warning {
-    color: var(--text-primary);
-    background: var(--tone-warning-surface);
-    border-color: var(--tone-warning-border);
   }
 
   /* Application shell — quiet, but each layer visually distinct */

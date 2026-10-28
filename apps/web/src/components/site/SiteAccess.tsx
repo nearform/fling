@@ -77,7 +77,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
           </label>
           <p className="text-xs text-muted">
             {site.visibility === 'public'
-              ? 'Anyone with the URL can open it.'
+              ? 'Anyone with the URL can open the site. Its review page and comments still need sign-in.'
               : site.restricted
                 ? `Private: only you and ${audienceWho(site.audience?.emails.length ?? 0, site.audience?.groups.length ?? 0)}.`
                 : `Private: open to ${audienceFor(instance)}.`}

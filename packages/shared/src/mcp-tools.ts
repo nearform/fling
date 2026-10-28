@@ -347,7 +347,7 @@ export function mcpToolsFor(w: McpWording) {
     setVisibility: tool({
       name: 'fling_set_visibility',
       title: 'Set visibility',
-      description: `Make a site private (open to ${w.privateAudience}) or public (anyone).`,
+      description: `Make a site private (open to ${w.privateAudience}) or public (anyone can open the site; its review page and comments still need sign-in).`,
       inputSchema: { name: siteName, visibility: z.enum(['private', 'public']) },
       annotations: { idempotentHint: true, openWorldHint: true },
     }),

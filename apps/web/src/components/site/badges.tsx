@@ -11,7 +11,10 @@ import { audienceFor } from '../../lib/instance'
 export function VisibilityBadge({ visibility }: { visibility: Site['visibility'] }) {
   const audience = audienceFor(useInstance())
   return visibility === 'public' ? (
-    <span className="badge badge-sm tone-info gap-1" title="Anyone with the URL can open it">
+    <span
+      className="badge badge-sm tone-info gap-1"
+      title="Anyone with the URL can open the site; reviewing it still needs sign-in"
+    >
       <GlobeAltIcon className="h-3 w-3" /> Public
     </span>
   ) : (

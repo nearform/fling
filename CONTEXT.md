@@ -34,7 +34,8 @@ one of your sites (overview, access, versions, archive and delete), in sections 
 name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `fling_list` `sort`.
 
 **Private** — visible to any signed-in member of the instance (not only the owner), unless it has
-an audience. **Public** — anyone.
+an audience. **Public** — anyone can open the site itself; its review page and comments still need
+sign-in (`comment.*` in `policy.ts` is for signed-in users only).
 
 **Audience** — the people, besides its owner, who may see a private site: addresses, each one the
 instance's email policy admits, and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`;
@@ -44,7 +45,9 @@ audience is **restricted**: only its owner and audience see it, and only they ta
 comments. The audience is kept, and ignored, while the site is public. Each address also gets a
 **direct grant** (`USER#<email>/SHARED#<siteId>`), a projection for listing the sites shared with
 someone; each group a group-site item (`GROUP#<id>/SITE#<siteId>`), so deleting the group can take
-it out of every audience. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and
+it out of every audience. Both carry the site's **listing** (`SharedListing` in
+`apps/api/src/store/types.ts`): its id, name, owner, when it was created and updated, and whether
+it is archived, live and restricted, rewritten by `putSite` whenever one of those changes. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and
 `fling_set_audience`; the `audiences` capability.
 
 **Group** — a named list of people, such as a team, that any audience may name
@@ -65,10 +68,12 @@ opened from the Groups page and a site's Access section); the `groups` capabilit
 
 **Shared with me** — the restricted sites of others that someone may see because the audience
 names them, by address or through a group they are a member of (`listShared` in
-`apps/api/src/sites.ts`; `SharedSite` in `packages/shared/src/api.ts`). Found from index items
-alone (their direct grants, their memberships' group-site items), then each site is asked of
-policy, so an item out of step with an audience never shows one; archived sites, sites with no
-current version, their own sites and private sites every member sees anyway are left out. A
+`apps/api/src/sites.ts`; `SharedSite` in `packages/shared/src/api.ts`). Read from index items
+alone, one query per source (their direct grants, their memberships, each group's site items),
+and from the listing those items carry, so no site is read; a group counts only while they are in
+it. Archived sites, sites with no current version, their own sites and private sites every member
+sees anyway are left out. An item the audience no longer backs (two saves of a site racing) can
+list a site's name, nothing more: opening the site still goes through policy and the site pass. A
 sharee sees the name, URL, review page, owner, when it was updated and how it reached them,
 nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
 `fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.

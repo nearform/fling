@@ -146,7 +146,7 @@ export default function GetStarted() {
             <li>
               <strong className="font-medium text-base-content">Private by default:</strong> sites
               are visible to {audienceFor(instance)} only. Make one public with{' '}
-              <code>--public</code> or from the Sites page.
+              <code>--public</code> or from its page; reviewing it still needs sign-in.
             </li>
             <li>
               <strong className="font-medium text-base-content">Share links:</strong> to show a

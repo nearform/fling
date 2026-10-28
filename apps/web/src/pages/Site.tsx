@@ -4,10 +4,10 @@
  * as the API answers both the same way. Archived sites are offline, so Access waits until they
  * are unarchived.
  */
-import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { NotFound } from '../components/NotFound'
 import { PageHeader } from '../components/PageHeader'
+import { ReviewButton } from '../components/SiteButtons'
 import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
@@ -16,7 +16,6 @@ import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
 import { useSiteDetail } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
-import { reviewHref } from '../lib/review'
 
 export default function Site() {
   const { name = '' } = useParams()
@@ -66,14 +65,7 @@ export default function Site() {
             )}
           </span>
         }
-        actions={
-          reviewable && (
-            <Link to={reviewHref(site.name)} className="btn btn-sm">
-              <ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden />
-              Review
-            </Link>
-          )
-        }
+        actions={reviewable && <ReviewButton name={site.name} />}
       />
       <SiteOverview site={site} />
       {!site.archived && <SiteAccess site={site} />}

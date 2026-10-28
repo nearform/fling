@@ -4,20 +4,18 @@
  * and last updated.
  */
 import type { SiteDetail } from '@fling/shared'
-import { ArrowTopRightOnSquareIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline'
+import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { useInstance } from '../../hooks/instance'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../../lib/format'
-import { reviewHref } from '../../lib/review'
 import { CopyButton } from '../CopyButton'
+import { ReviewButton } from '../SiteButtons'
 import { SiteSection } from './SiteSection'
 
 export function SiteOverview({ site }: { site: SiteDetail }) {
   const instance = useInstance()
   const reviewable = instance?.capabilities.comments === true && !site.archived
   const current = site.versions.find(v => v.id === site.currentVersionId)
-  const reviewUrl = `${window.location.origin}${reviewHref(site.name)}`
 
   return (
     <SiteSection title="Overview">
@@ -45,20 +43,7 @@ export function SiteOverview({ site }: { site: SiteDetail }) {
         </Row>
         {reviewable && (
           <Row label="Review">
-            <span className="flex min-w-0 items-center">
-              <Link
-                to={reviewHref(site.name)}
-                className="link link-hover inline-flex items-center gap-1"
-                title="Open the site with its comments"
-              >
-                <ChatBubbleLeftRightIcon className="h-3.5 w-3.5" aria-hidden />
-                Open review mode
-              </Link>
-              <CopyButton
-                text={reviewUrl}
-                label="Copy the review link (anyone who can open the site can comment)"
-              />
-            </span>
+            <ReviewButton name={site.name} />
           </Row>
         )}
         <Row label="Current version">

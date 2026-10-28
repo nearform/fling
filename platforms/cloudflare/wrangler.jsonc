@@ -39,8 +39,8 @@
   "durable_objects": { "bindings": [{ "name": "LIVE_ROOMS", "class_name": "LiveRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LiveRoom"] }],
   // Email Service (src/mail/email.ts). Locally `wrangler dev` simulates it: messages are logged and
-  // saved to files, never sent; set MAIL_DRIVER=cloudflare and MAIL_FROM in .dev.vars to use it. A
-  // deploy keeps it only with the deploy config's MAIL, restricted to MAIL.FROM.
+  // saved to files, never sent; `scripts/dev.mjs --mail` (or MAIL_DRIVER=cloudflare and MAIL_FROM in
+  // .dev.vars) uses it. A deploy keeps it only with the deploy config's MAIL, restricted to MAIL.FROM.
   "send_email": [{ "name": "EMAIL" }],
   // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
   "triggers": { "crons": ["17 * * * *"] },

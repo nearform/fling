@@ -66,11 +66,29 @@ the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets its
 `wrangler dev` runs the `LiveRoom` Durable Objects locally at `ws://flingcf.lvh.me:47103/api/live`.
 Open the same review page in two browser profiles to see each other's pointers.
 
-**Notifications locally.** With `MAIL_DRIVER=file` and `MAIL_FROM` set before `pnpm dev`, email goes
-to `.fling-dev/mail/` (an `.eml` and an `.html` per message). `pnpm dev` drains the outbox every
-minute, as the platforms' ticks do; `POST /dev/notify/drain` (dev login only) sends what is queued
-at once, including what is due within the hour, and `/dev/mail` lists what was sent, each message's
-HTML a click away.
+**Notifications locally.** Mail is off until you turn it on:
+
+- **Node** (`pnpm dev`): set `MAIL_DRIVER=file` and `MAIL_FROM=fling@mail.fling.lvh.me` first
+  (`MAIL_DRIVER=file MAIL_FROM=fling@mail.fling.lvh.me pnpm dev`). Each message is written to
+  `.fling-dev/mail/` (or `$FS_ROOT/mail/`) as an `.eml` and an `.html`. `MAIL_DRIVER=memory` keeps
+  them in memory instead, as the e2e does.
+- **`wrangler dev`**: `pnpm --filter @fling/platform-cloudflare dev --mail` (or `MAIL_DRIVER=cloudflare`
+  and `MAIL_FROM=fling@mail.flingcf.lvh.me` in `platforms/cloudflare/.dev.vars`). The real
+  `CloudflareMailer` sends through wrangler's simulated `send_email` binding, which logs each
+  message and saves its parts to local files whose paths it prints.
+
+To read what was sent, open `/dev/mail` on the app (<http://fling.lvh.me:47100/dev/mail> on Node, through the UI dev server:
+the newest first, each message's HTML a click away; JSON with `Accept: application/json`), or the
+files themselves. On Node it lists FileMailer's and MemoryMailer's messages; under `wrangler dev`
+it is empty, and the files wrangler prints are the record. Each person's own list is on their
+Settings → Notifications page and in `pnpm cli notifications sent`.
+
+Nothing is sent the moment you act. `pnpm dev` drains the outbox every minute, as the platforms'
+ticks do, about 75 seconds behind the clock, and a batch waits 2 minutes for more to fold in, so
+an email takes up to about 4 minutes. `POST /dev/notify/drain` (dev login only) drains at once,
+including everything due in the next hour (`flush`), and answers what it did:
+`curl -X POST http://localhost:47101/dev/notify/drain` on Node (or `http://flingcf.lvh.me:47103/dev/notify/drain`).
+`wrangler dev` runs no crons, so there the drain route is the only way mail goes out.
 
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
 `pnpm cli deploy <folder>`. The CLI remembers it beside any other Fling you are signed in to:
@@ -79,7 +97,10 @@ from your real config altogether, set `FLING_CONFIG_DIR=$(mktemp -d)`.
 
 **The e2e scenario.** Run `pnpm build && pnpm e2e` (or `pnpm --filter @fling/e2e e2e aws` for one
 runtime). It starts each runtime on free ports with fresh state, runs
-`packages/e2e/src/scenario.ts` through the real CLI and over HTTP, then stops it.
+`packages/e2e/src/scenario.ts` through the real CLI and over HTTP, then stops it. Both runtimes run
+with mail on (MemoryMailer on Node, the CloudflareMailer over the simulated binding under
+`wrangler dev`), and the scenario drains with `POST /dev/notify/drain` and reads what each person
+was sent from `GET /api/me/notifications/sent`.
 
 ## Adding a feature
 

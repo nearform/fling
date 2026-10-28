@@ -14,6 +14,12 @@
  *   the site to its owner) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
+ * Notifications ride along where their causes happen: the settings answer wherever the instance
+ * has email, and where the dev drain exists (`POST /dev/notify/drain`, local runs only) the
+ * scenario drains the outbox and reads, as each recipient, what was sent to them: the comment and
+ * reply (a burst folded into one email), the share, the group add and the group share, nothing for
+ * the actor, and nothing after an opt-out.
+ *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
  * to reach the edge location the check lands on. New sites must not need it: the CLI's readiness
  * wait covers them, and the scenario fails if a new site is not routed when the CLI says it is.
@@ -179,6 +185,111 @@ function siteDir(root: string, label: string, files: Record<string, string>) {
 const page = (title: string, marker: string) =>
   `<!doctype html><html><head><title>${title}</title></head><body><h1>${marker}</h1></body></html>\n`
 
+/** A remote MCP tool call as `session`: the tool's result. */
+async function mcpTool(
+  appOrigin: string,
+  session: Session,
+  tool: string,
+  args: Record<string, unknown>
+): Promise<{ isError?: boolean; structuredContent?: Record<string, unknown> } | undefined> {
+  const res = await fetch(`${appOrigin}/mcp`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${session.apiKey}`,
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'mcp-protocol-version': '2025-06-18',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: tool, arguments: args },
+    }),
+  })
+  check(res.status === 200, `MCP ${tool}: ${res.status} ${await res.clone().text()}`)
+  return ((await res.json()) as { result?: Awaited<ReturnType<typeof mcpTool>> }).result
+}
+
+interface SentJson {
+  id: string
+  channel: string
+  eventKeys: string[]
+  subject: string
+  providerId: string | null
+  sentAt: string
+}
+
+interface NotificationSettingsJson {
+  channels: string[]
+  muted: boolean
+  cells: Record<string, Record<string, string>>
+}
+
+/**
+ * What each person was sent, on an instance with the dev drain: `take` drains the outbox now
+ * (`POST /dev/notify/drain`, which also delivers what is due in the next hour, so nothing waits
+ * for a tick or a fold) and returns the messages `GET /api/me/notifications/sent` lists for them
+ * that it has not returned before.
+ */
+interface Mailbox {
+  take(session: Session): Promise<SentJson[]>
+}
+
+/** The mailbox, or null where there is no dev drain (a deployed instance). */
+async function devMailbox(appOrigin: string, sessions: Session[]): Promise<Mailbox | null> {
+  const drain = async () => {
+    const res = await fetch(`${appOrigin}/dev/notify/drain`, { method: 'POST' })
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('application/json')) {
+      return null
+    }
+    return (await res.json()) as { sent?: unknown; complete?: boolean }
+  }
+  const first = await drain()
+  if (typeof first?.sent !== 'number') return null
+  const sent = async (session: Session) => {
+    const res = await fetch(`${appOrigin}/api/me/notifications/sent`, {
+      headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
+    })
+    check(res.status === 200, `GET /api/me/notifications/sent as ${session.email}: ${res.status}`)
+    return ((await res.json()) as { sent: SentJson[] }).sent
+  }
+  const seen = new Set<string>()
+  for (const session of sessions) for (const m of await sent(session)) seen.add(m.id)
+  return {
+    async take(session) {
+      // A drain stops early when the background tick holds a batch or moved the cursor: again.
+      for (let i = 0; i < 10; i++) {
+        const result = await drain()
+        check(result, 'POST /dev/notify/drain stopped answering')
+        if (result.complete) break
+        await sleep(500)
+      }
+      const fresh = (await sent(session)).filter(m => !seen.has(m.id))
+      for (const m of fresh) seen.add(m.id)
+      return fresh
+    },
+  }
+}
+
+/** One email, about exactly these events (folded, in any order), from this instance. */
+function oneEmail(got: SentJson[], keys: string[], instance: string, who: string) {
+  const [m] = got
+  check(
+    got.length === 1 &&
+      m?.channel === 'email' &&
+      m.providerId &&
+      m.eventKeys.length === keys.length &&
+      keys.every(k => m.eventKeys.includes(k)) &&
+      m.subject.startsWith(`${instance}: `),
+    `${who}: want one email about ${keys.join(' + ')}, got ${JSON.stringify(got)}`
+  )
+}
+
+function noEmail(got: SentJson[], who: string) {
+  check(got.length === 0, `${who}: want no email, got ${JSON.stringify(got)}`)
+}
+
 export async function runScenario(opts: ScenarioOptions): Promise<void> {
   const log = opts.log ?? (line => console.log(line))
   const step = (line: string) => log(`  ✓ ${line}`)
@@ -195,6 +306,18 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       apiKey: opts.session.apiKey,
       configDir: join(work, 'cli'),
     })
+  /** The CLI as someone else, with a config dir of their own. */
+  const flingAs =
+    (session: Session) =>
+    (...args: string[]) =>
+      runCli(args, {
+        serverUrl: appOrigin,
+        apiKey: session.apiKey,
+        configDir: join(
+          work,
+          `cli-${createHash('sha256').update(session.email).digest('hex').slice(0, 8)}`
+        ),
+      })
   const api = (method: string, path: string, body?: unknown) =>
     fetch(`${appOrigin}${path}`, {
       method,
@@ -231,6 +354,28 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     const who = (await fling('whoami')) as { email?: string }
     check(who.email === opts.session.email, `whoami: ${JSON.stringify(who)}`)
     step(`signed in as ${who.email}`)
+
+    // Notifications: where the instance has email, the settings answer (nothing is sent here).
+    // Where the dev drain exists too, the steps below check what each person is sent.
+    let mail: Mailbox | null = null
+    if (meta.capabilities.email === true) {
+      check(meta.capabilities.notifications === true, 'email without the notifications capability')
+      const settings = await api('GET', '/api/me/notifications')
+      const body = (await settings.json()) as NotificationSettingsJson
+      check(
+        settings.status === 200 && body.channels.includes('email') && body.cells,
+        `GET /api/me/notifications: ${settings.status} ${JSON.stringify(body)}`
+      )
+      const people = [opts.session, opts.member, opts.admin, opts.outsider].filter(
+        (s): s is Session => s !== undefined
+      )
+      mail = await devMailbox(appOrigin, people)
+      step(
+        `notifications: settings answer; ${mail ? 'the dev drain is here, so mail is checked' : 'no dev drain, so nothing is sent or checked'}`
+      )
+    } else {
+      step('notifications: no email on this instance (skipped)')
+    }
 
     // Deploy (the CLI: manifest, presigned uploads, finalize, readiness wait) and view.
     const v1 = siteDir(work, 'v1', {
@@ -365,7 +510,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     // Comments (review mode's data): the owner through the CLI, a member through the API, the
     // remote MCP tools; anonymous callers refused. Only where the instance has them.
     if (meta.capabilities.comments === true) {
-      await commentsStep({ appOrigin, name, v1Id, fling, opts, step })
+      await commentsStep({ appOrigin, name, v1Id, fling, opts, step, mail, instance: meta.name })
     } else {
       step('comments: turned off on this instance (skipped)')
     }
@@ -398,6 +543,8 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
         opts,
         step,
         propagationMs,
+        mail,
+        instance: meta.name,
       })
     } else {
       step('audiences: not on this instance (skipped)')
@@ -412,8 +559,11 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
         siteUrl,
         comments: meta.capabilities.comments === true,
         fling,
+        flingAs,
         opts,
         step,
+        mail,
+        instance: meta.name,
       })
     } else {
       step('groups: not on this instance (skipped)')
@@ -544,8 +694,10 @@ async function commentsStep(ctx: {
   fling: (...args: string[]) => Promise<unknown>
   opts: ScenarioOptions
   step: (line: string) => void
+  mail: Mailbox | null
+  instance: string
 }) {
-  const { appOrigin, name, v1Id, fling, opts, step } = ctx
+  const { appOrigin, name, v1Id, fling, opts, step, mail } = ctx
   const call = (session: Session | null, method: string, path: string, body?: unknown) =>
     fetch(`${appOrigin}/api/sites/${name}/comments${path}`, {
       method,
@@ -617,6 +769,37 @@ async function commentsStep(ctx: {
     const refused = await call(opts.member, 'DELETE', `/${thread.id}`)
     check(refused.status === 403, `member deleting the owner's comment: ${refused.status}`)
     step("member: reads, replies, may not delete the owner's comment; anonymous: 401")
+
+    if (mail) {
+      // A burst: the member's reply above and two threads of theirs fold into one email to the
+      // owner; the owner's reply in the member's thread reaches the member. Neither hears of
+      // their own comments, and the owner of a thread they replied in gets the reply only.
+      const threads: string[] = []
+      for (const body of ['The footer is cut off', 'Typo in the second paragraph']) {
+        const made = await call(opts.member, 'POST', '', { body, path: '/docs/' })
+        check(made.status === 201, `member starts a thread: ${made.status}`)
+        threads.push(((await made.json()) as CommentJson).id)
+      }
+      const answered = await call(opts.session, 'POST', '', {
+        body: 'Fixed',
+        parentId: threads[0],
+      })
+      check(answered.status === 201, `owner replies in the member's thread: ${answered.status}`)
+      oneEmail(
+        await mail.take(opts.session),
+        ['comment.reply', 'comment.created'],
+        ctx.instance,
+        'owner, after a reply and two threads'
+      )
+      oneEmail(await mail.take(opts.member), ['comment.reply'], ctx.instance, 'member')
+      for (const id of threads) {
+        const gone = await call(opts.session, 'DELETE', `/${id}`)
+        check(gone.status === 204, `owner deletes the member's thread: ${gone.status}`)
+      }
+      step(
+        "mail: a reply and two new threads → one email to the owner; a reply in the member's thread → one to the member; none to the actors"
+      )
+    }
   } else {
     step('anonymous: 401 (no second user, so no member checks)')
   }
@@ -812,8 +995,10 @@ async function audienceStep(ctx: {
   opts: ScenarioOptions
   step: (line: string) => void
   propagationMs: number
+  mail: Mailbox | null
+  instance: string
 }) {
-  const { appOrigin, name, siteUrl, shareUrl, marker, fling, opts, step } = ctx
+  const { appOrigin, name, siteUrl, shareUrl, marker, fling, opts, step, mail } = ctx
   const viewer = opts.member
   const outsider = opts.outsider ?? opts.admin
   if (!viewer || !outsider) {
@@ -830,6 +1015,11 @@ async function audienceStep(ctx: {
     `fling access warns of the share link: ${JSON.stringify(restricted.warnings)}`
   )
   step(`restricted ${name} to ${viewer.email}`)
+  if (mail) {
+    oneEmail(await mail.take(viewer), ['site.shared'], ctx.instance, 'the address added')
+    noEmail(await mail.take(opts.session), 'the owner who shared')
+    step('mail: the address added gets site.shared; the owner who shared gets nothing')
+  }
 
   // The API: the viewer takes part in the comments; the outsider finds no such site.
   const asUser = (session: Session, path: string) =>
@@ -955,10 +1145,13 @@ async function groupStep(ctx: {
   siteUrl: string
   comments: boolean
   fling: (...args: string[]) => Promise<unknown>
+  flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
   opts: ScenarioOptions
   step: (line: string) => void
+  mail: Mailbox | null
+  instance: string
 }) {
-  const { appOrigin, name, siteUrl, fling, opts, step } = ctx
+  const { appOrigin, name, siteUrl, fling, opts, step, mail } = ctx
   const owner = opts.session
   const maker = opts.member
   const joiner = opts.outsider ?? opts.admin
@@ -1012,6 +1205,10 @@ async function groupStep(ctx: {
       added.status === 200 && addedGroup.members.some(m => m.email === joiner.email),
       `member adds ${joiner.email}: ${added.status} ${JSON.stringify(addedGroup)}`
     )
+    if (mail) {
+      oneEmail(await mail.take(joiner), ['group.member_added'], ctx.instance, 'the member added')
+      noEmail(await mail.take(maker), "the group's owner who added them")
+    }
     const access = (await fling('access', name, '--group', slug)) as {
       restricted: boolean
       audience?: { groups: { slug: string; size: number }[] }
@@ -1030,6 +1227,13 @@ async function groupStep(ctx: {
     step(
       `${joiner.email} added to ${slug} (found by its members); the owner named ${slug} in ${name}'s audience`
     )
+    if (mail) {
+      oneEmail(await mail.take(joiner), ['site.shared_via_group'], ctx.instance, 'the group member')
+      noEmail(await mail.take(owner), 'the owner who shared with the group')
+      step(
+        'mail: the member added gets group.member_added, then site.shared_via_group; the actors nothing'
+      )
+    }
 
     // In the group: the API lets them in, and a sign-in hop hands them a site pass.
     const site = () => as(joiner, 'GET', `/api/sites/${name}/comments`)
@@ -1069,9 +1273,41 @@ async function groupStep(ctx: {
     )
     step('out of the group: refused at once by the API, shared with me and the next sign-in hop')
 
+    // An opt-out holds: the joiner turns group emails off (read with the CLI, changed through
+    // MCP), is added again, and hears nothing. Their choice goes back to the default after.
+    const joinerCli = ctx.flingAs(joiner)
+    if (mail) {
+      const before = (await joinerCli('notifications')) as NotificationSettingsJson
+      check(
+        before.cells['group.member_added']?.email === 'on',
+        `fling notifications: ${JSON.stringify(before)}`
+      )
+      const set = await mcpTool(appOrigin, joiner, 'fling_notifications_set', {
+        cells: [{ event: 'group.member_added', channel: 'email', value: 'off' }],
+      })
+      const after = (await mcpTool(appOrigin, joiner, 'fling_notifications', {}))
+        ?.structuredContent as NotificationSettingsJson | undefined
+      check(
+        !set?.isError && after?.cells['group.member_added']?.email === 'off',
+        `MCP fling_notifications_set, then fling_notifications: ${JSON.stringify({ set, after })}`
+      )
+    }
+
     // Deleting the group while it is the audience's only entry never opens the site up: whoever
     // it let in is refused, and the site is its owner's alone.
     await as(maker, 'POST', `${path}/members`, { add: [joiner.email] })
+    if (mail) {
+      noEmail(await mail.take(joiner), 'opted out of group emails, added again')
+      await joinerCli('notifications', 'set', 'group.member_added', 'email', 'default')
+      const sent = (await joinerCli('notifications', 'sent')) as { sent: SentJson[] }
+      check(
+        sent.sent.some(m => m.eventKeys.includes('site.shared_via_group')),
+        `fling notifications sent: ${JSON.stringify(sent)}`
+      )
+      step(
+        'mail: settings read with the CLI and MCP; after an opt-out through MCP, nothing is sent (CLI sets it back)'
+      )
+    }
     const only = (await fling('access', name, '--remove', maker.email)) as {
       audience?: { emails: unknown[]; groups: unknown[] }
     }

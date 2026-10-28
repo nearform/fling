@@ -77,6 +77,16 @@ Durable Object on Cloudflare, an API Gateway WebSocket API on AWS. An instance w
 (`LIVE=false`, or no `LIVE_URL`) lacks the `live` capability, and review works as before,
 refreshing comments every 30 seconds.
 
+**Notifications.** With email set up, people hear when a site is shared with them (directly or
+through a group), when they are added to a group, and when someone comments on their site or
+replies in their thread; never about their own actions. Comments that arrive close together fold
+into one email. Each person chooses what they hear about from every client (Settings →
+Notifications, `fling notifications`, `fling_notifications_set`), and every email has a one-click
+unsubscribe. Email goes out through each cloud's own service (SES on AWS, Email Service on
+Cloudflare) from a sender the operator already has; admins check the setup at `/admin/mail` with a
+test email. An instance without a mail sender lacks the `email` and `notifications` capabilities,
+and every client hides the settings. See each platform's deploy guide, Email.
+
 ## Layout
 
 | Path | What |

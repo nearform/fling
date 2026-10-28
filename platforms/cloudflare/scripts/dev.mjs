@@ -5,7 +5,11 @@
 //   3. `wrangler dev`: the app at http://flingcf.lvh.me:<port>, sites at
 //      http://<name>.flingcf.lvh.me:<port> (lvh.me resolves to 127.0.0.1), dev login on.
 //
-//   node scripts/dev.mjs [--port 47103] [--persist-to .wrangler/state] [--test-scheduled]
+//   node scripts/dev.mjs [--port 47103] [--persist-to .wrangler/state] [--test-scheduled] [--mail]
+//
+// `--mail` turns email on (MAIL_DRIVER=cloudflare, MAIL_FROM=fling@mail.flingcf.lvh.me): the real
+// CloudflareMailer over wrangler's simulated `send_email` binding, which logs each message and
+// saves it to a local file instead of sending it. The e2e runs with it.
 //
 // Secrets: SESSION_SECRET and SITE_HMAC_KEY from the environment when both are set (the e2e),
 // else from .dev.vars, created with random values the first time.
@@ -22,6 +26,7 @@ const { values: args } = parseArgs({
     'persist-to': { type: 'string', default: '.wrangler/state' },
     'inspector-port': { type: 'string' },
     'test-scheduled': { type: 'boolean', default: false },
+    mail: { type: 'boolean', default: false },
   },
 })
 
@@ -36,6 +41,10 @@ run(bin('wrangler'), ['d1', 'migrations', 'apply', 'DB', '--local', '--persist-t
 run(bin('tsx'), [join(ROOT, 'scripts', 'migrate.ts'), '--local', '--persist-to', persistTo])
 
 const vars = { APP_ORIGIN: `http://${host}`, SITES_DOMAIN: host, LIVE_URL: `ws://${host}/api/live` }
+if (args.mail) {
+  vars.MAIL_DRIVER = 'cloudflare'
+  vars.MAIL_FROM = 'fling@mail.flingcf.lvh.me'
+}
 if (process.env.SESSION_SECRET && process.env.SITE_HMAC_KEY) {
   vars.SESSION_SECRET = process.env.SESSION_SECRET
   vars.SITE_HMAC_KEY = process.env.SITE_HMAC_KEY

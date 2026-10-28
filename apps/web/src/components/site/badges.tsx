@@ -1,6 +1,8 @@
 /**
  * The badges a site wears in the list and on its page: its access level (or archived), with how
- * many people and teams a list names, and whether it has a share link.
+ * many people and teams a list names, and whether it has a share link. Neutral and muted, so they
+ * read as status beside the tinted Review button, never as actions; the icon tells the levels
+ * apart.
  */
 import {
   type AccessLevel,
@@ -29,16 +31,16 @@ const ICONS: Record<AccessLevel, typeof GlobeAltIcon> = {
 }
 
 /** `Only you`, `Everyone signed in`, `Specific people · 2 people · 1 group`, `Public`. */
-export function AccessBadge({ site }: { site: SiteAccessFields }) {
+export function AccessBadge({ site, label }: { site: SiteAccessFields; label?: string }) {
   const members = audienceFor(useInstance())
   const level = siteAccessLevel(site)
   const Icon = ICONS[level]
   return (
     <span
-      className={`badge badge-sm gap-1 ${level === 'public' ? 'tone-info' : 'tone-primary'}`}
+      className="badge badge-sm badge-ghost gap-1 text-secondary"
       title={accessDescription(level, members)}
     >
-      <Icon className="h-3 w-3" aria-hidden /> {accessBadgeLabel(site)}
+      <Icon className="h-3 w-3" aria-hidden /> {label ?? accessBadgeLabel(site)}
     </span>
   )
 }

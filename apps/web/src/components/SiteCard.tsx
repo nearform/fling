@@ -1,6 +1,6 @@
 /**
  * One site as a row of the list: its name (and when it was updated), the two links people share
- * (Review Site, when the instance has comments, and View Site, each with a copy button), then
+ * (Review, when the instance has comments, and View, each with a copy button), then
  * its badges on the right. One line on wide screens, with the links in the same place on every
  * row; on narrow ones it stacks (name, badges, links) so the name keeps its room. The whole row opens the site page, where everything else
  * is managed: the name is the link, stretched over the row, and the buttons sit above it.

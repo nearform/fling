@@ -1,6 +1,7 @@
 /**
  * One site of the instance as a row of All sites (admins): its name, then its owner and when it
- * was updated; Review Site (when the instance has comments) and View Site; then its access level
+ * was updated (plain muted text, on the name's left edge); Review (when the instance has
+ * comments) and View; then its access level
  * (or archived, or not yet published). Laid out like your own sites' rows. Only your own sites
  * link to their site page: anyone else's answers you as it answers any member, so a restricted
  * one opens only by impersonating its owner.
@@ -10,7 +11,6 @@ import { Link } from 'react-router-dom'
 import { useInstance } from '../hooks/instance'
 import { displayUrl, fullDate, timeAgo } from '../lib/format'
 import { siteHref } from '../lib/sites'
-import { EmailBadge } from './EmailBadge'
 import { ReviewButton, ViewSiteButton } from './SiteButtons'
 import { AccessBadge } from './site/badges'
 
@@ -36,7 +36,9 @@ export function AdminSiteCard({ site, mine }: { site: AdminSite; mine: boolean }
           )}
         </h2>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-secondary">
-          <EmailBadge email={site.owner} size="sm" />
+          <span className="min-w-0 truncate" title={site.owner}>
+            {site.owner}
+          </span>
           <span>
             · <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
           </span>
@@ -56,7 +58,10 @@ export function AdminSiteCard({ site, mine }: { site: AdminSite; mine: boolean }
         {site.archived ? (
           <span className="badge badge-sm badge-ghost">Archived</span>
         ) : (
-          <AccessBadge site={{ access: site.access, visibility }} />
+          <AccessBadge
+            site={{ access: site.access, visibility }}
+            {...(site.access === 'only_me' && !mine && { label: 'Only its owner' })}
+          />
         )}
         {!site.live && !site.archived && (
           <span className="badge badge-sm badge-ghost" title="It has no published version yet">

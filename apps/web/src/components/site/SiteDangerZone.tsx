@@ -1,7 +1,7 @@
 /**
  * Taking a site away: archive (offline, files and versions kept), unarchive, and delete for good,
  * which needs the name typed. After a delete the page has nothing left to show, so it goes back
- * to the site list.
+ * to the list it came from (`home`).
  */
 import type { Site } from '@fling/shared'
 import {
@@ -16,7 +16,7 @@ import { ConfirmModal } from '../ConfirmModal'
 import { Modal } from '../Modal'
 import { SiteSection } from './SiteSection'
 
-export function SiteDangerZone({ site }: { site: Site }) {
+export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string }) {
   const actions = useSiteActions(site.name)
   const navigate = useNavigate()
   const [dialog, setDialog] = useState<'archive' | 'delete' | null>(null)
@@ -78,7 +78,7 @@ export function SiteDangerZone({ site }: { site: Site }) {
         onCancel={close}
         onConfirm={() =>
           actions.remove.mutate(undefined, {
-            onSuccess: () => navigate('/', { replace: true }),
+            onSuccess: () => navigate(home, { replace: true }),
             onSettled: close,
           })
         }

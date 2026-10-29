@@ -45,14 +45,20 @@ export function AccessBadge({ site, label }: { site: SiteAccessFields; label?: s
   )
 }
 
-/** The access level (or archived), plus "Shared" while a live site has a share link. */
-export function SiteBadges({ site }: { site: Site }) {
+/**
+ * The access level (or archived), plus "Shared" while a live site has a share link. `othersSite`:
+ * an admin looking at someone else's, where only-me reads "Only its owner".
+ */
+export function SiteBadges({ site, othersSite = false }: { site: Site; othersSite?: boolean }) {
   return (
     <>
       {site.archived ? (
         <span className="badge badge-sm badge-ghost">Archived</span>
       ) : (
-        <AccessBadge site={site} />
+        <AccessBadge
+          site={site}
+          {...(othersSite && siteAccessLevel(site) === 'only_me' && { label: 'Only its owner' })}
+        />
       )}
       {site.shareUrl && !site.archived && (
         <span className="badge badge-sm badge-ghost gap-1" title="Has a share link">

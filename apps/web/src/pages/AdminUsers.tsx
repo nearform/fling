@@ -2,7 +2,7 @@
  * Admin → Users (admins only; the API answers 404 to anyone else): every user of the instance, by
  * email, searched by email prefix and paged with "Load more"; Impersonate (with a confirmation)
  * on everyone but yourself and other admins; guests marked (invited from outside by a share or a
- * group); and the latest impersonations and invitations, from the audit log.
+ * group); and the latest impersonations, invitations and admins' changes to other people's sites, from the audit log.
  */
 import type { AdminUser, AuditEntry } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
@@ -98,7 +98,24 @@ const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'impersonation.stop': 'stopped impersonating',
   'invitation.create': 'invited',
   'invitation.revoke': 'revoked the invitation of',
+  'site.change': 'changed',
+  'site.open': 'opened',
 }
+
+/** What an admin did to someone else's site (a policy action), as a verb for its name. */
+const CHANGE_LABEL: Record<string, string> = {
+  'site.visibility': 'changed who can open',
+  'site.audience': 'changed the audience of',
+  'site.settings': 'changed the settings of',
+  'site.archive': 'archived or unarchived',
+  'site.rollback': 'rolled back',
+  'site.delete': 'deleted',
+  'share.create': 'made a share link for',
+  'share.revoke': 'revoked the share link of',
+  'comment.delete': 'deleted a comment on',
+}
+
+const labelOf = (e: AuditEntry) => (e.change && CHANGE_LABEL[e.change]) ?? ACTION_LABEL[e.action]
 
 /** How an invitation came about, after its target: " as a guest, by sharing". */
 function invitedHow(e: AuditEntry): string {
@@ -115,8 +132,8 @@ function AuditLog() {
       <div>
         <h2 className="text-base font-semibold">Recent activity</h2>
         <p className="text-sm text-secondary">
-          Every impersonation's start and stop, and every invitation made or revoked, kept for 180
-          days.
+          Every impersonation's start and stop, every invitation made or revoked, and what admins
+          changed on other people's sites or opened of their restricted ones, kept for 180 days.
         </p>
       </div>
       <div className="surface-panel">
@@ -130,8 +147,9 @@ function AuditLog() {
           <ul className="space-y-1.5 text-sm">
             {audit.data.map(e => (
               <li key={e.id}>
-                <span className="font-medium">{e.actor}</span> {ACTION_LABEL[e.action]}{' '}
+                <span className="font-medium">{e.actor}</span> {labelOf(e)}{' '}
                 <span className="font-medium">{e.target}</span>
+                {e.owner && <span className="text-secondary">, {e.owner}’s site</span>}
                 {invitedHow(e)}
                 {e.lapsed && <span className="text-secondary"> (it had lapsed)</span>}
                 <span className="text-secondary">

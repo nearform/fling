@@ -1,10 +1,8 @@
 /**
- * One site of the instance as a row of All sites (admins): its name, then its owner and when it
- * was updated (plain muted text, on the name's left edge); Review (when the instance has
- * comments) and View; then its access level
- * (or archived, or not yet published). Laid out like your own sites' rows. Only your own sites
- * link to their site page: anyone else's answers you as it answers any member, so a restricted
- * one opens only by impersonating its owner.
+ * One site of the instance as a row of All sites (admins): its name, linking to its site page
+ * (an admin manages anyone's), then its owner and when it was updated (plain muted text, on the
+ * name's left edge); Review (when the instance has comments) and View; then its access level (or
+ * archived, or not yet published). Laid out like your own sites' rows.
  */
 import type { AdminSite } from '@fling/shared'
 import { Link } from 'react-router-dom'
@@ -23,17 +21,13 @@ export function AdminSiteCard({ site, mine }: { site: AdminSite; mine: boolean }
     <article className="surface-panel grid grid-cols-[minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 px-4 py-2 [grid-template-areas:'name'_'badges'_'links'] md:grid-cols-[minmax(10rem,1fr)_auto_minmax(max-content,10rem)] md:[grid-template-areas:'name_links_badges']">
       <div className="min-w-0 [grid-area:name]">
         <h2 className="text-base font-semibold leading-tight [overflow-wrap:anywhere]">
-          {mine ? (
-            <Link
-              to={siteHref(site.name)}
-              className="hover:underline"
-              title={`Manage ${site.name}: access, versions, archive and delete`}
-            >
-              {site.name}
-            </Link>
-          ) : (
-            site.name
-          )}
+          <Link
+            to={siteHref(site.name)}
+            className="hover:underline"
+            title={`Manage ${site.name}: access, versions, archive and delete`}
+          >
+            {site.name}
+          </Link>
         </h2>
         <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-secondary">
           <span className="min-w-0 truncate" title={site.owner}>

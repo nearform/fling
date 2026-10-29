@@ -1,9 +1,11 @@
 /**
  * One site, everything about it: the overview, who can open it (Access), its files and versions,
  * and archive or delete (Danger zone). An unknown site, or one that isn't yours, is the 404 page,
- * as the API answers both the same way. Archived sites are offline, so Access waits until they
- * are unarchived.
+ * as the API answers both the same way; an admin opens anyone's, and is told whose it is and that
+ * what they change is on the record. Archived sites are offline, so Access waits until they are
+ * unarchived.
  */
+import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams } from 'react-router-dom'
 import { NotFound } from '../components/NotFound'
 import { PageHeader } from '../components/PageHeader'
@@ -14,13 +16,14 @@ import { SiteDangerZone } from '../components/site/SiteDangerZone'
 import { SiteOverview } from '../components/site/SiteOverview'
 import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
-import { useSiteDetail } from '../hooks/queries'
+import { useMe, useSiteDetail } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
 
 export default function Site() {
   const { name = '' } = useParams()
   const instance = useInstance()
   const detail = useSiteDetail(name, name !== '')
+  const { data: me } = useMe()
 
   if (detail.isPending) {
     return (
@@ -49,15 +52,18 @@ export default function Site() {
 
   const site = detail.data
   const reviewable = instance?.capabilities.comments === true && !site.archived
+  const othersSite = me != null && site.owner !== undefined && site.owner !== me.email
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       <PageHeader
-        breadcrumbs={[{ to: '/', label: 'Sites' }]}
+        breadcrumbs={[
+          othersSite ? { to: '/?view=all', label: 'All sites' } : { to: '/', label: 'Sites' },
+        ]}
         title={site.name}
         description={
           <span className="inline-flex flex-wrap items-center gap-1.5">
-            <SiteBadges site={site} />
+            <SiteBadges site={site} othersSite={othersSite} />
             {site.spa && (
               <span className="badge badge-sm badge-ghost" title="Unknown paths serve /index.html">
                 SPA
@@ -67,10 +73,19 @@ export default function Site() {
         }
         actions={reviewable && <ReviewButton name={site.name} />}
       />
+      {othersSite && (
+        <div className="alert alert-info text-sm" role="note">
+          <ShieldCheckIcon className="size-5" aria-hidden="true" />
+          <span>
+            This is <span className="font-medium">{site.owner}</span>’s site. You are managing it as
+            an admin: what you change is recorded in the audit log.
+          </span>
+        </div>
+      )}
       <SiteOverview site={site} />
-      {!site.archived && <SiteAccess site={site} />}
+      {!site.archived && <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />}
       <SiteVersions site={site} />
-      <SiteDangerZone site={site} />
+      <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />
     </div>
   )
 }

@@ -3,7 +3,8 @@
  *  - session: stateless HS256 JWT (jose, SESSION_SECRET, 7 days) in `__Host-fling_session`
  *    (HttpOnly, Secure, SameSite=Lax, Path=/). Over plain-http dev it is `fling_session`
  *    without Secure, since browsers drop `__Host-`/Secure cookies on http.
- *  - `fling_site`: HMAC cookie on SITE_COOKIE_DOMAIN that the edge verifies for private sites.
+ *  - `fling_site`: HMAC cookie on SITE_COOKIE_DOMAIN that the edge verifies for private sites;
+ *    a guest's says so (`g: 1`).
  *
  * Claims: `sub` is who signed in, `iat`/`exp` the session. An admin impersonating someone has the
  * same session (same `sub` and `exp`: starting and stopping never extend it) plus `imp` (whom
@@ -93,10 +94,17 @@ export function readSessionToken(c: Context<AppEnv>): string | undefined {
   return getCookie(c, sessionCookieName(c.get('deps').config))
 }
 
-export function setSiteCookie(c: Context<AppEnv>, email: string) {
+/** Who the site cookie is for. A guest's says `g: 1`, so the edge keeps them off members' sites. */
+export interface SiteCookieUser {
+  email: string
+  guest?: boolean
+}
+
+export function setSiteCookie(c: Context<AppEnv>, user: SiteCookieUser) {
   const { config, clock } = c.get('deps')
   const exp = Math.floor(clock.now().getTime() / 1000) + SITE_COOKIE_TTL_SECONDS
-  setCookie(c, SITE_COOKIE_NAME, signSiteCookie({ e: email, x: exp }, config.secrets.siteHmacKey), {
+  const payload = { e: user.email, x: exp, ...(user.guest ? { g: 1 as const } : {}) }
+  setCookie(c, SITE_COOKIE_NAME, signSiteCookie(payload, config.secrets.siteHmacKey), {
     domain: config.siteCookieDomain,
     path: '/',
     httpOnly: true,
@@ -118,11 +126,11 @@ function setSessionCookie(c: Context<AppEnv>, token: string, maxAge: number) {
 }
 
 /** Sign in: session cookie + site cookie. */
-export async function startSession(c: Context<AppEnv>, email: string) {
+export async function startSession(c: Context<AppEnv>, user: SiteCookieUser) {
   const { config, clock } = c.get('deps')
-  const token = await signSession(email, config.secrets.sessionSecret, clock.now())
+  const token = await signSession(user.email, config.secrets.sessionSecret, clock.now())
   setSessionCookie(c, token, SESSION_TTL_SECONDS)
-  setSiteCookie(c, email)
+  setSiteCookie(c, user)
 }
 
 /**

@@ -398,9 +398,6 @@ async function deploy(env: ReturnType<typeof setup>, key: string, name: string, 
   return json(await api(env, key, 'POST', `/api/sites/${name}/deploys/${body.versionId}/finalize`))
 }
 
-type EdgeRole = Exclude<Role, 'guest'>
-const EDGE_ROLES = ROLES.filter((r): r is EdgeRole => r !== 'guest')
-
 describe('the edge agrees with site.view', () => {
   async function sites() {
     const env = setup()
@@ -428,7 +425,8 @@ describe('the edge agrees with site.view', () => {
     })
     const key = env.config.secrets.siteHmacKey
     const x = Math.floor(now / 1000) + 60
-    const siteCookie = (email: string) => `fling_site=${signSiteCookie({ e: email, x }, key)}`
+    const siteCookie = (email: string, guest = false) =>
+      `fling_site=${signSiteCookie({ e: email, x, ...(guest ? { g: 1 as const } : {}) }, key)}`
     const pass = async (email: string, name: string, exp = x) => {
       const site = (await env.store.findSite(name)) as PolicySite & { id: string }
       return `fling_pass=${signSitePass({ s: site.id, e: email, x: exp }, key)}`
@@ -447,27 +445,29 @@ describe('the edge agrees with site.view', () => {
       const shareHost = new URL(share.shareUrl).host
       const site = (await env.store.findSite(name)) as PolicySite
       // What each role's browser holds: a site pass only where the API would hand one out.
-      const cookieOf = async (email: string) =>
-        can({ kind: 'user', email }, 'site.view', site) && (name === 'team' || name === 'mine')
+      const cookieOf = async (email: string, guest = false) =>
+        can({ kind: 'user', email, ...(guest ? { guest } : {}) }, 'site.view', site) &&
+        (name === 'team' || name === 'mine')
           ? pass(email, name)
-          : siteCookie(email)
-      const requests: Record<EdgeRole, [string, string?]> = {
+          : siteCookie(email, guest)
+      const requests: Record<Role, [string, string?]> = {
         owner: [`${name}.fling.test`, await cookieOf('alice@example.test')],
         viewer: [`${name}.fling.test`, await cookieOf('bob@example.test')],
         member: [`${name}.fling.test`, await cookieOf('carol@example.test')],
+        guest: [`${name}.fling.test`, await cookieOf(GUEST, true)],
         share: [shareHost],
         anonymous: [`${name}.fling.test`],
       }
-      const actors: Record<EdgeRole, Actor> = {
+      const actors: Record<Role, Actor> = {
         owner: { kind: 'user', email: 'alice@example.test' },
         viewer: { kind: 'user', email: 'bob@example.test' },
         member: { kind: 'user', email: 'carol@example.test' },
+        guest: { kind: 'user', email: GUEST, guest: true },
         share: { kind: 'share', token: shareHost.split('.')[0]?.slice(3) ?? '' },
         anonymous: { kind: 'anonymous' },
       }
       expect(env.routeTable.data.has(siteKvsKey(name))).toBe(true)
-      // The edge doesn't tell a guest's site cookie from a member's, so guests are left out here.
-      for (const role of EDGE_ROLES) {
+      for (const role of ROLES) {
         expect({ name, role, served: await served(...requests[role]) }).toEqual({
           name,
           role,
@@ -484,6 +484,19 @@ describe('the edge agrees with site.view', () => {
     expect(await served('team.fling.test', await pass('bob@example.test', 'other'))).toBe(false)
     const now = Math.floor(env.deps.clock.now().getTime() / 1000)
     expect(await served('team.fling.test', await pass('bob@example.test', 'team', now))).toBe(false)
+  })
+
+  it("a guest's site cookie opens public sites; members-level sites answer them as missing", async () => {
+    const { router, siteCookie, pass, served } = await sites()
+    const guest = siteCookie(GUEST, true)
+    expect(await served('pub.fling.test', guest)).toBe(true)
+    const priv = await router(
+      toCloudFrontEvent({ path: '/', host: 'priv.fling.test', cookieHeader: guest })
+    )
+    expect(!isResponse(priv) && priv.uri).toBe('/_fling/missing')
+    // Restricted sites go by the pass alone, which the API hands only to an audience's guests.
+    expect(await served('team.fling.test', guest)).toBe(false)
+    expect(await served('team.fling.test', await pass(GUEST, 'team'))).toBe(true)
   })
 
   it('/auth/login hands a viewer a pass the edge accepts, and anyone else a refusal', async () => {

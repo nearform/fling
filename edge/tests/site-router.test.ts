@@ -106,6 +106,12 @@ describe('auth for private sites', () => {
     expect(req.uri).toBe('/sites/S1/V1/index.html')
   })
 
+  it("answers a guest's cookie as a missing site", async () => {
+    const c = signSiteCookie({ e: 'guest@outside.test', x: NOW_S + 60, g: 1 }, HMAC)
+    const req = await asRequest({ host: PRIVATE, path: '/', cookieHeader: `fling_site=${c}` })
+    expect(req.uri).toBe('/_fling/missing')
+  })
+
   it('rejects expired cookies', async () => {
     const c = signSiteCookie({ e: 'alice@example.test', x: NOW_S }, HMAC)
     const res = await asResponse({ host: PRIVATE, cookieHeader: `fling_site=${c}` })

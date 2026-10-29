@@ -117,7 +117,7 @@ async function login(c: Context<AppEnv>) {
   const ret = returnOf(c)
   const session = await resolveSession(c)
   if (!session) return beginSignIn(c, ret)
-  setSiteCookie(c, session.user.email)
+  setSiteCookie(c, session.user)
   return c.redirect(await signedInReturn(c.get('deps'), session.user, ret), 302)
 }
 
@@ -154,8 +154,9 @@ async function callback(c: Context<AppEnv>) {
   )
   if (!admitted.ok) return loginError(c, admitted.reason)
 
-  const user = await upsertUser(c, admitted.email, admitted.name, admitted.picture)
-  await startSession(c, user.email)
+  const stored = await upsertUser(c, admitted.email, admitted.name, admitted.picture)
+  const user = standing === 'guest' ? { ...stored, guest: true as const } : stored
+  await startSession(c, user)
   return c.redirect(await signedInReturn(c.get('deps'), user, safeReturnUrl(flow.ret, config)), 302)
 }
 
@@ -253,9 +254,10 @@ authRoutes.get('/dev-login', async c => {
     )
   }
   if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw badRequest('Invalid email', 'invalid_email')
-  if ((await standingOf(c.get('deps'), email)) === 'none')
-    return loginError(c, 'domain_not_allowed')
-  const user = await upsertUser(c, email, email.split('@')[0] ?? email, null)
-  await startSession(c, user.email)
+  const standing = await standingOf(c.get('deps'), email)
+  if (standing === 'none') return loginError(c, 'domain_not_allowed')
+  const stored = await upsertUser(c, email, email.split('@')[0] ?? email, null)
+  const user = standing === 'guest' ? { ...stored, guest: true as const } : stored
+  await startSession(c, user)
   return c.redirect(await signedInReturn(c.get('deps'), user, ret), 302)
 })

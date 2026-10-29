@@ -6,7 +6,8 @@
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
 //   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile,
-//     restricted site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
+//     restricted site whose `fling_pass` says it was refused, members-level site to a guest's
+//     `fling_site`); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
 //     and `/robots.txt` on any host is ROBOTS_TXT
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie; restricted site without a valid `fling_pass` naming it), 301 to add a
@@ -35,6 +36,10 @@
 // refused them, for SITE_DENIED_TTL_SECONDS: while it lasts the site answers as a missing one (the
 // 404 page at the URL asked for), and afterwards the next visit asks the app again, so someone
 // added to the audience gets in within seconds and nobody loops between the two hosts.
+//
+// Members-level sites (private, no audience) open with any valid `fling_site` except a guest's
+// (`g: 1`). A guest views only the sites whose audience names them, through the site pass, so a
+// members-level site answers them as a missing one rather than sending them round to sign in.
 //
 // SYNTAX. This file runs in the CloudFront Functions runtime (cloudfront-js-2.0: ES5.1 plus
 // const/let, arrow functions, template literals, async/await on function declarations). So: no
@@ -179,21 +184,37 @@ function signedPayload(
   }
 }
 
-/** A valid, unexpired `fling_site` cookie (not a site pass or handoff, which carry a kind `k`). */
+/**
+ * Who a valid, unexpired `fling_site` cookie (not a site pass or handoff, which carry a kind `k`)
+ * says is signed in: 'guest' when it carries `g: 1`, else 'member'; null when it isn't one.
+ */
+export function siteCookieOf(
+  value: string,
+  key: string,
+  nowSeconds: number,
+  hmac: (key: string, data: string) => string
+): 'member' | 'guest' | null {
+  const p = signedPayload(value, key, hmac)
+  if (
+    !p ||
+    p.k !== undefined ||
+    typeof p.e !== 'string' ||
+    typeof p.x !== 'number' ||
+    p.x <= nowSeconds
+  ) {
+    return null
+  }
+  return p.g === 1 ? 'guest' : 'member'
+}
+
+/** A valid, unexpired `fling_site` cookie, a guest's or a member's. */
 export function validSiteCookie(
   value: string,
   key: string,
   nowSeconds: number,
   hmac: (key: string, data: string) => string
 ): boolean {
-  const p = signedPayload(value, key, hmac)
-  return (
-    !!p &&
-    p.k === undefined &&
-    typeof p.e === 'string' &&
-    typeof p.x === 'number' &&
-    p.x > nowSeconds
-  )
+  return siteCookieOf(value, key, nowSeconds, hmac) !== null
 }
 
 /**
@@ -384,9 +405,11 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     const cookie = req.cookie
     let key: string | null = null
     if (cookie !== null) key = await ctx.getCookieKey()
-    if (!key || !validSiteCookie(cookie || '', key, ctx.nowSeconds, ctx.hmac)) {
-      return toSignIn(req, ctx, host)
-    }
+    let who: string | null = null
+    if (key) who = siteCookieOf(cookie || '', key, ctx.nowSeconds, ctx.hmac)
+    if (!who) return toSignIn(req, ctx, host)
+    // Members-level sites are for members: to a guest they answer as missing ones, like a refusal.
+    if (who === 'guest') return rewrite(MISSING_KEY)
   }
 
   let path = uri

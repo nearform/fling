@@ -1,8 +1,9 @@
 // Node-only. The signed tokens the edge checks, all under the site HMAC key and in one format
 // (`<base64url(JSON payload)>.<base64url(HMAC-SHA256(key, payloadPart))>`):
 //
-// - `fling_site` (payload { e: email, x: expiry }): lets signed-in members view private sites.
-//   Minted by the API at login, verified at the edge by validSiteCookie in site-routing.ts.
+// - `fling_site` (payload { e: email, x: expiry, g?: 1 }): lets signed-in members view private
+//   sites. `g: 1` marks a guest, to whom members-level sites answer as missing ones. Minted by the
+//   API at login, verified at the edge by siteCookieOf in site-routing.ts.
 // - the pass handoff (payload { k: 'handoff', s: siteId, e, x }): the API's word, valid for
 //   60 seconds, that `e` may view the restricted site `s`; it travels in the URL of
 //   `/_fling-pass` on the site's host.
@@ -30,7 +31,8 @@ export {
 export const SITE_COOKIE_NAME = 'fling_site'
 export const SITE_COOKIE_TTL_SECONDS = 7 * 24 * 60 * 60
 
-export type SiteCookiePayload = { e: string; x: number }
+/** `g: 1`: a guest (auth/standing.ts), who sees only the restricted sites that name them. */
+export type SiteCookiePayload = { e: string; x: number; g?: 1 }
 
 /** How long a pass handoff (the URL the API sends the browser to) is good for. */
 export const PASS_HANDOFF_TTL_SECONDS = 60
@@ -72,7 +74,8 @@ export function verifySiteCookie(
 ): SiteCookiePayload | null {
   const p = verify(value, key)
   if (!p || p.k !== undefined || typeof p.e !== 'string' || typeof p.x !== 'number') return null
-  return p.x > nowSeconds ? { e: p.e, x: p.x } : null
+  if (p.x <= nowSeconds) return null
+  return p.g === 1 ? { e: p.e, x: p.x, g: 1 } : { e: p.e, x: p.x }
 }
 
 /** A pass handoff: the API lets `e` view restricted site `s` (the edge turns it into a pass). */

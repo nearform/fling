@@ -25,6 +25,7 @@ import {
   routeKeyForHost,
   routeSiteRequest,
   type SiteRequest,
+  siteCookieOf,
   siteResponseHeaders,
   validSiteCookie,
   validSiteDenial,
@@ -115,6 +116,18 @@ describe('routeSiteRequest', () => {
     expect(
       await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
     ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: NOINDEX })
+  })
+
+  it("answers a guest's cookie on a members-level site as a missing site, and serves them public ones", async () => {
+    const cookie = signSiteCookie({ e: 'g@outside.test', x: NOW + 1, g: 1 }, KEY)
+    expect(
+      await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
+    ).toEqual({ action: 'rewrite', uri: MISSING_KEY, headers: NOINDEX })
+    expect(
+      await routeSiteRequest(req({ host: 'pub.sites.example.test', uri: '/', cookie }), ctx())
+    ).toEqual({ action: 'rewrite', uri: '/sites/S1/V1/index.html', headers: NOINDEX })
+    expect(validSiteCookie(cookie, KEY, NOW, ctx().hmac)).toBe(true)
+    expect(siteCookieOf(cookie, KEY, NOW, ctx().hmac)).toBe('guest')
   })
 
   it('rewrites unknown hosts to the missing key without a lookup for malformed labels', async () => {

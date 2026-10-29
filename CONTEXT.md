@@ -146,7 +146,9 @@ afresh.
 what is shared with them (`guest` on the policy actor and principal, `apps/api/src/policy.ts`).
 They see and comment on the sites whose audience names them and on public sites; they never
 reach members-level private sites, create sites or groups, list groups, invite anyone, or hold API
-keys or app connections. Over MCP they get only the reviewing tools.
+keys or app connections. Over MCP they get only the reviewing tools. Their `fling_site` cookie
+says so (`g: 1`, `packages/shared/src/site-cookie.ts`), and the edge answers a members-level site
+to it as a missing one; restricted sites let them in by the site pass, like anyone.
 
 **Sign-in link** — an emailed single-use link that signs an invited person in
 (`MAGIC#<sha256 of the token>/MAGIC`, `apps/api/src/store/records.ts`): 32 random bytes of which

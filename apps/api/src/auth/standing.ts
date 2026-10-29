@@ -18,7 +18,7 @@
  * invitation), and a guest two more (one item each).
  */
 import { type Config, isAdminEmail } from '../config.ts'
-import { type InvitationRecord, isLiveInvitation, type Store } from '../store/types.ts'
+import { type InvitationRecord, isLiveInvitation, type Store, type User } from '../store/types.ts'
 import { emailAllowed } from './identity.ts'
 
 export type Standing = 'member' | 'guest' | 'none'
@@ -76,4 +76,17 @@ export async function withStanding<U extends { email: string }>(
   if (standing === 'guest') return { ...user, guest: true as const }
   const { guest: _guest, ...rest } = user as U & { guest?: true }
   return rest as U
+}
+
+/**
+ * The request's user as policy sees them: an admin carries `admin`, with how they signed in. An
+ * impersonated user is never an admin (auth/middleware.ts), so impersonating confers nothing.
+ */
+export function asRequestUser(
+  config: Pick<Config, 'adminEmails'>,
+  user: User,
+  via: 'session' | 'token'
+): User {
+  const { admin: _admin, ...rest } = user
+  return isAdminEmail(config, user.email) ? { ...rest, admin: via } : rest
 }

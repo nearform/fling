@@ -1,11 +1,22 @@
 /**
- * Admins (ADMIN_EMAILS): the users list, every site's listing and the audit log, impersonation (its rules, what it may
- * not do, its expiry, stopping it), and that admins get nothing over other people's sites.
+ * Admins (ADMIN_EMAILS): the users list, every site's listing and the audit log, impersonation
+ * (its rules, what it may not do, its expiry, stopping it), and administering other people's
+ * sites (reading with any credential, changing from the browser session, on the record).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as admin from '../src/admin.ts'
 import type { SiteRecord } from '../src/store/types.ts'
-import { APP_ORIGIN, api, cookiesOf, createUser, type Env, json, setup } from './helpers.ts'
+import {
+  APP_ORIGIN,
+  api,
+  cookiesOf,
+  createUser,
+  type Env,
+  file,
+  json,
+  setup,
+  upload,
+} from './helpers.ts'
 import {
   authorizeUrl,
   CLAUDE_CALLBACK,
@@ -146,7 +157,7 @@ describe('the users list', () => {
 })
 
 describe('the sites list', () => {
-  it("lists every site's listing for an admin, and opens none of them", async () => {
+  it("lists every site's listing for an admin", async () => {
     const { bossCookie, boss } = await world()
     await env.store.createSite({
       ...site(MEMBER, 'member-secret'),
@@ -178,8 +189,6 @@ describe('the sites list', () => {
     })
     expect(body.sites[0]).toMatchObject({ owner: BOSS, access: 'public', archived: true })
     expect(body.sites[1]).toMatchObject({ access: 'members', live: true })
-    // The listing is all: the restricted site itself is still someone else's.
-    expect((await browser(bossCookie, 'GET', '/api/sites/member-secret')).status).toBe(404)
     // An admin's API key may list too.
     expect((await api(env, boss.key, 'GET', '/api/admin/sites')).status).toBe(200)
   })
@@ -432,11 +441,150 @@ describe('impersonation', () => {
     expect(res.status).toBe(500)
     expect(cookiesOf(res)[SESSION]).toBeUndefined()
   })
+})
 
-  it("gives an admin nothing over other people's sites without impersonating", async () => {
-    const { boss } = await world()
-    expect((await api(env, boss.key, 'GET', '/api/sites/member-site')).status).toBe(404)
-    expect((await api(env, boss.key, 'DELETE', '/api/sites/member-site')).status).toBe(404)
-    expect(await env.store.findSite('member-site')).not.toBeNull()
+const page = [file('index.html', '<h1>hi</h1>')]
+
+/** Deploy `name` live with the given key; its version id. */
+async function deploy(key: string, name: string, extra = {}): Promise<string> {
+  const res = await api(env, key, 'POST', `/api/sites/${name}/deploys`, {
+    manifest: { files: page.map(f => f.meta) },
+    ...extra,
+  })
+  const body = await json(res)
+  if (body.status !== 'upload') return body.versionId
+  await upload(env, body.uploads, page)
+  await api(env, key, 'POST', `/api/sites/${name}/deploys/${body.versionId}/finalize`)
+  return body.versionId
+}
+
+/**
+ * The audit log's site entries as [action, change, actor, target, owner], sorted: the test clock
+ * stands still, so entries share a time and their ids don't order them.
+ */
+async function siteAudit() {
+  const entries = await env.store.listAuditEntries(100)
+  return entries
+    .filter(e => e.action === 'site.change' || e.action === 'site.open')
+    .map(e => [e.action, e.change ?? null, e.actor, e.target, e.owner])
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+}
+
+describe("administering other people's sites", () => {
+  it('an admin session reads, changes and deletes a site only its owner sees; each change on the record', async () => {
+    const { bossCookie, member } = await world()
+    const first = await deploy(member.key, 'secret')
+    await deploy(member.key, 'secret')
+    const detail = await browser(bossCookie, 'GET', '/api/sites/secret')
+    expect(detail.status).toBe(200)
+    expect(await json(detail)).toMatchObject({ name: 'secret', owner: MEMBER, access: 'only_me' })
+    expect(
+      (await browser(bossCookie, 'GET', `/api/sites/secret/versions/${first}/files`)).status
+    ).toBe(200)
+    // Reading is not audited.
+    expect(await siteAudit()).toEqual([])
+
+    const steps: [string, string, unknown?][] = [
+      ['PATCH', '/api/sites/secret', { access: 'members' }],
+      ['POST', '/api/sites/secret/archive'],
+      ['POST', '/api/sites/secret/unarchive'],
+      ['POST', '/api/sites/secret/current', { versionId: first }],
+      ['POST', '/api/sites/secret/share'],
+      ['DELETE', '/api/sites/secret/share'],
+    ]
+    for (const [method, path, body] of steps) {
+      const res = await browser(bossCookie, method, path, body)
+      expect({ method, path, ok: res.ok }).toEqual({ method, path, ok: true })
+    }
+    const site = await env.store.findSite('secret')
+    expect(site).toMatchObject({ visibility: 'private', archived: false, currentVersionId: first })
+    expect(site?.restricted).toBe(false)
+
+    expect((await browser(bossCookie, 'DELETE', '/api/sites/secret')).status).toBe(204)
+    expect(await env.store.findSite('secret')).toBeNull()
+
+    const expected = [
+      ['site.visibility'],
+      ['site.audience'],
+      ['site.archive'],
+      ['site.archive'],
+      ['site.rollback'],
+      ['share.create'],
+      ['share.revoke'],
+      ['site.delete'],
+    ]
+      .map(([change]) => ['site.change', change, BOSS, 'secret', MEMBER])
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
+    expect(await siteAudit()).toEqual(expected)
+  })
+
+  it('an admin key reads any site but changes none of them', async () => {
+    const { boss, member } = await world()
+    const version = await deploy(member.key, 'secret')
+    expect((await api(env, boss.key, 'GET', '/api/sites/secret')).status).toBe(200)
+    expect(
+      (await api(env, boss.key, 'GET', `/api/sites/secret/versions/${version}/files`)).status
+    ).toBe(200)
+    for (const [method, path, body] of [
+      ['PATCH', '/api/sites/secret', { access: 'public' }],
+      ['POST', '/api/sites/secret/archive'],
+      ['POST', '/api/sites/secret/share'],
+      ['DELETE', '/api/sites/secret'],
+    ] as [string, string, unknown?][]) {
+      const res = await api(env, boss.key, method, path, body)
+      expect({ method, path, status: res.status }).toEqual({ method, path, status: 404 })
+    }
+    expect(await env.store.findSite('secret')).toMatchObject({ archived: false })
+    expect(await siteAudit()).toEqual([])
+  })
+
+  it("nobody publishes in the owner's name, admin or not", async () => {
+    const { bossCookie, boss, member } = await world()
+    await deploy(member.key, 'secret')
+    const res = await api(env, boss.key, 'POST', '/api/sites/secret/deploys', {
+      manifest: { files: page.map(f => f.meta) },
+    })
+    expect(res.status).toBe(409)
+    const session = await browser(bossCookie, 'POST', '/api/sites/secret/deploys', {
+      manifest: { files: page.map(f => f.meta) },
+    })
+    expect(session.status).toBe(409)
+  })
+
+  it("impersonating gives only the user's rights", async () => {
+    const { bossCookie } = await world()
+    const third = await createUser(env, 'third@example.test')
+    await deploy(third.key, 'theirs')
+    const { cookie } = await impersonate(bossCookie)
+    expect((await browser(cookie, 'GET', '/api/sites/theirs')).status).toBe(404)
+    expect((await browser(cookie, 'POST', '/api/sites/theirs/archive')).status).toBe(404)
+  })
+
+  it("an admin deletes anyone's comment, on the record", async () => {
+    const { bossCookie, member } = await world()
+    await deploy(member.key, 'secret', { access: 'members' })
+    const posted = await json(
+      await api(env, member.key, 'POST', '/api/sites/secret/comments', { body: 'mine' })
+    )
+    const list = await json(await browser(bossCookie, 'GET', '/api/sites/secret/comments'))
+    expect(list.comments[0].canDelete).toBe(true)
+    const res = await browser(bossCookie, 'DELETE', `/api/sites/secret/comments/${posted.id}`)
+    expect(res.status).toBe(204)
+    expect(await siteAudit()).toEqual([['site.change', 'comment.delete', BOSS, 'secret', MEMBER]])
+  })
+
+  it('/auth/login hands an admin a pass to a restricted site, on the record; never for a site they could open anyway', async () => {
+    const { bossCookie, member } = await world()
+    await deploy(member.key, 'secret')
+    await deploy(member.key, 'open', { access: 'members' })
+    const login = (ret: string) =>
+      browser(bossCookie, 'GET', `/auth/login?return=${encodeURIComponent(ret)}`, undefined, null)
+    const to = new URL((await login('https://secret.fling.test/')).headers.get('location') ?? '')
+    expect(`${to.origin}${to.pathname}`).toBe('https://secret.fling.test/_fling-pass')
+    expect(await siteAudit()).toEqual([['site.open', null, BOSS, 'secret', MEMBER]])
+    expect((await login('https://open.fling.test/')).headers.get('location')).toBe(
+      'https://open.fling.test/'
+    )
+    expect(await siteAudit()).toHaveLength(1)
   })
 })

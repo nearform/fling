@@ -58,7 +58,14 @@ export const VersionSchema = z.object({
 })
 export type Version = z.infer<typeof VersionSchema>
 
-export const SiteDetailSchema = SiteWithAudienceSchema.extend({ versions: z.array(VersionSchema) })
+/**
+ * GET /api/sites/:name. `owner`: who holds the site (an admin may open anyone's); servers before
+ * admins could open other people's sites omit it.
+ */
+export const SiteDetailSchema = SiteWithAudienceSchema.extend({
+  owner: z.string().optional(),
+  versions: z.array(VersionSchema),
+})
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 
 export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
@@ -390,9 +397,16 @@ export const AuditEntrySchema = z.object({
     'impersonation.stop',
     'invitation.create',
     'invitation.revoke',
+    'site.change',
+    'site.open',
   ]),
   actor: z.string(),
+  /** the person, or for site.change and site.open the site's name */
   target: z.string(),
+  /** site.change, site.open: the site's owner */
+  owner: z.string().optional(),
+  /** site.change: what the admin did (a policy action, e.g. `site.archive`) */
+  change: z.string().optional(),
   /** invitation.create: how it came about (an admin's invite, a share, a group) */
   via: InvitationViaSchema.optional(),
   /** invitation.create: what it lets them be */

@@ -6,10 +6,11 @@ import { NotFound } from './components/NotFound'
 import { Toasts } from './components/Toasts'
 import { AppInstanceProvider } from './hooks/instance'
 import { queryKeys, useMe } from './hooks/queries'
-import { ADMIN_USERS_PATH } from './lib/admin'
+import { ADMIN_SETTINGS_PATH, ADMIN_USERS_PATH } from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
 import { ADMIN_MAIL_PATH, NOTIFICATION_SETTINGS_PATH } from './lib/notifications'
 import AdminMail from './pages/AdminMail'
+import AdminSettings from './pages/AdminSettings'
 import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
@@ -98,6 +99,7 @@ export default function App() {
               <Route path={NOTIFICATION_SETTINGS_PATH.slice(1)} element={<Notifications />} />
               <Route path="admin/users" element={<AdminUsers />} />
               <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
+              <Route path={ADMIN_SETTINGS_PATH.slice(1)} element={<AdminSettings />} />
               <Route path="admin" element={<Navigate to={ADMIN_USERS_PATH} replace />} />
             </Route>
             <Route element={<Authenticated bare />}>

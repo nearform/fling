@@ -2,17 +2,18 @@
  * Admin → Mail (`/admin/mail`; admins only, on an instance with the `email` capability; the API
  * answers 404 to anyone else): the mail settings, read only; a test email to any address, which
  * shows the provider's message id or why it was refused; and the last 24 hours of sending, with
- * the latest failures. No addresses but the instance's own, and no content. Nothing here sends
- * anything by itself.
+ * the latest failures, and whether outside invitations are on (`INVITES`, shown on Settings). No
+ * addresses but the instance's own, and no content. Nothing here sends anything by itself.
  */
 import type { MailAdmin, MailTestResult } from '@fling/shared'
 import { EnvelopeIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline'
 import { type FormEvent, type ReactNode, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AdminTabs } from '../components/AdminTabs'
 import { PageHeader } from '../components/PageHeader'
 import { useInstance } from '../hooks/instance'
 import { useAdminMail, useMe, useSendTestMail } from '../hooks/queries'
-import { showsAdmin } from '../lib/admin'
+import { ADMIN_SETTINGS_PATH, showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { fullDate, timeAgo } from '../lib/format'
 import { hourDate, showsMailAdmin } from '../lib/notifications'
@@ -74,6 +75,14 @@ function Configuration({ config }: { config: MailAdmin['config'] }) {
             </dd>
           </div>
         ))}
+        <dt className="text-secondary">Outside invitations</dt>
+        <dd>
+          {config.invites ? 'On' : 'Off'} (
+          <Link className="link" to={`${ADMIN_SETTINGS_PATH}#features`}>
+            <code>INVITES</code>
+          </Link>
+          )
+        </dd>
       </dl>
     </Section>
   )

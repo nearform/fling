@@ -87,6 +87,13 @@ export function checkDeployConfig(config) {
     throw new Error(`CF_DEPLOY_CONFIG.INSTANCE.${mailKey} is not allowed: email is set in MAIL`)
   }
   checkMail(config.MAIL)
+  // Outside invitations are sent by email: the Worker refuses INVITES on without it.
+  const invites = String(instance.INVITES ?? '')
+    .trim()
+    .toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(invites) && !config.MAIL) {
+    throw new Error('CF_DEPLOY_CONFIG.INSTANCE.INVITES needs MAIL: invitations are sent by email')
+  }
   // Who may sign in has no default: whole domains, individual addresses, or both.
   const set = k => typeof instance[k] === 'string' && instance[k].trim() !== ''
   if (!set('ALLOWED_EMAIL_DOMAINS') && !set('ALLOWED_EMAILS')) {

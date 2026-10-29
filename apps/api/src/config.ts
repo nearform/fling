@@ -11,6 +11,8 @@ import {
   HEX_COLOR_RE,
   type InstanceBrand,
   RESERVED_SITE_NAMES,
+  type SettingGroup,
+  type SettingValue,
 } from '@fling/shared'
 import { z } from 'zod'
 import { emailAllowed } from './auth/identity.ts'
@@ -137,7 +139,76 @@ const envSchema = z.object({
   MAIL_FROM_NAME: headerText,
   MAIL_REPLY_TO: emailAddress,
   SES_CONFIGURATION_SET: optionalString,
+  /** Outside invitations: off unless `on` (or true/yes/1); on needs mail. */
+  INVITES: flag,
+  INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
 })
+
+export type EnvKey = keyof typeof envSchema.shape
+
+/** Every key the instance reads from its environment (the env schema's), in schema order. */
+export const ENV_KEYS = Object.keys(envSchema.shape) as EnvKey[]
+
+/**
+ * Where each env key sits on the admins' Settings tab. A Record over the schema's keys, so a new
+ * key without a group fails to typecheck (and tests/settings.test.ts).
+ */
+export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
+  ALLOWED_EMAIL_DOMAINS: 'sign_in',
+  ALLOWED_EMAILS: 'sign_in',
+  ADMIN_EMAILS: 'sign_in',
+  OIDC_ISSUER: 'sign_in',
+  OIDC_CLIENT_ID: 'sign_in',
+  OIDC_DISPLAY_NAME: 'sign_in',
+  OIDC_SCOPES: 'sign_in',
+  OIDC_ASSUME_EMAIL_VERIFIED: 'sign_in',
+  OAUTH_REDIRECT_ALLOWLIST: 'sign_in',
+  DEV_LOGIN: 'sign_in',
+  APP_ORIGIN: 'sites',
+  SITES_DOMAIN: 'sites',
+  SITE_SCHEME: 'sites',
+  SITE_COOKIE_DOMAIN: 'sites',
+  SITE_DEFAULT_ACCESS: 'sites',
+  INSTANCE_NAME: 'branding',
+  INSTALL_COMMAND: 'branding',
+  BRAND_LOGO_URL: 'branding',
+  BRAND_LOGO_DARK_URL: 'branding',
+  BRAND_FAVICON_URL: 'branding',
+  BRAND_PRIMARY: 'branding',
+  BRAND_PRIMARY_CONTENT: 'branding',
+  BRAND_ACCENT: 'branding',
+  BRAND_INK: 'branding',
+  BRAND_HIGHLIGHT: 'branding',
+  COMMENTS: 'features',
+  LIVE: 'features',
+  LIVE_URL: 'features',
+  INVITES: 'features',
+  INVITES_PER_DAY: 'features',
+  MAIL_DRIVER: 'mail',
+  MAIL_FROM: 'mail',
+  MAIL_FROM_NAME: 'mail',
+  MAIL_REPLY_TO: 'mail',
+  SES_CONFIGURATION_SET: 'mail',
+  APP_ENV: 'platform',
+  TABLE_NAME: 'platform',
+  SITES_BUCKET: 'platform',
+  KVS_ARN: 'platform',
+  SSM_PREFIX: 'platform',
+  STORE_DRIVER: 'platform',
+  STORAGE_DRIVER: 'platform',
+  KVS_DRIVER: 'platform',
+  FS_ROOT: 'platform',
+}
+
+/** One env key as the admins' Settings tab shows it. */
+export interface ConfigSetting {
+  key: EnvKey
+  group: SettingGroup
+  /** what the instance runs with: the env's value parsed, or the default it falls back to */
+  value: SettingValue
+  /** the environment set it (not blank) */
+  set: boolean
+}
 
 /**
  * OAuth redirect URIs any client (DCR or CIMD) may use. Exact URLs, plus the keyword `loopback`
@@ -172,6 +243,29 @@ export interface Secrets {
   siteHmacKey: string
   /** CloudFront adds `x-origin-verify: <secret>`; unset → no check. */
   originVerifySecret?: string
+}
+
+/**
+ * Each secret by the env name it is read from (SSM: the same in kebab case), and where the
+ * admins' Settings tab lists it. The tab shows only whether one is set, never its value.
+ */
+export const SECRET_SETTINGS: Record<keyof Secrets, { name: string; group: SettingGroup }> = {
+  oidcClientSecret: { name: 'OIDC_CLIENT_SECRET', group: 'sign_in' },
+  googleClientId: { name: 'GOOGLE_CLIENT_ID', group: 'sign_in' },
+  googleClientSecret: { name: 'GOOGLE_CLIENT_SECRET', group: 'sign_in' },
+  sessionSecret: { name: 'SESSION_SECRET', group: 'platform' },
+  siteHmacKey: { name: 'SITE_HMAC_KEY', group: 'platform' },
+  originVerifySecret: { name: 'ORIGIN_VERIFY_SECRET', group: 'platform' },
+}
+
+/** The secrets by name, set or not: no value leaves here. */
+export function secretSettings(
+  secrets: Secrets
+): { name: string; group: SettingGroup; set: boolean }[] {
+  return (Object.keys(SECRET_SETTINGS) as (keyof Secrets)[]).map(k => ({
+    ...SECRET_SETTINGS[k],
+    set: Boolean(secrets[k]),
+  }))
 }
 
 /** The identity provider from env (`OIDC_*`); the client secret is in Secrets. */
@@ -265,6 +359,13 @@ export interface Config {
   liveUrl?: string
   /** Email, when a mail driver is configured (`MAIL_*`); absent: no email channel. */
   mail?: MailConfig
+  /**
+   * Outside invitations (`INVITES`, default off): people outside the email policy may be invited.
+   * On needs `mail` (the config refuses to load otherwise).
+   */
+  invites: boolean
+  /** New outside addresses one person may invite a day (`INVITES_PER_DAY`, default 20). */
+  invitesPerDay: number
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -272,6 +373,8 @@ export interface Config {
   /** OAuth redirect URI allowlist (exact URLs and/or `loopback`) */
   oauthRedirectAllowlist: string[]
   oidc: OidcConfig
+  /** Every env key, its effective value and whether the env set it (`GET /api/admin/settings`). */
+  settings: ConfigSetting[]
   secrets: Secrets
 }
 
@@ -359,13 +462,52 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
       scopes: e.OIDC_SCOPES?.split(/[\s,]+/).filter(Boolean),
       assumeEmailVerified: e.OIDC_ASSUME_EMAIL_VERIFIED,
     }),
+    invites: e.INVITES,
+    invitesPerDay: e.INVITES_PER_DAY,
+    settings: [],
   }
   const mail = mailConfig(e, cfg)
   if (mail) cfg.mail = mail
+  if (cfg.invites && !cfg.mail) {
+    throw new Error('INVITES=on needs email: set MAIL_DRIVER and MAIL_FROM')
+  }
   if (cfg.storeDriver === 'dynamo' && !cfg.tableName) throw new Error('TABLE_NAME is required')
   if (cfg.storageDriver === 's3' && !cfg.sitesBucket) throw new Error('SITES_BUCKET is required')
   if (cfg.kvsDriver === 'cloudfront' && !cfg.kvsArn) throw new Error('KVS_ARN is required')
+  cfg.settings = settingsOf(env, e, cfg)
   return cfg
+}
+
+/**
+ * Each env key with the value the instance runs with. Where the instance derives a default
+ * (from APP_ENV, other keys, or its own constants), that is the value, not the schema's blank.
+ */
+function settingsOf(
+  env: Record<string, string | undefined>,
+  e: z.infer<typeof envSchema>,
+  cfg: BaseConfig
+): ConfigSetting[] {
+  const derived: Partial<Record<EnvKey, SettingValue | undefined>> = {
+    APP_ORIGIN: cfg.appOrigin,
+    SITES_DOMAIN: cfg.sitesDomain,
+    SITE_SCHEME: cfg.siteScheme,
+    ALLOWED_EMAIL_DOMAINS: cfg.allowedEmailDomains,
+    ALLOWED_EMAILS: cfg.allowedEmails,
+    ADMIN_EMAILS: cfg.adminEmails,
+    STORE_DRIVER: cfg.storeDriver,
+    STORAGE_DRIVER: cfg.storageDriver,
+    KVS_DRIVER: cfg.kvsDriver,
+    DEV_LOGIN: cfg.devLogin,
+    OAUTH_REDIRECT_ALLOWLIST: cfg.oauthRedirectAllowlist,
+    OIDC_SCOPES: cfg.oidc.scopes,
+    MAIL_FROM_NAME: cfg.mail?.fromName,
+  }
+  return ENV_KEYS.map(key => ({
+    key,
+    group: SETTING_GROUP[key],
+    value: (key in derived ? derived[key] : (e[key] as SettingValue | undefined)) ?? null,
+    set: blank(env[key]) !== undefined,
+  }))
 }
 
 /**

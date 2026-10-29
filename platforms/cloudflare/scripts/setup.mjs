@@ -7,6 +7,8 @@
 //     [--email-domains example.com] [--allowed-emails you@example.com]
 //     [--admin-emails you@example.com]   (optional, never asked for; '' removes them)
 //     [--site-default-access only_me|members]   (optional, never asked for; '' removes it)
+//     [--invites on|off] [--invites-per-day 20]   (optional, never asked for; '' removes them;
+//                                                   on needs MAIL in the deploy config)
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
@@ -38,6 +40,8 @@ const { values: args } = parseArgs({
     'allowed-emails': { type: 'string' },
     'admin-emails': { type: 'string' },
     'site-default-access': { type: 'string' },
+    invites: { type: 'string' },
+    'invites-per-day': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'oidc-client-secret-file': { type: 'string' },
@@ -156,6 +160,24 @@ if (args['site-default-access'] !== undefined) {
   }
   if (access) instance.SITE_DEFAULT_ACCESS = access
   else delete instance.SITE_DEFAULT_ACCESS
+}
+// Outside invitations (off by default; on needs MAIL) and how many a person may send a day: only
+// from the flags, like the admins.
+if (args.invites !== undefined) {
+  const invites = args.invites.trim()
+  if (invites && invites !== 'on' && invites !== 'off') {
+    throw new Error('--invites must be on or off')
+  }
+  if (invites) instance.INVITES = invites
+  else delete instance.INVITES
+}
+if (args['invites-per-day'] !== undefined) {
+  const perDay = args['invites-per-day'].trim()
+  if (perDay && !/^[1-9]\d*$/.test(perDay)) {
+    throw new Error('--invites-per-day must be a positive whole number')
+  }
+  if (perDay) instance.INVITES_PER_DAY = perDay
+  else delete instance.INVITES_PER_DAY
 }
 instance.INSTANCE_NAME = await value(
   'instance-name',

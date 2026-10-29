@@ -1,7 +1,8 @@
 /**
  * The instance's admins (ADMIN_EMAILS): the users list, every site's listing (the site
  * directory; policy still decides what an admin may open), the audit log, the mail page
- * (notifications/mail-admin.ts), and impersonation. Policy
+ * (notifications/mail-admin.ts), the settings (configuration, secrets by name only), and
+ * impersonation. Policy
  * (`canInstance`, `impersonationRefusal` in policy.ts) decides; this does it and keeps the record.
  * To anyone who isn't an admin, none of it exists (404).
  *
@@ -12,6 +13,7 @@
  * isn't on the record never happens.
  */
 import {
+  type AdminSettings,
   type AdminSite,
   type AdminUser,
   type AuditEntry,
@@ -21,7 +23,7 @@ import {
   siteLabel,
   siteUrl,
 } from '@fling/shared'
-import { isAdminEmail } from './config.ts'
+import { isAdminEmail, secretSettings } from './config.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, forbidden, notFound } from './lib/errors.ts'
 import { newSortableId } from './lib/ids.ts'
@@ -146,6 +148,18 @@ export async function auditLog(deps: Deps, p: Principal): Promise<AuditEntry[]> 
 export function mail(deps: Deps, p: Principal): Promise<MailAdmin> {
   ensure(p, 'admin.mail.read')
   return mailOverview(deps, p.email)
+}
+
+/**
+ * The instance's configuration as it runs: every env key's effective value, set or defaulted,
+ * and the secrets by name, set or not. Never a secret's value.
+ */
+export function settings(deps: Deps, p: Principal): AdminSettings {
+  ensure(p, 'admin.settings.read')
+  return {
+    settings: deps.config.settings,
+    secrets: secretSettings(deps.config.secrets),
+  }
 }
 
 /** Send a test email to `to`, any address (at most MAIL_TESTS_PER_HOUR an hour per admin). */

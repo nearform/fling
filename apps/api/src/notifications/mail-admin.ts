@@ -61,6 +61,7 @@ export async function mailOverview(deps: Deps, admin: string): Promise<MailAdmin
       fromName: mail.fromName,
       replyTo: mail.replyTo ?? null,
       configurationSet: mail.sesConfigurationSet ?? null,
+      invites: deps.config.invites,
     },
     health: {
       since,

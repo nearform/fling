@@ -5,6 +5,8 @@
  */
 import {
   type AccessLevel,
+  type AdminSettings,
+  AdminSettingsSchema,
   type AdminSiteList,
   AdminSiteListSchema,
   type AdminUserList,
@@ -270,6 +272,8 @@ export const api = {
     request('/api/admin/impersonate/stop', MeSchema, { method: 'POST' }),
   /** Admins, on an instance with email: the mail settings and the last 24 hours of sending. */
   adminMail: (): Promise<MailAdmin> => request('/api/admin/mail', MailAdminSchema),
+  /** Admins: the instance's configuration, secrets by name only. */
+  adminSettings: (): Promise<AdminSettings> => request('/api/admin/settings', AdminSettingsSchema),
   /** Admins: send a test email to any address; the provider's id or the mapped error. */
   sendTestMail: (to: string): Promise<MailTestResult> =>
     request('/api/admin/mail/test', MailTestResultSchema, { method: 'POST', body: { to } }),

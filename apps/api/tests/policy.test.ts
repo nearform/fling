@@ -205,6 +205,7 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.audit.read': 'at',
   'admin.mail.read': 'at',
   'admin.mail.test': 'a',
+  'admin.settings.read': 'at',
   'admin.impersonate': 'a',
   'admin.impersonate.stop': 'i',
   'admin.invitations.manage': 'a',

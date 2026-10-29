@@ -278,6 +278,45 @@ export const AdminSiteListSchema = z.object({
 })
 export type AdminSiteList = z.infer<typeof AdminSiteListSchema>
 
+/** How the admins' Settings tab groups the instance's configuration, in this order. */
+export const SETTING_GROUPS = [
+  'sign_in',
+  'sites',
+  'branding',
+  'features',
+  'mail',
+  'platform',
+] as const
+export type SettingGroup = (typeof SETTING_GROUPS)[number]
+
+/** A setting's effective value: text, a number, a switch, a list, or nothing. */
+export const SettingValueSchema = z
+  .union([z.string(), z.number(), z.boolean(), z.array(z.string())])
+  .nullable()
+export type SettingValue = z.infer<typeof SettingValueSchema>
+
+/**
+ * GET /api/admin/settings — every configuration key the instance reads, with the value it runs
+ * with and whether the environment set it (`set: false`: the default, or what the instance
+ * derives). Secrets are named, with whether they are set, and never carry a value.
+ */
+export const AdminSettingsSchema = z.object({
+  settings: z.array(
+    z.object({
+      key: z.string(),
+      group: z.enum(SETTING_GROUPS),
+      value: SettingValueSchema,
+      set: z.boolean(),
+    })
+  ),
+  secrets: z.array(
+    z.object({ name: z.string(), group: z.enum(SETTING_GROUPS), set: z.boolean() }).strict()
+  ),
+})
+export type AdminSettings = z.infer<typeof AdminSettingsSchema>
+export type AdminSetting = AdminSettings['settings'][number]
+export type AdminSecret = AdminSettings['secrets'][number]
+
 /** GET /api/admin/audit — the latest admin actions, newest first. */
 export const AuditEntrySchema = z.object({
   id: z.string(),

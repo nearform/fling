@@ -3,6 +3,7 @@
  * authorize → consent (SPA, /authorize?request=<id>) → code → token, refresh with rotation and
  * reuse detection, revocation. Grants are the user's "connections" (Connections page).
  */
+import { standingOf } from '../auth/standing.ts'
 import { newId } from '../lib/ids.ts'
 import type { GrantRecord, OAuthRequestRecord, RefreshTokenRecord, User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
@@ -288,6 +289,9 @@ export async function exchangeCode(
   }
   const user = await deps.store.getUser(code.email)
   if (!user) throw new OAuthError('invalid_grant', 'Unknown user')
+  if ((await standingOf(deps, code.email)) === 'none') {
+    throw new OAuthError('invalid_grant', 'This account may no longer sign in')
+  }
 
   const now = deps.clock.now().toISOString()
   const grantId = newId()
@@ -336,6 +340,10 @@ export async function refresh(
   }
   if (p.client_id !== undefined && p.client_id !== grant.clientId) {
     throw new OAuthError('invalid_grant', 'The refresh token was issued to another client')
+  }
+  // A user without standing (a domain removed, an invitation revoked) gets no new tokens.
+  if ((await standingOf(deps, grant.email)) === 'none') {
+    throw new OAuthError('invalid_grant', 'This account may no longer sign in')
   }
   if (p.resource !== undefined && !isOurResource(deps, p.resource)) {
     throw new OAuthError('invalid_target', `resource must be ${grant.resource}`)

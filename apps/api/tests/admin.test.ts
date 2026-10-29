@@ -186,7 +186,7 @@ describe('the sites list', () => {
   it('stops at the ceiling and says the list was cut', async () => {
     await world()
     await env.store.createSite(site(BOSS, 'boss-site'))
-    const p = { email: BOSS, admin: true, via: 'session' as const }
+    const p = { email: BOSS, admin: true, via: 'session' as const, guest: false }
     const cut = await admin.listSites(env.deps, p, 2)
     expect(cut.sites.map(s => s.name)).toEqual(['boss-site', 'member-docs'])
     expect(cut.truncated).toBe(true)

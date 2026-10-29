@@ -6,6 +6,7 @@ import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { manifestKey } from '../src/blobs/types.ts'
+import type { Principal } from '../src/policy.ts'
 import { publish, publishBytes, stage, UPLOAD_URL_TTL_SECONDS } from '../src/publication.ts'
 import type { User } from '../src/store/types.ts'
 import { APP_ORIGIN, createUser, type Env, file, setup, upload } from './helpers.ts'
@@ -15,10 +16,12 @@ const FAKE_AWS_KEY = `AKIA${'Q'.repeat(16)}`
 
 let env: Env
 let user: User
+let principal: Principal
 
 beforeEach(async () => {
   env = setup()
   ;({ user } = await createUser(env))
+  principal = { email: user.email, admin: false, via: 'api_key', guest: false }
 })
 
 type Upload = { path: string; url: string; headers: Record<string, string> }
@@ -27,7 +30,7 @@ const put = (u: Upload, content: string, headers = u.headers) =>
   env.app.request(u.url, { method: 'PUT', headers, body: content })
 
 async function stageUploads(files: ReturnType<typeof file>[], name = 'hello') {
-  const res = await stage(env.deps, user, name, body(files))
+  const res = await stage(env.deps, user, name, body(files), principal)
   if (res.status !== 'upload') throw new Error(`expected upload, got ${res.status}`)
   return res
 }
@@ -110,26 +113,22 @@ describe('admission', () => {
     const bad = { ...file('index.html', 'x').meta, sha256: 'nope' }
 
     await expect(
-      stage(env.deps, user, 'hello', { manifest: { files: [huge, dot, bad] } })
+      stage(env.deps, user, 'hello', { manifest: { files: [huge, dot, bad] } }, principal)
     ).rejects.toMatchObject({ status: 413, code: 'too_large' })
     await expect(
-      stage(env.deps, user, 'hello', { manifest: { files: [dot, bad] } })
+      stage(env.deps, user, 'hello', { manifest: { files: [dot, bad] } }, principal)
     ).rejects.toMatchObject({ status: 400, code: 'dotfile' })
     await expect(
-      stage(env.deps, user, 'hello', { manifest: { files: [bad] } })
+      stage(env.deps, user, 'hello', { manifest: { files: [bad] } }, principal)
     ).rejects.toMatchObject({ name: 'ZodError' })
     expect(await env.store.findSite('hello')).toBeNull()
   })
 
   it('applies to publishBytes as well', async () => {
     await expect(
-      publishBytes(
-        env.deps,
-        user,
-        'hello',
-        [{ path: 'secrets.json', bytes: new Uint8Array(1) }],
-        {}
-      )
+      publishBytes(env.deps, user, 'hello', [{ path: 'secrets.json', bytes: new Uint8Array(1) }], {
+        principal,
+      })
     ).rejects.toMatchObject({ status: 400, code: 'secret_file' })
     expect(await env.store.findSite('hello')).toBeNull()
   })
@@ -164,16 +163,18 @@ describe('scanning', () => {
   it('publishBytes scans before writing anything', async () => {
     const bytes = new Uint8Array(Buffer.from(`<p>${FAKE_AWS_KEY}</p>`))
     await expect(
-      publishBytes(env.deps, user, 'hello', [{ path: 'index.html', bytes }], {})
+      publishBytes(env.deps, user, 'hello', [{ path: 'index.html', bytes }], { principal })
     ).rejects.toMatchObject({ status: 422, code: 'secret_detected' })
     expect(await env.store.findSite('hello')).toBeNull()
   })
 
   it('publishBytes goes live, and the same bytes again are unchanged', async () => {
     const files = [{ path: 'index.html', bytes: new Uint8Array(Buffer.from('<h1>hi</h1>')) }]
-    const first = await publishBytes(env.deps, user, 'hello', files, {})
+    const first = await publishBytes(env.deps, user, 'hello', files, { principal })
     expect(first.status).toBe('live')
     expect(await stored(first.versionId, 'index.html')).toBe('<h1>hi</h1>')
-    expect((await publishBytes(env.deps, user, 'hello', files, {})).status).toBe('unchanged')
+    expect((await publishBytes(env.deps, user, 'hello', files, { principal })).status).toBe(
+      'unchanged'
+    )
   })
 })

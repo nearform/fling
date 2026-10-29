@@ -3,11 +3,15 @@
  * SSE — a Lambda can't hold a stream open). Auth: `Authorization: Bearer <token>` where the token
  * is an OAuth access token from /oauth/token (aud = this resource, grant still active) or a CLI
  * API key (`fling_…`, handy for testing). Anything else → 401 with a `WWW-Authenticate` pointing
- * at the protected-resource metadata, which is how MCP clients discover the OAuth server.
+ * at the protected-resource metadata, which is how MCP clients discover the OAuth server. Either
+ * way the user must still have standing (auth/standing.ts); a guest gets only the tools for
+ * reviewing what is shared with them.
  */
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { type Context, Hono } from 'hono'
 import { API_KEY_PREFIX, validateApiKey } from '../auth/api-keys.ts'
+import { principalOf } from '../auth/middleware.ts'
+import { withStanding } from '../auth/standing.ts'
 import { createRemoteMcpServer } from '../mcp/server.ts'
 import { resourceMetadataUrl, SCOPE, verifyAccessToken } from '../oauth/tokens.ts'
 import type { User } from '../store/types.ts'
@@ -47,9 +51,10 @@ async function authenticate(c: Context<AppEnv>): Promise<User | Response> {
 
   if (token.startsWith(API_KEY_PREFIX)) {
     const result = await validateApiKey(store, token, clock.now())
-    if (!result) return invalid()
+    const user = result ? await withStanding({ config, store }, result.user) : null
+    if (!user) return invalid()
     c.set('via', 'api_key')
-    return result.user
+    return user
   }
   const claims = await verifyAccessToken(config, token, clock.now())
   if (!claims) return invalid()
@@ -58,7 +63,8 @@ async function authenticate(c: Context<AppEnv>): Promise<User | Response> {
   if (!grant || Date.parse(grant.expiresAt) <= clock.now().getTime()) {
     return challenge(c, { code: 'invalid_token', description: 'This connection was revoked' })
   }
-  const user = await store.getUser(claims.email)
+  const stored = await store.getUser(claims.email)
+  const user = stored ? await withStanding({ config, store }, stored) : null
   if (!user) return invalid()
   const now = clock.now()
   if (!grant.lastUsedAt || now.getTime() - Date.parse(grant.lastUsedAt) > TOUCH_INTERVAL_MS) {
@@ -72,6 +78,7 @@ mcpRoutes.all('/', async c => {
   const auth = await authenticate(c)
   if (auth instanceof Response) return auth
   const user = auth
+  c.set('user', user)
 
   if (c.req.method !== 'POST') {
     // Stateless: no standalone SSE stream (GET) and no sessions to end (DELETE).
@@ -108,7 +115,7 @@ mcpRoutes.all('/', async c => {
   }
 
   const deps = c.get('deps')
-  const server = createRemoteMcpServer(deps, user)
+  const server = createRemoteMcpServer(deps, user, principalOf(c))
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

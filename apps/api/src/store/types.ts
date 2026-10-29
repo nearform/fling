@@ -22,6 +22,11 @@ export interface User {
   updatedAt: string
   /** every sign-in sets it (upsertUser); absent on users who haven't signed in since it exists */
   lastSignInAt?: string
+  /**
+   * Never stored: set on the signed-in user of a request whose standing is `guest`
+   * (auth/standing.ts), so policy (`userActor`, `principalOf`) sees it wherever the user goes.
+   */
+  guest?: true
 }
 
 /**
@@ -39,6 +44,53 @@ export interface UserSummary {
 }
 
 export type AuditAction = 'impersonation.start' | 'impersonation.stop'
+
+/** What an invitation lets someone be: a full user, or a guest who reviews what is shared with them. */
+export type InvitationRole = 'member' | 'guest'
+
+/** How an invitation came about: an admin's invite, or a share (a site's audience or a group). */
+export type InvitationVia = 'admin' | 'share' | 'group'
+
+/**
+ * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
+ * copy at `INVITES/INVITE#<email>`). One per address: an admin's invite upgrades a guest to a
+ * member, nothing demotes one, and a later invite of a revoked address starts afresh.
+ */
+export interface InvitationRecord {
+  /** lowercase */
+  email: string
+  role: InvitationRole
+  /** who invited them (the admin, or whoever shared) */
+  invitedBy: string
+  via: InvitationVia
+  /** the site whose audience first named them (via `share`) */
+  siteId?: string
+  /** the group they were added to (via `group`) */
+  groupId?: string
+  createdAt: string
+  /** every write sets it: what the next write is conditioned on */
+  updatedAt: string
+  /** set by revoking: kept for the record, and ends the access it gave */
+  revokedAt?: string
+}
+
+/** A live invitation: one that hasn't been revoked. */
+export const isLiveInvitation = (i: InvitationRecord | null): i is InvitationRecord =>
+  i !== null && i.revokedAt === undefined
+
+/**
+ * An emailed single-use sign-in link (`MAGIC#<sha256 of the token>/MAGIC`). Only the hash of the
+ * token is stored; consuming it deletes it.
+ */
+export interface SignInLinkRecord {
+  /** sha256 hex of the token */
+  hash: string
+  email: string
+  /** where to go once signed in (an app path or a site URL, checked when it was made) */
+  return: string
+  createdAt: string
+  expiresAt: string
+}
 
 /** Something an admin did, kept for a while (`expiresAt`) and listed newest first. */
 export interface AuditRecord {
@@ -425,6 +477,42 @@ export interface Store extends NotificationStore {
   }): Promise<{ sites: SiteDirectoryRecord[]; truncated: boolean }>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
+  /**
+   * Whether any audience names `email`: a direct grant or a group membership (two queries of one
+   * item each). What keeps a guest's standing.
+   */
+  isNamedAnywhere(email: string): Promise<boolean>
+
+  // --- invitations and sign-in links ---
+  getInvitation(email: string): Promise<InvitationRecord | null>
+  /**
+   * Invite an address: one invitation per address, written with its directory copy. A live
+   * member invitation is never turned into a guest one, and a live invitation of the same role is
+   * left as it is (`changed: false`); otherwise (none, a revoked one, or a guest becoming a
+   * member) `invitation` replaces it. Returns what is stored.
+   */
+  putInvitation(
+    invitation: Omit<InvitationRecord, 'updatedAt' | 'revokedAt'>
+  ): Promise<{ invitation: InvitationRecord; changed: boolean }>
+  /** The invitation directory by address (byte order), a page at a time, optionally under `prefix`. */
+  listInvitations(opts: {
+    prefix?: string
+    limit: number
+    cursor?: string
+  }): Promise<{ invitations: InvitationRecord[]; cursor?: string }>
+  /** Revoke the invitation (set `revokedAt`, kept if set already); null when there is none. */
+  revokeInvitation(email: string, at: string): Promise<InvitationRecord | null>
+  putSignInLink(link: SignInLinkRecord): Promise<void>
+  /** Take a sign-in link by its hash, once: null when unknown, expired or already taken. */
+  consumeSignInLink(hash: string): Promise<SignInLinkRecord | null>
+  /** Count one more new address `email` invited by sharing on `day` (`NINVITE`); returns the count. */
+  countInvitation(email: string, day: Day): Promise<number>
+  /** The addresses `email` invited by sharing on `day`, without counting one. */
+  invitationsOn(email: string, day: Day): Promise<number>
+  /** Count one more sign-in link asked for `email` this hour; returns the count. */
+  countSignInLinkRequest(email: string, hour: Hour): Promise<number>
+  /** Count one more sign-in link asked of the instance this minute; returns the count. */
+  countSignInLinkInstance(minute: Minute): Promise<number>
 
   // --- groups ---
   /**
@@ -542,6 +630,9 @@ export type Hour = string
 
 export const minuteOf = (at: Date): Minute => at.toISOString().slice(0, 16)
 export const hourOf = (at: Date): Hour => at.toISOString().slice(0, 13)
+/** A UTC day, `2026-10-28`: what the daily counters are keyed by. */
+export type Day = string
+export const dayOf = (at: Date): Day => at.toISOString().slice(0, 10)
 /** The instant a minute starts. */
 export const minuteStart = (minute: Minute) => new Date(`${minute}:00.000Z`)
 export const addMinutes = (minute: Minute, n: number): Minute =>

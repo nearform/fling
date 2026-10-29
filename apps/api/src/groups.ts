@@ -1,8 +1,9 @@
 /**
  * Groups: named lists of people that a site's audience can name (the `groups` capability). Any
- * signed-in user makes one and becomes its owner; policy.ts (`canGroup`) decides the rest: every
- * member of the instance lists groups, sees their members and uses them in an audience, and only
- * the owner renames one, changes its members or deletes it.
+ * signed-in user but a guest makes one and becomes its owner (`account.group.create`, checked by
+ * the routes and the MCP server); policy.ts (`canGroup`) decides the rest: every member of the
+ * instance lists groups, sees their members and uses them in an audience, and only the owner
+ * renames one, changes its members or deletes it. Guests may be members, and read none.
  *
  * Groups are not secret, so an unknown slug is a 404 and a refusal a 403. Members are addresses the
  * instance would let sign in (`checkEmails`, as for audiences), at most GROUP_MEMBERS_MAX. Clients

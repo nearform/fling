@@ -1087,6 +1087,152 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       })
     })
 
+    describe('invitations', () => {
+      const invite = (
+        address: string,
+        role: 'member' | 'guest',
+        createdAt = NOW,
+        by = 'inviter@example.test'
+      ) => ({
+        email: address,
+        role,
+        invitedBy: by,
+        via: role === 'member' ? ('admin' as const) : ('share' as const),
+        createdAt,
+      })
+
+      it('stores one per address with its directory copy; lists by address under a prefix', async () => {
+        const store = await factory()
+        const u = uid()
+        const [a, b, c] = ['a', 'b', 'c'].map(x => `i-${u}-${x}@outside.test`) as [
+          string,
+          string,
+          string,
+        ]
+        expect(await store.getInvitation(a)).toBeNull()
+        for (const address of [c, a, b]) {
+          const put = await store.putInvitation(invite(address, 'guest'))
+          expect(put.changed).toBe(true)
+          expect(put.invitation).toMatchObject(invite(address, 'guest'))
+        }
+        expect(await store.getInvitation(a)).toMatchObject({ email: a, role: 'guest' })
+        const first = await store.listInvitations({ prefix: `i-${u}`, limit: 2 })
+        expect(first.invitations.map(i => i.email)).toEqual([a, b])
+        const rest = await store.listInvitations({
+          prefix: `i-${u}`,
+          limit: 2,
+          cursor: first.cursor,
+        })
+        expect(rest.invitations.map(i => i.email)).toEqual([c])
+      })
+
+      it('an admin invite upgrades a guest to a member; nothing demotes one; the same role is left alone', async () => {
+        const store = await factory()
+        const address = `i-${uid()}@outside.test`
+        await store.putInvitation(invite(address, 'guest'))
+        expect((await store.putInvitation(invite(address, 'guest', LATER))).changed).toBe(false)
+        const up = await store.putInvitation(invite(address, 'member', LATER))
+        expect(up).toMatchObject({ changed: true, invitation: { role: 'member', via: 'admin' } })
+        const down = await store.putInvitation(invite(address, 'guest', LATER))
+        expect(down).toMatchObject({ changed: false, invitation: { role: 'member' } })
+        expect((await store.getInvitation(address))?.role).toBe('member')
+        const listed = await store.listInvitations({ prefix: address, limit: 5 })
+        expect(listed.invitations).toEqual([await store.getInvitation(address)])
+      })
+
+      it('revoking sets revokedAt on both copies and keeps the first; a later invite starts afresh', async () => {
+        const store = await factory()
+        const address = `i-${uid()}@outside.test`
+        expect(await store.revokeInvitation(address, LATER)).toBeNull()
+        await store.putInvitation(invite(address, 'member'))
+        const revoked = await store.revokeInvitation(address, LATER)
+        expect(revoked).toMatchObject({ role: 'member', revokedAt: LATER })
+        expect((await store.revokeInvitation(address, EXPIRES))?.revokedAt).toBe(LATER)
+        expect((await store.listInvitations({ prefix: address, limit: 5 })).invitations).toEqual([
+          revoked,
+        ])
+        const again = await store.putInvitation(invite(address, 'guest', LATER))
+        expect(again.changed).toBe(true)
+        expect(again.invitation.role).toBe('guest')
+        expect(again.invitation.revokedAt).toBeUndefined()
+        expect(await store.getInvitation(address)).toEqual(again.invitation)
+      })
+
+      it('race: concurrent invites of one address store one invitation', async () => {
+        const store = await factory()
+        const address = `i-${uid()}@outside.test`
+        const results = await Promise.all(
+          Array.from({ length: 5 }, (_, n) =>
+            store.putInvitation(invite(address, 'guest', NOW, `by-${n}@example.test`))
+          )
+        )
+        expect(results.filter(r => r.changed)).toHaveLength(1)
+        const stored = await store.getInvitation(address)
+        expect(results.find(r => r.changed)?.invitation).toEqual(stored)
+        expect((await store.listInvitations({ prefix: address, limit: 5 })).invitations).toEqual([
+          stored,
+        ])
+      })
+
+      it('isNamedAnywhere: a direct grant or a group membership names the address', async () => {
+        const store = await factory()
+        const owner = email()
+        const [byGrant, byGroup, nobody] = [email(), email(), email()]
+        expect(await store.isNamedAnywhere(byGrant)).toBe(false)
+        const s = site(owner)
+        await store.createSite(s)
+        await store.putSite({ ...s, restricted: true, audience: { emails: [byGrant], groups: [] } })
+        await store.createGroup(group(owner, { size: 1 }), [byGroup])
+        expect(await store.isNamedAnywhere(byGrant)).toBe(true)
+        expect(await store.isNamedAnywhere(byGroup)).toBe(true)
+        expect(await store.isNamedAnywhere(nobody)).toBe(false)
+      })
+
+      it('counts invitations by day and sign-in link requests by hour and minute', async () => {
+        const store = await factory()
+        const e = email()
+        const day = new Date().toISOString().slice(0, 10)
+        const hour = new Date().toISOString().slice(0, 13)
+        const minute = new Date().toISOString().slice(0, 16)
+        expect(await store.invitationsOn(e, day)).toBe(0)
+        const counts = await Promise.all(
+          Array.from({ length: 4 }, () => store.countInvitation(e, day))
+        )
+        expect([...counts].sort()).toEqual([1, 2, 3, 4])
+        expect(await store.invitationsOn(e, day)).toBe(4)
+        expect(await store.countSignInLinkRequest(e, hour)).toBe(1)
+        expect(await store.countSignInLinkRequest(e, hour)).toBe(2)
+        expect(await store.countSignInLinkRequest(email(), hour)).toBe(1)
+        const first = await store.countSignInLinkInstance(minute)
+        expect(await store.countSignInLinkInstance(minute)).toBe(first + 1)
+      })
+    })
+
+    describe('sign-in links', () => {
+      const link = (expiresAt = EXPIRES) => ({
+        hash: `${uid()}${uid()}`,
+        email: email(),
+        return: '/sites',
+        createdAt: NOW,
+        expiresAt,
+      })
+
+      it('are taken once, even under a race; unknown and expired ones are null', async () => {
+        const store = await factory()
+        const l = link()
+        await store.putSignInLink(l)
+        const taken = await Promise.all(
+          Array.from({ length: 5 }, () => store.consumeSignInLink(l.hash))
+        )
+        expect(taken.filter(t => t !== null)).toEqual([l])
+        expect(await store.consumeSignInLink(l.hash)).toBeNull()
+        expect(await store.consumeSignInLink('missing')).toBeNull()
+        const old = link('2000-01-01T00:00:00.000Z')
+        await store.putSignInLink(old)
+        expect(await store.consumeSignInLink(old.hash)).toBeNull()
+      })
+    })
+
     notificationStoreConformance(factory)
   })
 }

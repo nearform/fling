@@ -26,6 +26,7 @@ import { uploadPrefix } from '../blobs/types.ts'
 import { mapLimit } from '../lib/concurrency.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import { newId } from '../lib/ids.ts'
+import type { Principal } from '../policy.ts'
 import { assertPublishablePaths, publishBytes } from '../publication.ts'
 import * as sites from '../sites.ts'
 import type { UploadRecord, User } from '../store/types.ts'
@@ -45,6 +46,8 @@ export interface AccessOptions {
 }
 
 export interface PublishOptions extends AccessOptions {
+  /** who is publishing: a new site needs `account.site.create` */
+  principal: Principal
   spa?: boolean
   visibility?: Visibility
   /** no root index.html: true → generate a listing page; false → publish anyway; undefined → ask */
@@ -147,7 +150,13 @@ export async function publishFiles(
     user,
     name,
     [...files].map(([path, bytes]) => ({ path, bytes })),
-    { spa: opts.spa, visibility: opts.visibility, access: opts.access, audience: opts.audience }
+    {
+      principal: opts.principal,
+      spa: opts.spa,
+      visibility: opts.visibility,
+      access: opts.access,
+      audience: opts.audience,
+    }
   )
   return {
     kind: 'published',
@@ -254,7 +263,7 @@ export async function finishUpload(
   deps: Deps,
   user: User,
   uploadId: string,
-  opts: { listHtml?: boolean }
+  opts: { principal: Principal; listHtml?: boolean }
 ): Promise<PublishOutcome> {
   const upload = await requireUpload(deps, user, uploadId)
   const records = await deps.store.listUploadFiles(upload.id)
@@ -283,6 +292,7 @@ export async function finishUpload(
     return { path: rec.path, bytes: decoded }
   })
   const outcome = await publishFiles(deps, user, upload.name, files, {
+    principal: opts.principal,
     spa: upload.spa,
     visibility: upload.visibility,
     access: upload.access,

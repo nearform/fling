@@ -179,6 +179,23 @@ describe('OIDC sign-in', () => {
     expect(errorOf(other)).toBe('/login?error=domain_not_allowed')
   })
 
+  it('admits an invited address outside the policy while its invitation stands', async () => {
+    const outsider = { claims: { email: 'pat@outside.test' } }
+    expect(errorOf(await signIn(env, { tamper: outsider }))).toBe('/login?error=domain_not_allowed')
+    await env.store.putInvitation({
+      email: 'pat@outside.test',
+      role: 'member',
+      invitedBy: 'admin@example.test',
+      via: 'admin',
+      createdAt: env.deps.clock.now().toISOString(),
+    })
+    const res = await signIn(env, { tamper: outsider })
+    expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
+    expect(await env.store.getUser('pat@outside.test')).not.toBeNull()
+    await env.store.revokeInvitation('pat@outside.test', env.deps.clock.now().toISOString())
+    expect(errorOf(await signIn(env, { tamper: outsider }))).toBe('/login?error=domain_not_allowed')
+  })
+
   it('OIDC_ASSUME_EMAIL_VERIFIED trusts a missing email_verified, never an explicit false', async () => {
     const config = testConfig()
     env = setup({ oidc: { ...config.oidc, assumeEmailVerified: true } })

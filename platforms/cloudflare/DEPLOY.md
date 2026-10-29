@@ -289,12 +289,14 @@ FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
 ```
 
 `FLING_E2E_ADMIN_API_KEY`, a key of a user in `ADMIN_EMAILS`, adds the admin checks an API key
-can make (the users list; impersonation refused, as it is for any API key). Without it they are
-skipped; impersonation itself is covered by the local e2e, which has browser sessions.
-With it and `FLING_E2E_MEMBER_API_KEY` (a second test user), the smoke test also restricts its site
-to the member and checks through the API that the admin, outside the audience, finds no such site,
-then lets the admin in through a group the member makes (and shuts them out again); the site pass
-itself needs browser sessions, so the local e2e follows it.
+can make (the users list; reading the test user's site, but not changing it; impersonation
+refused, as it is for any API key). Without it they are skipped; impersonation and an admin's
+changes to someone else's site are covered by the local e2e, which has browser sessions.
+With `FLING_E2E_MEMBER_API_KEY` (a second test user) and `FLING_E2E_OUTSIDER_API_KEY` (a third, not
+an admin), the smoke test also restricts its site to the member and checks through the API that
+the outsider finds no such site, then lets them in through a group the member makes (and shuts
+them out again). Without the outsider, the admin, who reads any site, checks the way in only. The
+site pass itself needs browser sessions, so the local e2e follows it.
 
 ## Routes, consistency and the KV fallback
 

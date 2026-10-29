@@ -21,6 +21,11 @@ paths:
 - Admin-only behaviour goes through `canInstance` and `ADMIN_EMAILS`, checked on every request.
   While an admin impersonates a user, nothing may outlive the session: no API keys, no
   `fling login`, no OAuth approvals, no nested impersonation. Audit every start and stop.
+- Admins' rights over sites are roles in `can` (`admin`, `admin-token`), carried by the request's
+  user (`asRequestUser` in `auth/standing.ts`): any credential reads, only the browser session
+  changes (`SITE_CHANGES`), and only the owner deploys. Whatever an admin may do only as one is
+  audited before it happens (`auditAdmin` in `sites.ts`). Actors built for notifications carry no
+  `admin`.
 - Sign-in is generic OIDC (`auth/oidc.ts`, behind `IdentityProvider`), plus emailed sign-in links
   for invited people (`auth/sign-in-link.ts`). Never add code specific to one provider. Who may
   sign in is decided only by standing (`auth/standing.ts`): the email policy (`auth/identity.ts`:

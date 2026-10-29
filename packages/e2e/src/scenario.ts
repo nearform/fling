@@ -9,7 +9,8 @@
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
  *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list; every site's listing, the owner's site included;
- *   the settings, secrets by name only; impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
+ *   the settings, secrets by name only; the owner's site read by key, changed only from the
+ *   browser, audited; impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
  *   group (the member makes one the owner can see and use but not change; the owner names it in
  *   the audience; the outsider, once in it, gets in, and once out is refused; deleting it leaves
@@ -58,8 +59,9 @@ export interface ScenarioOptions {
    */
   admin?: Session
   /**
-   * A user outside a restricted site's audience. Without one, the admin plays the part (an admin
-   * has no rights over someone else's site); without either, the audience checks are skipped.
+   * A user outside a restricted site's audience, who isn't an admin. Without one, the audience
+   * checks find the admin reading the site anyway (an admin reads any site) and the group checks
+   * add the admin to the group; without either, those checks are skipped.
    */
   outsider?: Session
   /** how long a changed route may take to show (default 5 s locally; smoke tests pass more) */
@@ -1159,8 +1161,10 @@ async function audienceStep(ctx: {
 }) {
   const { appOrigin, name, siteUrl, shareUrl, marker, fling, opts, step, mail } = ctx
   const viewer = opts.member
-  const outsider = opts.outsider ?? opts.admin
-  if (!viewer || !outsider) {
+  const outsider = opts.outsider
+  // An admin outside the audience reads the site anyway; one who owns it proves nothing.
+  const admin = opts.admin && opts.admin.email !== opts.session.email ? opts.admin : undefined
+  if (!viewer || (!outsider && !admin)) {
     step('audience: needs two more users (skipped)')
     return
   }
@@ -1185,15 +1189,27 @@ async function audienceStep(ctx: {
     fetch(`${appOrigin}${path}`, {
       headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
     })
-  const outsiderSite = await asUser(outsider, `/api/sites/${name}`)
-  check(outsiderSite.status === 404, `outsider GET /api/sites/${name}: ${outsiderSite.status}`)
-  const outsiderComments = await asUser(outsider, `/api/sites/${name}/comments`)
-  check(outsiderComments.status === 404, `outsider comments: ${outsiderComments.status}`)
+  if (outsider) {
+    const outsiderSite = await asUser(outsider, `/api/sites/${name}`)
+    check(outsiderSite.status === 404, `outsider GET /api/sites/${name}: ${outsiderSite.status}`)
+    const outsiderComments = await asUser(outsider, `/api/sites/${name}/comments`)
+    check(outsiderComments.status === 404, `outsider comments: ${outsiderComments.status}`)
+  }
+  if (admin) {
+    const adminSite = await asUser(admin, `/api/sites/${name}`)
+    const body = adminSite.ok ? ((await adminSite.json()) as { owner?: string }) : {}
+    check(
+      adminSite.status === 200 && body.owner === opts.session.email,
+      `admin GET /api/sites/${name}: ${adminSite.status} ${JSON.stringify(body)}`
+    )
+  }
   if (ctx.comments) {
     const viewerComments = await asUser(viewer, `/api/sites/${name}/comments`)
     check(viewerComments.status === 200, `viewer comments: ${viewerComments.status}`)
   }
-  step('API: the viewer reads the comments; the outsider gets 404s, as for a missing site')
+  step(
+    `API: the viewer reads the comments${outsider ? '; the outsider gets 404s, as for a missing site' : ''}${admin ? '; an admin outside the audience reads it' : ''}`
+  )
 
   // Shared with me: the viewer finds the site there, by address; the outsider and the owner
   // (`fling ls --shared`, whose own sites never show) don't.
@@ -1202,22 +1218,26 @@ async function audienceStep(ctx: {
     viewerShared.some(s => s.name === name && s.via.direct),
     `viewer GET /api/shared: ${JSON.stringify(viewerShared)}`
   )
-  const outsiderShared = await sharedWith(appOrigin, outsider)
-  check(
-    !outsiderShared.some(s => s.name === name),
-    `outsider GET /api/shared lists ${name}: ${JSON.stringify(outsiderShared)}`
-  )
+  // Shared with me is what was shared with you: never every site an admin may open.
+  for (const who of [outsider, admin]) {
+    if (!who) continue
+    const theirs = await sharedWith(appOrigin, who)
+    check(
+      !theirs.some(s => s.name === name),
+      `${who.email} GET /api/shared lists ${name}: ${JSON.stringify(theirs)}`
+    )
+  }
   const ownerShared = (await fling('ls', '--shared')) as { sites: SharedListed[] }
   check(
     !ownerShared.sites.some(s => s.name === name),
     `owner fling ls --shared lists their own site: ${JSON.stringify(ownerShared)}`
   )
-  step('shared with me: the viewer sees it; the outsider and the owner do not')
+  step('shared with me: the viewer sees it; the outsider (or admin) and the owner do not')
 
   // The site host: a member cookie doesn't open it; the viewer gets in through sign-in and the
   // site pass, the outsider is answered as for a missing site, at the address they asked for.
   // Only with browser sessions.
-  if (viewer.cookie && viewer.siteCookie && outsider.cookie) {
+  if (viewer.cookie && viewer.siteCookie && outsider?.cookie) {
     const loginPrefix = `${appOrigin}/auth/login?return=`
     const toSignIn = await eventually(
       'restricted site sends a member to sign in',
@@ -1518,6 +1538,8 @@ async function groupStep(ctx: {
   const owner = opts.session
   const maker = opts.member
   const joiner = opts.outsider ?? opts.admin
+  // An admin reads the site whether or not the group names them: only the way in is checked.
+  const joinerIsAdmin = !opts.outsider
   if (!maker || !joiner) {
     step('groups: needs two more users (skipped)')
     return
@@ -1622,11 +1644,11 @@ async function groupStep(ctx: {
 
     const removed = await as(maker, 'POST', `${path}/members`, { remove: [joiner.email] })
     check(removed.status === 200, `member removes ${joiner.email}: ${removed.status}`)
-    if (ctx.comments) {
+    if (ctx.comments && !joinerIsAdmin) {
       const outside = await site()
       check(outside.status === 404, `removed from the group, comments: ${outside.status}`)
     }
-    if (joiner.cookie) {
+    if (joiner.cookie && !joinerIsAdmin) {
       await refusedAt(siteUrl, appOrigin, joiner.cookie, 'removed from the group')
     }
     const left = await sharedWith(appOrigin, joiner)
@@ -1634,7 +1656,11 @@ async function groupStep(ctx: {
       !left.some(s => s.name === name),
       `removed from the group, GET /api/shared: ${JSON.stringify(left)}`
     )
-    step('out of the group: refused at once by the API, shared with me and the next sign-in hop')
+    step(
+      joinerIsAdmin
+        ? 'out of the group: gone from shared with me (an admin still reads the site)'
+        : 'out of the group: refused at once by the API, shared with me and the next sign-in hop'
+    )
 
     // An opt-out holds: the joiner turns group emails off (read with the CLI, changed through
     // MCP), is added again, and hears nothing. Their choice goes back to the default after.
@@ -1800,9 +1826,23 @@ async function adminStep(ctx: {
     email: owner,
   })
   check(viaKey.status === 403, `impersonating with an API key: ${viaKey.status}`)
+  // Someone else's site: the key reads it and changes nothing; changes need the browser session.
+  const othersSite = admin.email !== owner
+  let spa = false
+  if (othersSite) {
+    const read = await call({ key: admin.apiKey }, 'GET', `/api/sites/${name}`)
+    const detail = read.ok ? ((await read.json()) as { owner?: string; spa?: boolean }) : {}
+    check(
+      read.status === 200 && detail.owner === owner,
+      `admin key GET /api/sites/${name}: ${read.status} ${JSON.stringify(detail)}`
+    )
+    spa = detail.spa === true
+    const change = await call({ key: admin.apiKey }, 'PATCH', `/api/sites/${name}`, { spa })
+    check(change.status === 404, `admin key PATCH /api/sites/${name}: ${change.status}`)
+  }
   if (!admin.cookie) {
     step(
-      `admin (API key): lists users (${owner} included), every site (${name} included) and the settings (secrets by name only); may not impersonate with a key`
+      `admin (API key): lists users (${owner} included), every site (${name} included) and the settings (secrets by name only)${othersSite ? `; reads ${name} but may not change it` : ''}; may not impersonate with a key`
     )
     return
   }
@@ -1864,8 +1904,25 @@ async function adminStep(ctx: {
       [latest, before].every(e => e.actor === admin.email && e.target === owner),
     `audit: ${JSON.stringify(audit.entries.slice(0, 2))}`
   )
+  if (othersSite) {
+    // The same setting again: a change to the owner's site, on the record, that alters nothing.
+    const changed = await call(after, 'PATCH', `/api/sites/${name}`, { spa })
+    check(changed.status === 200, `admin session PATCH /api/sites/${name}: ${changed.status}`)
+    const logged = (await (await call(after, 'GET', '/api/admin/audit')).json()) as {
+      entries: { action: string; actor: string; target: string; owner?: string; change?: string }[]
+    }
+    const [entry] = logged.entries
+    check(
+      entry?.action === 'site.change' &&
+        entry.change === 'site.settings' &&
+        entry.actor === admin.email &&
+        entry.target === name &&
+        entry.owner === owner,
+      `audit after an admin's change: ${JSON.stringify(logged.entries.slice(0, 1))}`
+    )
+  }
   step(
-    `admin: lists users, every site (${name} included) and the settings; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
+    `admin: lists users, every site (${name} included) and the settings; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)${othersSite ? `; changes ${name} from the browser (audited)` : ''}`
   )
 }
 

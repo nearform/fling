@@ -191,6 +191,10 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
+An admin of the instance can read anyone's site with these commands (`fling info`, `fling files`,
+the comments). Changing someone else's site needs the admin's browser session: open it from All
+sites in the web app.
+
 ### Who can open a site
 
 Each site has an access level: **only you**, **teams** (groups), **specific people**, **everyone

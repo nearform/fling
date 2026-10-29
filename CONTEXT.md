@@ -188,12 +188,24 @@ login page (`link_used`, `link_expired`, `not_invited`) with the form to ask for
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
 last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, in one
 response of at most `ADMIN_SITES_MAX` sites, with `truncated` past it; the Sites page's All sites
-tab, shown to admins alone, searched and ordered like the other tabs). They may **impersonate** a
-user: from a browser session only, they act as that user for at most 60 minutes, with a banner on
-every page, and stop to return to their own session. Listing a site gives them nothing more: they
-get no rights over anyone's site except by impersonating, and while impersonating can create
+tab, shown to admins alone, searched and ordered like the other tabs, each row opening the site's
+page). Admins **administer** every site (the `admin` and `admin-token` roles in `policy.ts`):
+with any credential they open, read and review any site, restricted ones included; from their
+browser session they also change it as its owner would (access, settings, archive, roll back,
+share link, delete, anyone's comment). Nobody but the owner deploys. What an admin does only
+because they are one is audited: `site.change` for each change, `site.open` for each site pass to
+a restricted site (`auditAdmin` in `apps/api/src/sites.ts`); the owner is not emailed. The site
+page tells an admin whose site it is. They may **impersonate** a user: from a browser session
+only, they act as that user, with that user's rights alone, for at most 60 minutes, with a banner
+on every page, and stop to return to their own session. While impersonating they can create
 nothing that outlives the session (no API keys or `fling login`, no OAuth approvals, no further
-impersonation). Every start and stop is audited (`AUDIT` items, kept 180 days, and a log line).
+impersonation). Every start and stop is audited.
+
+**Audit log** — what admins did (impersonations, invitations and revocations, changes to other
+people's sites, opening restricted ones) and every invitation made by sharing
+(`apps/api/src/audit.ts`): an `AUDIT` item per entry, time-ordered and kept 180 days, and a log
+line. Admin → Users shows the latest 50 (`GET /api/admin/audit`).
+
 Admins also read the instance's **settings** (`/admin/settings`, `GET /api/admin/settings`,
 `admin.settings.read`; from a browser session or an admin's API key): every key of the env schema
 in `apps/api/src/config.ts` with the value the instance runs with and whether the deployment set

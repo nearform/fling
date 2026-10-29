@@ -1,9 +1,10 @@
 import { DEFAULT_INSTALL_COMMAND, instanceSiteUrl, REPO_SLUG } from '@fling/shared'
-import { ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import { CommandLine } from '../components/CopyButton'
 import { PageHeader } from '../components/PageHeader'
 import { useInstance } from '../hooks/instance'
+import { useWhySite } from '../hooks/queries'
 import { audienceFor, npxCommandFor } from '../lib/instance'
 
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
@@ -70,11 +71,26 @@ export function QuickStart() {
 
 export default function GetStarted() {
   const instance = useInstance()
+  const { data: whyUrl } = useWhySite()
   return (
     <div className="mx-auto max-w-3xl">
       <PageHeader
         title="Get started"
         description="Put a folder of static files online in one command, from your terminal, Claude Code or Claude."
+        actions={
+          whyUrl && (
+            <a
+              href={whyUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-ghost btn-sm gap-1.5"
+            >
+              Why Fling?
+              <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" aria-hidden />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          )
+        }
       />
       <div className="space-y-4">
         <QuickStart />

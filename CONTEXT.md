@@ -170,6 +170,11 @@ it or it is the default, grouped (`SETTING_GROUP`), and the secrets by name only
 never their values. Read only: changing a setting is a deploy.
 The `admin.*` actions are in `policy.ts` (`canInstance`).
 
+**Why Fling?** — the page in `why/` that says what Fling is for. An admin publishes it on their
+instance as a public site named `why-fling` (`WHY_SITE_NAME`, `packages/shared/src/distribution.ts`);
+while it is public and live, `GET /api/why` gives its URL and the Get started page links to it, in a
+new tab.
+
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **viewer** (a signed-in user in its audience, by address or through a

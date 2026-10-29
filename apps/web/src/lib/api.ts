@@ -48,6 +48,7 @@ import {
   SentNotificationListSchema,
   type SharedSite,
   SharedSiteListSchema,
+  type SignInLinkRequest,
   type Site,
   type SiteDetail,
   SiteDetailSchema,
@@ -292,6 +293,17 @@ export const api = {
     const { sent } = await request('/api/me/notifications/sent', SentNotificationListSchema)
     return sent
   },
+}
+
+/**
+ * Ask for an emailed sign-in link (the `invites` capability). The answer is the same whatever the
+ * address, so it says nothing about who is invited.
+ */
+export function requestSignInLink(email: string, returnTo: string): Promise<void> {
+  return request('/auth/link', ignoreBody, {
+    method: 'POST',
+    body: { email, return: returnTo } satisfies SignInLinkRequest,
+  })
 }
 
 /** Full-page redirect into the instance's sign-in; the API sends the browser back to `returnTo`. */

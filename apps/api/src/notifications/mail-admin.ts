@@ -4,10 +4,10 @@
  * keys and provider codes, never an address or content); and a test email to any address the
  * admin types, inside the email policy or not, so outside deliverability checkers work.
  *
- * The test goes straight to the Mailer, not through the outbox, and is the only message Fling
- * sends on request: nothing sends one automatically. At most MAIL_TESTS_PER_HOUR per admin
- * (`USER#<admin>/NTEST#<hour>`). Policy decides who (`admin.mail.read`, `admin.mail.test`); the
- * caller passes the decision in as `ensure`.
+ * The test goes straight to the Mailer, not through the outbox (direct-mail.ts), and only when an
+ * admin asks for one. At most MAIL_TESTS_PER_HOUR per admin (`USER#<admin>/NTEST#<hour>`). Policy
+ * decides who (`admin.mail.read`, `admin.mail.test`); the caller passes the decision in as
+ * `ensure`.
  */
 import {
   MAIL_COUNTERS,
@@ -17,22 +17,15 @@ import {
   type MailTestResult,
 } from '@fling/shared'
 import { instanceMetadata } from '../instance.ts'
-import { ApiError, badRequest, notFound } from '../lib/errors.ts'
-import { newSortableId } from '../lib/ids.ts'
+import { ApiError, badRequest } from '../lib/errors.ts'
 import { isMailAddress, type MailResult } from '../mail/types.ts'
 import { hourOf } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { addressHash, logNotify } from './log.ts'
-import { renderEmail } from './templates/layout.ts'
+import { mailOf, sendDirectMail } from './direct-mail.ts'
 
 /** Failures the page lists. */
 const FAILURES_SHOWN = 20
 const HOUR_MS = 3_600_000
-
-function mailOf(deps: Deps) {
-  if (!deps.config.mail || !deps.mailer) throw notFound('Email is not set up on this instance')
-  return { mail: deps.config.mail, mailer: deps.mailer }
-}
 
 export async function mailOverview(deps: Deps, admin: string): Promise<MailAdmin> {
   const { mail } = mailOf(deps)
@@ -97,7 +90,7 @@ export function describeMailFailure(result: Extract<MailResult, { ok: false }>):
 
 /** Send the branded test email to `to` as `admin`; counts against the admin's hourly limit. */
 export async function sendTestMail(deps: Deps, admin: string, to: string): Promise<MailTestResult> {
-  const { mail, mailer } = mailOf(deps)
+  mailOf(deps) // 404 before anything is counted
   if (!isMailAddress(to)) throw badRequest('That is not an email address', 'invalid_email')
   const now = deps.clock.now()
   const used = await deps.store.countMailTest(admin, hourOf(now))
@@ -109,42 +102,20 @@ export async function sendTestMail(deps: Deps, admin: string, to: string): Promi
     )
   }
   const metadata = instanceMetadata(deps.config)
-  const rendered = renderEmail(
-    metadata,
-    [
-      {
-        subject: 'Test email',
-        lead: `This is a test email from ${metadata.name}, sent by ${admin} from the admin page.`,
-        lines: [
-          `If you can read it, ${metadata.name} can send email. Check its headers for SPF, DKIM and DMARC alignment.`,
-        ],
-        action: { label: `Open ${metadata.name}`, url: metadata.appOrigin },
-        why: `an admin of ${metadata.name} sent a test to this address`,
-      },
-    ],
-    'Test email',
-    { to, unsubscribe: [], commentNote: false }
-  )
-  const batchId = `test-${newSortableId(now)}`
-  const result = await mailer.send({
+  const { result, subject } = await sendDirectMail(deps, {
     to,
-    from: { address: mail.from, name: mail.fromName },
-    ...(mail.replyTo ? { replyTo: mail.replyTo } : {}),
-    subject: rendered.subject,
-    text: rendered.text,
-    html: rendered.html,
-    headers: {},
-    batchId,
-    tags: ['mail.test'],
+    tag: 'mail.test',
+    section: {
+      subject: 'Test email',
+      lead: `This is a test email from ${metadata.name}, sent by ${admin} from the admin page.`,
+      lines: [
+        `If you can read it, ${metadata.name} can send email. Check its headers for SPF, DKIM and DMARC alignment.`,
+      ],
+      action: { label: `Open ${metadata.name}`, url: metadata.appOrigin },
+      why: `an admin of ${metadata.name} sent a test to this address`,
+    },
   })
-  logNotify(result.ok ? 'info' : 'warn', 'test email', {
-    batchId,
-    to: addressHash(to),
-    ok: result.ok,
-    ...(result.ok ? {} : { reason: result.reason, detail: result.detail }),
-  })
-  if (result.ok)
-    return { ok: true, providerId: result.providerId ?? null, subject: rendered.subject }
+  if (result.ok) return { ok: true, providerId: result.providerId ?? null, subject }
   return {
     ok: false,
     reason: result.reason,

@@ -180,6 +180,7 @@ describe('OIDC sign-in', () => {
   })
 
   it('admits an invited address outside the policy while its invitation stands', async () => {
+    env.config.invites = true
     const outsider = { claims: { email: 'pat@outside.test' } }
     expect(errorOf(await signIn(env, { tamper: outsider }))).toBe('/login?error=domain_not_allowed')
     await env.store.putInvitation({

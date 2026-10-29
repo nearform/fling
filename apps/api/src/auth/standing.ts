@@ -10,8 +10,12 @@
  *   the invitation stays as the record.
  * - `none`: anything else. Signing in is refused and a credential gets a 401.
  *
- * An address the policy admits costs no store read; anyone else one (the invitation), and a guest
- * two more (one item each).
+ * Invitations count only while the instance has them on (`INVITES`, `config.invites`): with them
+ * off, standing is the configuration alone and an invited address is `none`, as if it had never
+ * been invited. Turning them on again brings back the invitations that are still live.
+ *
+ * An address the policy admits costs no store read; with invitations on, anyone else one (the
+ * invitation), and a guest two more (one item each).
  */
 import { type Config, isAdminEmail } from '../config.ts'
 import { type InvitationRecord, isLiveInvitation, type Store } from '../store/types.ts'
@@ -47,12 +51,13 @@ export function standingFrom(invitation: InvitationRecord | null, named: boolean
 /** The standing of a (lowercase) address now. */
 export async function standingOf(
   deps: {
-    config: Pick<Config, 'allowedEmailDomains' | 'allowedEmails' | 'adminEmails'>
+    config: Pick<Config, 'allowedEmailDomains' | 'allowedEmails' | 'adminEmails' | 'invites'>
     store: Pick<Store, 'getInvitation' | 'isNamedAnywhere'>
   },
   email: string
 ): Promise<Standing> {
   if (admittedByConfig(deps.config, email)) return 'member'
+  if (!deps.config.invites) return 'none'
   const invitation = await deps.store.getInvitation(email)
   const guest = isLiveInvitation(invitation) && invitation.role === 'guest'
   return standingFrom(invitation, guest && (await deps.store.isNamedAnywhere(email)))

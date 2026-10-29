@@ -503,8 +503,12 @@ export interface Store extends NotificationStore {
   /** Revoke the invitation (set `revokedAt`, kept if set already); null when there is none. */
   revokeInvitation(email: string, at: string): Promise<InvitationRecord | null>
   putSignInLink(link: SignInLinkRecord): Promise<void>
+  /** A sign-in link by its hash, left in place: null when unknown, expired or taken. */
+  getSignInLink(hash: string): Promise<SignInLinkRecord | null>
   /** Take a sign-in link by its hash, once: null when unknown, expired or already taken. */
   consumeSignInLink(hash: string): Promise<SignInLinkRecord | null>
+  /** Whether the link was taken (until it would have expired): "used" rather than "expired". */
+  signInLinkUsed(hash: string): Promise<boolean>
   /** Count one more new address `email` invited by sharing on `day` (`NINVITE`); returns the count. */
   countInvitation(email: string, day: Day): Promise<number>
   /** The addresses `email` invited by sharing on `day`, without counting one. */

@@ -58,6 +58,8 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       comments: config.comments,
       live: config.live,
       ...notificationCapabilities(config),
+      // People invited from outside the email policy, and the sign-in links they use (INVITES).
+      invites: config.invites,
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,

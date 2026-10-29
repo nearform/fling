@@ -21,9 +21,13 @@ paths:
 - Admin-only behaviour goes through `canInstance` and `ADMIN_EMAILS`, checked on every request.
   While an admin impersonates a user, nothing may outlive the session: no API keys, no
   `fling login`, no OAuth approvals, no nested impersonation. Audit every start and stop.
-- Sign-in is generic OIDC (`auth/oidc.ts`, behind `IdentityProvider`). Never add code specific to
-  one provider. Who may sign in is decided only by the email policy (`auth/identity.ts`:
-  `ALLOWED_EMAIL_DOMAINS`, `ALLOWED_EMAILS`), and it requires a verified email.
+- Sign-in is generic OIDC (`auth/oidc.ts`, behind `IdentityProvider`), plus emailed sign-in links
+  for invited people (`auth/sign-in-link.ts`). Never add code specific to one provider. Who may
+  sign in is decided only by standing (`auth/standing.ts`): the email policy (`auth/identity.ts`:
+  `ALLOWED_EMAIL_DOMAINS`, `ALLOWED_EMAILS`), `ADMIN_EMAILS`, or a live invitation while `INVITES`
+  is on. OIDC requires a verified email. Every request rechecks standing.
+- A sign-in link is taken only by a same-origin form POST, never by opening it, and the token is
+  never logged or stored (only its hash).
 - Publication (`publication.ts`) is the only way a version goes live. Every path to it goes through
   admission, staging and the secret scan. Nothing may skip the scan. The CLI's own checks exist only
   to give earlier messages.

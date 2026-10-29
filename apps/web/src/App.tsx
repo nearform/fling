@@ -1,3 +1,4 @@
+import { SIGN_IN_LINK_PAGE } from '@fling/shared'
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { ImpersonationBanner } from './components/ImpersonationBanner'
@@ -20,6 +21,7 @@ import Groups from './pages/Groups'
 import Login from './pages/Login'
 import Notifications from './pages/Notifications'
 import Review from './pages/Review'
+import SignInLink from './pages/SignInLink'
 import Site from './pages/Site'
 import Sites from './pages/Sites'
 
@@ -108,6 +110,7 @@ export default function App() {
             {/* OAuth consent: signed-in, but outside the app shell */}
             <Route path="authorize" element={<Authorize />} />
             <Route path="login" element={<Login />} />
+            <Route path={SIGN_IN_LINK_PAGE.slice(1)} element={<SignInLink />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

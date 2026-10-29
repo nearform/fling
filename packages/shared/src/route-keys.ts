@@ -7,6 +7,13 @@ export const siteKvsKey = (label: string) => `site:${label}`
 export const shareKvsKey = (token: string) => `share:${token}`
 /** HMAC key the edge uses to verify the `fling_site` cookie. */
 export const SITE_HMAC_KVS_KEY = 'cfg:site-hmac'
+/**
+ * `revoked:<mac>` → an expiry, in epoch seconds: the revocation list. A member's `fling_site` for
+ * that email expiring no later than it (so issued by the revocation's second) no longer opens a site. `mac` is
+ * the base64url HMAC of the email under the site cookie key (site-cookie.ts, `revocationMac`), so
+ * no address is stored at the edge; an email has an `@`, so it is never a token body.
+ */
+export const revokedKvsKey = (mac: string) => `revoked:${mac}`
 
 /** Object key that never exists; the edge rewrites unknown hosts here so S3 404s into the error page. */
 export const MISSING_KEY = '/_fling/missing'

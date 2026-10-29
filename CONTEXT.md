@@ -141,8 +141,20 @@ or they hold a live member invitation; `guest` with a live guest invitation whil
 still names them (a direct grant or a group membership); else `none`. Invitations count only
 while `INVITES` is on: with it off, standing is the configuration alone. Every sign-in admits by it
 and every request rechecks it (session, API key, OAuth and MCP tokens, refresh): with `none` the
-request is a 401, so removing a domain or revoking an invitation cuts access at once. An address
-the policy admits costs no store read.
+request is a 401, so removing a domain or revoking an invitation cuts access at once. The edge
+holds no standing, so revoking also puts the person on the **revocation list**; removing a domain
+from the configuration does not, and a member's `fling_site` from before it keeps opening
+members-level sites until it expires (7 days). An address the policy admits costs no store read.
+
+**Revocation list** — how revoking an invitation reaches the sites' edge
+(`apps/api/src/revocations.ts`): a route-table key `revoked:<mac>` (the HMAC of the email under the
+site cookie key, so no address is at the edge) whose value is the expiry a `fling_site` issued at
+that moment has. A member's cookie expiring no later than it was issued by the revocation's second, and the
+edge (`site-routing.ts`) sends it to sign in, where someone without standing is refused and anyone
+re-invited gets a fresh cookie. Entries stay 30 days, past the last cookie they could stop, kept as
+`REVOKED/<dueAt>#<mac>` records that each platform's one-minute tick sweeps. On Cloudflare the
+Worker reads the list from KV alone, so a revocation reaches every location within about a
+minute.
 
 **Invitation** — an address outside the email policy that may sign in
 (`INVITE#<email>/INVITE`, with a directory copy at `INVITES/INVITE#<email>`, in

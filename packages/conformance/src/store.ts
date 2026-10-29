@@ -1241,6 +1241,27 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       })
     })
 
+    describe('revocations', () => {
+      it('lists the due ones oldest first, not the rest, and forgets one deleted', async () => {
+        const store = await factory()
+        const r = (dueAt: string) => ({ mac: `${uid()}${uid()}`, before: 1_700_000_000, dueAt })
+        const later = r('2001-01-02T00:00:00.000Z')
+        const first = r('2001-01-01T00:00:00.000Z')
+        const notYet = r('2999-01-01T00:00:00.000Z')
+        for (const x of [later, first, notYet]) await store.putRevocation(x)
+        const due = (await store.dueRevocations(NOW, 1000)).filter(x =>
+          [later, first, notYet].some(y => y.mac === x.mac)
+        )
+        expect(due).toEqual([first, later])
+        await store.deleteRevocation(first)
+        await store.deleteRevocation(first)
+        const left = await store.dueRevocations(NOW, 1000)
+        expect(left.some(x => x.mac === first.mac)).toBe(false)
+        expect(left.some(x => x.mac === later.mac)).toBe(true)
+        for (const x of [later, notYet]) await store.deleteRevocation(x)
+      })
+    })
+
     notificationStoreConformance(factory)
   })
 }

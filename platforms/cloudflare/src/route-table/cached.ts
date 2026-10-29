@@ -13,7 +13,8 @@ import type { RouteTable } from '@fling/api/route-table'
 
 export class CachedRouteTable implements RouteTable {
   constructor(
-    private cache: RouteTable,
+    /** KV alone: what the sites host reads the revocation list from (sites.ts) */
+    readonly cache: RouteTable,
     private source: RouteTable
   ) {}
 

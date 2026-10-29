@@ -9,7 +9,8 @@
  * - The sites host (`*.<SITES_DOMAIN>`): the shared routing decision over the route table and R2
  *   (sites.ts).
  * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`) drains the
- *   notifications outbox (@fling/api/notifications); hourly, deletes expired items from D1. Reads
+ *   notifications outbox (@fling/api/notifications) and takes due revocations off the edge's
+ *   revocation list (@fling/api/revocations); hourly, deletes expired items from D1. Reads
  *   already ignore them; that reclaims the space.
  *
  * Data migrations are not run here: scripts/migrate.ts runs them from the deploy, through a
@@ -23,11 +24,13 @@ import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { drain, errorName, logNotify } from '@fling/api/notifications'
+import { sweepRevocations } from '@fling/api/revocations'
 import type { Deps } from '@fling/api/types'
 import { R2Blobs, UPLOAD_ROUTE } from './blobs/r2.ts'
 import { buildCloudflareDeps, CLOUDFLARE_DRIVERS } from './deps.ts'
 import { type Env, stringVars } from './env.ts'
 import { handleLiveUpgrade, LIVE_PATH } from './live.ts'
+import { CachedRouteTable } from './route-table/cached.ts'
 import { handleSiteRequest } from './sites.ts'
 import { D1Table } from './table/d1.ts'
 
@@ -140,6 +143,8 @@ export default {
         siteScheme: config.siteScheme,
         cookieKey: config.secrets.siteHmacKey,
         routeTable: deps.routeTable,
+        revocations:
+          deps.routeTable instanceof CachedRouteTable ? deps.routeTable.cache : deps.routeTable,
         bucket: env.BUCKET,
         assets: env.ASSETS,
       })
@@ -158,6 +163,18 @@ export default {
             console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
           })
           .catch(err => logNotify('error', 'notify drain failed', { err: errorName(err) }))
+      )
+      ctx.waitUntil(
+        sweepRevocations(deps)
+          .then(n => {
+            if (n)
+              console.log(JSON.stringify({ level: 'info', msg: 'revocations swept', count: n }))
+          })
+          .catch(err => {
+            console.warn(
+              JSON.stringify({ level: 'warn', msg: 'revocation sweep failed', err: String(err) })
+            )
+          })
       )
       return
     }

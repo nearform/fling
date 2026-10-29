@@ -8,9 +8,12 @@ import {
   NOT_FOUND_PAGE,
   REVIEW_SHELL,
   ROBOTS_TXT,
+  revokedKvsKey,
   SITE_HMAC_KVS_KEY,
 } from '../src/route-keys.ts'
 import {
+  revocationMac,
+  SITE_COOKIE_TTL_SECONDS,
   signDenyHandoff,
   signPassHandoff,
   signSiteCookie,
@@ -42,7 +45,7 @@ const routes = new Map([
 const SHARE = `s--${'t'.repeat(20)}.sites.example.test`
 const NOINDEX = { 'x-robots-tag': 'noindex' }
 
-function ctx(lookups: string[] = []) {
+function ctx(lookups: string[] = [], revocations = new Map<string, string>()) {
   return {
     appOrigin: 'https://app.example.test',
     siteScheme: 'https',
@@ -54,6 +57,10 @@ function ctx(lookups: string[] = []) {
     getCookieKey: async () => {
       lookups.push(SITE_HMAC_KVS_KEY)
       return KEY
+    },
+    getRevocation: async (key: string) => {
+      lookups.push(key)
+      return revocations.get(key) ?? null
     },
     hmac: (key: string, data: string) => createHmac('sha256', key).update(data).digest('base64url'),
   }
@@ -154,6 +161,50 @@ describe('routeSiteRequest', () => {
     ).toEqual({ action: 'rewrite', uri: '/sites/S1/V1/index.html', headers: NOINDEX })
     expect(validSiteCookie(cookie, KEY, NOW, ctx().hmac)).toBe(true)
     expect(siteCookieOf(cookie, KEY, NOW, ctx().hmac)).toBe('guest')
+  })
+
+  it("sends a member's cookie issued before a revocation of their email to sign in", async () => {
+    const host = 'priv.sites.example.test'
+    const email = 'm@outside.test'
+    const listKey = revokedKvsKey(revocationMac(email, KEY))
+    const issuedAt = (at: number) =>
+      signSiteCookie({ e: email, x: at + SITE_COOKIE_TTL_SECONDS }, KEY)
+    // Revoked a minute ago: the list holds the expiry a cookie issued then has.
+    const revoked = new Map([[listKey, String(NOW - 60 + SITE_COOKIE_TTL_SECONDS)]])
+    const toSignIn = {
+      action: 'respond',
+      status: 302,
+      statusDescription: 'Found',
+      headers: {
+        location: `https://app.example.test/auth/login?return=${encodeURIComponent(`https://${host}/`)}`,
+        'cache-control': 'no-store',
+        ...NOINDEX,
+      },
+    }
+    const lookups: string[] = []
+    expect(
+      await routeSiteRequest(req({ host, cookie: issuedAt(NOW - 120) }), ctx(lookups, revoked))
+    ).toEqual(toSignIn)
+    expect(lookups).toEqual(['site:priv', SITE_HMAC_KVS_KEY, listKey])
+    // Issued in the same second as the revocation: stopped too. A second later (a fresh sign-in):
+    // served.
+    expect(
+      (await routeSiteRequest(req({ host, cookie: issuedAt(NOW - 60) }), ctx([], revoked))).action
+    ).toBe('respond')
+    const d = await routeSiteRequest(req({ host, cookie: issuedAt(NOW - 59) }), ctx([], revoked))
+    expect(d.action).toBe('rewrite')
+    // Someone else's revocation stops no one but them.
+    const other = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
+    expect((await routeSiteRequest(req({ host, cookie: other }), ctx([], revoked))).action).toBe(
+      'rewrite'
+    )
+    // A public site reads no revocation.
+    const pub: string[] = []
+    await routeSiteRequest(
+      req({ host: 'pub.sites.example.test', cookie: issuedAt(NOW - 120) }),
+      ctx(pub, revoked)
+    )
+    expect(pub).toEqual(['site:pub'])
   })
 
   it('rewrites unknown hosts to the missing key without a lookup for malformed labels', async () => {

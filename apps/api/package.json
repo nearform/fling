@@ -15,6 +15,7 @@
     "./mail/memory": "./src/mail/memory.ts",
     "./mail/file": "./src/mail/file.ts",
     "./notifications": "./src/notifications/index.ts",
+    "./revocations": "./src/revocations.ts",
     "./blobs": "./src/blobs/types.ts",
     "./blobs/fs": "./src/blobs/fs.ts",
     "./blobs/signed-upload": "./src/blobs/signed-upload.ts",

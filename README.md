@@ -105,7 +105,8 @@ and on public sites, and nothing else (no sites, groups, API keys or app connect
 Their first email is the share's notification, with a sign-in link; guests sign in with emailed
 single-use links, never at the instance's identity provider. Each person invites at most
 `INVITES_PER_DAY` new outside addresses a day. Admins invite full members from Admin → Invitations
-and revoke any invitation there, which cuts that person off on their next request. A guest no
+and revoke any invitation there, which cuts that person off on their next request, at the sites'
+edge too (within about a minute on Cloudflare). A guest no
 audience or group names any more is cut off too, until someone shares with them again. See each
 platform's deploy guide, Outside invitations.
 

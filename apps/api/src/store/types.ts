@@ -86,6 +86,19 @@ export const isLiveInvitation = (i: InvitationRecord | null): i is InvitationRec
   i !== null && i.revokedAt === undefined
 
 /**
+ * A revocation on the edge's revocation list (`revoked:<mac>` in the route table, route-keys.ts),
+ * kept at `REVOKED/<dueAt>#<mac>` so the sweep (revocations.ts) finds the ones to take off it.
+ */
+export interface RevocationRecord {
+  /** the list key's `mac` (revocationMac): no address is kept */
+  mac: string
+  /** the list's value: member cookies expiring no later than this (epoch seconds) are stopped */
+  before: number
+  /** when it comes off the list */
+  dueAt: string
+}
+
+/**
  * An emailed single-use sign-in link (`MAGIC#<sha256 of the token>/MAGIC`). Only the hash of the
  * token is stored; consuming it deletes it.
  */
@@ -535,6 +548,12 @@ export interface Store extends NotificationStore {
   countSignInLinkRequest(email: string, hour: Hour): Promise<number>
   /** Count one more sign-in link asked of the instance this minute; returns the count. */
   countSignInLinkInstance(minute: Minute): Promise<number>
+  /** Keep a revocation until it is due to come off the edge's list. */
+  putRevocation(revocation: RevocationRecord): Promise<void>
+  /** Revocations due by `now`, oldest first, at most `limit`. */
+  dueRevocations(now: string, limit: number): Promise<RevocationRecord[]>
+  /** Forget a revocation (no-op when it is gone already). */
+  deleteRevocation(revocation: RevocationRecord): Promise<void>
 
   // --- groups ---
   /**

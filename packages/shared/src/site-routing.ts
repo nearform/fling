@@ -9,7 +9,7 @@
 //     site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
 //     and `/robots.txt` on any host is ROBOTS_TXT
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
-//     `fling_site` cookie; restricted site, or members-level site to a guest's `fling_site`,
+//     `fling_site` cookie, or a member's the revocation list stops; restricted site, or members-level site to a guest's `fling_site`,
 //     without a valid `fling_pass` naming it), 301 to add a trailing slash (extensionless path,
 //     not an SPA).
 //   → either way, with the headers every response on that host carries (siteResponseHeaders).
@@ -38,7 +38,10 @@
 // added to the audience gets in within seconds and nobody loops between the two hosts.
 //
 // Members-level sites (private, no audience) open with any valid `fling_site` that isn't a guest's
-// (`g: 1`). A guest's goes through the site pass like a restricted site: the app's `/auth/login`
+// (`g: 1`) and was issued after any revocation of its email on the revocation list
+// (`revoked:<mac>`, route-keys.ts); an older one goes to sign in like no cookie, where the app
+// refuses someone who has lost their standing and gives anyone else a fresh cookie. The list is
+// how revoking an invitation reaches the edge before the cookie expires. A guest's goes through the site pass like a restricted site: the app's `/auth/login`
 // refreshes `fling_site` and asks policy, so a real guest gets a deny handoff (the site answers
 // as a missing one) and someone who has become a member since their cookie was set goes straight
 // back with a member's cookie.
@@ -59,6 +62,7 @@ import {
   NOT_FOUND_PAGE,
   REVIEW_SHELL,
   ROBOTS_TXT,
+  revokedKvsKey,
   SITE_DENIED_TTL_SECONDS,
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
@@ -94,6 +98,11 @@ export interface SiteRoutingContext {
   getRoute(key: string): Promise<string | null>
   /** the key `fling_site` cookies are signed with; null when unknown */
   getCookieKey(): Promise<string | null>
+  /**
+   * the revocation list's value at `key` (`revoked:<mac>`: an expiry), null when missing. May
+   * trail a revocation by the platform's propagation, never by more.
+   */
+  getRevocation(key: string): Promise<string | null>
   /** base64url HMAC-SHA256 of `data` under `key` */
   hmac(key: string, data: string): string
   /** how long a site pass minted here lasts, in seconds; default SITE_PASS_TTL_SECONDS */
@@ -186,16 +195,14 @@ function signedPayload(
   }
 }
 
-/**
- * Who a valid, unexpired `fling_site` cookie (not a site pass or handoff, which carry a kind `k`)
- * says is signed in: 'guest' when it carries `g: 1`, else 'member'; null when it isn't one.
- */
-export function siteCookieOf(
+/** The payload of a valid, unexpired `fling_site` cookie (`e`, `x`, `g`); null when it isn't one. */
+function siteCookieClaims(
   value: string,
   key: string,
   nowSeconds: number,
   hmac: (key: string, data: string) => string
-): 'member' | 'guest' | null {
+  // biome-ignore lint/suspicious/noExplicitAny: a parsed JSON payload, checked field by field
+): any {
   const p = signedPayload(value, key, hmac)
   if (
     !p ||
@@ -206,6 +213,21 @@ export function siteCookieOf(
   ) {
     return null
   }
+  return p
+}
+
+/**
+ * Who a valid, unexpired `fling_site` cookie (not a site pass or handoff, which carry a kind `k`)
+ * says is signed in: 'guest' when it carries `g: 1`, else 'member'; null when it isn't one.
+ */
+export function siteCookieOf(
+  value: string,
+  key: string,
+  nowSeconds: number,
+  hmac: (key: string, data: string) => string
+): 'member' | 'guest' | null {
+  const p = siteCookieClaims(value, key, nowSeconds, hmac)
+  if (!p) return null
   return p.g === 1 ? 'guest' : 'member'
 }
 
@@ -422,14 +444,21 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     const cookie = req.cookie
     let key: string | null = null
     if (cookie !== null) key = await ctx.getCookieKey()
-    let who: string | null = null
-    if (key) who = siteCookieOf(cookie || '', key, ctx.nowSeconds, ctx.hmac)
-    if (!who) return toSignIn(req, ctx, host)
-    // A guest's cookie may be stale (they have since become a member): the app decides, through
-    // the same sign-in hop as a restricted site, which refreshes the cookie on the way.
-    if (who === 'guest') {
+    // biome-ignore lint/suspicious/noExplicitAny: the claims siteCookieClaims checked
+    let claims: any = null
+    if (key) claims = siteCookieClaims(cookie || '', key, ctx.nowSeconds, ctx.hmac)
+    if (!claims) return toSignIn(req, ctx, host)
+    if (claims.g === 1) {
+      // A guest's cookie may be stale (they have since become a member): the app decides, through
+      // the same sign-in hop as a restricted site, which refreshes the cookie on the way.
       const held = await bySitePass(req, ctx, host, site.id)
       if (held) return held
+    } else {
+      // A member's that expires no later than its email's revocation-list value was issued no
+      // later than the second of the revocation. Someone who keeps their standing gets a newer one
+      // at sign-in, so at worst they pass through it again within that second.
+      const until = await ctx.getRevocation(revokedKvsKey(ctx.hmac(key as string, claims.e)))
+      if (until !== null && claims.x <= Number(until)) return toSignIn(req, ctx, host)
     }
   }
 

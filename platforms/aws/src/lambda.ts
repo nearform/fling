@@ -12,7 +12,8 @@
  * runs those migrations (opt-in ones included), `dryRun: true` writes nothing. Only callers with
  * lambda:InvokeFunction can send it: a function URL request is always an HTTP event whose body is
  * a string, so no visitor can. The same holds for `{"fling":"notify"}`, the scheduler's one-minute
- * tick, which drains the notifications outbox (@fling/api/notifications) and returns its result.
+ * tick, which drains the notifications outbox (@fling/api/notifications) and returns its result,
+ * then takes due revocations off the edge's revocation list (@fling/api/revocations).
  *
  * Instance values (INSTANCE_NAME, ALLOWED_EMAIL_DOMAINS, BRAND_*, …) can also ship inside the zip as
  * `instance.json` (a flat object of env-style keys, written by scripts/build.mjs from
@@ -24,6 +25,7 @@ import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
 import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
+import { sweepRevocations } from '@fling/api/revocations'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
@@ -132,6 +134,15 @@ export const handler = async (
       deadline: Date.now() + notifyBudget(context.getRemainingTimeInMillis()),
     })
     console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
+    await sweepRevocations(deps)
+      .then(n => {
+        if (n) console.log(JSON.stringify({ level: 'info', msg: 'revocations swept', count: n }))
+      })
+      .catch(err =>
+        console.warn(
+          JSON.stringify({ level: 'warn', msg: 'revocation sweep failed', err: String(err) })
+        )
+      )
     return result
   }
   if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }

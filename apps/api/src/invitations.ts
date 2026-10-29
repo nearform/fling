@@ -27,6 +27,7 @@ import { sendDirectMail } from './notifications/direct-mail.ts'
 import { describeMailFailure } from './notifications/mail-admin.ts'
 import { lifetimeInWords } from './notifications/templates/sign-in-link.ts'
 import { canInstance, type Principal } from './policy.ts'
+import { revokeSiteCookies } from './revocations.ts'
 import { dayOf, type InvitationRecord, isLiveInvitation } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -256,6 +257,8 @@ export async function revokeInvitation(
   }
   const revoked = await deps.store.revokeInvitation(email, at)
   if (!revoked) throw notFound(`No invitation for ${email}`)
+  // The API refuses them from now on; the revocation list stops their cookie at the edge too.
+  if (isLiveInvitation(existing)) await revokeSiteCookies(deps, email, deps.clock.now())
   return rowOf(deps, revoked)
 }
 

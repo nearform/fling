@@ -207,7 +207,10 @@ As on AWS ([Outside invitations](../aws/DEPLOY.md#outside-invitations)): `INVITE
 from outside the email policy in by invitation. Sharing a site or adding someone to a group with an
 outside address invites them as a guest (a reviewer of what is shared with them), at most
 `INVITES_PER_DAY` new addresses a day per person (default 20); admins invite full members and revoke
-invitations at **Admin → Invitations**. Invited people sign in with single-use links emailed to
+invitations at **Admin → Invitations**. A revocation also goes on the edge's revocation list, which
+the Worker reads from KV alone (a D1 read for every member's page view would cost too much), so a
+revoked member's `fling_site` cookie stops opening members-level sites everywhere within about a
+minute; the one-minute cron takes entries off the list after 30 days. Invited people sign in with single-use links emailed to
 them, so it needs [Email](#email): the deploy refuses `INVITES` on without `MAIL`. Set both with
 `setup.mjs` (`--invites on`, `--invites-per-day`) or in `INSTANCE` in the deploy config, then deploy.
 

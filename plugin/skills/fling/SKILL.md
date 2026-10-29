@@ -227,8 +227,10 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
   updated first; `sort: "created"` (newest first) or `"name"` (A–Z) for another order.
   `shared: true` lists instead the restricted sites other people have shared with the user (by
   address or through a group), with owner and review link: use it when the user asks what has
-  been shared with them. Only the owner manages those sites.
-- `fling_info { name }` — one site with its version history.
+  been shared with them. Only the owner manages those sites (and the instance's admins, from the
+  web app).
+- `fling_info { name }` — one site with its version history. An admin reads anyone's site this
+  way; changing someone else's site takes the web app, so say so rather than retrying.
 - `fling_files { name, versionId? }` — the files in the live version (or an earlier one): use it to
   check what was published, e.g. when the user reports a 404 (no root `index.html` → the root 404s).
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).

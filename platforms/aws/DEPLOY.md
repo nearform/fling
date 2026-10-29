@@ -502,7 +502,10 @@ By default only the people the email policy admits (`ALLOWED_EMAIL_DOMAINS`, `AL
   them, and on public sites, and nothing else. Each person invites at most `INVITES_PER_DAY` (20 by
   default) new outside addresses a day; past it, the change is refused (`too_many_invites`).
 - **Admins invite members** from **Admin → Invitations** (`/admin/invitations`): a full user, like
-  anyone the policy admits. Revoking an invitation there cuts that person off on their next request.
+  anyone the policy admits. Revoking an invitation there cuts that person off on their next request,
+  and puts them on the edge's revocation list, so their `fling_site` cookie stops opening
+  members-level sites within seconds too. The scheduler's one-minute tick takes entries off the
+  list after 30 days.
 - **Guests sign in with an emailed link**, single use, never at the OIDC issuer (which usually
   admits only your organisation): the share's notification email carries their first one, and the
   login page offers "Email me a sign-in link" for later.

@@ -1,6 +1,6 @@
 // The CloudFront Function shell (cloudfront-js-2.0, viewer-request, on the sites distribution)
 // around the shared routing decision, @fling/shared/site-routing. It reads the request, looks
-// routes and the cookie key up in the associated KeyValueStore and turns the decision into a
+// routes, revocations and the cookie key up in the associated KeyValueStore and turns the decision into a
 // rewritten request (an S3 object key; unknown hosts go to `/_fling/missing`, which S3 404s into
 // the error page) or a response, with the cookies it sets (the site pass) and the host's headers
 // (a share host's `Referrer-Policy: no-referrer`). A rewrite's headers cannot be applied here: a
@@ -69,6 +69,7 @@ async function handler(event) {
       nowSeconds: Math.floor(Date.now() / 1000),
       getRoute: kvsGet,
       getCookieKey: getCookieKey,
+      getRevocation: kvsGet,
       hmac: hmac,
     }
   )

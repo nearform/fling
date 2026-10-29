@@ -1,6 +1,8 @@
 import { parseLabel } from '@fling/shared/hosts'
-import { SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
+import { revokedKvsKey, SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
 import {
+  revocationMac,
+  SITE_COOKIE_TTL_SECONDS,
   signDenyHandoff,
   signPassHandoff,
   signSiteCookie,
@@ -113,6 +115,24 @@ describe('auth for private sites', () => {
     expect(res.headers?.location?.value).toBe(
       `${APP}/auth/login?return=${encodeURIComponent(`https://${PRIVATE}/`)}`
     )
+  })
+
+  it("sends a member's cookie issued before their revocation to sign in, and serves a newer one", async () => {
+    const email = 'gone@outside.test'
+    const at = NOW_S - 60
+    const kvs = new Map(store)
+    kvs.set(revokedKvsKey(revocationMac(email, HMAC)), String(at + SITE_COOKIE_TTL_SECONDS))
+    const r = createSiteRouter({
+      kvs: { get: async key => kvs.get(key) },
+      appOrigin: APP,
+      now: () => NOW_MS,
+    })
+    const issued = (t: number) =>
+      `fling_site=${signSiteCookie({ e: email, x: t + SITE_COOKIE_TTL_SECONDS }, HMAC)}`
+    const old = await r(toCloudFrontEvent({ host: PRIVATE, cookieHeader: issued(at - 1) }))
+    expect(isResponse(old) && old.statusCode).toBe(302)
+    const fresh = await r(toCloudFrontEvent({ host: PRIVATE, cookieHeader: issued(at + 1) }))
+    expect(isResponse(fresh) ? fresh.statusCode : fresh.uri).toBe('/sites/S1/V1/index.html')
   })
 
   it('rejects expired cookies', async () => {

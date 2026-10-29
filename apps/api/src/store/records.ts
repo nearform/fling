@@ -81,6 +81,10 @@
  *                                                        hour — 2 h
  *   MAGICRATE              <minute>                      sign-in links asked of the instance that
  *                                                        minute — 1 h
+ *   REVOKED                <dueAt>#<mac>                 a revocation on the edge's revocation list
+ *                                                        (mac, revokedAt), until it comes off it:
+ *                                                        sorted by when, so the due ones are one
+ *                                                        query
  *
  * An invitation and its directory copy are written together, each write conditioned on the
  * `updatedAt` read (or on there being none), so racing invites of one address store one.
@@ -236,6 +240,7 @@ import {
   type OAuthRequestRecord,
   type PendingNotificationRecord,
   type RefreshTokenRecord,
+  type RevocationRecord,
   type SentNotificationRecord,
   type SharedListing,
   type SignInLinkRecord,
@@ -328,6 +333,7 @@ const key = {
   invitationCount: (email: string, day: Day) => ({ pk: userPk(email), sk: `NINVITE#${day}` }),
   signInLinkRate: (email: string, hour: Hour) => ({ pk: `MAGICRATE#${email}`, sk: hour }),
   signInLinkInstanceRate: (minute: Minute) => ({ pk: 'MAGICRATE', sk: minute }),
+  revocation: (r: { dueAt: string; mac: string }) => ({ pk: 'REVOKED', sk: `${r.dueAt}#${r.mac}` }),
 }
 
 /** The outbox's partition for a minute. */
@@ -1732,6 +1738,22 @@ export class Records implements Store {
 
   countSignInLinkInstance(minute: Minute) {
     return this.count(key.signInLinkInstanceRate(minute), minuteAfter(minute, TTL.instanceRate))
+  }
+
+  async putRevocation(revocation: RevocationRecord) {
+    await this.table.put(encode('revocation', key.revocation(revocation), revocation))
+  }
+
+  async dueRevocations(now: string, limit: number) {
+    const page = await this.table.query('REVOKED', { limit })
+    return page.items
+      .map(i => decode<RevocationRecord>('revocation', i))
+      .filter(r => r.dueAt <= now)
+  }
+
+  async deleteRevocation(revocation: RevocationRecord) {
+    const k = key.revocation(revocation)
+    await this.table.delete(k.pk, k.sk)
   }
 }
 

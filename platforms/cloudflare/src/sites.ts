@@ -29,6 +29,12 @@ export interface SitesOptions {
   siteScheme: string
   cookieKey: string
   routeTable: RouteTable
+  /**
+   * Where the revocation list is read: KV alone, not KV and D1 as routes are. A key on the list is
+   * missing for nearly every request, and a miss there would otherwise cost a D1 read; KV shows a
+   * new revocation within about a minute.
+   */
+  revocations: RouteTable
   bucket: R2Bucket
   assets: Bindings['ASSETS']
   now?: () => number
@@ -151,6 +157,7 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
       nowSeconds: Math.floor((opts.now ?? Date.now)() / 1000),
       getRoute: async key => (await opts.routeTable.get(key)) ?? null,
       getCookieKey: async () => opts.cookieKey,
+      getRevocation: async key => (await opts.revocations.get(key)) ?? null,
       hmac,
       passTtlSeconds: opts.passTtlSeconds,
     }

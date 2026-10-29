@@ -3,7 +3,8 @@
 //
 // - `fling_site` (payload { e: email, x: expiry, g?: 1 }): lets signed-in members view private
 //   sites. `g: 1` marks a guest, to whom members-level sites answer as missing ones. Minted by the
-//   API at login, verified at the edge by siteCookieOf in site-routing.ts.
+//   API at login, verified at the edge by siteCookieOf in site-routing.ts. A member's is refused
+//   once it was issued before a revocation of `e` on the revocation list (revokedKvsKey, route-keys.ts).
 // - the pass handoff (payload { k: 'handoff', s: siteId, e, x }): the API's word, valid for
 //   60 seconds, that `e` may view the restricted site `s`; it travels in the URL of
 //   `/_fling-pass` on the site's host.
@@ -61,6 +62,11 @@ function verify(value: string, key: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+/** The `mac` of `email`'s revocation-list key (`revokedKvsKey`), as the edge computes it. */
+export function revocationMac(email: string, key: string): string {
+  return createHmac('sha256', key).update(email).digest('base64url')
 }
 
 export function signSiteCookie(payload: SiteCookiePayload, key: string): string {

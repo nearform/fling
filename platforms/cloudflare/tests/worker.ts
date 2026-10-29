@@ -38,6 +38,7 @@ export default {
         new WorkersKvRouteTable(env.KV),
         new TableRouteTable(new D1Table(env.DB))
       ),
+      revocations: new WorkersKvRouteTable(env.KV),
       bucket: env.BUCKET,
       assets: {
         fetch: async (url: string) =>

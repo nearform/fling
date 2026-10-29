@@ -5,9 +5,14 @@
  * an invited newcomer's sign-in link, minted at send time, and the drain mails only people with
  * standing.
  */
+import { createHmac } from 'node:crypto'
+import { revokedKvsKey } from '@fling/shared'
+import { revocationMac, SITE_COOKIE_TTL_SECONDS, signSiteCookie } from '@fling/shared/site-cookie'
+import { routeSiteRequest } from '@fling/shared/site-routing'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailConfig } from '../src/config.ts'
 import { drain } from '../src/notifications/drain.ts'
+import { sweepRevocations } from '../src/revocations.ts'
 import {
   APP_ORIGIN,
   api,
@@ -368,6 +373,89 @@ describe('admin invitations', () => {
     expect((await browser(env, bossCookie, 'GET', '/api/admin/invitations')).status).toBe(404)
     const res = await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: SAM })
     expect(res.status).toBe(404)
+  })
+})
+
+describe('the revocation list', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const hmac = (key: string, data: string) =>
+    createHmac('sha256', key).update(data).digest('base64url')
+  const listKey = (env: Env, email: string) =>
+    revokedKvsKey(revocationMac(email, env.config.secrets.siteHmacKey))
+
+  /** What the edge decides for a members-level site, given this `fling_site`. */
+  async function edge(env: Env, cookie: string) {
+    const host = 'q3-report.sites.example.test'
+    const d = await routeSiteRequest(
+      { method: 'GET', host, uri: '/', query: '', cookie, pass: null },
+      {
+        appOrigin: APP_ORIGIN,
+        siteScheme: 'https',
+        nowSeconds: Math.floor(env.deps.clock.now().getTime() / 1000),
+        getRoute: async k => (await env.routeTable.get(k)) ?? null,
+        getCookieKey: async () => env.config.secrets.siteHmacKey,
+        getRevocation: async k => (await env.routeTable.get(k)) ?? null,
+        hmac,
+      }
+    )
+    return d.action === 'rewrite' ? 'served' : d.status
+  }
+
+  const siteCookie = (env: Env, email: string) =>
+    signSiteCookie(
+      {
+        e: email,
+        x: Math.floor(env.deps.clock.now().getTime() / 1000) + SITE_COOKIE_TTL_SECONDS,
+      },
+      env.config.secrets.siteHmacKey
+    )
+
+  it("revoking a member stops their cookie at the edge; a later sign-in's opens again", async () => {
+    const { env, bossCookie } = await world()
+    await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: SAM })
+    const before = siteCookie(env, SAM)
+    expect(await edge(env, before)).toBe('served')
+    env.advance(60_000)
+    await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${SAM}`)
+    expect(await env.routeTable.get(listKey(env, SAM))).toBe(
+      String(Math.floor(env.deps.clock.now().getTime() / 1000) + SITE_COOKIE_TTL_SECONDS)
+    )
+    expect(await edge(env, before)).toBe(302)
+    // Nobody else is stopped, and revoking again writes nothing new.
+    expect(await edge(env, siteCookie(env, ALICE))).toBe('served')
+    const at = await env.routeTable.get(listKey(env, SAM))
+    env.advance(60_000)
+    await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${SAM}`)
+    expect(await env.routeTable.get(listKey(env, SAM))).toBe(at)
+    // Invited again, they sign in afresh: the new cookie is newer than the revocation.
+    await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: SAM })
+    expect(await edge(env, siteCookie(env, SAM))).toBe('served')
+  })
+
+  it('the sweep takes a revocation off the list after 30 days, not one made since', async () => {
+    const { env, bossCookie } = await world()
+    await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: SAM })
+    await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${SAM}`)
+    await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: PAT })
+    await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${PAT}`)
+    env.advance(29 * DAY)
+    expect(await sweepRevocations(env.deps)).toBe(0)
+    // Pat, revoked again a day before the first one is due: that one must stay.
+    const fresh = `${SESSION}=${(await createUser(env, BOSS)).session}`
+    await browser(env, fresh, 'POST', '/api/admin/invitations', { email: PAT })
+    await browser(env, fresh, 'DELETE', `/api/admin/invitations/${PAT}`)
+    const again = await env.routeTable.get(listKey(env, PAT))
+    expect(Number(again)).toBe(
+      Math.floor(env.deps.clock.now().getTime() / 1000) + SITE_COOKIE_TTL_SECONDS
+    )
+    env.advance(DAY + 1000)
+    expect(await sweepRevocations(env.deps)).toBe(2)
+    expect(await env.routeTable.get(listKey(env, SAM))).toBeUndefined()
+    expect(await env.routeTable.get(listKey(env, PAT))).toBe(again)
+    env.advance(30 * DAY)
+    expect(await sweepRevocations(env.deps)).toBe(1)
+    expect(await env.routeTable.get(listKey(env, PAT))).toBeUndefined()
+    expect(await sweepRevocations(env.deps)).toBe(0)
   })
 })
 

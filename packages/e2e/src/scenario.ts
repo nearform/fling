@@ -17,7 +17,8 @@
  *   the site to its owner) → invitations (where on, with the dev mailbox: an outsider shared with
  *   signs in by the emailed link, sees the site through the pass and comments, finds members-only
  *   sites missing and may not deploy, mint a key or make a group; revoked, refused; an admin's
- *   member invitation signs another outsider in, who deploys) → conditional-write race (concurrent
+ *   member invitation signs another outsider in, who deploys, and once revoked finds their site
+ *   cookie sent to sign in by the revocation list) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
@@ -633,6 +634,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
         opts,
         step,
         comments: meta.capabilities.comments === true,
+        propagationMs,
       })
     } else {
       step('invitations: off, or no dev mailbox or admin session (skipped)')
@@ -1340,6 +1342,7 @@ async function invitationStep(ctx: {
   opts: ScenarioOptions
   step: (line: string) => void
   comments: boolean
+  propagationMs: number
 }) {
   const { appOrigin, nonce, work, fling, flingAs, made, opts, step } = ctx
   const admin = opts.admin as Session & { cookie: string }
@@ -1484,8 +1487,26 @@ async function invitationStep(ctx: {
     step(
       `the admin invited ${memberEmail}: signed in by link, minted a key, deployed ${memberSite}`
     )
+
+    // 8. Revoked, their `fling_site` stops opening members-level sites: the revocation list.
+    const siteCookie = member.siteCookie as string
+    const opened = await get(teamUrl, { cookie: siteCookie })
+    check(opened.status === 200, `invited member view of ${teamName}: ${opened.status}`)
+    const gone = await as(
+      admin,
+      'DELETE',
+      `/api/admin/invitations/${encodeURIComponent(memberEmail)}`
+    )
+    check(gone.status === 200, `revoke ${memberEmail}: ${gone.status}`)
+    await eventually(
+      'a revoked member is sent to sign in',
+      teamUrl,
+      r => r.status === 302 && (r.location ?? '').startsWith(`${appOrigin}/auth/login?return=`),
+      { timeoutMs: ctx.propagationMs, headers: { cookie: siteCookie } }
+    )
+    step(`the admin revoked ${memberEmail}: their site cookie now goes to sign in`)
   } finally {
-    // 8. Clean up: their site, and the invitation (kept as revoked, for the record).
+    // 9. Clean up: their site, and the invitation (kept as revoked, for the record).
     await asMember('rm', memberSite, '--yes').catch(() => {})
     await as(admin, 'DELETE', `/api/admin/invitations/${encodeURIComponent(memberEmail)}`)
   }

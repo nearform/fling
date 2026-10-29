@@ -38,6 +38,7 @@ import { callTool, connect } from './oauth-helpers.ts'
 
 const OWNER = 'owner@example.test'
 const VIEWER = 'viewer@example.test'
+const GUEST = 'guest@outside.test'
 const TOKEN = 'abcdefghij0123456789'
 
 /**
@@ -55,16 +56,17 @@ const actorFor: Record<Role, Actor> = {
   owner: { kind: 'user', email: OWNER },
   viewer: { kind: 'user', email: VIEWER },
   member: { kind: 'user', email: 'member@example.test' },
+  guest: { kind: 'user', email: GUEST, guest: true },
   share: { kind: 'share', token: TOKEN },
   anonymous: { kind: 'anonymous' },
 }
 
 const ownerOnly = { public: 'o', private: 'o', restricted: 'o' }
-const takesPart = { public: 'ovm', private: 'ovm', restricted: 'ov' }
+const takesPart = { public: 'ovmg', private: 'ovm', restricted: 'ov' }
 
-/** Allowed roles per action and access: o(wner) v(iewer) m(ember) s(hare) a(nonymous). */
+/** Allowed roles per action and access: o(wner) v(iewer) m(ember) g(uest) s(hare) a(nonymous). */
 const EXPECTED: Record<Action, Record<Access, string>> = {
-  'site.view': { public: 'ovmsa', private: 'ovms', restricted: 'ovs' },
+  'site.view': { public: 'ovmgsa', private: 'ovms', restricted: 'ovs' },
   'site.read': ownerOnly,
   'version.list': ownerOnly,
   'version.read': ownerOnly,
@@ -105,8 +107,8 @@ describe('every access level', () => {
     ['members', stored('private', false), 'ovms'],
     ['people', stored('private', true, { emails: [VIEWER] }), 'ovs'],
     ['groups', stored('private', true, { groups: ['g1'] }), 'ovs'],
-    ['public', stored('public', true), 'ovmsa'],
-    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'ovmsa'],
+    ['public', stored('public', true), 'ovmgsa'],
+    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'ovmgsa'],
     ['a record from before access levels, no audience', stored('private', undefined), 'ovms'],
     [
       'a record from before access levels, with an audience',
@@ -159,9 +161,44 @@ describe('can', () => {
     expect(roleOf({ kind: 'user', email: user, groups: ['g1'] }, site)).toBe('viewer')
     expect(can({ kind: 'user', email: user, groups: ['g1'] }, 'site.view', site)).toBe(true)
   })
+
+  it('a guest the audience names is a viewer like anyone, by address or through a group', () => {
+    const byAddress: PolicySite = {
+      ...siteWith('restricted'),
+      audience: { emails: [GUEST], groups: [] },
+    }
+    const byGroup: PolicySite = {
+      ...siteWith('restricted'),
+      audience: { emails: [], groups: ['g1'] },
+    }
+    const guest: Actor = { kind: 'user', email: GUEST, guest: true }
+    expect(roleOf(guest, byAddress)).toBe('viewer')
+    expect(roleOf({ ...guest, groups: ['g1'] }, byGroup)).toBe('viewer')
+    expect(roleOf(guest, byGroup)).toBe('guest')
+    for (const action of [
+      'site.view',
+      'comment.read',
+      'comment.create',
+      'comment.resolve',
+    ] as const) {
+      expect(can(guest, action, byAddress)).toBe(true)
+    }
+    expect(can(guest, 'site.read', byAddress)).toBe(false)
+    // Named in the audience of a private site that is open to every member, a guest is a viewer.
+    expect(
+      can(guest, 'site.view', {
+        ...siteWith('private'),
+        audience: { emails: [GUEST], groups: [] },
+        restricted: false,
+      })
+    ).toBe(true)
+  })
 })
 
-/** Allowed principal roles per instance action: a(dmin) t(oken: an admin's key) i(mpersonating) u(ser). */
+/**
+ * Allowed principal roles per instance action: a(dmin) t(oken: an admin's key) i(mpersonating)
+ * g(uest) u(ser).
+ */
 const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.users.list': 'at',
   'admin.sites.list': 'at',
@@ -170,30 +207,38 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.mail.test': 'a',
   'admin.impersonate': 'a',
   'admin.impersonate.stop': 'i',
+  'admin.invitations.manage': 'a',
+  'account.site.create': 'atiu',
+  'account.group.create': 'atiu',
+  'account.groups.read': 'atiu',
+  'account.invite': 'atu',
   'account.key.create': 'atu',
   'account.oauth.approve': 'atu',
-  'account.revoke': 'atu',
-  'account.notifications.change': 'atu',
-  'account.notifications.sent': 'atu',
+  'account.revoke': 'atgu',
+  'account.notifications.change': 'atgu',
+  'account.notifications.sent': 'atgu',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {
   admin: 'a',
   'admin-token': 't',
   impersonating: 'i',
+  guest: 'g',
   user: 'u',
 }
 
 const principalFor: Record<PrincipalRole, Principal> = {
-  admin: { email: 'boss@example.test', admin: true, via: 'session' },
-  'admin-token': { email: 'boss@example.test', admin: true, via: 'api_key' },
+  admin: { email: 'boss@example.test', admin: true, via: 'session', guest: false },
+  'admin-token': { email: 'boss@example.test', admin: true, via: 'api_key', guest: false },
   impersonating: {
     email: 'member@example.test',
     admin: false,
     via: 'session',
     impersonator: 'boss@example.test',
+    guest: false,
   },
-  user: { email: 'member@example.test', admin: false, via: 'session' },
+  guest: { email: GUEST, admin: false, via: 'session', guest: true },
+  user: { email: 'member@example.test', admin: false, via: 'session', guest: false },
 }
 
 describe('canInstance', () => {
@@ -211,9 +256,23 @@ describe('canInstance', () => {
   }
 
   it('resolves roles: impersonating wins, an admin is a token-admin off a browser session', () => {
-    expect(principalRole({ email: 'u@x.test', admin: false, via: 'api_key' })).toBe('user')
-    expect(principalRole({ email: 'u@x.test', admin: true, via: 'oauth' })).toBe('admin-token')
+    expect(principalRole({ email: 'u@x.test', admin: false, via: 'api_key', guest: false })).toBe(
+      'user'
+    )
+    expect(principalRole({ email: 'u@x.test', admin: true, via: 'oauth', guest: false })).toBe(
+      'admin-token'
+    )
+    expect(principalRole({ email: GUEST, admin: false, via: 'oauth', guest: true })).toBe('guest')
     for (const role of PRINCIPAL_ROLES) expect(principalRole(principalFor[role])).toBe(role)
+  })
+
+  it('an admin acting as a guest may do only what both an impersonating admin and a guest may', () => {
+    const asGuest: Principal = { ...principalFor.guest, impersonator: 'boss@example.test' }
+    for (const action of INSTANCE_ACTIONS) {
+      const both =
+        INSTANCE_EXPECTED[action].includes('i') && INSTANCE_EXPECTED[action].includes('g')
+      expect({ action, allowed: canInstance(asGuest, action) }).toEqual({ action, allowed: both })
+    }
   })
 
   it('refuses to impersonate nobody, yourself or an admin', () => {
@@ -249,6 +308,7 @@ describe('canDeleteComment', () => {
       owner: [true, true, true],
       viewer: [false, false, false],
       member: [false, true, false],
+      guest: [false, false, false],
       share: [false, false, false],
       anonymous: [false, false, false],
     }
@@ -264,9 +324,10 @@ describe('canDeleteComment', () => {
 describe('roleOf', () => {
   const site = siteWith('private')
 
-  it('owner is the user holding the site; one in its audience a viewer; any other a member', () => {
+  it('owner is the user holding the site; one in its audience a viewer; any other a member or guest', () => {
     expect(roleOf(actorFor.owner, site)).toBe('owner')
     expect(roleOf(actorFor.member, site)).toBe('member')
+    expect(roleOf(actorFor.guest, site)).toBe('guest')
     expect(roleOf(actorFor.viewer, siteWith('restricted'))).toBe('viewer')
     expect(roleOf(actorFor.viewer, site)).toBe('member')
   })
@@ -312,8 +373,10 @@ describe('canGroup', () => {
     expect(got).toBe(GROUP_EXPECTED[action])
   })
 
-  it('share-link holders and anonymous visitors get nothing', () => {
+  it('guests, share-link holders and anonymous visitors get nothing, even a group a guest owns', () => {
     for (const action of GROUP_ACTIONS) {
+      expect(canGroup(actorFor.guest, action, group)).toBe(false)
+      expect(canGroup(actorFor.guest, action, { owner: GUEST })).toBe(false)
       expect(canGroup(actorFor.share, action, group)).toBe(false)
       expect(canGroup(actorFor.anonymous, action, group)).toBe(false)
     }
@@ -333,6 +396,9 @@ async function deploy(env: ReturnType<typeof setup>, key: string, name: string, 
   await upload(env, body.uploads, page)
   return json(await api(env, key, 'POST', `/api/sites/${name}/deploys/${body.versionId}/finalize`))
 }
+
+type EdgeRole = Exclude<Role, 'guest'>
+const EDGE_ROLES = ROLES.filter((r): r is EdgeRole => r !== 'guest')
 
 describe('the edge agrees with site.view', () => {
   async function sites() {
@@ -384,14 +450,14 @@ describe('the edge agrees with site.view', () => {
         can({ kind: 'user', email }, 'site.view', site) && (name === 'team' || name === 'mine')
           ? pass(email, name)
           : siteCookie(email)
-      const requests: Record<Role, [string, string?]> = {
+      const requests: Record<EdgeRole, [string, string?]> = {
         owner: [`${name}.fling.test`, await cookieOf('alice@example.test')],
         viewer: [`${name}.fling.test`, await cookieOf('bob@example.test')],
         member: [`${name}.fling.test`, await cookieOf('carol@example.test')],
         share: [shareHost],
         anonymous: [`${name}.fling.test`],
       }
-      const actors: Record<Role, Actor> = {
+      const actors: Record<EdgeRole, Actor> = {
         owner: { kind: 'user', email: 'alice@example.test' },
         viewer: { kind: 'user', email: 'bob@example.test' },
         member: { kind: 'user', email: 'carol@example.test' },
@@ -399,7 +465,8 @@ describe('the edge agrees with site.view', () => {
         anonymous: { kind: 'anonymous' },
       }
       expect(env.routeTable.data.has(siteKvsKey(name))).toBe(true)
-      for (const role of ROLES) {
+      // The edge doesn't tell a guest's site cookie from a member's, so guests are left out here.
+      for (const role of EDGE_ROLES) {
         expect({ name, role, served: await served(...requests[role]) }).toEqual({
           name,
           role,

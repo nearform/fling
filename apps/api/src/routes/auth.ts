@@ -6,7 +6,8 @@
  * `signedInReturn` (sites.ts), which asks policy. State, nonce, the PKCE
  * verifier and the return URL travel in a short-lived `fling_oauth` cookie. `/auth/google` and
  * `/auth/google/callback` are the pre-OIDC paths, kept because existing Google OAuth clients
- * allow only that callback. Also logout, the CLI loopback login and the dev-only login.
+ * allow only that callback. Also logout, the CLI loopback login and the dev-only login. Every way
+ * in admits by standing (auth/standing.ts): the email policy, an admin, or a live invitation.
  */
 import { userSlugFromEmail } from '@fling/shared'
 import { type Context, Hono } from 'hono'
@@ -19,6 +20,7 @@ import { admitIdentity, type Identity, type SignInRequest } from '../auth/identi
 import { resolveSession, sessionPrincipal } from '../auth/middleware.ts'
 import { safeReturnUrl } from '../auth/return-url.ts'
 import { endSession, setSiteCookie, startSession } from '../auth/session.ts'
+import { standingOf } from '../auth/standing.ts'
 import { badRequest, forbidden, notFound } from '../lib/errors.ts'
 import { canInstance } from '../policy.ts'
 import { signedInReturn } from '../sites.ts'
@@ -139,11 +141,17 @@ async function callback(c: Context<AppEnv>) {
     warn('oidc exchange failed', err)
     return loginError(c, 'oauth_failed')
   }
-  const admitted = admitIdentity(who, {
-    allowedDomains: config.allowedEmailDomains,
-    allowedEmails: config.allowedEmails,
-    assumeEmailVerified: config.oidc.assumeEmailVerified,
-  })
+  const email = who.email?.trim().toLowerCase()
+  const standing = email ? await standingOf(c.get('deps'), email) : 'none'
+  const admitted = admitIdentity(
+    who,
+    {
+      allowedDomains: config.allowedEmailDomains,
+      allowedEmails: config.allowedEmails,
+      assumeEmailVerified: config.oidc.assumeEmailVerified,
+    },
+    standing
+  )
   if (!admitted.ok) return loginError(c, admitted.reason)
 
   const user = await upsertUser(c, admitted.email, admitted.name, admitted.picture)
@@ -169,7 +177,8 @@ authRoutes.post('/logout', c => {
 /**
  * `GET /auth/cli?redirect_uri=&hostname=`: browser half of `fling login`. Mints an API key named
  * `cli:<hostname>` and 302s to `redirect_uri?key=…`. The key is never logged. Not while
- * impersonating (`account.key.create`): the CLI gets `error=impersonating`.
+ * impersonating, nor for a guest (`account.key.create`): the CLI gets `error=impersonating` or
+ * `error=guest`.
  */
 authRoutes.get('/cli', async c => {
   const { store, clock, config } = c.get('deps')
@@ -201,8 +210,11 @@ authRoutes.get('/cli', async c => {
     return beginSignIn(c, self.toString())
   }
   const { user } = session
-  if (!canInstance(sessionPrincipal(config, session), 'account.key.create')) {
-    return back({ error: 'impersonating' })
+  const principal = sessionPrincipal(config, session)
+  if (!canInstance(principal, 'account.key.create')) {
+    return back({
+      error: principal.impersonator === undefined && principal.guest ? 'guest' : 'impersonating',
+    })
   }
   try {
     const { plaintext } = await mintApiKey(
@@ -218,7 +230,10 @@ authRoutes.get('/cli', async c => {
   }
 })
 
-/** Dev only: `GET /auth/dev-login?email=&return=` signs in as anyone; no email → a tiny form. */
+/**
+ * Dev only: `GET /auth/dev-login?email=&return=` signs in as anyone with standing, unverified;
+ * no email → a tiny form.
+ */
 authRoutes.get('/dev-login', async c => {
   const { config } = c.get('deps')
   if (!config.devLogin) throw notFound(`Not found: ${c.req.path}`)
@@ -238,6 +253,8 @@ authRoutes.get('/dev-login', async c => {
     )
   }
   if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw badRequest('Invalid email', 'invalid_email')
+  if ((await standingOf(c.get('deps'), email)) === 'none')
+    return loginError(c, 'domain_not_allowed')
   const user = await upsertUser(c, email, email.split('@')[0] ?? email, null)
   await startSession(c, user.email)
   return c.redirect(await signedInReturn(c.get('deps'), user, ret), 302)

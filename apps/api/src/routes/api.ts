@@ -183,6 +183,7 @@ for (const action of ['approve', 'deny'] as const) {
 }
 
 apiRoutes.get('/names/:name', async c => {
+  requireAccountAction(c, 'account.site.create', 'checking names for new sites')
   const check = await sites.checkName(c.get('deps'), c.get('user'), c.req.param('name'))
   return c.json(NameCheckSchema.parse(check))
 })
@@ -232,7 +233,13 @@ apiRoutes.post('/sites/:name/deploys', async c => {
   } catch {
     throw new ApiError(400, 'invalid_json', 'Body must be JSON')
   }
-  const res = await publication.stage(c.get('deps'), c.get('user'), c.req.param('name'), raw)
+  const res = await publication.stage(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    raw,
+    principalOf(c)
+  )
   return c.json(DeployResponseSchema.parse(res))
 })
 
@@ -333,6 +340,7 @@ apiRoutes.post('/sites/:name/live', async c => {
 // --- groups (the `groups` capability). canGroup decides: anyone reads, the owner changes. ---
 
 apiRoutes.get('/groups', async c => {
+  requireAccountAction(c, 'account.groups.read', 'listing groups')
   const mine = ['1', 'true'].includes(c.req.query('mine') ?? '')
   const members = c.req.query('members')
   const list = await groups.listGroups(c.get('deps'), c.get('user'), {
@@ -343,12 +351,14 @@ apiRoutes.get('/groups', async c => {
 })
 
 apiRoutes.post('/groups', async c => {
+  requireAccountAction(c, 'account.group.create', 'making groups')
   const input = await jsonBody(c, CreateGroupRequestSchema)
   const group = await groups.createGroup(c.get('deps'), c.get('user'), input, acting(c))
   return c.json(GroupDetailSchema.parse(group), 201)
 })
 
 apiRoutes.get('/groups/:slug', async c => {
+  requireAccountAction(c, 'account.groups.read', 'reading groups')
   const group = await groups.groupDetail(c.get('deps'), c.get('user'), c.req.param('slug'))
   return c.json(GroupDetailSchema.parse(group))
 })

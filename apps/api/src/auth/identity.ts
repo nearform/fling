@@ -4,6 +4,8 @@
  * kept apart from it, decides whether that identity gets in.
  */
 
+import type { Standing } from './standing.ts'
+
 /** What one sign-in needs remembered between the redirect out and the callback. */
 export interface SignInRequest {
   state: string
@@ -52,16 +54,22 @@ export interface EmailPolicy {
  * Who may sign in: a verified email that is listed in ALLOWED_EMAILS or whose domain is in
  * ALLOWED_EMAIL_DOMAINS, and whose `hd` (Google Workspace domain) claim, when present, matches the
  * email's domain. An issuer that says nothing about verification is refused unless the instance
- * opts in to trusting it.
+ * opts in to trusting it. With `standing` (auth/standing.ts, which starts from the same lists and
+ * adds admins and invitations), it decides in place of the lists: anything but `none` gets in.
  */
-export function admitIdentity(identity: Identity, policy: EmailPolicy): Admission {
+export function admitIdentity(
+  identity: Identity,
+  policy: EmailPolicy,
+  standing?: Standing
+): Admission {
   const email = identity.email?.trim().toLowerCase()
   const verified =
     identity.emailVerified ?? (policy.assumeEmailVerified === true ? true : undefined)
   if (!email || verified !== true) return { ok: false, reason: 'email_unverified' }
   const at = email.lastIndexOf('@')
   const domain = at > 0 ? email.slice(at + 1) : ''
-  if (!emailAllowed(email, policy)) return { ok: false, reason: 'domain_not_allowed' }
+  const allowed = standing === undefined ? emailAllowed(email, policy) : standing !== 'none'
+  if (!allowed) return { ok: false, reason: 'domain_not_allowed' }
   if (identity.hd !== undefined && identity.hd.toLowerCase() !== domain) {
     return { ok: false, reason: 'domain_not_allowed' }
   }

@@ -61,6 +61,27 @@
  *   GROUPNAME#<slug>       NAME                          slug claim → { slug, groupId, owner,
  *                                                        createdAt }; how a group is found
  *
+ * Invitations and sign-in links (people outside the email policy; auth/standing.ts reads them):
+ *
+ *   INVITE#<email>         INVITE                        invitation (role, invitedBy, via, siteId
+ *                                                        or groupId, createdAt, revokedAt): one per
+ *                                                        address
+ *   INVITES                INVITE#<email>                invitation directory: a copy, written with
+ *                                                        it, so the admins list invitations by one
+ *                                                        query
+ *   MAGIC#<sha256>         MAGIC                         sign-in link (email, return) — 15 min or 7
+ *                                                        days; taken with a conditional delete
+ *                                                        (single use)
+ *   USER#<email>           NINVITE#<day>                 new addresses the user invited by sharing
+ *                                                        that day — 2 days
+ *   MAGICRATE#<email>      <hour>                        sign-in links asked for the address that
+ *                                                        hour — 2 h
+ *   MAGICRATE              <minute>                      sign-in links asked of the instance that
+ *                                                        minute — 1 h
+ *
+ * An invitation and its directory copy are written together, each write conditioned on the
+ * `updatedAt` read (or on there being none), so racing invites of one address store one.
+ *
  * A site's record, its index item, its directory item and (on creation) its claim are written in
  * one transaction. `putSite` rewrites the directory item with the site whenever its listing or
  * access level changed.
@@ -187,12 +208,15 @@ import {
   type BatchRef,
   type BatchSent,
   type CommentRecord,
+  type Day,
   directoryOf,
   type FanOutRecord,
   type GrantRecord,
   type GroupRecord,
   type GroupSiteRecord,
   type Hour,
+  type InvitationRecord,
+  isLiveInvitation,
   type LiveConnectionRecord,
   listingOf,
   type Minute,
@@ -211,6 +235,7 @@ import {
   type RefreshTokenRecord,
   type SentNotificationRecord,
   type SharedListing,
+  type SignInLinkRecord,
   type SiteDirectoryRecord,
   type SiteGrantRecord,
   type SiteRecord,
@@ -293,6 +318,12 @@ const key = {
   mailTests: (email: string, hour: Hour) => ({ pk: userPk(email), sk: `NTEST#${hour}` }),
   sent: (email: string, id: string) => ({ pk: userPk(email), sk: `NSENT#${id}` }),
   suppression: (email: string) => ({ pk: `SUPPRESS#${email}`, sk: 'SUPPRESS' }),
+  invitation: (email: string) => ({ pk: `INVITE#${email}`, sk: 'INVITE' }),
+  invitationDirectory: (email: string) => ({ pk: 'INVITES', sk: `INVITE#${email}` }),
+  signInLink: (hash: string) => ({ pk: `MAGIC#${hash}`, sk: 'MAGIC' }),
+  invitationCount: (email: string, day: Day) => ({ pk: userPk(email), sk: `NINVITE#${day}` }),
+  signInLinkRate: (email: string, hour: Hour) => ({ pk: `MAGICRATE#${email}`, sk: hour }),
+  signInLinkInstanceRate: (minute: Minute) => ({ pk: 'MAGICRATE', sk: minute }),
 }
 
 /** The outbox's partition for a minute. */
@@ -319,6 +350,7 @@ const TTL = {
   sent: 30 * DAY_MS,
   instanceRate: HOUR_MS,
   hourly: 2 * HOUR_MS,
+  daily: 2 * DAY_MS,
 }
 const after = (at: string | Date, ms: number) => new Date(new Date(at).getTime() + ms).toISOString()
 const minuteAfter = (minute: Minute, ms: number) => after(minuteStart(minute), ms)
@@ -815,6 +847,14 @@ export class Records implements Store {
   async listGroupMembers(groupId: string) {
     const members = await this.list<{ email: string }>('groupmember', groupPk(groupId), 'MEMBER#')
     return members.map(m => m.email)
+  }
+
+  async isNamedAnywhere(email: string) {
+    const [grants, memberships] = await Promise.all([
+      this.table.query(userPk(email), { skPrefix: 'SHARED#', limit: 1 }),
+      this.table.query(userPk(email), { skPrefix: 'GROUP#', limit: 1 }),
+    ])
+    return grants.items.length + memberships.items.length > 0
   }
 
   async listMemberships(email: string) {
@@ -1571,6 +1611,104 @@ export class Records implements Store {
     const k = key.mailTests(email, hour)
     const item = await this.table.get(k.pk, k.sk)
     return item ? Number(item.count) : 0
+  }
+
+  // --- invitations and sign-in links ---
+
+  getInvitation(email: string) {
+    return this.read<InvitationRecord>('invitation', key.invitation(email))
+  }
+
+  async putInvitation(input: Omit<InvitationRecord, 'updatedAt' | 'revokedAt'>) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const existing = await this.getInvitation(input.email)
+      if (isLiveInvitation(existing) && (existing.role === 'member' || input.role === 'guest')) {
+        return { invitation: existing, changed: false }
+      }
+      // Two writes in one millisecond would share `updatedAt`: step past the one read.
+      const updatedAt =
+        existing && existing.updatedAt >= input.createdAt
+          ? after(existing.updatedAt, 1)
+          : input.createdAt
+      const invitation: InvitationRecord = { ...input, updatedAt }
+      const cond = existing ? fieldEquals('updatedAt', existing.updatedAt) : ifAbsent
+      const written = await unless(
+        this.table.transact([
+          { put: encode('invitation', key.invitation(input.email), invitation), cond },
+          {
+            put: encode('invitationdirectory', key.invitationDirectory(input.email), invitation),
+          },
+        ])
+      )
+      if (written) return { invitation, changed: true }
+    }
+    throw new Error('Could not store the invitation: it kept changing')
+  }
+
+  async listInvitations(opts: { prefix?: string; limit: number; cursor?: string }) {
+    const page = await this.table.query('INVITES', {
+      skPrefix: `INVITE#${opts.prefix ?? ''}`,
+      limit: opts.limit,
+      cursor: opts.cursor,
+    })
+    return {
+      invitations: page.items.map(i => decode<InvitationRecord>('invitationdirectory', i)),
+      ...(page.cursor ? { cursor: page.cursor } : {}),
+    }
+  }
+
+  async revokeInvitation(email: string, at: string) {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const existing = await this.getInvitation(email)
+      if (!existing || existing.revokedAt !== undefined) return existing
+      const updatedAt = existing.updatedAt >= at ? after(existing.updatedAt, 1) : at
+      const revoked: InvitationRecord = { ...existing, revokedAt: at, updatedAt }
+      const written = await unless(
+        this.table.transact([
+          {
+            put: encode('invitation', key.invitation(email), revoked),
+            cond: fieldEquals('updatedAt', existing.updatedAt),
+          },
+          { put: encode('invitationdirectory', key.invitationDirectory(email), revoked) },
+        ])
+      )
+      if (written) return revoked
+    }
+    throw new Error('Could not revoke the invitation: it kept changing')
+  }
+
+  async putSignInLink(link: SignInLinkRecord) {
+    await this.table.put(encode('signinlink', key.signInLink(link.hash), link), ifAbsent)
+  }
+
+  async consumeSignInLink(hash: string) {
+    // Conditional, so of two clicks racing exactly one signs in.
+    const { pk, sk } = key.signInLink(hash)
+    try {
+      const item = await this.table.delete(pk, sk, ifExists)
+      return item ? decode<SignInLinkRecord>('signinlink', item) : null
+    } catch (err) {
+      if (err instanceof ConditionFailed) return null
+      throw err
+    }
+  }
+
+  countInvitation(email: string, day: Day) {
+    return this.count(key.invitationCount(email, day), after(`${day}T00:00:00.000Z`, TTL.daily))
+  }
+
+  async invitationsOn(email: string, day: Day) {
+    const k = key.invitationCount(email, day)
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? Number(item.count) : 0
+  }
+
+  countSignInLinkRequest(email: string, hour: Hour) {
+    return this.count(key.signInLinkRate(email, hour), after(`${hour}:00:00.000Z`, TTL.hourly))
+  }
+
+  countSignInLinkInstance(minute: Minute) {
+    return this.count(key.signInLinkInstanceRate(minute), minuteAfter(minute, TTL.instanceRate))
   }
 }
 

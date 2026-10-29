@@ -44,7 +44,7 @@ import * as groups from '../groups.ts'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
 import * as notifications from '../notifications/settings.ts'
-import { userActor } from '../policy.ts'
+import { canInstance, type Principal, userActor } from '../policy.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
@@ -225,7 +225,12 @@ function accessOf(args: {
   }
 }
 
-export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
+/**
+ * The tools `user` may use. A guest (`principal`) gets only what reviewing takes: who they are,
+ * the sites shared with them, comments and their notification settings; no site, publishing or
+ * group tools.
+ */
+export function createRemoteMcpServer(deps: Deps, user: User, principal: Principal): McpServer {
   const wording = mcpWording(instanceMetadata(deps.config))
   const members = privateAudience(instanceMetadata(deps.config))
   const mcpTools = mcpToolsFor(wording)
@@ -261,8 +266,14 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     data: { email: user.email, name: user.name, userSlug: user.userSlug },
   }))
 
+  const mayOwnSites = canInstance(principal, 'account.site.create')
+  /** Registers the tools about one's own sites, for anyone but a guest. */
+  const registerSiteTool: typeof register = (def, handler) => {
+    if (mayOwnSites) register(def, handler)
+  }
+
   register(mcpTools.list, async args => {
-    if (args.shared) {
+    if (args.shared || !mayOwnSites) {
       const shared = sortSites(await sites.listShared(deps, user), args.sort)
       return {
         text: shared.length
@@ -281,7 +292,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.info, async args => {
+  registerSiteTool(mcpTools.info, async args => {
     const site = await sites.siteDetail(deps, user, args.name)
     const versions = site.versions
       .slice(0, 10)
@@ -298,7 +309,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.files, async args => {
+  registerSiteTool(mcpTools.files, async args => {
     const site = await sites.requireSite(deps, user, args.name, 'version.read')
     const versionId = args.versionId ?? site.currentVersionId
     if (!versionId)
@@ -312,7 +323,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.checkName, async args => {
+  registerSiteTool(mcpTools.checkName, async args => {
     const check = await sites.checkName(deps, user, args.name)
     const url =
       check.status === 'invalid'
@@ -330,7 +341,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     return { text, data: { ...check, url } }
   })
 
-  register(mcpTools.publish, async args => {
+  registerSiteTool(mcpTools.publish, async args => {
     let total = 0
     const files = args.files.map(f => {
       const bytes = decodeContent(f.content, (f.encoding ?? 'utf8') as Encoding, f.path)
@@ -345,6 +356,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
       )
     }
     const outcome = await publishFiles(deps, user, args.name, files, {
+      principal,
       spa: args.spa,
       ...accessOf(args),
       listHtml: args.listHtml,
@@ -352,7 +364,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     return publishResult(deps, args.name, outcome, 'fling_publish', args.access)
   })
 
-  register(mcpTools.uploadBegin, async args => {
+  registerSiteTool(mcpTools.uploadBegin, async args => {
     const upload = await beginUpload(deps, user, args.name, { spa: args.spa, ...accessOf(args) })
     return {
       text:
@@ -362,7 +374,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.uploadFile, async args => {
+  registerSiteTool(mcpTools.uploadFile, async args => {
     const res = await uploadFile(deps, user, {
       uploadId: args.uploadId,
       path: args.path,
@@ -376,9 +388,12 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.uploadFinish, async args => {
+  registerSiteTool(mcpTools.uploadFinish, async args => {
     const upload = await deps.store.getUpload(args.uploadId)
-    const outcome = await finishUpload(deps, user, args.uploadId, { listHtml: args.listHtml })
+    const outcome = await finishUpload(deps, user, args.uploadId, {
+      principal,
+      listHtml: args.listHtml,
+    })
     return publishResult(
       deps,
       upload?.name ?? 'the site',
@@ -388,7 +403,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     )
   })
 
-  register(mcpTools.share, async args => {
+  registerSiteTool(mcpTools.share, async args => {
     if (args.refresh && args.revoke) {
       throw new ApiError(400, 'bad_request', 'Use either refresh or revoke, not both')
     }
@@ -426,7 +441,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.setAccess, async args => {
+  registerSiteTool(mcpTools.setAccess, async args => {
     const site = await sites.updateSite(deps, user, args.name, {
       access: args.access,
       ...(needsAudience(args.access)
@@ -436,12 +451,12 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
-  register(mcpTools.setVisibility, async args => {
+  registerSiteTool(mcpTools.setVisibility, async args => {
     const site = await sites.updateSite(deps, user, args.name, { visibility: args.visibility })
     return { text: `${site.name} is now ${site.visibility}: ${site.url}`, data: site }
   })
 
-  register(mcpTools.setAudience, async args => {
+  registerSiteTool(mcpTools.setAudience, async args => {
     const change = {
       add: args.add,
       remove: args.remove,
@@ -465,7 +480,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
-  register(mcpTools.archive, async args => {
+  registerSiteTool(mcpTools.archive, async args => {
     const site = await sites.setArchived(deps, user, args.name, !args.unarchive)
     return {
       text: args.unarchive
@@ -475,7 +490,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.delete, async args => {
+  registerSiteTool(mcpTools.delete, async args => {
     await sites.deleteSite(deps, user, args.name)
     return {
       text: `${args.name} deleted; the name is free again.`,
@@ -483,7 +498,7 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  register(mcpTools.rollback, async args => {
+  registerSiteTool(mcpTools.rollback, async args => {
     const site = await sites.rollback(deps, user, args.name, args.versionId)
     return {
       text: `${site.name} now serves version ${site.currentVersionId}: ${site.url}`,
@@ -491,7 +506,9 @@ export function createRemoteMcpServer(deps: Deps, user: User): McpServer {
     }
   })
 
-  registerGroupTools(deps, user, mcpTools, register)
+  if (canInstance(principal, 'account.groups.read')) {
+    registerGroupTools(deps, user, mcpTools, register)
+  }
   if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
   if (notificationChannels(deps.config).length > 0) {
     registerNotificationTools(deps, user, mcpTools, register)
@@ -649,7 +666,12 @@ function registerNotificationTools(
     // /mcp takes API keys and OAuth tokens, never a session, so it never acts for an impersonator.
     const settings = await notifications.updateNotificationSettings(
       deps,
-      { email: user.email, admin: isAdminEmail(deps.config, user.email), via: 'oauth' },
+      {
+        email: user.email,
+        admin: isAdminEmail(deps.config, user.email),
+        via: 'oauth',
+        guest: user.guest === true,
+      },
       preferencesUpdateOf(args)
     )
     return { text: `Saved.\n${describeNotificationSettings(settings)}`, data: settings }

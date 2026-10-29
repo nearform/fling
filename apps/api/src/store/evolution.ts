@@ -49,6 +49,9 @@ export type Kind =
   | 'notifyfailure'
   | 'nsent'
   | 'suppression'
+  | 'invitation'
+  | 'invitationdirectory'
+  | 'signinlink'
   | 'counter'
 
 export type Fields = Record<string, unknown>

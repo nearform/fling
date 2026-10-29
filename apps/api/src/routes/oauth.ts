@@ -159,11 +159,15 @@ oauthRoutes.get('/oauth/authorize', async c => {
     const self = `${config.appOrigin}/oauth/authorize${new URL(c.req.url).search}`
     return c.redirect(`/auth/login?return=${encodeURIComponent(self)}`, 302)
   }
-  // An impersonating admin may not connect apps in the user's name.
-  if (!canInstance(sessionPrincipal(config, session), 'account.oauth.approve')) {
+  // An impersonating admin may not connect apps in the user's name, nor may a guest connect any.
+  const principal = sessionPrincipal(config, session)
+  if (!canInstance(principal, 'account.oauth.approve')) {
     const q = new URLSearchParams({
       error: 'access_denied',
-      error_description: `You are impersonating ${session.user.email}. Stop impersonating to connect apps.`,
+      error_description:
+        principal.impersonator === undefined && principal.guest
+          ? 'Guests review the sites shared with them in the browser; they cannot connect apps.'
+          : `You are impersonating ${session.user.email}. Stop impersonating to connect apps.`,
     })
     return c.redirect(`/authorize?${q}`, 302)
   }

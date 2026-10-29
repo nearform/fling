@@ -5,6 +5,10 @@
  * `resolveSession` is the one place a session cookie becomes a user, impersonation included:
  * the routes outside /api that read the session (/auth/login, /auth/cli, /oauth/authorize) use
  * it too.
+ *
+ * Every credential is rechecked against the user's standing (standing.ts) on every request: with
+ * none (a domain removed from the policy, an invitation revoked, a guest no audience names any
+ * more) the request is unauthenticated (401). A guest's user carries `guest: true`.
  */
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -15,6 +19,7 @@ import type { User } from '../store/types.ts'
 import type { AppEnv } from '../types.ts'
 import { validateApiKey } from './api-keys.ts'
 import { readSession, readSessionToken, type SessionClaims } from './session.ts'
+import { withStanding } from './standing.ts'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -27,9 +32,10 @@ export interface ResolvedSession {
 }
 
 /**
- * The session's user. An impersonation is honoured only while it hasn't lapsed, whoever signed in
- * is still an admin, and the target is a user who isn't one; otherwise the session is the
- * signer's own (and stopping clears the leftover claim).
+ * The session's user, if they still have standing. An impersonation is honoured only while it
+ * hasn't lapsed, whoever signed in is still an admin, and the target is a user who isn't one and
+ * has standing; otherwise the session is the signer's own (and stopping clears the leftover
+ * claim).
  */
 export async function resolveSession(c: Context<AppEnv>): Promise<ResolvedSession | null> {
   const { config, clock, store } = c.get('deps')
@@ -47,9 +53,11 @@ export async function resolveSession(c: Context<AppEnv>): Promise<ResolvedSessio
       store.getUser(claims.email),
       store.getUser(imp.email),
     ])
-    if (admin && target) return { user: target, impersonator: claims.email, claims }
+    const standing = target ? await withStanding({ config, store }, target) : null
+    if (admin && standing) return { user: standing, impersonator: claims.email, claims }
   }
-  const user = await store.getUser(claims.email)
+  const stored = await store.getUser(claims.email)
+  const user = stored ? await withStanding({ config, store }, stored) : null
   return user ? { user, claims } : null
 }
 
@@ -59,8 +67,9 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   if (header) {
     const match = /^Bearer\s+(\S+)$/i.exec(header)
     const result = match?.[1] ? await validateApiKey(store, match[1], clock.now()) : null
-    if (!result) throw unauthorized('Invalid API key')
-    c.set('user', result.user)
+    const user = result ? await withStanding({ config, store }, result.user) : null
+    if (!user) throw unauthorized('Invalid API key')
+    c.set('user', user)
     c.set('via', 'api_key')
     return next()
   }
@@ -86,6 +95,7 @@ export function sessionPrincipal(
     email: session.user.email,
     admin: isAdminEmail(config, session.user.email),
     via: 'session',
+    guest: session.user.guest === true,
     ...(session.impersonator ? { impersonator: session.impersonator } : {}),
   }
 }
@@ -93,19 +103,25 @@ export function sessionPrincipal(
 /** The authenticated caller, for the instance and account actions in policy.ts. */
 export function principalOf(c: Context<AppEnv>): Principal {
   const { config } = c.get('deps')
-  const email = c.get('user').email
+  const user = c.get('user')
   const impersonator = c.get('impersonator')
   return {
-    email,
-    admin: isAdminEmail(config, email),
+    email: user.email,
+    admin: isAdminEmail(config, user.email),
     via: c.get('via'),
+    guest: user.guest === true,
     ...(impersonator ? { impersonator } : {}),
   }
 }
 
-/** Refuse an account action while impersonating (403, so the UI can say why). */
+/** Refuse an account action a guest or an impersonating admin may not do (403, saying which). */
 export function requireAccountAction(c: Context<AppEnv>, action: InstanceAction, what: string) {
-  if (!canInstance(principalOf(c), action)) {
-    throw forbidden(`Not while impersonating ${c.get('user').email}: ${what}`, 'impersonating')
-  }
+  const p = principalOf(c)
+  if (canInstance(p, action)) return
+  if (p.impersonator === undefined && p.guest) throw guestRefusal()
+  throw forbidden(`Not while impersonating ${p.email}: ${what}`, 'impersonating')
 }
+
+/** What a guest is told when they try what only members do. */
+export const guestRefusal = () =>
+  forbidden('Guests review the sites shared with them; they cannot do this', 'guest')

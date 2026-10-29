@@ -124,8 +124,34 @@ minutes, and someone added gets in within 10 seconds.
 `IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
 **email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from it, decides who gets in: a
 verified email listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS` (production
-needs at least one; the public metadata names the domains, never the addresses). A user is their
-email; the issuer's `sub` is not stored.
+needs at least one; the public metadata names the domains, never the addresses), or one with
+**standing** from an invitation. A user is their email; the issuer's `sub` is not stored.
+
+**Standing** — whether someone may be signed in, and as what (`standingOf`,
+`apps/api/src/auth/standing.ts`): `member` when the email policy admits them, they are an admin
+or they hold a live member invitation; `guest` with a live guest invitation while some audience
+still names them (a direct grant or a group membership); else `none`. Every sign-in admits by it
+and every request rechecks it (session, API key, OAuth and MCP tokens, refresh): with `none` the
+request is a 401, so removing a domain or revoking an invitation cuts access at once. An address
+the policy admits costs no store read.
+
+**Invitation** — an address outside the email policy that may sign in
+(`INVITE#<email>/INVITE`, with a directory copy at `INVITES/INVITE#<email>`, in
+`apps/api/src/store/records.ts`): its role (`member` or `guest`), who invited them, how (`admin`,
+`share` or `group`) and when. One per address: an admin's invite upgrades a guest to a member,
+nothing demotes one, and revoking sets `revokedAt`, kept for the record; a later invite starts
+afresh.
+
+**Guest** — a user whose standing is `guest`: someone from outside the instance invited to review
+what is shared with them (`guest` on the policy actor and principal, `apps/api/src/policy.ts`).
+They see and comment on the sites whose audience names them and on public sites; they never
+reach members-level private sites, create sites or groups, list groups, invite anyone, or hold API
+keys or app connections. Over MCP they get only the reviewing tools.
+
+**Sign-in link** — an emailed single-use link that signs an invited person in
+(`MAGIC#<sha256 of the token>/MAGIC`, `apps/api/src/store/records.ts`): 32 random bytes of which
+only the hash is stored, taken once by a conditional delete, alive 15 minutes when asked for and
+7 days when it comes with an invitation.
 
 **Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
@@ -143,7 +169,7 @@ The `admin.*` actions are in `policy.ts` (`canInstance`).
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **viewer** (a signed-in user in its audience, by address or through a
 group), **member** (any other
-signed-in user), **share** (holds its current share link), **anonymous**. What a role may do depends
+signed-in user), **guest** (a signed-in guest not in its audience: public sites only), **share** (holds its current share link), **anonymous**. What a role may do depends
 on the site's access: public, private, or restricted. `site.view` and the comment actions reach
 beyond the owner (on a restricted site, only to its viewers and share-link holders; on an `only_me`
 one, to share-link holders alone). A refusal looks

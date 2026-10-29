@@ -55,13 +55,14 @@ import {
   type Visibility,
 } from '@fling/shared'
 import { computeVersionId } from '@fling/shared/version-id'
+import { guestRefusal } from './auth/middleware.ts'
 import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { can, isRestricted, userActor } from './policy.ts'
+import { can, canInstance, isRestricted, type Principal, userActor } from './policy.ts'
 import {
   type AccessFields,
   applySettings,
@@ -206,7 +207,8 @@ async function prepare(
   deps: Deps,
   user: User,
   name: string,
-  req: DeployRequest
+  req: DeployRequest,
+  principal: Principal
 ): Promise<Prepared> {
   if (!isValidSiteName(name)) {
     throw badRequest(
@@ -223,6 +225,7 @@ async function prepare(
   if (!existing) {
     const claim = await store.getNameClaim(name)
     if (claim && claim.email !== user.email) throw await nameTaken(deps, user, name)
+    if (!canInstance(principal, 'account.site.create')) throw guestRefusal()
   }
   if (req.access !== undefined && req.visibility !== undefined) {
     throw badRequest('Pass `access` or `visibility`, not both')
@@ -337,9 +340,10 @@ export async function stage(
   deps: Deps,
   user: User,
   name: string,
-  raw: unknown
+  raw: unknown,
+  principal: Principal
 ): Promise<DeployResponse> {
-  const prepared = await prepare(deps, user, name, admit(raw))
+  const prepared = await prepare(deps, user, name, admit(raw), principal)
   if (prepared.kind === 'done') return prepared.result
   const { site, version, files } = prepared
   const uploads = await mapLimit(files, PRESIGN_CONCURRENCY, async file => {
@@ -407,6 +411,8 @@ export async function publishBytes(
   name: string,
   input: readonly { path: string; bytes: Uint8Array }[],
   opts: {
+    /** who is publishing: a new site needs `account.site.create` */
+    principal: Principal
     spa?: boolean
     visibility?: Visibility
     access?: AccessLevel
@@ -431,7 +437,7 @@ export async function publishBytes(
   const findings = input.flatMap(f => scanBytesForSecrets(f.bytes, f.path))
   if (findings.length > 0) throw secretDetected(findings)
 
-  const prepared = await prepare(deps, user, name, req)
+  const prepared = await prepare(deps, user, name, req, opts.principal)
   if (prepared.kind === 'done') return prepared.result
   const { site, version } = prepared
   await mapLimit(prepared.files, PUT_CONCURRENCY, async f => {

@@ -476,7 +476,12 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
     }))
 
   // v1 items: read the site and ask policy, as the listing would have answered.
-  const actor: Actor = { kind: 'user', email: user.email, groups }
+  const actor: Actor = {
+    kind: 'user',
+    email: user.email,
+    groups,
+    ...(user.guest ? { guest: true as const } : {}),
+  }
   const fromSites = await mapLimit(
     [...unlisted].filter(([id]) => !listed.has(id)),
     SHARED_READ_CONCURRENCY,

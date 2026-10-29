@@ -8,8 +8,11 @@
  * - `owner`: the signed-in user who holds the site (`site.email`).
  * - `viewer`: a signed-in user in the site's audience (`site.audience`), by email or through one
  *   of their groups (`groups` on the actor, which requireSite loads only for a restricted site).
- * - `member`: any other signed-in user. Signing in already applied the instance's email policy
- *   (`admit…` in auth/), so every user the API knows is admitted.
+ * - `member`: any other signed-in user whose standing is `member` (auth/standing.ts: the email
+ *   policy admits them, they are an admin, or they hold a member invitation).
+ * - `guest`: any other signed-in user whose standing is `guest` (`guest` on the actor): someone
+ *   from outside the email policy, invited to review what is shared with them. Standing is
+ *   rechecked on every request, so whoever the API sees signed in is admitted now.
  * - `share`: whoever holds the site's current share link (`s--<token>`). A revoked or rotated
  *   token is `anonymous`.
  * - `anonymous`: nobody we know.
@@ -33,13 +36,14 @@ import type { GroupRecord, SiteRecord } from './store/types.ts'
 
 export type Actor =
   /** `groups`: the ids of the user's groups, when policy needs them (a restricted site) */
-  | { kind: 'user'; email: string; groups?: readonly string[] }
+  /** `guest`: their standing is `guest` (auth/standing.ts) */
+  | { kind: 'user'; email: string; groups?: readonly string[]; guest?: true }
   | { kind: 'share'; token: string }
   | { kind: 'anonymous' }
 
-export type Role = 'owner' | 'viewer' | 'member' | 'share' | 'anonymous'
+export type Role = 'owner' | 'viewer' | 'member' | 'guest' | 'share' | 'anonymous'
 
-export const ROLES: readonly Role[] = ['owner', 'viewer', 'member', 'share', 'anonymous']
+export const ROLES: readonly Role[] = ['owner', 'viewer', 'member', 'guest', 'share', 'anonymous']
 
 /** What policy needs to know about a site. */
 export type PolicySite = Pick<
@@ -98,7 +102,9 @@ export const accessOf = (site: AccessFields): Access =>
  * Comments are the conversation around a site, so everyone who can see a site by signing in
  * takes part: members (on a restricted site, only its viewers) read, write and resolve (resolving
  * is reversible, and review threads are closed by whoever addressed them), and delete what they
- * wrote; only the owner deletes anyone's.
+ * wrote; only the owner deletes anyone's. Guests take part where they are viewers, and on public
+ * sites; a private site that isn't restricted is the members', so a guest gets nothing there,
+ * not even `site.view`.
  * Share-link holders get nothing yet. Guest commenting (a name, kept in a signed per-site
  * cookie, as a `{ kind: 'guest' }` author) will turn on `comment.read` and `comment.create`
  * for `share`, and `comment.delete.own` once a guest can be recognised again.
@@ -129,11 +135,14 @@ export type Action = (typeof ACTIONS)[number]
 
 const ownerOnly = (role: Role) => role === 'owner'
 /**
- * Signed in and able to see the site: the owner and its viewers, and on a site that isn't
- * restricted any member.
+ * Signed in and able to see the site: the owner and its viewers, on a site that isn't restricted
+ * any member, and on a public one any guest.
  */
 const signedIn = (role: Role, access: Access) =>
-  role === 'owner' || role === 'viewer' || (role === 'member' && access !== 'restricted')
+  role === 'owner' ||
+  role === 'viewer' ||
+  (role === 'member' && access !== 'restricted') ||
+  (role === 'guest' && access === 'public')
 
 const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   // Public: anyone. Private: any signed-in user, or anyone with the share link. Restricted: the
@@ -168,7 +177,8 @@ export function roleOf(actor: Actor, site: PolicySite): Role {
       const inAudience =
         site.audience.emails.includes(actor.email) ||
         site.audience.groups.some(g => groups.includes(g))
-      return inAudience ? 'viewer' : 'member'
+      if (inAudience) return 'viewer'
+      return actor.guest ? 'guest' : 'member'
     }
     case 'share':
       return site.shareToken !== null && actor.token === site.shareToken ? 'share' : 'anonymous'
@@ -181,8 +191,12 @@ export function can(actor: Actor, action: Action, site: PolicySite): boolean {
   return RULES[action](roleOf(actor, site), accessOf(site))
 }
 
-/** A signed-in user as an actor. */
-export const userActor = (user: { email: string }): Actor => ({ kind: 'user', email: user.email })
+/** A signed-in user as an actor; a request's user carries `guest` when their standing is. */
+export const userActor = (user: { email: string; guest?: true }): Actor => ({
+  kind: 'user',
+  email: user.email,
+  ...(user.guest ? { guest: true as const } : {}),
+})
 
 /** Whether the actor wrote a comment. Guests can't be recognised yet (no guest identity). */
 export function isAuthor(actor: Actor, author: CommentAuthor): boolean {
@@ -213,9 +227,10 @@ export function canDeleteComment(
  *                 fling_group_members
  *   group.delete  DELETE /api/groups/:slug, fling_group_delete
  *
- * Making a group needs only a signed-in user (its maker becomes the owner). There are no
- * co-managers, and admins get no rights over groups, as over sites: they act only by
- * impersonating.
+ * Making a group needs a signed-in user who isn't a guest (`account.group.create`; its maker
+ * becomes the owner), and listing them `account.groups.read`. A guest may be a member of groups
+ * but reads none: an audience naming one is all they see of it. There are no co-managers, and
+ * admins get no rights over groups, as over sites: they act only by impersonating.
  */
 export const GROUP_ACTIONS = ['group.read', 'group.manage', 'group.delete'] as const
 
@@ -225,7 +240,7 @@ export type GroupAction = (typeof GROUP_ACTIONS)[number]
 export type PolicyGroup = Pick<GroupRecord, 'owner'>
 
 export function canGroup(actor: Actor, action: GroupAction, group: PolicyGroup): boolean {
-  if (actor.kind !== 'user') return false
+  if (actor.kind !== 'user' || actor.guest) return false
   return action === 'group.read' || actor.email === group.owner
 }
 
@@ -244,20 +259,25 @@ export interface Principal {
   via: 'session' | 'api_key' | 'oauth'
   /** the admin acting as `email` (a browser session only) */
   impersonator?: string
+  /** the effective user's standing is `guest` (auth/standing.ts; never an admin) */
+  guest: boolean
 }
 
 /**
  * - `admin`: an admin in their own browser session.
  * - `admin-token`: an admin through an API key or OAuth token (the CLI, MCP, the smoke test).
- * - `impersonating`: an admin acting as another user (always a browser session).
+ * - `impersonating`: an admin acting as another user (always a browser session). Acting as a
+ *   guest, they are held to the guest's rules as well.
+ * - `guest`: a user whose standing is `guest`.
  * - `user`: anyone else.
  */
-export type PrincipalRole = 'admin' | 'admin-token' | 'impersonating' | 'user'
+export type PrincipalRole = 'admin' | 'admin-token' | 'impersonating' | 'guest' | 'user'
 
 export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
   'admin',
   'admin-token',
   'impersonating',
+  'guest',
   'user',
 ]
 
@@ -271,6 +291,13 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   admin.mail.test          POST /api/admin/mail/test: send a test email (browser session only)
  *   admin.impersonate        POST /api/admin/impersonate (then `impersonationRefusal` on the target)
  *   admin.impersonate.stop   POST /api/admin/impersonate/stop
+ *   admin.invitations.manage invite an address as a member, list and revoke invitations (browser
+ *                            session only: an invitation lets someone in)
+ *   account.site.create      claim a new site name (a first deploy: publication.ts)
+ *   account.group.create     POST /api/groups, fling_group_create
+ *   account.groups.read      GET /api/groups[/:slug], fling_groups, fling_group_show
+ *   account.invite           invite an outside address as a guest by naming it in an audience or
+ *                            a group
  *   account.key.create       GET /auth/cli: mint an API key (`fling login`)
  *   account.oauth.approve    /oauth/authorize and /api/oauth/requests/…: approve (or deny) an app
  *   account.revoke           DELETE /api/keys/:id, /api/connections/:id
@@ -286,7 +313,12 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  * what they set up either (revoking their keys or apps), nor changing what they hear about
  * (preferences are their consent), nor reading the mail sent to them (admins never read other
  * people's mail). Starting one needs the admin's browser session: a key or token that leaked must
- * not be able to become someone else.
+ * not be able to become someone else. Nor may an impersonating admin invite anyone: an invitation
+ * outlives the session.
+ *
+ * Guests review what is shared with them and nothing else: they create no sites or groups, list
+ * no groups, invite no one, and hold no API keys or app connections (none that outlive what was
+ * shared with them). They keep their own account's settings.
  */
 export const INSTANCE_ACTIONS = [
   'admin.users.list',
@@ -296,6 +328,11 @@ export const INSTANCE_ACTIONS = [
   'admin.mail.test',
   'admin.impersonate',
   'admin.impersonate.stop',
+  'admin.invitations.manage',
+  'account.site.create',
+  'account.group.create',
+  'account.groups.read',
+  'account.invite',
   'account.key.create',
   'account.oauth.approve',
   'account.revoke',
@@ -307,6 +344,9 @@ export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
 
 const isAdminRole = (role: PrincipalRole) => role === 'admin' || role === 'admin-token'
 const notImpersonating = (role: PrincipalRole) => role !== 'impersonating'
+const notGuest = (role: PrincipalRole) => role !== 'guest'
+/** Their own, not a guest's: no impersonating, no guests. */
+const ownMember = (role: PrincipalRole) => notImpersonating(role) && notGuest(role)
 
 const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> = {
   'admin.users.list': isAdminRole,
@@ -317,8 +357,13 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.mail.test': role => role === 'admin',
   'admin.impersonate': role => role === 'admin',
   'admin.impersonate.stop': role => role === 'impersonating',
-  'account.key.create': notImpersonating,
-  'account.oauth.approve': notImpersonating,
+  'admin.invitations.manage': role => role === 'admin',
+  'account.site.create': notGuest,
+  'account.group.create': notGuest,
+  'account.groups.read': notGuest,
+  'account.invite': ownMember,
+  'account.key.create': ownMember,
+  'account.oauth.approve': ownMember,
   'account.revoke': notImpersonating,
   'account.notifications.change': notImpersonating,
   'account.notifications.sent': notImpersonating,
@@ -326,12 +371,15 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
 
 export function principalRole(p: Principal): PrincipalRole {
   if (p.impersonator !== undefined) return 'impersonating'
-  if (!p.admin) return 'user'
-  return p.via === 'session' ? 'admin' : 'admin-token'
+  if (p.admin) return p.via === 'session' ? 'admin' : 'admin-token'
+  return p.guest ? 'guest' : 'user'
 }
 
 export function canInstance(p: Principal, action: InstanceAction): boolean {
-  return INSTANCE_RULES[action](principalRole(p))
+  const rule = INSTANCE_RULES[action]
+  const role = principalRole(p)
+  // An admin acting as a guest may do only what both may.
+  return rule(role) && (role !== 'impersonating' || !p.guest || rule('guest'))
 }
 
 export type ImpersonationRefusal = 'no_such_user' | 'self' | 'admin'

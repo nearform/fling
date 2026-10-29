@@ -289,6 +289,7 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   admin.audit.read         GET /api/admin/audit
  *   admin.mail.read          GET /api/admin/mail: the mail settings and the sending health
  *   admin.mail.test          POST /api/admin/mail/test: send a test email (browser session only)
+ *   admin.settings.read      GET /api/admin/settings: the configuration, secrets by name only
  *   admin.impersonate        POST /api/admin/impersonate (then `impersonationRefusal` on the target)
  *   admin.impersonate.stop   POST /api/admin/impersonate/stop
  *   admin.invitations.manage invite an address as a member, list and revoke invitations (browser
@@ -326,6 +327,7 @@ export const INSTANCE_ACTIONS = [
   'admin.audit.read',
   'admin.mail.read',
   'admin.mail.test',
+  'admin.settings.read',
   'admin.impersonate',
   'admin.impersonate.stop',
   'admin.invitations.manage',
@@ -355,6 +357,7 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.mail.read': isAdminRole,
   // Sending is never automatic: a leaked key or token must not be able to send mail.
   'admin.mail.test': role => role === 'admin',
+  'admin.settings.read': isAdminRole,
   'admin.impersonate': role => role === 'admin',
   'admin.impersonate.stop': role => role === 'impersonating',
   'admin.invitations.manage': role => role === 'admin',

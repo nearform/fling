@@ -1,6 +1,11 @@
 import { type Me, notificationSettings } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { ADMIN_MAIL_TAB, ADMIN_USERS_TAB, adminTabsFor } from '../src/components/AdminTabs'
+import {
+  ADMIN_MAIL_TAB,
+  ADMIN_SETTINGS_TAB,
+  ADMIN_USERS_TAB,
+  adminTabsFor,
+} from '../src/components/AdminTabs'
 import { ADMIN_NAV_ITEM, isPathActive } from '../src/components/SideNav'
 import {
   ADMIN_MAIL_PATH,
@@ -58,10 +63,15 @@ describe('where notifications show', () => {
     expect(showsSentMail(undefined)).toBe(false)
   })
 
-  it('shows the Admin tabs only when there is more than Users', () => {
-    expect(adminTabsFor(true)).toEqual([ADMIN_USERS_TAB, ADMIN_MAIL_TAB])
+  it('offers Mail among the Admin tabs only on an instance that sends email', () => {
+    expect(adminTabsFor(true)).toContain(ADMIN_MAIL_TAB)
     expect(ADMIN_MAIL_TAB).toMatchObject({ to: ADMIN_MAIL_PATH, label: 'Mail' })
-    expect(adminTabsFor(false)).toEqual([ADMIN_USERS_TAB])
+    expect(adminTabsFor(false)).not.toContain(ADMIN_MAIL_TAB)
+    for (const mail of [true, false]) {
+      expect(adminTabsFor(mail)).toEqual(
+        expect.arrayContaining([ADMIN_USERS_TAB, ADMIN_SETTINGS_TAB])
+      )
+    }
   })
 
   it('keeps Admin active in the side nav on every admin page', () => {

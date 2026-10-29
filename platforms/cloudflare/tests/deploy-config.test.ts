@@ -41,6 +41,16 @@ describe('checkDeployConfig', () => {
   })
 })
 
+describe('INSTANCE.INVITES', () => {
+  it('turns on only with MAIL', () => {
+    const instance = { ALLOWED_EMAIL_DOMAINS: 'example.test', INVITES: 'on' }
+    expect(() => checkDeployConfig(config(instance))).toThrow(/INVITES needs MAIL/)
+    const mail = { MAIL: { FROM: 'fling@mail.example.test' } }
+    expect(() => checkDeployConfig({ ...config(instance), ...mail })).not.toThrow()
+    expect(() => checkDeployConfig(config({ ...instance, INVITES: 'off' }))).not.toThrow()
+  })
+})
+
 describe('renderWranglerConfig', () => {
   it('keeps the live rooms (their Durable Object and its migration) and points LIVE_URL at the Worker', () => {
     const out = renderWranglerConfig(

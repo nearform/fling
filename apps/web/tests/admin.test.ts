@@ -1,4 +1,4 @@
-import type { AdminUser, Me } from '@fling/shared'
+import { type AdminSettings, type AdminUser, type Me, REPO_URL } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import {
   ADMIN_NAV_ITEM,
@@ -11,6 +11,9 @@ import {
   ADMIN_USERS_PATH,
   impersonateBlocked,
   impersonationNotice,
+  SETTING_GROUP_INFO,
+  settingGroups,
+  settingText,
   showsAdmin,
 } from '../src/lib/admin'
 
@@ -94,5 +97,36 @@ describe('the users list', () => {
     expect(impersonateBlocked(boss, user({ email: 'other@example.test', admin: true }))).toBe(
       'Admin'
     )
+  })
+})
+
+describe('the Settings tab', () => {
+  const data: AdminSettings = {
+    settings: [
+      { key: 'INVITES', group: 'features', value: false, set: false },
+      { key: 'INSTANCE_NAME', group: 'branding', value: 'Acme', set: true },
+    ],
+    secrets: [{ name: 'SESSION_SECRET', group: 'platform', set: true }],
+  }
+
+  it('groups settings and secrets in the groups’ order and leaves empty groups out', () => {
+    const groups = settingGroups(data)
+    expect(groups.map(g => g.group)).toEqual(['branding', 'features', 'platform'])
+    expect(groups.find(g => g.group === 'platform')?.secrets).toEqual(data.secrets)
+  })
+
+  it('links every group to both deploy guides, never to an instance', () => {
+    for (const info of Object.values(SETTING_GROUP_INFO)) {
+      expect(info.aws.startsWith(`${REPO_URL}/`)).toBe(true)
+      expect(info.cloudflare.startsWith(`${REPO_URL}/`)).toBe(true)
+    }
+  })
+
+  it('shows values as text, nothing as not set', () => {
+    expect(settingText(true)).toBe('on')
+    expect(settingText(['a.test', 'b.test'])).toBe('a.test, b.test')
+    expect(settingText([])).toBeNull()
+    expect(settingText(null)).toBeNull()
+    expect(settingText(20)).toBe('20')
   })
 })

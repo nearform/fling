@@ -28,6 +28,7 @@ export const queryKeys = {
   adminSites: ['admin', 'sites'] as const,
   adminAudit: ['admin', 'audit'] as const,
   adminMail: ['admin', 'mail'] as const,
+  adminSettings: ['admin', 'settings'] as const,
   notifications: ['notifications'] as const,
   sentNotifications: ['notifications', 'sent'] as const,
 }
@@ -314,6 +315,11 @@ export function useAdminMail(enabled: boolean) {
     queryFn: api.adminMail,
     refetchInterval: 60_000,
   })
+}
+
+/** Admins: the instance's configuration (it changes only with a deploy). */
+export function useAdminSettings(enabled: boolean) {
+  return useQuery({ enabled, queryKey: queryKeys.adminSettings, queryFn: api.adminSettings })
 }
 
 /** Admins: send a test email. The page shows the result; the remaining count refetches. */

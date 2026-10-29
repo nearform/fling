@@ -1,10 +1,11 @@
 /**
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
- * check): the users list, every site's listing, the audit log, the mail page (settings, health and a test email), and
- * starting and stopping an impersonation. admin.ts
+ * check): the users list, every site's listing, the audit log, the mail page (settings, health
+ * and a test email), the instance's settings, and starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
+  AdminSettingsSchema,
   AdminSiteListSchema,
   AdminUserListSchema,
   AuditListSchema,
@@ -57,6 +58,10 @@ adminRoutes.post('/mail/test', async c => {
   const result = await admin.mailTest(c.get('deps'), p, to)
   return c.json(MailTestResultSchema.parse(result))
 })
+
+adminRoutes.get('/settings', c =>
+  c.json(AdminSettingsSchema.parse(admin.settings(c.get('deps'), principalOf(c))))
+)
 
 adminRoutes.post('/impersonate', async c => {
   const { email } = await jsonBody(c, ImpersonateRequestSchema)

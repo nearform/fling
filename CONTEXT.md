@@ -163,6 +163,11 @@ every page, and stop to return to their own session. Listing a site gives them n
 get no rights over anyone's site except by impersonating, and while impersonating can create
 nothing that outlives the session (no API keys or `fling login`, no OAuth approvals, no further
 impersonation). Every start and stop is audited (`AUDIT` items, kept 180 days, and a log line).
+Admins also read the instance's **settings** (`/admin/settings`, `GET /api/admin/settings`,
+`admin.settings.read`; from a browser session or an admin's API key): every key of the env schema
+in `apps/api/src/config.ts` with the value the instance runs with and whether the deployment set
+it or it is the default, grouped (`SETTING_GROUP`), and the secrets by name only, set or not,
+never their values. Read only: changing a setting is a deploy.
 The `admin.*` actions are in `policy.ts` (`canInstance`).
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a

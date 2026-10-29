@@ -261,6 +261,7 @@ describe('the admin mail page', () => {
       fromName: 'Acme Fling',
       replyTo: 'help@example.test',
       configurationSet: 'transactional',
+      invites: false,
     })
     expect(body.health.totals).toMatchObject({ sent: 3, retrying: 1, givenUp: 0 })
     expect(body.health.hours).toEqual([expect.objectContaining({ hour, sent: 3 })])

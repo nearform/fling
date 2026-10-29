@@ -9,7 +9,7 @@
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
  *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list; every site's listing, the owner's site included;
- *   impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
+ *   the settings, secrets by name only; impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
  *   group (the member makes one the owner can see and use but not change; the owner names it in
  *   the audience; the outsider, once in it, gets in, and once out is refused; deleting it leaves
@@ -1527,6 +1527,26 @@ async function adminStep(ctx: {
     )
   }
 
+  /** The instance's settings: the env keys with their values, the secrets by name only. */
+  const settings = async (how: { cookie: string } | { key: string }) => {
+    const res = await call(how, 'GET', '/api/admin/settings')
+    check(res.status === 200, `admin settings: ${res.status}`)
+    const body = (await res.json()) as {
+      settings: { key: string; value: unknown }[]
+      secrets: Record<string, unknown>[]
+    }
+    check(
+      body.settings.some(s => s.key === 'SITES_DOMAIN' && typeof s.value === 'string'),
+      `settings: ${body.settings.length} keys, no SITES_DOMAIN`
+    )
+    const session = body.secrets.find(s => s.name === 'SESSION_SECRET')
+    check(
+      session?.set === true &&
+        body.secrets.every(s => Object.keys(s).sort().join() === 'group,name,set'),
+      `settings' secrets: ${JSON.stringify(body.secrets.map(s => Object.keys(s)))}`
+    )
+  }
+
   // Not admins: nothing there. A smoke run may sign in as one admin for both roles (a personal
   // instance has no second account), and then there is no non-admin to ask.
   if (admin.email !== owner) {
@@ -1534,23 +1554,27 @@ async function adminStep(ctx: {
     check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
     const noSites = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/sites')
     check(noSites.status === 404, `a non-admin listing every site: ${noSites.status}`)
+    const noSettings = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/settings')
+    check(noSettings.status === 404, `a non-admin reading the settings: ${noSettings.status}`)
   }
 
   await listed({ key: admin.apiKey })
   await allSites({ key: admin.apiKey })
+  await settings({ key: admin.apiKey })
   const viaKey = await call({ key: admin.apiKey }, 'POST', '/api/admin/impersonate', {
     email: owner,
   })
   check(viaKey.status === 403, `impersonating with an API key: ${viaKey.status}`)
   if (!admin.cookie) {
     step(
-      `admin (API key): lists users (${owner} included) and every site (${name} included); may not impersonate with a key`
+      `admin (API key): lists users (${owner} included), every site (${name} included) and the settings (secrets by name only); may not impersonate with a key`
     )
     return
   }
   const own = { cookie: admin.cookie }
   await listed(own)
   await allSites(own)
+  await settings(own)
 
   const started = await call(own, 'POST', '/api/admin/impersonate', { email: owner })
   check(started.status === 200, `impersonate ${owner}: ${started.status} ${await started.text()}`)
@@ -1606,7 +1630,7 @@ async function adminStep(ctx: {
     `audit: ${JSON.stringify(audit.entries.slice(0, 2))}`
   )
   step(
-    `admin: lists users and every site (${name} included); impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
+    `admin: lists users, every site (${name} included) and the settings; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)`
   )
 }
 

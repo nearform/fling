@@ -284,6 +284,8 @@ export const MailAdminSchema = z.object({
     fromName: z.string(),
     replyTo: z.string().nullable(),
     configurationSet: z.string().nullable(),
+    /** outside invitations are on (`INVITES`) */
+    invites: z.boolean(),
   }),
   health: z.object({
     /** the first hour counted (UTC, `2026-10-28T14`) */

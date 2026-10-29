@@ -162,7 +162,7 @@ Values reach the function two ways, and the function's own environment wins:
 | --- | --- | --- |
 | `ALLOWED_EMAIL_DOMAINS` | **yes**, unless `ALLOWED_EMAILS` is set (production refuses to start with neither; the deploy checks `INSTANCE` has one) | Comma-separated email domains that may sign in, e.g. `example.test`. A verified email whose domain matches one is admitted (and Google's `hd` claim, when present, must match its domain). |
 | `ALLOWED_EMAILS` | **yes**, unless `ALLOWED_EMAIL_DOMAINS` is set | Comma-separated email addresses that may sign in whatever their domain, e.g. `you@gmail.com` for a personal instance. Each must still be verified. The addresses are never published: the public metadata only says there are invited accounts. With it set, Google's sign-in page gets no `hd` hint. |
-| `ADMIN_EMAILS` | no (none) | Comma-separated email addresses of the instance's admins, who get **Admin → Users** in the web UI: every user, and impersonation (acting as a user for up to 60 minutes, from a browser session only, audited). Admins sign in like anyone else, so each must be admitted by `ALLOWED_EMAILS` or `ALLOWED_EMAIL_DOMAINS` (the function refuses to start otherwise); they get no other rights over anyone's sites. Checked on every request; never published. |
+| `ADMIN_EMAILS` | no (none) | Comma-separated email addresses of the instance's admins, who get **Admin** in the web UI: every user, and impersonation (acting as a user for up to 60 minutes, from a browser session only, audited); the mail page; and the instance's settings. Admins sign in like anyone else, so each must be admitted by `ALLOWED_EMAILS` or `ALLOWED_EMAIL_DOMAINS` (the function refuses to start otherwise); they get no other rights over anyone's sites. Checked on every request; never published. |
 | `OIDC_ISSUER` | **yes**, with the next one (see [Sign-in](#sign-in-openid-connect)) | The OpenID Connect issuer, exactly as its tokens' `iss`, e.g. `https://accounts.google.com`. Must be `https`. |
 | `OIDC_CLIENT_ID` | with `OIDC_ISSUER` | The client (application) id registered with the issuer. Its secret is the SSM parameter `oidc-client-secret`. |
 | `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else the issuer's host) | What the button says: "Sign in with …". |
@@ -175,6 +175,8 @@ Values reach the function two ways, and the function's own environment wins:
 | `MAIL_FROM_NAME` | no (`INSTANCE_NAME`) | The sender's display name, one line. |
 | `MAIL_REPLY_TO` | no (none) | The operator's address replies go to, on every email (never the person who acted). Never published. |
 | `SES_CONFIGURATION_SET` | no (the identity's default) | AWS: the SES configuration set each send names. |
+| `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. |
+| `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |
@@ -186,6 +188,10 @@ Values reach the function two ways, and the function's own environment wins:
 | `BRAND_LOGO_URL` | no | Logo mark shown before the name: an `https:` URL or a `data:image/…` URI (an SVG data URI keeps it self-contained). |
 | `BRAND_LOGO_DARK_URL` | no | The same for the dark theme (defaults to `BRAND_LOGO_URL`). |
 | `BRAND_FAVICON_URL` | no | Favicon, `https:` or `data:image/…`. |
+
+Admins see every key here, the value the instance runs with and whether it was set or is the
+default, at **Admin → Settings** in the web UI, with the [secrets](#secrets) by name only (set or
+not, never their values). The page is read only: change a value here and redeploy.
 
 Without any `BRAND_*` value the UI uses its neutral default theme. The UI applies the brand at
 runtime, so one build serves every instance; it caches the last brand in the browser so later visits
@@ -649,6 +655,9 @@ will be deployed, after `pnpm install`.
 ## Secrets
 
 SSM SecureString parameters under `$SSM_PREFIX`, read by the function at cold start:
+
+Admin → Settings lists each one under its environment name (`OIDC_CLIENT_SECRET`,
+`SESSION_SECRET`, …), set or not, never its value.
 
 | Parameter | Source |
 | --- | --- |

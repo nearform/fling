@@ -7,3 +7,10 @@ export const REPO_SLUG = 'nearform/fling'
 
 /** The command an instance's metadata advertises unless it configures its own. */
 export const DEFAULT_INSTALL_COMMAND = `npm install -g ${CLI_PACKAGE}`
+
+/** The repository's page, where Fling's guides live. */
+export const REPO_URL = `https://github.com/${REPO_SLUG}`
+
+/** A guide in the repository (`path` from its root, e.g. `platforms/aws/DEPLOY.md`), on main. */
+export const guideUrl = (path: string, anchor?: string) =>
+  `${REPO_URL}/blob/main/${path}${anchor ? `#${anchor}` : ''}`

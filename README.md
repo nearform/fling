@@ -93,7 +93,7 @@ into one email. Each person chooses what they hear about from every client (Sett
 Notifications, `fling notifications`, `fling_notifications_set`), and every email has a one-click
 unsubscribe. Email goes out through each cloud's own service (SES on AWS, Email Service on
 Cloudflare) from a sender the operator already has; admins check the setup at `/admin/mail` with a
-test email. An instance without a mail sender lacks the `email` and `notifications` capabilities,
+test email, and see the whole configuration (secrets by name only) at `/admin/settings`. An instance without a mail sender lacks the `email` and `notifications` capabilities,
 and every client hides the settings. See each platform's deploy guide, Email.
 
 ## Layout

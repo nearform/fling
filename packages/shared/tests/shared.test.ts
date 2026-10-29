@@ -80,6 +80,11 @@ describe('site cookie', () => {
     expect(verifySiteCookie(c, 'k', 3000)).toBeNull()
     expect(verifySiteCookie(`${c}x`, 'k', 1000)).toBeNull()
   })
+
+  it("keeps a guest's mark", () => {
+    const c = signSiteCookie({ e: 'g@outside.test', x: 2000, g: 1 }, 'k')
+    expect(verifySiteCookie(c, 'k', 1000)).toEqual({ e: 'g@outside.test', x: 2000, g: 1 })
+  })
 })
 
 describe('cacheControlFor', () => {

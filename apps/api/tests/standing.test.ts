@@ -3,10 +3,11 @@
  * matrix, then what it does to each credential (session, API key, OAuth and MCP) and what a guest
  * may reach. Invitations are written straight into the store here.
  */
+import { SITE_COOKIE_NAME, verifySiteCookie } from '@fling/shared/site-cookie'
 import { describe, expect, it, vi } from 'vitest'
 import { type Standing, standingFrom, standingOf } from '../src/auth/standing.ts'
 import type { InvitationRecord } from '../src/store/types.ts'
-import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
+import { api, cookiesOf, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 import {
   authorizeUrl,
   CLAUDE_CALLBACK,
@@ -274,6 +275,26 @@ describe('a guest', () => {
     const denied = new URL(authorize.headers.get('location') ?? '', 'https://fling.test')
     expect(denied.pathname).toBe('/authorize')
     expect(denied.searchParams.get('error')).toBe('access_denied')
+  })
+
+  it("carries a guest's site cookie, which keeps members-level sites from them at the edge", async () => {
+    const { env, owner, guest } = await world()
+    const key = env.config.secrets.siteHmacKey
+    const now = Math.floor(env.deps.clock.now().getTime() / 1000)
+    const siteCookieAfterLogin = async (session: string) => {
+      const res = await sessionGet(env, session, '/auth/login?return=/')
+      expect(res.status).toBe(302)
+      return verifySiteCookie(cookiesOf(res)[SITE_COOKIE_NAME]?.value ?? '', key, now)
+    }
+    expect(await siteCookieAfterLogin(guest.session)).toEqual({
+      e: GUEST,
+      x: expect.any(Number),
+      g: 1,
+    })
+    expect(await siteCookieAfterLogin(owner.session)).toEqual({
+      e: 'alice@example.test',
+      x: expect.any(Number),
+    })
   })
 
   it('gets only the reviewing tools over MCP', async () => {

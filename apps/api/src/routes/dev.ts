@@ -3,10 +3,10 @@
  *
  * - `POST /dev/notify/drain`: drain the outbox now, including what is due in the next hour
  *   (`flush`), so local runs and the e2e scenario need not wait for a tick or a fold. Answers the
- *   drain's result.
+ *   drain's result, or, posted from the mail page's form, sends the browser back to it.
  * - `GET /dev/mail`: the messages the mailer kept (FileMailer's `.fling-dev/mail/`,
  *   MemoryMailer's, or KeptMailer's copies of a platform mailer's), newest first: JSON when asked
- *   for it, else a page linking each one.
+ *   for it, else a page linking each one, with a button that drains the outbox now.
  * - `GET /dev/mail/:id`: one message's HTML part.
  */
 import type { Context } from 'hono'
@@ -21,7 +21,11 @@ import type { AppEnv } from '../types.ts'
 export const devRoutes = new Hono<AppEnv>()
 
 devRoutes.post('/notify/drain', async c => {
-  return c.json(await drain(c.get('deps'), { flush: true }))
+  const result = await drain(c.get('deps'), { flush: true })
+  if ((c.req.header('content-type') ?? '').startsWith('application/x-www-form-urlencoded')) {
+    return c.redirect('/dev/mail', 303)
+  }
+  return c.json(result)
 })
 
 interface Listed {
@@ -66,7 +70,7 @@ devRoutes.get('/mail', async c => {
     )
     .join('')
   return c.html(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local mail</title><style>body{font-family:sans-serif;margin:24px}td{padding:4px 12px 4px 0}</style></head><body><h1>Local mail</h1>${
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Local mail</title><style>body{font-family:sans-serif;margin:24px}td{padding:4px 12px 4px 0}form{margin:0 0 16px}</style></head><body><h1>Local mail</h1><form method="post" action="/dev/notify/drain"><button type="submit">Send what is waiting</button> <small>Emails wait a couple of minutes in the outbox; this sends them now.</small></form>${
       messages.length ? `<table>${rows}</table>` : '<p>Nothing sent yet.</p>'
     }</body></html>`
   )

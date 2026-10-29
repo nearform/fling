@@ -883,6 +883,15 @@ describe('dev routes', () => {
     ])
     const one = await env.app.request(`/dev/mail/${listed.messages[0].id}`)
     expect(await one.text()).toContain('q3-report')
+    const page = await (await env.app.request('/dev/mail')).text()
+    expect(page).toContain('action="/dev/notify/drain"')
+    const posted = await env.app.request('/dev/notify/drain', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: '',
+    })
+    expect(posted.status).toBe(303)
+    expect(posted.headers.get('location')).toBe('/dev/mail')
     // The cursor stays behind the clock, so what happens next is still drained.
     await comment(env, bob.key, { body: 'Later' })
     await settle(env)

@@ -118,11 +118,37 @@ describe('routeSiteRequest', () => {
     ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: NOINDEX })
   })
 
-  it("answers a guest's cookie on a members-level site as a missing site, and serves them public ones", async () => {
+  it("sends a guest's cookie on a members-level site through the site pass, and serves them public ones", async () => {
     const cookie = signSiteCookie({ e: 'g@outside.test', x: NOW + 1, g: 1 }, KEY)
-    expect(
-      await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
-    ).toEqual({ action: 'rewrite', uri: MISSING_KEY, headers: NOINDEX })
+    const host = 'priv.sites.example.test'
+    // No pass: to sign in, where the app refreshes the cookie and asks policy.
+    expect(await routeSiteRequest(req({ host, uri: '/u/1', cookie }), ctx())).toEqual({
+      action: 'respond',
+      status: 302,
+      statusDescription: 'Found',
+      headers: {
+        location: `https://app.example.test/auth/login?return=${encodeURIComponent(`https://${host}/u/1`)}`,
+        'cache-control': 'no-store',
+        ...NOINDEX,
+      },
+    })
+    // The app's refusal: the site answers as a missing one while it lasts.
+    const denied = signSiteDenied({ s: 'S2', x: NOW + 1 }, KEY)
+    expect(await routeSiteRequest(req({ host, uri: '/u/1', cookie, pass: denied }), ctx())).toEqual(
+      { action: 'rewrite', uri: MISSING_KEY, headers: NOINDEX }
+    )
+    // The handoff path takes the deny handoff, as on a restricted site.
+    const handoff = signDenyHandoff({ s: 'S2', x: NOW + 1 }, KEY)
+    const taken = await routeSiteRequest(
+      req({ host, uri: '/_fling-pass', query: `?t=${handoff}&r=%2Fu%2F1`, cookie }),
+      ctx()
+    )
+    expect(taken.action === 'respond' && taken.cookies?.fling_pass).toBeTruthy()
+    // A member's cookie needs no pass.
+    const member = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
+    expect((await routeSiteRequest(req({ host, uri: '/', cookie: member }), ctx())).action).toBe(
+      'rewrite'
+    )
     expect(
       await routeSiteRequest(req({ host: 'pub.sites.example.test', uri: '/', cookie }), ctx())
     ).toEqual({ action: 'rewrite', uri: '/sites/S1/V1/index.html', headers: NOINDEX })

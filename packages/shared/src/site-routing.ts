@@ -6,12 +6,12 @@
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
 //   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile,
-//     restricted site whose `fling_pass` says it was refused, members-level site to a guest's
-//     `fling_site`); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
+//     site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
 //     and `/robots.txt` on any host is ROBOTS_TXT
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
-//     `fling_site` cookie; restricted site without a valid `fling_pass` naming it), 301 to add a
-//     trailing slash (extensionless path, not an SPA).
+//     `fling_site` cookie; restricted site, or members-level site to a guest's `fling_site`,
+//     without a valid `fling_pass` naming it), 301 to add a trailing slash (extensionless path,
+//     not an SPA).
 //   → either way, with the headers every response on that host carries (siteResponseHeaders).
 //
 // Sites are not indexed: every sites host answers `/robots.txt` with Fling's own `Disallow: /`
@@ -37,9 +37,11 @@
 // 404 page at the URL asked for), and afterwards the next visit asks the app again, so someone
 // added to the audience gets in within seconds and nobody loops between the two hosts.
 //
-// Members-level sites (private, no audience) open with any valid `fling_site` except a guest's
-// (`g: 1`). A guest views only the sites whose audience names them, through the site pass, so a
-// members-level site answers them as a missing one rather than sending them round to sign in.
+// Members-level sites (private, no audience) open with any valid `fling_site` that isn't a guest's
+// (`g: 1`). A guest's goes through the site pass like a restricted site: the app's `/auth/login`
+// refreshes `fling_site` and asks policy, so a real guest gets a deny handoff (the site answers
+// as a missing one) and someone who has become a member since their cookie was set goes straight
+// back with a member's cookie.
 //
 // SYNTAX. This file runs in the CloudFront Functions runtime (cloudfront-js-2.0: ES5.1 plus
 // const/let, arrow functions, template literals, async/await on function declarations). So: no
@@ -339,6 +341,30 @@ async function passFromHandoff(
   return res
 }
 
+/**
+ * A site that wants a site pass: `/_fling-pass` takes a handoff; a refusal still running answers
+ * as a missing site; without a valid pass, off to sign in. null: the pass is good, serve the site.
+ */
+async function bySitePass(
+  req: SiteRequest,
+  ctx: SiteRoutingContext,
+  host: string,
+  siteId: string
+): Promise<SiteDecision | null> {
+  if (req.uri === SITE_PASS_PATH) return await passFromHandoff(req, ctx, siteId)
+  const pass = req.pass
+  let key: string | null = null
+  if (pass) key = await ctx.getCookieKey()
+  // Refused a moment ago: answer as a missing site, until the refusal runs out.
+  if (key && pass && validSiteDenial(pass, key, 'denied', siteId, ctx.nowSeconds, ctx.hmac)) {
+    return rewrite(MISSING_KEY)
+  }
+  if (!key || !pass || !validSitePass(pass, key, 'pass', siteId, ctx.nowSeconds, ctx.hmac)) {
+    return toSignIn(req, ctx, host)
+  }
+  return null
+}
+
 function parseRoute(raw: string | null): RouteValue | null {
   if (!raw) return null
   try {
@@ -390,17 +416,8 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
   }
 
   if (site.vis !== 'public' && !target.share && site.r) {
-    if (uri === SITE_PASS_PATH) return await passFromHandoff(req, ctx, site.id)
-    const pass = req.pass
-    let key: string | null = null
-    if (pass) key = await ctx.getCookieKey()
-    // Refused a moment ago: answer as a missing site, until the refusal runs out.
-    if (key && pass && validSiteDenial(pass, key, 'denied', site.id, ctx.nowSeconds, ctx.hmac)) {
-      return rewrite(MISSING_KEY)
-    }
-    if (!key || !pass || !validSitePass(pass, key, 'pass', site.id, ctx.nowSeconds, ctx.hmac)) {
-      return toSignIn(req, ctx, host)
-    }
+    const held = await bySitePass(req, ctx, host, site.id)
+    if (held) return held
   } else if (site.vis !== 'public' && !target.share) {
     const cookie = req.cookie
     let key: string | null = null
@@ -408,8 +425,12 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     let who: string | null = null
     if (key) who = siteCookieOf(cookie || '', key, ctx.nowSeconds, ctx.hmac)
     if (!who) return toSignIn(req, ctx, host)
-    // Members-level sites are for members: to a guest they answer as missing ones, like a refusal.
-    if (who === 'guest') return rewrite(MISSING_KEY)
+    // A guest's cookie may be stale (they have since become a member): the app decides, through
+    // the same sign-in hop as a restricted site, which refreshes the cookie on the way.
+    if (who === 'guest') {
+      const held = await bySitePass(req, ctx, host, site.id)
+      if (held) return held
+    }
   }
 
   let path = uri

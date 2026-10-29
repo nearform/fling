@@ -4,13 +4,15 @@
  * - `POST /dev/notify/drain`: drain the outbox now, including what is due in the next hour
  *   (`flush`), so local runs and the e2e scenario need not wait for a tick or a fold. Answers the
  *   drain's result.
- * - `GET /dev/mail`: the messages the mailer kept (FileMailer's `.fling-dev/mail/`, or
- *   MemoryMailer's), newest first: JSON when asked for it, else a page linking each one.
+ * - `GET /dev/mail`: the messages the mailer kept (FileMailer's `.fling-dev/mail/`,
+ *   MemoryMailer's, or KeptMailer's copies of a platform mailer's), newest first: JSON when asked
+ *   for it, else a page linking each one.
  * - `GET /dev/mail/:id`: one message's HTML part.
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { FileMailer } from '../mail/file.ts'
+import { KeptMailer } from '../mail/kept.ts'
 import { MemoryMailer } from '../mail/memory.ts'
 import { drain } from '../notifications/drain.ts'
 import { escapeHtml as e } from '../notifications/templates/layout.ts'
@@ -39,7 +41,7 @@ async function listMail(c: Context<AppEnv>): Promise<Listed[]> {
       date: m.date,
     }))
   }
-  if (mailer instanceof MemoryMailer) {
+  if (mailer instanceof MemoryMailer || mailer instanceof KeptMailer) {
     return [...mailer.sent].reverse().map(m => ({
       id: m.providerId,
       to: m.message.to,
@@ -75,7 +77,7 @@ devRoutes.get('/mail/:id', async c => {
   const id = c.req.param('id')
   let html: string | null = null
   if (mailer instanceof FileMailer) html = await mailer.read(id, 'html')
-  else if (mailer instanceof MemoryMailer) {
+  else if (mailer instanceof MemoryMailer || mailer instanceof KeptMailer) {
     html = mailer.sent.find(m => m.providerId === id)?.message.html ?? null
   }
   if (html === null)

@@ -1,10 +1,12 @@
 /**
  * TEMPLATES: what each event says, per channel, folded (several of the same event in one
  * message: "Ben and Ana left 4 comments on q3-report"). Plain text in, plain text out: the layout
- * escapes. A guest's comment carries neither a name, an excerpt nor its page path (design §9): it is
+ * escapes. A share's message to someone invited from outside who has never signed in
+ * (`ctx.invitation`) says they were invited, and its button is their sign-in link. A guest's comment carries neither a name, an excerpt nor its page path (design §9): it is
  * unverified, and mail clients may turn a URL in it into a link.
  */
 import type { ActorView, DeliveryItem, SiteView } from '../channel.ts'
+import { lifetimeInWords } from './sign-in-link.ts'
 import type { Section, TemplateContext, Templates } from './types.ts'
 
 export type { Section, Template, TemplateContext, Templates } from './types.ts'
@@ -77,7 +79,34 @@ function commentQuotes(items: DeliveryItem<'comment.created' | 'comment.reply'>[
 /** One person, unnamed guests, or several: whether a section's actors are only guests. */
 const onlyGuests = (items: DeliveryItem[]) => items.every(i => i.actor.kind === 'guest')
 
-const siteShared = (items: DeliveryItem<'site.shared'>[], ctx: TemplateContext): Section => {
+/**
+ * The section as an invited newcomer gets it (`ctx.invitation`): that they were invited (as a
+ * reviewer, for a guest), and a button that signs them in, once, and goes on where it led.
+ */
+function invitedTo(section: Section, ctx: TemplateContext): Section {
+  const invitation = ctx.invitation
+  if (!invitation) return section
+  const label = section.action.label
+  return {
+    ...section,
+    lines: [
+      invitation.guest
+        ? `You've been invited to ${ctx.instance} as a reviewer: you can open and comment on what is shared with you.`
+        : `You've been invited to ${ctx.instance}.`,
+      ...(section.lines ?? []),
+      `The button signs you in as ${ctx.to}. It works once, within ${lifetimeInWords(invitation.ttlSeconds)}; after that, ask for a new link on the sign-in page.`,
+    ],
+    action: {
+      label: `Sign in and ${label.charAt(0).toLowerCase()}${label.slice(1)}`,
+      url: invitation.url,
+    },
+  }
+}
+
+const siteShared = (items: DeliveryItem<'site.shared'>[], ctx: TemplateContext): Section =>
+  invitedTo(siteSharedSection(items, ctx), ctx)
+
+const siteSharedSection = (items: DeliveryItem<'site.shared'>[], ctx: TemplateContext): Section => {
   const who = actorsPhrase(items.map(i => i.actor))
   const sites = items.map(i => i.details.site)
   const first = sites[0] as SiteView
@@ -103,6 +132,11 @@ const siteShared = (items: DeliveryItem<'site.shared'>[], ctx: TemplateContext):
 }
 
 const siteSharedViaGroup = (
+  items: DeliveryItem<'site.shared_via_group'>[],
+  ctx: TemplateContext
+): Section => invitedTo(siteSharedViaGroupSection(items, ctx), ctx)
+
+const siteSharedViaGroupSection = (
   items: DeliveryItem<'site.shared_via_group'>[],
   ctx: TemplateContext
 ): Section => {
@@ -131,6 +165,11 @@ const siteSharedViaGroup = (
 }
 
 const groupMemberAdded = (
+  items: DeliveryItem<'group.member_added'>[],
+  ctx: TemplateContext
+): Section => invitedTo(groupMemberAddedSection(items, ctx), ctx)
+
+const groupMemberAddedSection = (
   items: DeliveryItem<'group.member_added'>[],
   ctx: TemplateContext
 ): Section => {

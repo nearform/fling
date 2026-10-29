@@ -15,8 +15,9 @@
  * new site that names no level gets the instance's default (`SITE_DEFAULT_ACCESS`).
  *
  * Audiences: the owner may limit a private site to listed addresses and groups (`applyAudience`
- * through `updateSite`), each address one the instance would let sign in, each group one that
- * exists (named by slug, stored by id). A restricted site (an audience, or only the owner) has a
+ * through `updateSite`), each address one the instance would let sign in or one they invite as a
+ * guest (invitations.ts, with `INVITES` on), each group one that exists (named by slug, stored by
+ * id). A restricted site (an audience, or only the owner) has a
  * route value carrying `r: 1`, and the edge wants a site pass, which `/auth/login` hands to whoever
  * policy lets view it (`signedInReturn`). Deleting a group takes it out of the audiences that name
  * it, never widening one (`dropGroup`).
@@ -68,8 +69,9 @@ import {
   signDenyHandoff,
   signPassHandoff,
 } from '@fling/shared/site-cookie'
-import { emailAllowed } from './auth/identity.ts'
+import { admittedByConfig } from './auth/standing.ts'
 import { manifestKey } from './blobs/types.ts'
+import { checkAddresses, type Inviter, inviteGuests, inviterOf } from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
@@ -294,38 +296,18 @@ export async function save(deps: Deps, site: SiteRecord, oldShareToken?: string)
 }
 
 /**
- * Refuse (400 `email_not_allowed`, naming them) any address the instance would not let sign in:
- * an audience or a group can't name someone who could never see the site.
- */
-export function checkEmails(deps: Deps, emails: readonly string[]) {
-  const policy = {
-    allowedDomains: deps.config.allowedEmailDomains,
-    allowedEmails: deps.config.allowedEmails,
-  }
-  const refused = emails.filter(e => !/^[^@\s]+@[^@\s]+$/.test(e) || !emailAllowed(e, policy))
-  if (refused.length) {
-    // The domains are public (the metadata names them); the listed addresses never are.
-    const domains = policy.allowedDomains.map(d => `@${d}`).join(', ')
-    const which = domains ? ` (it admits ${domains} addresses)` : ''
-    throw new ApiError(
-      400,
-      'email_not_allowed',
-      `Not an address that can sign in to ${deps.config.instanceName}${which}: ${refused.join(', ')}`,
-      { emails: refused }
-    )
-  }
-}
-
-/**
- * A new audience for the site, checked: every address one the instance would let sign in, every
- * group slug one that exists (400 `unknown_group`, naming them), stored by id. A deleted group's
- * reference (`#<id>`) keeps it, if the audience already names it. Returns the audience it had:
- * once the site is saved, `notifyAudienceChange` tells the addresses and groups it added.
+ * A new audience for the site, checked: every address it adds one the instance would let sign in,
+ * or one `inviter` may invite (`checkAddresses`, invitations.ts), every group slug one that exists
+ * (400 `unknown_group`, naming them), stored by id. A deleted group's reference (`#<id>`) keeps
+ * it, if the audience already names it. Returns the audience it had: once the site is saved,
+ * `inviteAdded` invites the outside addresses it added and `notifyAudienceChange` tells the
+ * addresses and groups it added.
  */
 export async function applyAudience(
   deps: Deps,
   site: Pick<SiteRecord, 'audience'>,
-  input: AudienceInput
+  input: AudienceInput,
+  inviter: Inviter | null
 ): Promise<SiteAudience> {
   const audience = AudienceInputSchema.parse(input)
   const emails = [...new Set(audience.emails)]
@@ -336,7 +318,12 @@ export async function applyAudience(
   if (slugs.length > AUDIENCE_GROUPS_MAX) {
     throw badRequest(`An audience names at most ${AUDIENCE_GROUPS_MAX} groups`)
   }
-  checkEmails(deps, emails)
+  const had = new Set(site.audience.emails)
+  await checkAddresses(
+    deps,
+    emails.filter(e => !had.has(e)),
+    inviter
+  )
   const ids = await Promise.all(
     slugs.map(async slug => {
       const kept = deletedGroupId(slug)
@@ -355,6 +342,21 @@ export async function applyAudience(
   return before
 }
 
+/**
+ * Once the site is saved with a new audience: invite as guests the outside addresses it added
+ * since `before` (invitations.ts `inviteGuests`; nothing when invitations are off).
+ */
+export async function inviteAdded(
+  deps: Deps,
+  inviter: Inviter,
+  site: SiteRecord,
+  before: SiteAudience
+) {
+  const had = new Set(before.emails)
+  const added = site.audience.emails.filter(e => !had.has(e) && !admittedByConfig(deps.config, e))
+  if (added.length) await inviteGuests(deps, inviter, added, { via: 'share', siteId: site.id })
+}
+
 /** What an access level sets on a site. */
 export type AccessFields = Pick<SiteRecord, 'visibility' | 'restricted' | 'audience'>
 
@@ -370,7 +372,8 @@ export async function applyAccess(
   deps: Deps,
   site: AccessFields,
   level: AccessLevel,
-  audience?: AudienceInput
+  audience: AudienceInput | undefined,
+  inviter: Inviter | null
 ): Promise<SiteAudience> {
   const problem = accessProblem(level, audience)
   if (problem) throw badRequest(problem)
@@ -381,7 +384,7 @@ export async function applyAccess(
   }
   site.visibility = 'private'
   site.restricted = level !== 'members'
-  if (needsAudience(level)) await applyAudience(deps, site, audience as AudienceInput)
+  if (needsAudience(level)) await applyAudience(deps, site, audience as AudienceInput, inviter)
   else site.audience = NO_AUDIENCE()
   return before
 }
@@ -394,7 +397,8 @@ export async function applyAccess(
  */
 export async function initialAccess(
   deps: Deps,
-  req: { access?: AccessLevel; audience?: AudienceInput }
+  req: { access?: AccessLevel; audience?: AudienceInput },
+  inviter: Inviter | null
 ): Promise<AccessFields> {
   const level = req.access ?? deps.config.siteDefaultAccess
   if (req.access === undefined && req.audience !== undefined) {
@@ -405,7 +409,7 @@ export async function initialAccess(
     restricted: deps.config.siteDefaultAccess === 'only_me',
     audience: NO_AUDIENCE(),
   }
-  await applyAccess(deps, fields, level, req.audience)
+  await applyAccess(deps, fields, level, req.audience, inviter)
   return fields
 }
 
@@ -613,13 +617,16 @@ export async function updateSite(
   const site = await requireSite(deps, user, name, first, ...rest)
   applySettings(site, patch)
   let before: SiteAudience | undefined
+  const inviter = inviterOf(user, acting)
   if (patch.access !== undefined) {
-    before = await applyAccess(deps, site, patch.access, patch.audience)
+    before = await applyAccess(deps, site, patch.access, patch.audience, inviter)
   } else if (patch.audience !== undefined) {
-    before = await applyAudience(deps, site, patch.audience)
+    before = await applyAudience(deps, site, patch.audience, inviter)
     site.restricted = site.audience.emails.length + site.audience.groups.length > 0
   }
   await save(deps, site)
+  // The invitations first: the share's email, sent later, goes only to people with standing.
+  if (before) await inviteAdded(deps, inviter, site, before)
   if (before) await notifyAudienceChange(deps, user.email, site, before, acting)
   return {
     ...toSite(deps, user, site),
@@ -663,7 +670,7 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
 
 /**
  * Where `/auth/login` sends a signed-in user (`ret`, already through safeReturnUrl). A restricted
- * site's host is let in only through a site pass: someone policy lets view it goes by its
+ * site's host, and a members-level site's to a guest, is let in only through a site pass: someone policy lets view it goes by its
  * `/_fling-pass` with a 60-second handoff naming them and the site; anyone else goes the same way
  * with a 60-second deny handoff naming only the site, after which the edge answers the site as a
  * missing one (its 404 page at the address asked for). Every other return URL is unchanged.
@@ -681,7 +688,9 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
   const label = parseLabel(url.host.slice(0, -suffix.length))
   if (label?.kind !== 'site') return ret
   const site = await deps.store.findSite(label.name)
-  if (!site || !isRestricted(site)) return ret
+  // The edge wants a pass for a restricted site, and for a members-level one from a guest.
+  if (!site || site.visibility === 'public') return ret
+  if (!isRestricted(site) && !user.guest) return ret
   const actor = await actorOn(deps, userActor(user), site)
   const x = Math.floor(deps.clock.now().getTime() / 1000) + PASS_HANDOFF_TTL_SECONDS
   const key = config.secrets.siteHmacKey

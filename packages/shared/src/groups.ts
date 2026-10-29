@@ -60,7 +60,9 @@ export type GroupDetail = z.infer<typeof GroupDetailSchema>
 
 /**
  * POST /api/groups { slug, name, members? } → GroupDetailSchema (201). A slug in use is a 409
- * `group_taken`; a member the instance wouldn't let sign in is a 400 `email_not_allowed`.
+ * `group_taken`; a member the instance wouldn't let sign in is a 400 `email_not_allowed`, unless
+ * outside invitations are on: then a member added from outside is invited as a guest (429
+ * `too_many_invites` past the day's limit), as for an audience.
  */
 export const CreateGroupRequestSchema = z.object({
   slug: GroupSlugSchema,

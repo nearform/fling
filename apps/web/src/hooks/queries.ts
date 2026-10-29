@@ -28,6 +28,8 @@ export const queryKeys = {
   adminUsers: (q: string) => ['admin', 'users', q] as const,
   adminSites: ['admin', 'sites'] as const,
   adminAudit: ['admin', 'audit'] as const,
+  adminInvitations: (q: string) => ['admin', 'invitations', q] as const,
+  allAdminInvitations: ['admin', 'invitations'] as const,
   adminMail: ['admin', 'mail'] as const,
   adminSettings: ['admin', 'settings'] as const,
   notifications: ['notifications'] as const,
@@ -303,6 +305,35 @@ export function useAdminUsers(q: string, enabled: boolean) {
 /** Admins: every site on the instance, whole (up to the server's ceiling); fetched when shown. */
 export function useAdminSites(enabled: boolean) {
   return useQuery({ enabled, queryKey: queryKeys.adminSites, queryFn: api.adminSites })
+}
+
+/** Admins: the invitation directory under an address prefix, a page at a time ("Load more"). */
+export function useAdminInvitations(q: string, enabled: boolean) {
+  return useInfiniteQuery({
+    enabled,
+    queryKey: queryKeys.adminInvitations(q),
+    queryFn: ({ pageParam }) => api.adminInvitations(q, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor ?? undefined,
+  })
+}
+
+/** Admins: invite a member, and revoke an invitation. Both refresh the list and the audit log. */
+export function useInvitationActions() {
+  const queryClient = useQueryClient()
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.allAdminInvitations })
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit })
+  }
+  return {
+    invite: useMutation({ mutationFn: api.invite, onSettled: refresh }),
+    revoke: useMutation({
+      mutationFn: api.revokeInvitation,
+      onSuccess: i => showToast(`${i.email} can no longer sign in by invitation`),
+      onError: error => showToast(errorMessage(error), 'error'),
+      onSettled: refresh,
+    }),
+  }
 }
 
 export function useAdminAudit() {

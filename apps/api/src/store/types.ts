@@ -43,7 +43,11 @@ export interface UserSummary {
   lastSignInAt: string | null
 }
 
-export type AuditAction = 'impersonation.start' | 'impersonation.stop'
+export type AuditAction =
+  | 'impersonation.start'
+  | 'impersonation.stop'
+  | 'invitation.create'
+  | 'invitation.revoke'
 
 /** What an invitation lets someone be: a full user, or a guest who reviews what is shared with them. */
 export type InvitationRole = 'member' | 'guest'
@@ -92,13 +96,16 @@ export interface SignInLinkRecord {
   expiresAt: string
 }
 
-/** Something an admin did, kept for a while (`expiresAt`) and listed newest first. */
+/**
+ * Something an admin did, or an invitation someone made, kept for a while (`expiresAt`) and listed
+ * newest first.
+ */
 export interface AuditRecord {
   /** time-sortable (newSortableId), so the AUDIT partition lists in time order */
   id: string
   at: string
   action: AuditAction
-  /** who did it: the admin */
+  /** who did it: the admin, or whoever invited by sharing */
   actor: string
   /** whom it was done to */
   target: string
@@ -106,6 +113,10 @@ export interface AuditRecord {
   until?: string
   /** impersonation.stop: true when it had already lapsed */
   lapsed?: boolean
+  /** invitation.create: how it came about */
+  via?: InvitationVia
+  /** invitation.create: what it lets them be */
+  role?: InvitationRole
   expiresAt: string
 }
 

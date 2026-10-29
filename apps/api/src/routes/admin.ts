@@ -1,15 +1,19 @@
 /**
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
  * check): the users list, every site's listing, the audit log, the mail page (settings, health
- * and a test email), the instance's settings, and starting and stopping an impersonation. admin.ts
+ * and a test email), the instance's settings, the invitations (list, invite, revoke), and starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
+  AdminInvitationListSchema,
+  AdminInvitationSchema,
+  AdminInviteResultSchema,
   AdminSettingsSchema,
   AdminSiteListSchema,
   AdminUserListSchema,
   AuditListSchema,
   ImpersonateRequestSchema,
+  InviteRequestSchema,
   MailAdminSchema,
   MailTestRequestSchema,
   MailTestResultSchema,
@@ -62,6 +66,31 @@ adminRoutes.post('/mail/test', async c => {
 adminRoutes.get('/settings', c =>
   c.json(AdminSettingsSchema.parse(admin.settings(c.get('deps'), principalOf(c))))
 )
+
+adminRoutes.get('/invitations', async c => {
+  const limit = c.req.query('limit')
+  const list = await admin.listInvitations(c.get('deps'), principalOf(c), {
+    q: c.req.query('q'),
+    cursor: c.req.query('cursor'),
+    limit: limit ? Number(limit) || undefined : undefined,
+  })
+  return c.json(AdminInvitationListSchema.parse(list))
+})
+
+adminRoutes.post('/invitations', async c => {
+  const p = principalOf(c)
+  // Only admins learn that the body was wrong: everyone else gets the 404 first.
+  admin.ensure(p, 'admin.invitations.manage')
+  const { email } = await jsonBody(c, InviteRequestSchema)
+  const result = await admin.invite(c.get('deps'), p, email)
+  return c.json(AdminInviteResultSchema.parse(result), 201)
+})
+
+adminRoutes.delete('/invitations/:email', async c => {
+  const email = c.req.param('email').trim().toLowerCase()
+  const revoked = await admin.revokeInvitation(c.get('deps'), principalOf(c), email)
+  return c.json(AdminInvitationSchema.parse(revoked))
+})
 
 adminRoutes.post('/impersonate', async c => {
   const { email } = await jsonBody(c, ImpersonateRequestSchema)

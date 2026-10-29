@@ -12,6 +12,7 @@ import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
 import { type LiveHub, noLiveHub } from './live.ts'
 import { FileMailer } from './mail/file.ts'
+import { KeptMailer } from './mail/kept.ts'
 import { MemoryMailer } from './mail/memory.ts'
 import type { Mailer } from './mail/types.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
@@ -74,7 +75,8 @@ export function buildDeps(
 function mailerFor(config: Config, opts: Adapters & { fsRoot?: string }): Mailer | undefined {
   const driver = config.mail?.driver
   if (!driver) return undefined
-  if (opts.mailer) return opts.mailer
+  // Local development: keep a copy of what the platform's mailer sends, for `/dev/mail`.
+  if (opts.mailer) return config.devLogin ? new KeptMailer(opts.mailer) : opts.mailer
   if (driver === 'memory') return new MemoryMailer()
   if (driver === 'file')
     return new FileMailer(join(opts.fsRoot ?? config.fsRoot ?? '.fling-dev', 'mail'))

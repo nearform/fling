@@ -3,8 +3,9 @@
  * `{"fling":"notify"}`). It walks the outbox a minute at a time from the cursor (the last minute
  * fully drained) to now, and for each minute:
  *
- * 1. leases each batch due then and delivers it: the send-time checks (resolve.ts; the email policy
- *    and suppression per address), the per-recipient limit (10 an hour: the batch moves to the next
+ * 1. leases each batch due then and delivers it: the send-time checks (resolve.ts; standing and
+ *    suppression per address: the email policy, or a live invitation), a sign-in link for an
+ *    invited newcomer something was shared with (`invitationLink`), the per-recipient limit (10 an hour: the batch moves to the next
  *    hour and keeps folding) and the instance's per-minute limit (the drain stops; the next tick
  *    goes on), then one message through the channel. Once the provider has accepted it, the batch
  *    is marked sent before any bookkeeping, and nothing after that can send it again: a failed
@@ -34,7 +35,8 @@
  * Logs name batches by id, events by key and recipients by `addressHash`.
  */
 import { type EventKey, eventDefinition } from '@fling/shared'
-import { emailAllowed } from '../auth/identity.ts'
+import { INVITATION_LINK_TTL_SECONDS, mintSignInLink } from '../auth/sign-in-link.ts'
+import { admittedByConfig, type Standing, standingOf } from '../auth/standing.ts'
 import { newSortableId } from '../lib/ids.ts'
 import {
   addMinutes,
@@ -49,7 +51,14 @@ import {
   type PendingNotificationRecord,
 } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { type AnyDeliveryItem, type Channel, channelsOf, type DeliveryResult } from './channel.ts'
+import {
+  type AnyDeliveryItem,
+  type Channel,
+  channelsOf,
+  type DeliveryInvitation,
+  type DeliveryResult,
+  INVITATION_EVENTS,
+} from './channel.ts'
 import { addressHash, errorName, logNotify } from './log.ts'
 import { recipientsOf } from './recipients.ts'
 import { Resolver } from './resolve.ts'
@@ -466,7 +475,7 @@ async function deliverBatch(
   loaded: Loaded
 ): Promise<Outcome> {
   const { deps } = run
-  const { store, config } = deps
+  const { store } = deps
   // Sent by an earlier drain that could not finish it: finish it, and send nothing.
   if (batch.sent) return finishSent(run, batch, batch.sent)
   const to = addressHash(batch.email)
@@ -496,14 +505,21 @@ async function deliverBatch(
     await finish(run, batch, allIds)
     return 'done'
   }
-  const policy = { allowedDomains: config.allowedEmailDomains, allowedEmails: config.allowedEmails }
-  const [prefs, memberships] = await Promise.all([
+  const [prefs, memberships, standing] = await Promise.all([
     store.getNotificationPreferences(batch.email),
     store.listMemberships(batch.email),
+    standingOf(deps, batch.email),
   ])
   const items: { item: AnyDeliveryItem; at: string }[] = []
-  if (emailAllowed(batch.email, policy)) {
-    const resolver = new Resolver(deps, batch.email, memberships, prefs, batch.channel)
+  if (standing !== 'none') {
+    const resolver = new Resolver(
+      deps,
+      batch.email,
+      memberships,
+      prefs,
+      batch.channel,
+      standing === 'guest'
+    )
     for (const p of pending) {
       const item = await resolver.resolve(p)
       if (item) items.push({ item, at: p.createdAt })
@@ -533,6 +549,7 @@ async function deliverBatch(
 
   const delivered = items.map(i => i.item)
   const keys = uniqueKeys(delivered)
+  const invitation = await invitationLink(run, batch.email, standing, delivered)
   const result: DeliveryResult = await channel.deliver(
     {
       id: batch.id,
@@ -540,6 +557,7 @@ async function deliverBatch(
       channel: batch.channel,
       site: batchSite(delivered),
       items: delivered,
+      ...(invitation ? { invitation } : {}),
     },
     deps
   )
@@ -637,6 +655,32 @@ async function afterSend(
 }
 
 const detail = (value: string | undefined) => (value ? { detail: value } : {})
+
+/**
+ * A sign-in link for someone invited from outside the email policy who has never signed in, when
+ * the batch tells them something was shared with them (INVITATION_EVENTS): how they get in the
+ * first time. Minted here, at send time, so the outbox never holds a token; it goes back to the
+ * site's review page when the batch is about one site, else to the app's home. Everyone else: none.
+ */
+async function invitationLink(
+  run: Run,
+  email: string,
+  standing: Standing,
+  items: AnyDeliveryItem[]
+): Promise<DeliveryInvitation | null> {
+  const { deps } = run
+  if (standing === 'none' || admittedByConfig(deps.config, email)) return null
+  const shares = items.filter(i => INVITATION_EVENTS.has(i.key))
+  if (shares.length === 0 || (await deps.store.getUser(email))) return null
+  const sites = new Set(shares.flatMap(i => ('site' in i.details ? [i.details.site.url] : [])))
+  const [only] = sites
+  const link = await mintSignInLink(deps, {
+    email,
+    return: sites.size === 1 ? only : '/',
+    ttlSeconds: INVITATION_LINK_TTL_SECONDS,
+  })
+  return { url: link.url, ttlSeconds: INVITATION_LINK_TTL_SECONDS, guest: standing === 'guest' }
+}
 
 /**
  * A failed send worth trying again: later with backoff, or given up after MAX_ATTEMPTS. A give-up

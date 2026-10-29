@@ -106,10 +106,13 @@ describe('auth for private sites', () => {
     expect(req.uri).toBe('/sites/S1/V1/index.html')
   })
 
-  it("answers a guest's cookie as a missing site", async () => {
+  it("sends a guest's cookie through the sign-in hop for a site pass", async () => {
     const c = signSiteCookie({ e: 'guest@outside.test', x: NOW_S + 60, g: 1 }, HMAC)
-    const req = await asRequest({ host: PRIVATE, path: '/', cookieHeader: `fling_site=${c}` })
-    expect(req.uri).toBe('/_fling/missing')
+    const res = await asResponse({ host: PRIVATE, path: '/', cookieHeader: `fling_site=${c}` })
+    expect(res.statusCode).toBe(302)
+    expect(res.headers?.location?.value).toBe(
+      `${APP}/auth/login?return=${encodeURIComponent(`https://${PRIVATE}/`)}`
+    )
   })
 
   it('rejects expired cookies', async () => {

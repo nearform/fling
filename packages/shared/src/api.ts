@@ -173,7 +173,10 @@ export const RollbackRequestSchema = z.object({ versionId: z.string() })
  * audience when the patch set one). `access` sets the level (access.ts), with `audience` for
  * `groups` and `people`; it goes without `visibility`. Without `access`, `visibility` and
  * `audience` edit those alone: an audience naming someone restricts the site, an empty one opens it
- * to every member. An address the instance wouldn't let sign in is a 400 `email_not_allowed`.
+ * to every member. An address the instance wouldn't let sign in is a 400 `email_not_allowed`, unless
+ * the instance has outside invitations on (the `invites` capability): then an address the audience
+ * adds is invited as a guest, at most `INVITES_PER_DAY` new ones a day per person (429
+ * `too_many_invites` past it).
  */
 export const UpdateSiteRequestSchema = z.object({
   access: AccessLevelSchema.optional(),
@@ -250,6 +253,8 @@ export const AdminUserSchema = z.object({
   /** sites the user holds, archived ones included */
   siteCount: z.number(),
   admin: z.boolean(),
+  /** outside the email policy, on a live guest invitation (see GET /api/admin/invitations) */
+  guest: z.boolean(),
 })
 export type AdminUser = z.infer<typeof AdminUserSchema>
 export const AdminUserListSchema = z.object({
@@ -321,13 +326,75 @@ export type AdminSettings = z.infer<typeof AdminSettingsSchema>
 export type AdminSetting = AdminSettings['settings'][number]
 export type AdminSecret = AdminSettings['secrets'][number]
 
-/** GET /api/admin/audit — the latest admin actions, newest first. */
+/** What an invitation lets someone outside the email policy be: a full user, or a guest. */
+export const InvitationRoleSchema = z.enum(['member', 'guest'])
+export type InvitationRole = z.infer<typeof InvitationRoleSchema>
+/** How an invitation came about: an admin's invite, a site's audience, or a group. */
+export const InvitationViaSchema = z.enum(['admin', 'share', 'group'])
+export type InvitationVia = z.infer<typeof InvitationViaSchema>
+
+/**
+ * GET /api/admin/invitations?q=<email prefix>&cursor=&limit= (the `invites` capability; admins,
+ * admin tokens too) — the invitation directory, one page by address: each address's invitation,
+ * live or revoked, and whether they have signed in yet (from their user record).
+ */
+export const AdminInvitationSchema = z.object({
+  email: z.string(),
+  role: InvitationRoleSchema,
+  /** who invited them: the admin, or whoever shared */
+  invitedBy: z.string(),
+  via: InvitationViaSchema,
+  createdAt: z.string(),
+  /** set once revoked; the invitation is kept as the record */
+  revokedAt: z.string().nullable(),
+  /** their first sign-in has happened */
+  signedIn: z.boolean(),
+  lastSignInAt: z.string().nullable(),
+})
+export type AdminInvitation = z.infer<typeof AdminInvitationSchema>
+export const AdminInvitationListSchema = z.object({
+  invitations: z.array(AdminInvitationSchema),
+  /** pass back as `cursor` for the next page; null: no more */
+  cursor: z.string().nullable(),
+})
+export type AdminInvitationList = z.infer<typeof AdminInvitationListSchema>
+
+/**
+ * POST /api/admin/invitations { email } (an admin's browser session) → AdminInviteResultSchema:
+ * invite an address outside the email policy as a member (a guest becomes one; nobody is ever
+ * demoted) and email them a 7-day sign-in link at once. An address the policy admits already is a
+ * 400 `already_admitted`. DELETE /api/admin/invitations/:email (an admin's browser session) →
+ * AdminInvitationSchema: revoke it, which ends the access it gave on their next request.
+ */
+export const InviteRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().min(3).max(254),
+})
+export type InviteRequest = z.infer<typeof InviteRequestSchema>
+export const AdminInviteResultSchema = z.object({
+  invitation: AdminInvitationSchema,
+  /** the provider took the email */
+  sent: z.boolean(),
+  /** why it didn't, in words (`rejected: sender not verified`) */
+  error: z.string().nullable(),
+})
+export type AdminInviteResult = z.infer<typeof AdminInviteResultSchema>
+
+/** GET /api/admin/audit — the latest admin actions and invitations, newest first. */
 export const AuditEntrySchema = z.object({
   id: z.string(),
   at: z.string(),
-  action: z.enum(['impersonation.start', 'impersonation.stop']),
+  action: z.enum([
+    'impersonation.start',
+    'impersonation.stop',
+    'invitation.create',
+    'invitation.revoke',
+  ]),
   actor: z.string(),
   target: z.string(),
+  /** invitation.create: how it came about (an admin's invite, a share, a group) */
+  via: InvitationViaSchema.optional(),
+  /** invitation.create: what it lets them be */
+  role: InvitationRoleSchema.optional(),
   until: z.string().optional(),
   lapsed: z.boolean().optional(),
 })

@@ -68,6 +68,7 @@ import {
   applySettings,
   detectGeneratedIndex,
   initialAccess,
+  inviteAdded,
   nameTaken,
   requireSite,
   type StoredManifest,
@@ -232,10 +233,13 @@ async function prepare(
   }
   // Who can open a site that has never been live. One that has keeps its access: PATCH changes it.
   const neverLive = !existing || existing.currentVersionId === null
-  const access = neverLive ? await initialAccess(deps, req) : null
+  const inviter = { email: user.email, may: canInstance(principal, 'account.invite') }
+  const access = neverLive ? await initialAccess(deps, req, inviter) : null
   if (existing && access && req.access !== undefined) {
+    const before = existing.audience
     Object.assign(existing, access)
     await save(deps, existing)
+    await inviteAdded(deps, inviter, existing, before)
   }
 
   if (existing && existing.currentVersionId === versionId) {
@@ -280,6 +284,7 @@ async function prepare(
     }))
   // Lost a race for the name to another user.
   if (!site) throw await nameTaken(deps, user, name)
+  if (!existing) await inviteAdded(deps, inviter, site, { emails: [], groups: [] })
 
   const files = req.manifest.files
   const version: VersionRecord = {

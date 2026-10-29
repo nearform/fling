@@ -11,10 +11,12 @@ import {
   ADMIN_USERS_PATH,
   impersonateBlocked,
   impersonationNotice,
+  invitationStatus,
   SETTING_GROUP_INFO,
   settingGroups,
   settingText,
   showsAdmin,
+  showsInvitationsAdmin,
 } from '../src/lib/admin'
 
 const me = (over: Partial<Me> = {}): Me => ({
@@ -35,6 +37,7 @@ const user = (over: Partial<AdminUser> = {}): AdminUser => ({
   lastSignInAt: null,
   siteCount: 0,
   admin: false,
+  guest: false,
   ...over,
 })
 
@@ -128,5 +131,22 @@ describe('the Settings tab', () => {
     expect(settingText([])).toBeNull()
     expect(settingText(null)).toBeNull()
     expect(settingText(20)).toBe('20')
+  })
+})
+
+describe('Admin → Invitations', () => {
+  const instance = (invites: boolean) => ({ capabilities: { invites } })
+
+  it('shows to admins in their own session, with outside invitations on', () => {
+    expect(showsInvitationsAdmin(me({ admin: true }), instance(true))).toBe(true)
+    expect(showsInvitationsAdmin(me({ admin: true }), instance(false))).toBe(false)
+    expect(showsInvitationsAdmin(me(), instance(true))).toBe(false)
+    expect(showsInvitationsAdmin({ ...impersonating, admin: true }, instance(true))).toBe(false)
+  })
+
+  it('says whether each invited person has signed in, or was revoked', () => {
+    expect(invitationStatus({ revokedAt: null, signedIn: false })).toBe('Not signed in yet')
+    expect(invitationStatus({ revokedAt: null, signedIn: true })).toBe('Signed in')
+    expect(invitationStatus({ revokedAt: '2026-01-01T00:00:00Z', signedIn: true })).toBe('Revoked')
   })
 })

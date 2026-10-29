@@ -292,8 +292,10 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   admin.settings.read      GET /api/admin/settings: the configuration, secrets by name only
  *   admin.impersonate        POST /api/admin/impersonate (then `impersonationRefusal` on the target)
  *   admin.impersonate.stop   POST /api/admin/impersonate/stop
- *   admin.invitations.manage invite an address as a member, list and revoke invitations (browser
- *                            session only: an invitation lets someone in)
+ *   admin.invitations.read   GET /api/admin/invitations: the invitation directory
+ *   admin.invitations.manage POST /api/admin/invitations (invite an address as a member) and
+ *                            DELETE /api/admin/invitations/:email (revoke): browser session only,
+ *                            an invitation lets someone in
  *   account.site.create      claim a new site name (a first deploy: publication.ts)
  *   account.group.create     POST /api/groups, fling_group_create
  *   account.groups.read      GET /api/groups[/:slug], fling_groups, fling_group_show
@@ -330,6 +332,7 @@ export const INSTANCE_ACTIONS = [
   'admin.settings.read',
   'admin.impersonate',
   'admin.impersonate.stop',
+  'admin.invitations.read',
   'admin.invitations.manage',
   'account.site.create',
   'account.group.create',
@@ -360,6 +363,7 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.settings.read': isAdminRole,
   'admin.impersonate': role => role === 'admin',
   'admin.impersonate.stop': role => role === 'impersonating',
+  'admin.invitations.read': isAdminRole,
   'admin.invitations.manage': role => role === 'admin',
   'account.site.create': notGuest,
   'account.group.create': notGuest,

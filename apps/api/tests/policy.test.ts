@@ -9,6 +9,7 @@ import { createSiteRouter, isResponse, toCloudFrontEvent } from '@fling/edge'
 import { SITE_HMAC_KVS_KEY, siteKvsKey } from '@fling/shared'
 import { signSiteCookie, signSitePass } from '@fling/shared/site-cookie'
 import { describe, expect, it } from 'vitest'
+import type { Config } from '../src/config.ts'
 import {
   ACCESSES,
   ACTIONS,
@@ -33,7 +34,7 @@ import {
   type Role,
   roleOf,
 } from '../src/policy.ts'
-import { api, cookiesOf, createUser, file, json, setup, upload } from './helpers.ts'
+import { APP_ORIGIN, api, cookiesOf, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
 
 const OWNER = 'owner@example.test'
@@ -208,6 +209,7 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.settings.read': 'at',
   'admin.impersonate': 'a',
   'admin.impersonate.stop': 'i',
+  'admin.invitations.read': 'at',
   'admin.invitations.manage': 'a',
   'account.site.create': 'atiu',
   'account.group.create': 'atiu',
@@ -399,8 +401,8 @@ async function deploy(env: ReturnType<typeof setup>, key: string, name: string, 
 }
 
 describe('the edge agrees with site.view', () => {
-  async function sites() {
-    const env = setup()
+  async function sites(overrides: Partial<Config> = {}) {
+    const env = setup(overrides)
     const owner = await createUser(env, 'alice@example.test')
     const viewer = await createUser(env, 'bob@example.test')
     const member = await createUser(env, 'carol@example.test')
@@ -486,17 +488,66 @@ describe('the edge agrees with site.view', () => {
     expect(await served('team.fling.test', await pass('bob@example.test', 'team', now))).toBe(false)
   })
 
-  it("a guest's site cookie opens public sites; members-level sites answer them as missing", async () => {
+  it("a guest's site cookie opens public sites; members-level sites send it through the site pass", async () => {
     const { router, siteCookie, pass, served } = await sites()
     const guest = siteCookie(GUEST, true)
     expect(await served('pub.fling.test', guest)).toBe(true)
     const priv = await router(
-      toCloudFrontEvent({ path: '/', host: 'priv.fling.test', cookieHeader: guest })
+      toCloudFrontEvent({ path: '/docs/', host: 'priv.fling.test', cookieHeader: guest })
     )
-    expect(!isResponse(priv) && priv.uri).toBe('/_fling/missing')
+    expect(isResponse(priv) && priv.headers?.location?.value).toBe(
+      `${APP_ORIGIN}/auth/login?return=${encodeURIComponent('https://priv.fling.test/docs/')}`
+    )
     // Restricted sites go by the pass alone, which the API hands only to an audience's guests.
     expect(await served('team.fling.test', guest)).toBe(false)
     expect(await served('team.fling.test', await pass(GUEST, 'team'))).toBe(true)
+  })
+
+  it("the sign-in hop refuses a real guest a members-level site, and lets a stale guest's cookie back in", async () => {
+    const { env, owner, member, router } = await sites({ invites: true })
+    // GUEST is invited by being named in an audience.
+    const named = await api(env, owner.key, 'PATCH', '/api/sites/other', {
+      audience: { emails: ['bob@example.test', GUEST] },
+    })
+    expect(named.status).toBe(200)
+    const guest = await createUser(env, GUEST)
+    const login = (session: string, ret: string) =>
+      env.app.request(`/auth/login?return=${encodeURIComponent(ret)}`, {
+        headers: { cookie: `__Host-fling_session=${session}` },
+      })
+    // The guest: a fresh guest's cookie and a deny handoff, then the site answers as missing.
+    const refused = await login(guest.session, 'https://priv.fling.test/docs/')
+    expect(cookiesOf(refused).fling_site).toBeDefined()
+    const to = new URL(refused.headers.get('location') ?? '')
+    expect(`${to.origin}${to.pathname}`).toBe('https://priv.fling.test/_fling-pass')
+    const guestCookie = `fling_site=${cookiesOf(refused).fling_site?.value}`
+    const denial = await router(
+      toCloudFrontEvent({
+        host: to.host,
+        path: to.pathname,
+        query: to.search.slice(1),
+        cookieHeader: guestCookie,
+      })
+    )
+    if (!isResponse(denial)) throw new Error('expected a redirect')
+    const denied = denial.cookies?.fling_pass?.value
+    expect(denied).toBeTruthy()
+    const page = await router(
+      toCloudFrontEvent({
+        host: to.host,
+        path: '/docs/',
+        cookieHeader: `${guestCookie}; fling_pass=${denied}`,
+      })
+    )
+    expect(!isResponse(page) && page.uri).toBe('/_fling/missing')
+    // A member holding a guest's cookie from before goes straight back with a member's cookie.
+    const back = await login(member.session, 'https://priv.fling.test/docs/')
+    expect(back.headers.get('location')).toBe('https://priv.fling.test/docs/')
+    const fresh = `fling_site=${cookiesOf(back).fling_site?.value}`
+    const served = await router(
+      toCloudFrontEvent({ host: 'priv.fling.test', path: '/', cookieHeader: fresh })
+    )
+    expect(!isResponse(served) && served.uri.startsWith('/sites/')).toBe(true)
   })
 
   it('/auth/login hands a viewer a pass the edge accepts, and anyone else a refusal', async () => {

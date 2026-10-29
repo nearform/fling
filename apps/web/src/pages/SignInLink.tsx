@@ -5,8 +5,9 @@
  * native form POST to `/auth/link/verify`, uses it. The page never submits on its own.
  *
  * It reads the token once, then takes it out of the address bar (history), and asks the browser
- * to send no Referer from here (`<meta name="referrer">`; the UI's own response header says
- * `strict-origin-when-cross-origin`, so no path or fragment leaves the app either way).
+ * to send a Referer only to the app itself (`<meta name="referrer" content="same-origin">`). Not
+ * `no-referrer`: under it the browser sends `Origin: null` with the form's POST, which the API's
+ * same-origin check refuses. No Referer carries a fragment, so the token never leaves either way.
  */
 import { SIGN_IN_LINK_VERIFY_PATH } from '@fling/shared'
 import { useEffect, useState } from 'react'
@@ -56,7 +57,7 @@ export default function SignInLink() {
     }
     const meta = document.createElement('meta')
     meta.name = 'referrer'
-    meta.content = 'no-referrer'
+    meta.content = 'same-origin'
     document.head.appendChild(meta)
     return () => meta.remove()
   }, [])

@@ -13,7 +13,8 @@
  * their place).
  *
  * An instance without the `accessLevels` capability has no "only you": the other options save
- * through `visibility` and `audience` instead.
+ * through `visibility` and `audience` instead. On someone else's site (an admin's, `owner`), "you"
+ * reads "its owner".
  */
 import {
   type AccessLevel,
@@ -67,12 +68,14 @@ type Audience = { emails: string[]; groups: string[] }
 const sizeOf = (a: { emails: readonly unknown[]; groups: readonly unknown[] }) =>
   a.emails.length + a.groups.length
 
-export function SiteAccess({ site }: { site: SiteWithAudience }) {
+export function SiteAccess({ site, owner }: { site: SiteWithAudience; owner?: string }) {
   const instance = useInstance()
   const levels = instance?.capabilities.accessLevels === true
   const audiences = instance?.capabilities.audiences === true
   const groupsOn = instance?.capabilities.groups === true
   const actions = useSiteActions(site.name)
+  /** Who "only you" means: the user, or on someone else's site its owner. */
+  const only = owner ? 'Only its owner' : 'Only you'
   const allGroups = useGroups(false)
   const id = useId()
 
@@ -161,7 +164,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
     }
     if (sizeOf(next) === 0) {
       setProblem(
-        'The list needs at least one person or team. To let no one else in, choose Only you above.'
+        `The list needs at least one person or team. To let no one else in, choose ${only} above.`
       )
       return false
     }
@@ -173,7 +176,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
       ? [
           {
             choice: 'only_me' as const,
-            label: 'Only you',
+            label: only,
             description: 'Nobody else can open it.',
           },
         ]
@@ -184,8 +187,8 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
             choice: 'audience' as const,
             label: groupsOn ? 'Specific people and teams' : 'Specific people',
             description: groupsOn
-              ? 'Only you, the people you add and the members of the teams you choose.'
-              : 'Only you and the people you add.',
+              ? `${only}, the people you add and the members of the teams you choose.`
+              : `${only} and the people you add.`,
           },
         ]
       : []),
@@ -271,6 +274,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
                     problem={problem}
                     onProblem={setProblem}
                     onChange={changeList}
+                    {...(owner && { owner })}
                   />
                   {!editing && (
                     <div className="flex flex-wrap items-center gap-2">
@@ -369,15 +373,17 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
         isOpen={confirmClear !== null}
         title={
           confirmClear === 'only_me'
-            ? 'Make it yours alone?'
+            ? owner
+              ? 'Make it its owner’s alone?'
+              : 'Make it yours alone?'
             : 'Open the site to everyone signed in?'
         }
         message={`Its list of ${audienceWho(listed.length, named.length)} is cleared${
           confirmClear === 'only_me'
-            ? ', and only you can open the site.'
+            ? `, and ${only.toLowerCase()} can open the site.`
             : `, and anyone signed in to ${instanceName} can open the site.`
         }`}
-        confirmText={confirmClear === 'only_me' ? 'Only you' : 'Open to everyone'}
+        confirmText={confirmClear === 'only_me' ? only : 'Open to everyone'}
         confirmButtonClass={confirmClear === 'only_me' ? 'btn-primary' : 'btn-warning'}
         isLoading={busy}
         onCancel={() => setConfirmClear(null)}
@@ -425,6 +431,7 @@ function AudiencePicker({
   problem,
   onProblem,
   onChange,
+  owner,
 }: {
   emails: readonly AudienceEmail[]
   named: readonly AudienceGroup[]
@@ -434,7 +441,10 @@ function AudiencePicker({
   problem: string | null
   onProblem: (problem: string | null) => void
   onChange: (next: Audience) => Promise<boolean>
+  /** someone else's site (an admin's view): whose it is */
+  owner?: string
 }) {
+  const only = owner ? 'Only its owner' : 'Only you'
   const emails = listed.map(e => e.email)
   const slugs = named.map(g => g.slug)
   const size = listed.length + named.length
@@ -591,8 +601,8 @@ function AudiencePicker({
           !live
             ? `Add at least one person${groupsOn ? ' or team' : ''}, then save.`
             : size > 0 && listed.length === 0 && named.every(g => g.deleted)
-              ? 'Only you can open it: the group it was limited to was deleted. Add people or teams to let them in.'
-              : 'You can always open it. Someone you remove can still open it for up to 5 minutes.'
+              ? `${only} can open it: the group it was limited to was deleted. Add people or teams to let them in.`
+              : `${owner ? 'Its owner' : 'You'} can always open it. Someone you remove can still open it for up to 5 minutes.`
         }
       />
       <GroupEditor

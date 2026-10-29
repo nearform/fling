@@ -94,6 +94,8 @@ function useSiteMutation<TVars, TResult>(
     onSuccess: result => {
       queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
       queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
+      // An admin may have changed a site from All sites.
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminSites })
       if (success) showToast(typeof success === 'string' ? success : success(result))
     },
     onError: error => {

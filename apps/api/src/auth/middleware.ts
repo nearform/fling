@@ -8,7 +8,8 @@
  *
  * Every credential is rechecked against the user's standing (standing.ts) on every request: with
  * none (a domain removed from the policy, an invitation revoked, a guest no audience names any
- * more) the request is unauthenticated (401). A guest's user carries `guest: true`.
+ * more) the request is unauthenticated (401). A guest's user carries `guest: true`, and an
+ * admin's `admin` (`asRequestUser`).
  */
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -19,7 +20,7 @@ import type { User } from '../store/types.ts'
 import type { AppEnv } from '../types.ts'
 import { validateApiKey } from './api-keys.ts'
 import { readSession, readSessionToken, type SessionClaims } from './session.ts'
-import { withStanding } from './standing.ts'
+import { asRequestUser, withStanding } from './standing.ts'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -69,7 +70,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     const result = match?.[1] ? await validateApiKey(store, match[1], clock.now()) : null
     const user = result ? await withStanding({ config, store }, result.user) : null
     if (!user) throw unauthorized('Invalid API key')
-    c.set('user', user)
+    c.set('user', asRequestUser(config, user, 'token'))
     c.set('via', 'api_key')
     return next()
   }
@@ -79,7 +80,7 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   if (!SAFE_METHODS.has(c.req.method) && c.req.header('origin') !== config.appOrigin) {
     throw forbidden('Cross-origin request refused', 'csrf')
   }
-  c.set('user', session.user)
+  c.set('user', asRequestUser(config, session.user, 'session'))
   c.set('via', 'session')
   c.set('session', session.claims)
   if (session.impersonator) c.set('impersonator', session.impersonator)

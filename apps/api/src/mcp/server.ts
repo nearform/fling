@@ -486,7 +486,8 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
         'Pass `add`, `remove`, `set`, `addGroups`, `removeGroups`, `setGroups` or `clear`'
       )
     }
-    const current = await sites.requireSite(deps, user, args.name, 'site.audience')
+    // Reading the audience to edit it; updateSite asks for site.audience.
+    const current = await sites.requireSite(deps, user, args.name, 'site.read')
     const site = await sites.updateSite(
       deps,
       user,

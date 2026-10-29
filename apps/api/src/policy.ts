@@ -13,6 +13,9 @@
  * - `guest`: any other signed-in user whose standing is `guest` (`guest` on the actor): someone
  *   from outside the email policy, invited to review what is shared with them. Standing is
  *   rechecked on every request, so whoever the API sees signed in is admitted now.
+ * - `admin`, `admin-token`: an admin (ADMIN_EMAILS) who isn't the owner, through their browser
+ *   session or through an API key or OAuth token (`admin` on the actor). They come before
+ *   `viewer`, as they may do more.
  * - `share`: whoever holds the site's current share link (`s--<token>`). A revoked or rotated
  *   token is `anonymous`.
  * - `anonymous`: nobody we know.
@@ -27,6 +30,14 @@
  * API's say-so (`/auth/login` asks `can(…, 'site.view', …)` here): tests/policy.test.ts runs the
  * real site router against this table so the two cannot drift.
  *
+ * Admins administer every site: with any credential they open, read and review any site,
+ * restricted ones included; from their browser session they also change it as its owner would
+ * (access, settings, archive, roll back, share link, delete, anyone's comment), so a key or token
+ * that leaked cannot. Nobody but the owner deploys: a version is never published in someone else's
+ * name. Whatever an admin may do only because they are one is audited (`byAdminOnly`, used by
+ * `resolveSite` and the site-pass handoff in sites.ts). Notifications ask policy with an actor
+ * that carries no `admin`, so admins hear only about what they would without it.
+ *
  * Groups (a named list of people an audience can name) are `canGroup`: any signed-in user lists
  * them, sees their members and uses them in an audience; only the group's owner, who made it,
  * changes or deletes it.
@@ -34,16 +45,43 @@
 import type { CommentAuthor } from '@fling/shared'
 import type { GroupRecord, SiteRecord } from './store/types.ts'
 
+/** How an admin is signed in: their browser session, or an API key or OAuth token. */
+export type AdminVia = 'session' | 'token'
+
 export type Actor =
   /** `groups`: the ids of the user's groups, when policy needs them (a restricted site) */
   /** `guest`: their standing is `guest` (auth/standing.ts) */
-  | { kind: 'user'; email: string; groups?: readonly string[]; guest?: true }
+  /** `admin`: they are an admin, and how they are signed in (never while impersonating) */
+  | {
+      kind: 'user'
+      email: string
+      groups?: readonly string[]
+      guest?: true
+      admin?: AdminVia
+    }
   | { kind: 'share'; token: string }
   | { kind: 'anonymous' }
 
-export type Role = 'owner' | 'viewer' | 'member' | 'guest' | 'share' | 'anonymous'
+export type Role =
+  | 'owner'
+  | 'admin'
+  | 'admin-token'
+  | 'viewer'
+  | 'member'
+  | 'guest'
+  | 'share'
+  | 'anonymous'
 
-export const ROLES: readonly Role[] = ['owner', 'viewer', 'member', 'guest', 'share', 'anonymous']
+export const ROLES: readonly Role[] = [
+  'owner',
+  'admin',
+  'admin-token',
+  'viewer',
+  'member',
+  'guest',
+  'share',
+  'anonymous',
+]
 
 /** What policy needs to know about a site. */
 export type PolicySite = Pick<
@@ -77,7 +115,8 @@ export const accessOf = (site: AccessFields): Access =>
  *
  *   site.view        open the served site (edge; `/auth/login` refreshes the cookie for it, and
  *                    hands a restricted site's viewers a site pass)
- *   site.read        GET /api/sites/:name, fling_info, fling_check_name "yours"
+ *   site.read        GET /api/sites/:name (its audience included), fling_info, fling_check_name
+ *                    "yours"
  *   version.list     the versions in GET /api/sites/:name and fling_info
  *   version.read     GET …/versions/:id/files, fling_files
  *   site.deploy      POST …/deploys, …/finalize, fling_publish, fling_upload_*; also what makes a
@@ -86,7 +125,7 @@ export const accessOf = (site: AccessFields): Access =>
  *   site.settings    PATCH { spa }
  *   site.visibility  PATCH { visibility }, fling_set_visibility; with site.audience, PATCH
  *                    { access } and fling_set_access (a new site's `access` is its creator's)
- *   site.audience    PATCH { audience }, fling_set_audience (and seeing the audience)
+ *   site.audience    PATCH { audience }, fling_set_audience
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete
  *   share.read       fling_share returning the existing link
@@ -105,6 +144,7 @@ export const accessOf = (site: AccessFields): Access =>
  * wrote; only the owner deletes anyone's. Guests take part where they are viewers, and on public
  * sites; a private site that isn't restricted is the members', so a guest gets nothing there,
  * not even `site.view`.
+ * Admins take part in every site's comments, and from their browser session delete anyone's.
  * Share-link holders get nothing yet. Guest commenting (a name, kept in a signed per-site
  * cookie, as a `{ kind: 'guest' }` author) will turn on `comment.read` and `comment.create`
  * for `share`, and `comment.delete.own` once a guest can be recognised again.
@@ -133,13 +173,18 @@ export const ACTIONS = [
 
 export type Action = (typeof ACTIONS)[number]
 
-const ownerOnly = (role: Role) => role === 'owner'
+const isAdmin = (role: Role) => role === 'admin' || role === 'admin-token'
+/** The owner, or an admin with any credential: reading what only the owner otherwise reads. */
+const ownerOrAdmin = (role: Role) => role === 'owner' || isAdmin(role)
+/** The owner, or an admin in their browser session: changing the site. */
+const ownerOrAdminSession = (role: Role) => role === 'owner' || role === 'admin'
 /**
- * Signed in and able to see the site: the owner and its viewers, on a site that isn't restricted
- * any member, and on a public one any guest.
+ * Signed in and able to see the site: the owner, any admin and its viewers, on a site that isn't
+ * restricted any member, and on a public one any guest.
  */
 const signedIn = (role: Role, access: Access) =>
   role === 'owner' ||
+  isAdmin(role) ||
   role === 'viewer' ||
   (role === 'member' && access !== 'restricted') ||
   (role === 'guest' && access === 'public')
@@ -148,23 +193,23 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   // Public: anyone. Private: any signed-in user, or anyone with the share link. Restricted: the
   // owner, its viewers, or anyone with the share link.
   'site.view': (role, access) => access === 'public' || role === 'share' || signedIn(role, access),
-  'site.read': ownerOnly,
-  'version.list': ownerOnly,
-  'version.read': ownerOnly,
-  'site.deploy': ownerOnly,
-  'site.rollback': ownerOnly,
-  'site.settings': ownerOnly,
-  'site.visibility': ownerOnly,
-  'site.audience': ownerOnly,
-  'site.archive': ownerOnly,
-  'site.delete': ownerOnly,
-  'share.read': ownerOnly,
-  'share.create': ownerOnly,
-  'share.revoke': ownerOnly,
+  'site.read': ownerOrAdmin,
+  'version.list': ownerOrAdmin,
+  'version.read': ownerOrAdmin,
+  'site.deploy': role => role === 'owner',
+  'site.rollback': ownerOrAdminSession,
+  'site.settings': ownerOrAdminSession,
+  'site.visibility': ownerOrAdminSession,
+  'site.audience': ownerOrAdminSession,
+  'site.archive': ownerOrAdminSession,
+  'site.delete': ownerOrAdminSession,
+  'share.read': ownerOrAdmin,
+  'share.create': ownerOrAdminSession,
+  'share.revoke': ownerOrAdminSession,
   'comment.read': signedIn,
   'comment.create': signedIn,
   'comment.resolve': signedIn,
-  'comment.delete': ownerOnly,
+  'comment.delete': ownerOrAdminSession,
   'comment.delete.own': signedIn,
 }
 
@@ -173,6 +218,7 @@ export function roleOf(actor: Actor, site: PolicySite): Role {
   switch (actor.kind) {
     case 'user': {
       if (actor.email === site.email) return 'owner'
+      if (actor.admin) return actor.admin === 'session' ? 'admin' : 'admin-token'
       const groups = actor.groups ?? []
       const inAudience =
         site.audience.emails.includes(actor.email) ||
@@ -191,11 +237,41 @@ export function can(actor: Actor, action: Action, site: PolicySite): boolean {
   return RULES[action](roleOf(actor, site), accessOf(site))
 }
 
-/** A signed-in user as an actor; a request's user carries `guest` when their standing is. */
-export const userActor = (user: { email: string; guest?: true }): Actor => ({
+/**
+ * The actions that change a site (or its comments): an admin does them to another user's site
+ * only from their browser session, and `resolveSite` audits each one. The rest only read.
+ */
+export const SITE_CHANGES: ReadonlySet<Action> = new Set<Action>([
+  'site.deploy',
+  'site.rollback',
+  'site.settings',
+  'site.visibility',
+  'site.audience',
+  'site.archive',
+  'site.delete',
+  'share.create',
+  'share.revoke',
+  'comment.delete',
+])
+
+/**
+ * True when the actor may do `action` to the site only because they are an admin: what is audited.
+ */
+export function byAdminOnly(actor: Actor, action: Action, site: PolicySite): boolean {
+  if (actor.kind !== 'user' || !actor.admin) return false
+  const { admin: _admin, ...plain } = actor
+  return can(actor, action, site) && !can(plain, action, site)
+}
+
+/**
+ * A signed-in user as an actor; a request's user carries `guest` when their standing is, and
+ * `admin` when they are one.
+ */
+export const userActor = (user: { email: string; guest?: true; admin?: AdminVia }): Actor => ({
   kind: 'user',
   email: user.email,
   ...(user.guest ? { guest: true as const } : {}),
+  ...(user.admin ? { admin: user.admin } : {}),
 })
 
 /** Whether the actor wrote a comment. Guests can't be recognised yet (no guest identity). */
@@ -230,7 +306,7 @@ export function canDeleteComment(
  * Making a group needs a signed-in user who isn't a guest (`account.group.create`; its maker
  * becomes the owner), and listing them `account.groups.read`. A guest may be a member of groups
  * but reads none: an audience naming one is all they see of it. There are no co-managers, and
- * admins get no rights over groups, as over sites: they act only by impersonating.
+ * admins get no rights over groups: they act on one only by impersonating its owner.
  */
 export const GROUP_ACTIONS = ['group.read', 'group.manage', 'group.delete'] as const
 
@@ -307,10 +383,9 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   account.notifications.change  PUT /api/me/notifications (and fling_notifications_set)
  *   account.notifications.sent    GET /api/me/notifications/sent: the mail sent to them
  *
- * Admins have no extra rights over sites: they see every site's listing (`admin.sites.list`:
- * its name, owner, dates, state and access level) but no more. `can` never asks whether someone
- * is an admin, so an admin is a member of other people's sites like anyone else, and opens a
- * restricted one, or changes anyone's, only by impersonating. Impersonation is for seeing and
+ * Admins see every site's listing (`admin.sites.list`: its name, owner, dates, state and access
+ * level), and administer the sites themselves through `can` (the `admin` and `admin-token`
+ * roles, above). An impersonating admin is the user, with the user's rights. Impersonation is for seeing and
  * doing what the user sees and does with their sites, never for creating anything that outlives
  * it in their name: no API keys, no app approvals, no other impersonation; and not for undoing
  * what they set up either (revoking their keys or apps), nor changing what they hear about

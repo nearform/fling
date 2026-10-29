@@ -25,8 +25,8 @@ import { ApiError, badRequest, forbidden, notFound } from './lib/errors.ts'
 import { newCommentId } from './lib/ids.ts'
 import { publishQuietly } from './live.ts'
 import { type Acting, notifyComment } from './notifications/notify.ts'
-import { type Action, type Actor, can, canDeleteComment } from './policy.ts'
-import { resolveSite } from './sites.ts'
+import { type Action, type Actor, can, canDeleteComment, isAuthor } from './policy.ts'
+import { auditAdmin, resolveSite } from './sites.ts'
 import type { CommentRecord, SiteRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -175,14 +175,18 @@ export async function resolveComment(
   return toComment(who, site, updated)
 }
 
-/** Delete a comment (a thread with its replies): the author's own, or any for the owner. */
+/**
+ * Delete a comment (a thread with its replies): the author's own, or any for the owner and admins
+ * (an admin deleting someone else's is audited).
+ */
 export async function deleteComment(deps: Deps, actor: Actor, name: string, id: string) {
   const { site, actor: who } = await commentSite(deps, actor, name, 'comment.read')
   const comment = await findComment(deps, site, id, name)
   // Someone who may read but not delete it is told so: the comment is visible to them anyway.
   if (!canDeleteComment(who, site, comment)) {
-    throw forbidden('Only its author or the site owner can delete a comment')
+    throw forbidden('Only its author, the site owner or an admin can delete a comment')
   }
+  if (!isAuthor(who, comment.author)) await auditAdmin(deps, who, site, 'comment.delete')
   await deps.store.deleteComment(site.id, id)
   await publishQuietly(deps, site.id, { type: 'comments' })
 }

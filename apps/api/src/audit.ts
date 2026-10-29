@@ -1,7 +1,8 @@
 /**
- * The audit log: what admins did (impersonations, invitations, revocations) and every invitation
- * someone made by sharing. Each entry is written twice: an AUDIT record, kept AUDIT_TTL_DAYS and
- * listed on the admin page, and a structured log line. The record is written first, so a caller
+ * The audit log: what admins did (impersonations, invitations, revocations, changes to other
+ * people's sites, opening restricted ones) and every invitation someone made by sharing. Each
+ * entry is written twice: an AUDIT record, kept AUDIT_TTL_DAYS and listed on the admin page, and a
+ * structured log line. The record is written first, so a caller
  * that audits before acting never acts off the record.
  */
 import { newSortableId } from './lib/ids.ts'
@@ -34,6 +35,8 @@ export async function audit(
       ...(record.lapsed && { lapsed: true }),
       ...(record.via && { via: record.via }),
       ...(record.role && { role: record.role }),
+      ...(record.owner && { owner: record.owner }),
+      ...(record.change && { change: record.change }),
     })
   )
 }

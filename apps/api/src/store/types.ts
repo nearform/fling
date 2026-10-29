@@ -29,6 +29,11 @@ export interface User {
    * (auth/standing.ts), so policy (`userActor`, `principalOf`) sees it wherever the user goes.
    */
   guest?: true
+  /**
+   * Never stored: set on the signed-in user of a request when they are an admin (and not
+   * impersonating), with how they signed in, so policy (`userActor`) gives them the admin role.
+   */
+  admin?: 'session' | 'token'
 }
 
 /**
@@ -50,6 +55,8 @@ export type AuditAction =
   | 'impersonation.stop'
   | 'invitation.create'
   | 'invitation.revoke'
+  | 'site.change'
+  | 'site.open'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -103,8 +110,12 @@ export interface AuditRecord {
   action: AuditAction
   /** who did it: the admin, or whoever invited by sharing */
   actor: string
-  /** whom it was done to */
+  /** whom it was done to (site.change, site.open: the site's name) */
   target: string
+  /** site.change, site.open: the site's owner */
+  owner?: string
+  /** site.change: what the admin did (a policy action, e.g. `site.archive`) */
+  change?: string
   /** impersonation.start: when the impersonation lapses */
   until?: string
   /** impersonation.stop: true when it had already lapsed */

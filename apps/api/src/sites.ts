@@ -69,7 +69,8 @@ import {
   signDenyHandoff,
   signPassHandoff,
 } from '@fling/shared/site-cookie'
-import { admittedByConfig } from './auth/standing.ts'
+import { audit } from './audit.ts'
+import { admittedByConfig, asRequestUser } from './auth/standing.ts'
 import { manifestKey } from './blobs/types.ts'
 import {
   checkAddresses,
@@ -82,7 +83,16 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { actingOf, notifyAudienceChange } from './notifications/notify.ts'
-import { type Action, type Actor, can, isRestricted, type Principal, userActor } from './policy.ts'
+import {
+  type Action,
+  type Actor,
+  byAdminOnly,
+  can,
+  isRestricted,
+  type Principal,
+  SITE_CHANGES,
+  userActor,
+} from './policy.ts'
 import {
   accessOfSite,
   hasListing,
@@ -274,7 +284,9 @@ export async function actorOn(deps: Deps, actor: Actor, site: SiteRecord): Promi
 
 /**
  * The site named `name` and the actor resolved against it, if the actor may do every one of
- * `actions` to it; else 404, the same answer as for a name nobody holds.
+ * `actions` to it; else 404, the same answer as for a name nobody holds. A change an admin may make
+ * only because they are one is audited first (`site.change`, one entry per action), so it is on
+ * record before it happens.
  */
 export async function resolveSite(
   deps: Deps,
@@ -287,7 +299,25 @@ export async function resolveSite(
   if (!site || !actions.every(a => can(resolved, a, site))) {
     throw notFound(`No site named "${name}"`)
   }
+  for (const action of actions) {
+    if (SITE_CHANGES.has(action)) await auditAdmin(deps, resolved, site, action)
+  }
   return { site, actor: resolved }
+}
+
+/**
+ * Audit what an admin does to a site only because they are one: `site.change` for a change,
+ * `site.open` for a site pass. Nothing for anyone else, nor for what they could do anyway.
+ */
+export async function auditAdmin(deps: Deps, actor: Actor, site: SiteRecord, action: Action) {
+  if (actor.kind !== 'user' || !byAdminOnly(actor, action, site)) return
+  await audit(deps, {
+    action: action === 'site.view' ? 'site.open' : 'site.change',
+    actor: actor.email,
+    target: site.name,
+    owner: site.email,
+    ...(action === 'site.view' ? {} : { change: action }),
+  })
 }
 
 /** The site named `name`, if the user may do every one of `actions` to it; else 404. */
@@ -551,13 +581,14 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
 }
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
-  const site = await requireSite(deps, user, name, 'site.read', 'version.list', 'site.audience')
+  const site = await requireSite(deps, user, name, 'site.read', 'version.list')
   const [versions, audience] = await Promise.all([
     deps.store.listVersions(site),
     audienceOf(deps, site),
   ])
   return {
     ...toSite(deps, user, site),
+    owner: site.email,
     audience,
     versions: versions
       .filter(v => v.status === 'complete')
@@ -682,10 +713,12 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
 
 /**
  * Where `/auth/login` sends a signed-in user (`ret`, already through safeReturnUrl). A restricted
- * site's host, and a members-level site's to a guest, is let in only through a site pass: someone policy lets view it goes by its
+ * site's host, and a members-level site's to a guest, is let in only through a site pass: someone
+ * policy lets view it goes by its
  * `/_fling-pass` with a 60-second handoff naming them and the site; anyone else goes the same way
  * with a 60-second deny handoff naming only the site, after which the edge answers the site as a
- * missing one (its 404 page at the address asked for). Every other return URL is unchanged.
+ * missing one (its 404 page at the address asked for). An admin is let in to any site, and an
+ * admin let in only as one is audited (`site.open`). Every other return URL is unchanged.
  */
 export async function signedInReturn(deps: Deps, user: User, ret: string): Promise<string> {
   const { config } = deps
@@ -703,10 +736,13 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
   // The edge wants a pass for a restricted site, and for a members-level one from a guest.
   if (!site || site.visibility === 'public') return ret
   if (!isRestricted(site) && !user.guest) return ret
-  const actor = await actorOn(deps, userActor(user), site)
+  // Always a browser session here: an admin opens any site, on the record.
+  const actor = await actorOn(deps, userActor(asRequestUser(config, user, 'session')), site)
   const x = Math.floor(deps.clock.now().getTime() / 1000) + PASS_HANDOFF_TTL_SECONDS
   const key = config.secrets.siteHmacKey
-  const t = can(actor, 'site.view', site)
+  const viewer = can(actor, 'site.view', site)
+  if (viewer) await auditAdmin(deps, actor, site, 'site.view')
+  const t = viewer
     ? signPassHandoff({ s: site.id, e: user.email, x }, key)
     : signDenyHandoff({ s: site.id, x }, key)
   const r = encodeURIComponent(`${url.pathname}${url.search}`)

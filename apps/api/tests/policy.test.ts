@@ -16,6 +16,7 @@ import {
   type Access,
   type Action,
   type Actor,
+  byAdminOnly,
   can,
   canDeleteComment,
   canGroup,
@@ -33,6 +34,7 @@ import {
   ROLES,
   type Role,
   roleOf,
+  SITE_CHANGES,
 } from '../src/policy.ts'
 import { APP_ORIGIN, api, cookiesOf, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
@@ -40,6 +42,7 @@ import { callTool, connect } from './oauth-helpers.ts'
 const OWNER = 'owner@example.test'
 const VIEWER = 'viewer@example.test'
 const GUEST = 'guest@outside.test'
+const ADMIN = 'boss@example.test'
 const TOKEN = 'abcdefghij0123456789'
 
 /**
@@ -53,8 +56,14 @@ const siteWith = (access: Access): PolicySite => ({
   audience: { emails: access === 'private' ? [] : [VIEWER], groups: [] },
 })
 
+type UserActor = Extract<Actor, { kind: 'user' }>
+const adminSession: UserActor = { kind: 'user', email: ADMIN, admin: 'session' }
+const adminToken: UserActor = { kind: 'user', email: ADMIN, admin: 'token' }
+
 const actorFor: Record<Role, Actor> = {
   owner: { kind: 'user', email: OWNER },
+  admin: adminSession,
+  'admin-token': adminToken,
   viewer: { kind: 'user', email: VIEWER },
   member: { kind: 'user', email: 'member@example.test' },
   guest: { kind: 'user', email: GUEST, guest: true },
@@ -62,29 +71,46 @@ const actorFor: Record<Role, Actor> = {
   anonymous: { kind: 'anonymous' },
 }
 
-const ownerOnly = { public: 'o', private: 'o', restricted: 'o' }
-const takesPart = { public: 'ovmg', private: 'ovm', restricted: 'ov' }
+/**
+ * Each role's letter: o(wner) d (an admin's browser session) t (an admin's key or token) v(iewer)
+ * m(ember) g(uest) s(hare) a(nonymous).
+ */
+const LETTER: Record<Role, string> = {
+  owner: 'o',
+  admin: 'd',
+  'admin-token': 't',
+  viewer: 'v',
+  member: 'm',
+  guest: 'g',
+  share: 's',
+  anonymous: 'a',
+}
 
-/** Allowed roles per action and access: o(wner) v(iewer) m(ember) g(uest) s(hare) a(nonymous). */
+const ownerOnly = { public: 'o', private: 'o', restricted: 'o' }
+const reads = { public: 'odt', private: 'odt', restricted: 'odt' }
+const changes = { public: 'od', private: 'od', restricted: 'od' }
+const takesPart = { public: 'odtvmg', private: 'odtvm', restricted: 'odtv' }
+
+/** Allowed roles (LETTER) per action and access. */
 const EXPECTED: Record<Action, Record<Access, string>> = {
-  'site.view': { public: 'ovmgsa', private: 'ovms', restricted: 'ovs' },
-  'site.read': ownerOnly,
-  'version.list': ownerOnly,
-  'version.read': ownerOnly,
+  'site.view': { public: 'odtvmgsa', private: 'odtvms', restricted: 'odtvs' },
+  'site.read': reads,
+  'version.list': reads,
+  'version.read': reads,
   'site.deploy': ownerOnly,
-  'site.rollback': ownerOnly,
-  'site.settings': ownerOnly,
-  'site.visibility': ownerOnly,
-  'site.audience': ownerOnly,
-  'site.archive': ownerOnly,
-  'site.delete': ownerOnly,
-  'share.read': ownerOnly,
-  'share.create': ownerOnly,
-  'share.revoke': ownerOnly,
+  'site.rollback': changes,
+  'site.settings': changes,
+  'site.visibility': changes,
+  'site.audience': changes,
+  'site.archive': changes,
+  'site.delete': changes,
+  'share.read': reads,
+  'share.create': changes,
+  'share.revoke': changes,
   'comment.read': takesPart,
   'comment.create': takesPart,
   'comment.resolve': takesPart,
-  'comment.delete': ownerOnly,
+  'comment.delete': changes,
   'comment.delete.own': takesPart,
 }
 
@@ -104,17 +130,17 @@ const stored = (
 describe('every access level', () => {
   // Who may open the site (site.view); those signed in among them take part in its comments.
   const cases: [string, PolicySite, string][] = [
-    ['only you', stored('private', true), 'os'],
-    ['members', stored('private', false), 'ovms'],
-    ['people', stored('private', true, { emails: [VIEWER] }), 'ovs'],
-    ['groups', stored('private', true, { groups: ['g1'] }), 'ovs'],
-    ['public', stored('public', true), 'ovmgsa'],
-    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'ovmgsa'],
-    ['a record from before access levels, no audience', stored('private', undefined), 'ovms'],
+    ['only you', stored('private', true), 'odts'],
+    ['members', stored('private', false), 'odtvms'],
+    ['people', stored('private', true, { emails: [VIEWER] }), 'odtvs'],
+    ['groups', stored('private', true, { groups: ['g1'] }), 'odtvs'],
+    ['public', stored('public', true), 'odtvmgsa'],
+    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'odtvmgsa'],
+    ['a record from before access levels, no audience', stored('private', undefined), 'odtvms'],
     [
       'a record from before access levels, with an audience',
       stored('private', undefined, { emails: [VIEWER] }),
-      'ovs',
+      'odtvs',
     ],
   ]
   const actors: Record<Role, Actor> = {
@@ -124,7 +150,7 @@ describe('every access level', () => {
   for (const [name, site, view] of cases) {
     it(`${name}: ${view}`, () => {
       for (const role of ROLES) {
-        const letter = role[0] as string
+        const letter = LETTER[role]
         expect({ role, view: can(actors[role], 'site.view', site) }).toEqual({
           role,
           view: view.includes(letter),
@@ -146,7 +172,7 @@ describe('can', () => {
   for (const action of ACTIONS) {
     for (const access of ACCESSES) {
       for (const role of ROLES) {
-        const allowed = EXPECTED[action][access].includes(role[0] as string)
+        const allowed = EXPECTED[action][access].includes(LETTER[role])
         it(`${role} ${allowed ? 'may' : 'may not'} ${action} a ${access} site`, () => {
           expect(can(actorFor[role], action, siteWith(access))).toBe(allowed)
         })
@@ -286,8 +312,7 @@ describe('canInstance', () => {
     expect(impersonationRefusal(boss, { email: 'm@example.test', admin: false })).toBeNull()
   })
 
-  it("gives admins nothing on other people's sites: an admin is a member there", () => {
-    // `can` has no notion of admins; an admin's actor is a user like any other.
+  it('an admin without the flag is a member: what notifications and impersonation see', () => {
     const admin: Actor = { kind: 'user', email: principalFor.admin.email }
     for (const action of ACTIONS) {
       for (const access of ACCESSES) {
@@ -296,6 +321,30 @@ describe('canInstance', () => {
         )
       }
     }
+  })
+})
+
+describe('admins on sites', () => {
+  it('SITE_CHANGES are what an admin may do only from their browser session', () => {
+    const sessionOnly = ACTIONS.filter(
+      a => EXPECTED[a].restricted.includes('o') && !EXPECTED[a].restricted.includes('t')
+    )
+    expect([...SITE_CHANGES].sort()).toEqual([...sessionOnly].sort())
+  })
+
+  it('byAdminOnly: what the admin role alone allows, never what they could do anyway', () => {
+    const restricted = siteWith('restricted')
+    expect(byAdminOnly(actorFor.admin, 'site.view', restricted)).toBe(true)
+    expect(byAdminOnly(actorFor.admin, 'site.archive', restricted)).toBe(true)
+    // Refused outright: not by admin.
+    expect(byAdminOnly(actorFor['admin-token'], 'site.archive', restricted)).toBe(false)
+    expect(byAdminOnly(actorFor.admin, 'site.deploy', restricted)).toBe(false)
+    // Any member opens a members-level site, admin or not.
+    expect(byAdminOnly(actorFor.admin, 'site.view', siteWith('private'))).toBe(false)
+    // An admin who owns the site, or whom its audience names, is no exception.
+    expect(byAdminOnly({ ...adminSession, email: OWNER }, 'site.archive', restricted)).toBe(false)
+    expect(byAdminOnly({ ...adminSession, email: VIEWER }, 'site.view', restricted)).toBe(false)
+    expect(byAdminOnly(actorFor.member, 'site.view', restricted)).toBe(false)
   })
 })
 
@@ -309,6 +358,8 @@ describe('canDeleteComment', () => {
     const expected: Record<Role, [boolean, boolean, boolean]> = {
       // [the owner's comment, the member's comment, a guest's comment]
       owner: [true, true, true],
+      admin: [true, true, true],
+      'admin-token': [false, false, false],
       viewer: [false, false, false],
       member: [false, true, false],
       guest: [false, false, false],
@@ -333,6 +384,13 @@ describe('roleOf', () => {
     expect(roleOf(actorFor.guest, site)).toBe('guest')
     expect(roleOf(actorFor.viewer, siteWith('restricted'))).toBe('viewer')
     expect(roleOf(actorFor.viewer, site)).toBe('member')
+  })
+
+  it('an admin is an admin before a viewer, and the owner before either', () => {
+    const restricted = siteWith('restricted')
+    expect(roleOf({ ...adminSession, email: VIEWER }, restricted)).toBe('admin')
+    expect(roleOf({ ...adminToken, email: VIEWER }, restricted)).toBe('admin-token')
+    expect(roleOf({ ...adminSession, email: OWNER }, restricted)).toBe('owner')
   })
 
   it("only the site's current share token makes a share actor", () => {
@@ -447,27 +505,32 @@ describe('the edge agrees with site.view', () => {
       const shareHost = new URL(share.shareUrl).host
       const site = (await env.store.findSite(name)) as PolicySite
       // What each role's browser holds: a site pass only where the API would hand one out.
-      const cookieOf = async (email: string, guest = false) =>
-        can({ kind: 'user', email, ...(guest ? { guest } : {}) }, 'site.view', site) &&
-        (name === 'team' || name === 'mine')
-          ? pass(email, name)
-          : siteCookie(email, guest)
-      const requests: Record<Role, [string, string?]> = {
-        owner: [`${name}.fling.test`, await cookieOf('alice@example.test')],
-        viewer: [`${name}.fling.test`, await cookieOf('bob@example.test')],
-        member: [`${name}.fling.test`, await cookieOf('carol@example.test')],
-        guest: [`${name}.fling.test`, await cookieOf(GUEST, true)],
-        share: [shareHost],
-        anonymous: [`${name}.fling.test`],
-      }
       const actors: Record<Role, Actor> = {
         owner: { kind: 'user', email: 'alice@example.test' },
+        admin: { kind: 'user', email: ADMIN, admin: 'session' },
+        'admin-token': { kind: 'user', email: ADMIN, admin: 'token' },
         viewer: { kind: 'user', email: 'bob@example.test' },
         member: { kind: 'user', email: 'carol@example.test' },
         guest: { kind: 'user', email: GUEST, guest: true },
         share: { kind: 'share', token: shareHost.split('.')[0]?.slice(3) ?? '' },
         anonymous: { kind: 'anonymous' },
       }
+      const cookieOf = async (actor: Actor) => {
+        if (actor.kind !== 'user') return undefined
+        return can(actor, 'site.view', site) && (name === 'team' || name === 'mine')
+          ? pass(actor.email, name)
+          : siteCookie(actor.email, actor.guest === true)
+      }
+      const host = `${name}.fling.test`
+      const requests = Object.fromEntries(
+        await Promise.all(
+          ROLES.map(async role => {
+            const request: [string, string?] =
+              role === 'share' ? [shareHost] : [host, await cookieOf(actors[role])]
+            return [role, request] as const
+          })
+        )
+      ) as Record<Role, [string, string?]>
       expect(env.routeTable.data.has(siteKvsKey(name))).toBe(true)
       for (const role of ROLES) {
         expect({ name, role, served: await served(...requests[role]) }).toEqual({

@@ -11,7 +11,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { type Context, Hono } from 'hono'
 import { API_KEY_PREFIX, validateApiKey } from '../auth/api-keys.ts'
 import { principalOf } from '../auth/middleware.ts'
-import { withStanding } from '../auth/standing.ts'
+import { asRequestUser, withStanding } from '../auth/standing.ts'
 import { createRemoteMcpServer } from '../mcp/server.ts'
 import { resourceMetadataUrl, SCOPE, verifyAccessToken } from '../oauth/tokens.ts'
 import type { User } from '../store/types.ts'
@@ -77,7 +77,7 @@ async function authenticate(c: Context<AppEnv>): Promise<User | Response> {
 mcpRoutes.all('/', async c => {
   const auth = await authenticate(c)
   if (auth instanceof Response) return auth
-  const user = auth
+  const user = asRequestUser(c.get('deps').config, auth, 'token')
   c.set('user', user)
 
   if (c.req.method !== 'POST') {

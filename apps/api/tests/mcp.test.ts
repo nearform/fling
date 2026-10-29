@@ -630,7 +630,7 @@ describe('/mcp comment tools', () => {
       id: reply.structuredContent.id,
     })
     expect(refused.isError).toBe(true)
-    expect(refused.content[0]?.text).toMatch(/author or the site owner/)
+    expect(refused.content[0]?.text).toMatch(/author, the site owner or an admin/)
     const deleted = await callTool(env, bearer, 'fling_comment_delete', { name: 'deck', id })
     expect(deleted.isError).toBeFalsy()
     const after = await callTool(env, bob, 'fling_comments_list', {

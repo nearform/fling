@@ -119,7 +119,7 @@ describe('comments', () => {
 
     const refused = await del(bob.key, carols.id)
     expect(refused.status).toBe(403)
-    expect((await json(refused)).error.message).toMatch(/author or the site owner/)
+    expect((await json(refused)).error.message).toMatch(/author, the site owner or an admin/)
     expect((await del(carol.key, carols.id)).status).toBe(204)
     expect((await del(alice.key, bobs.id)).status).toBe(204)
     expect((await list(env, bob.key)).comments).toEqual([])

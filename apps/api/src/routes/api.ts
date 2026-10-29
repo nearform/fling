@@ -224,7 +224,7 @@ apiRoutes.patch('/sites/:name', async c => {
     c.get('user'),
     c.req.param('name'),
     patch,
-    acting(c)
+    principalOf(c)
   )
   return c.json(SiteWithAudienceSchema.parse(site))
 })
@@ -356,7 +356,7 @@ apiRoutes.get('/groups', async c => {
 apiRoutes.post('/groups', async c => {
   requireAccountAction(c, 'account.group.create', 'making groups')
   const input = await jsonBody(c, CreateGroupRequestSchema)
-  const group = await groups.createGroup(c.get('deps'), c.get('user'), input, acting(c))
+  const group = await groups.createGroup(c.get('deps'), c.get('user'), input, principalOf(c))
   return c.json(GroupDetailSchema.parse(group), 201)
 })
 
@@ -379,7 +379,7 @@ apiRoutes.post('/groups/:slug/members', async c => {
     c.get('user'),
     c.req.param('slug'),
     change,
-    acting(c)
+    principalOf(c)
   )
   return c.json(GroupDetailSchema.parse(group))
 })

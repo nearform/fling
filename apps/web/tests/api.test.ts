@@ -19,8 +19,12 @@ afterEach(() => {
 describe('request', () => {
   it('parses a successful response with the schema', async () => {
     respond(200, me)
-    // A server from before admins doesn't say: not one.
-    await expect(request('/api/me', MeSchema)).resolves.toEqual({ ...me, admin: false })
+    // A server that doesn't say whether the user is an admin or a guest: neither.
+    await expect(request('/api/me', MeSchema)).resolves.toEqual({
+      ...me,
+      admin: false,
+      guest: false,
+    })
   })
 
   it('turns the error envelope into an ApiError with code and message', async () => {

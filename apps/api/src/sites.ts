@@ -71,12 +71,18 @@ import {
 } from '@fling/shared/site-cookie'
 import { admittedByConfig } from './auth/standing.ts'
 import { manifestKey } from './blobs/types.ts'
-import { checkAddresses, type Inviter, inviteGuests, inviterOf } from './invitations.ts'
+import {
+  checkAddresses,
+  guestsAmong,
+  type Inviter,
+  inviteGuests,
+  inviterOf,
+} from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
-import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { type Action, type Actor, can, isRestricted, userActor } from './policy.ts'
+import { actingOf, notifyAudienceChange } from './notifications/notify.ts'
+import { type Action, type Actor, can, isRestricted, type Principal, userActor } from './policy.ts'
 import {
   accessOfSite,
   hasListing,
@@ -134,18 +140,24 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
 }
 
 /**
- * The audience as its owner sees it: each address, and whether it has signed in yet; each group by
+ * The audience as its owner sees it: each address, whether it has signed in yet and whether it is a
+ * guest (`guestsAmong`); each group by
  * slug, with its name and size. A group that has been deleted (kept because it was the only entry,
  * `dropGroup`) is `deleted`, named by its reference.
  */
 export async function audienceOf(deps: Deps, site: SiteRecord): Promise<Audience> {
-  const [known, groups] = await Promise.all([
+  const [known, guests, groups] = await Promise.all([
     deps.store.knownEmails(site.audience.emails),
+    guestsAmong(deps, site.audience.emails),
     deps.store.getGroups(site.audience.groups),
   ])
   const byId = new Map(groups.map(g => [g.id, g]))
   return {
-    emails: site.audience.emails.map(email => ({ email, known: known.has(email) })),
+    emails: site.audience.emails.map(email => ({
+      email,
+      known: known.has(email),
+      ...(guests.has(email) ? { guest: true } : {}),
+    })),
     groups: site.audience.groups.map(id => {
       const g = byId.get(id)
       return g
@@ -307,7 +319,7 @@ export async function applyAudience(
   deps: Deps,
   site: Pick<SiteRecord, 'audience'>,
   input: AudienceInput,
-  inviter: Inviter | null
+  inviter: Inviter
 ): Promise<SiteAudience> {
   const audience = AudienceInputSchema.parse(input)
   const emails = [...new Set(audience.emails)]
@@ -373,7 +385,7 @@ export async function applyAccess(
   site: AccessFields,
   level: AccessLevel,
   audience: AudienceInput | undefined,
-  inviter: Inviter | null
+  inviter: Inviter
 ): Promise<SiteAudience> {
   const problem = accessProblem(level, audience)
   if (problem) throw badRequest(problem)
@@ -398,7 +410,7 @@ export async function applyAccess(
 export async function initialAccess(
   deps: Deps,
   req: { access?: AccessLevel; audience?: AudienceInput },
-  inviter: Inviter | null
+  inviter: Inviter
 ): Promise<AccessFields> {
   const level = req.access ?? deps.config.siteDefaultAccess
   if (req.access === undefined && req.audience !== undefined) {
@@ -599,7 +611,7 @@ export async function updateSite(
     audience?: AudienceInput
     access?: AccessLevel
   },
-  acting: Acting = {}
+  principal: Principal
 ): Promise<Site & { audience?: Audience }> {
   if (patch.access !== undefined && patch.visibility !== undefined) {
     throw badRequest('Pass `access` or `visibility`, not both')
@@ -617,7 +629,7 @@ export async function updateSite(
   const site = await requireSite(deps, user, name, first, ...rest)
   applySettings(site, patch)
   let before: SiteAudience | undefined
-  const inviter = inviterOf(user, acting)
+  const inviter = inviterOf(principal)
   if (patch.access !== undefined) {
     before = await applyAccess(deps, site, patch.access, patch.audience, inviter)
   } else if (patch.audience !== undefined) {
@@ -627,7 +639,7 @@ export async function updateSite(
   await save(deps, site)
   // The invitations first: the share's email, sent later, goes only to people with standing.
   if (before) await inviteAdded(deps, inviter, site, before)
-  if (before) await notifyAudienceChange(deps, user.email, site, before, acting)
+  if (before) await notifyAudienceChange(deps, user.email, site, before, actingOf(principal))
   return {
     ...toSite(deps, user, site),
     ...(before ? { audience: await audienceOf(deps, site) } : {}),

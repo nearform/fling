@@ -67,8 +67,10 @@ owner: the `only_me` level. A record from before access levels has no `restricte
 restricted exactly when its audience names someone, so every existing site keeps its access.
 
 **Audience** — the people, besides its owner, who may see a restricted site: addresses, each one the
-instance's email policy admits, and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`;
-contract in `packages/shared/src/audience.ts`). Clients name a group by its slug; the audience
+instance's email policy admits or, while `INVITES` is on, one from outside that adding invites as a
+guest (**Invitation**), and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`; contract in
+`packages/shared/src/audience.ts`). As the API reports it, each address says whether it has signed
+in yet and whether it is a guest (`guestsAmong`, `apps/api/src/invitations.ts`). Clients name a group by its slug; the audience
 stores its id. Editing the audience alone (`PATCH { audience }`, `fling access --add`,
 `fling_set_audience`) restricts the site when it names someone and opens it to every member when
 it is emptied; the `only_me` and `members` levels empty it. The audience is kept, and ignored,
@@ -83,7 +85,8 @@ it is archived, live and restricted, rewritten by `putSite` whenever one of thos
 **Group** — a named list of people, such as a team, that any audience may name
 (`apps/api/src/groups.ts`; contract in `packages/shared/src/groups.ts`): a slug unique on the
 instance (a claim, `GROUPNAME#<slug>`), a display name, an **owner** (who made it) and up to 500
-members, each an address the email policy admits. Every member of the instance lists groups, sees
+members, each an address the email policy admits or, while `INVITES` is on, one from outside that
+adding invites as a guest (marked as one in the group's detail). Every member of the instance lists groups, sees
 who is in one and uses it in their sites' audiences; only the owner renames it, changes its members
 or deletes it (`canGroup` in `policy.ts`; no co-managers, and admins get nothing extra). Each
 member has a **membership** item (`USER#<email>/GROUP#<id>`), what policy reads for a restricted
@@ -108,8 +111,8 @@ sharee sees the name, URL, review page, owner, when it was updated and how it re
 nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
 `fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.
 
-**Site pass** — how the edge lets someone into a restricted site (only the owner's included), or
-a guest into any private site, without holding its audience: a
+**Site pass** — how the edge lets someone into a restricted site (only the owner's included)
+without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
 for 5 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
 `/auth/login`, where the API asks policy and sends a viewer to `/_fling-pass?t=<handoff>` on the
@@ -150,7 +153,11 @@ afresh. Made by sharing (`apps/api/src/invitations.ts`, while `INVITES` is on): 
 group that newly adds an outside address invites it as a guest, at most `INVITES_PER_DAY` a day
 per person (`too_many_invites`), and the share's email carries their first sign-in link. Made by an
 admin (Admin → Invitations, `/api/admin/invitations`): a member, emailed a 7-day sign-in link at
-once. Admins list and revoke them; every invitation and revocation is in the audit log.
+once. Admins list and revoke them; every invitation and revocation is in the audit log. An admin
+impersonating someone invites nobody (403 `impersonating`: an invitation outlives the session),
+though they may name someone invited already. The API, the CLI (`fling access --add`) and both MCP
+servers (`fling_set_access`, `fling_set_audience`, the group tools) take outside addresses the same
+way, and their wording says so while the `invites` capability is on.
 
 **Guest** — a user whose standing is `guest`: someone from outside the instance invited to review
 what is shared with them (`guest` on the policy actor and principal, `apps/api/src/policy.ts`).
@@ -159,7 +166,10 @@ reach members-level private sites, create sites or groups, list groups, invite a
 keys or app connections. Over MCP they get only the reviewing tools. Their `fling_site` cookie
 says so (`g: 1`, `packages/shared/src/site-cookie.ts`), and the edge sends it through the site pass
 on a members-level site, where they get a refusal (the site answers as a missing one); restricted
-sites let them in by the site pass, like anyone. Admin → Users marks them.
+sites let them in by the site pass, like anyone. `/api/me` says `guest`, and the web app shows them
+only Shared with me (no Groups, Connections, Get started or quick start). Wherever people are
+listed (an audience, a group's members, Admin → Users) a Guest badge marks them, and the CLI and
+MCP say "(guest)".
 
 **Sign-in link** — an emailed single-use link that signs an invited person in
 (`apps/api/src/auth/sign-in-link.ts`; `MAGIC#<sha256 of the token>/MAGIC` in
@@ -200,7 +210,8 @@ new tab.
 pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
 **owner** (holds it), **viewer** (a signed-in user in its audience, by address or through a
 group), **member** (any other
-signed-in user), **guest** (a signed-in guest not in its audience: public sites only), **share** (holds its current share link), **anonymous**. What a role may do depends
+signed-in user), **guest** (a signed-in guest not in its audience: public sites only), **share**
+(holds its current share link), **anonymous**. What a role may do depends
 on the site's access: public, private, or restricted. `site.view` and the comment actions reach
 beyond the owner (on a restricted site, only to its viewers and share-link holders; on an `only_me`
 one, to share-link holders alone). A refusal looks
@@ -213,7 +224,8 @@ time): a **thread** or a one-level **reply** to one. It records the page **path*
 being served when it was written, so it outlives new versions; an optional **pin** marks the spot
 it is about, recorded as an anchor. Owners and members read, write and
 resolve; authors delete their own, owners any. The author is a user (`{ kind: 'user', email }`) or,
-later, a **guest** (`{ kind: 'guest', name }`, a share-link viewer with a signed per-site cookie).
+later, a share-link visitor (`{ kind: 'guest', name }`, with a signed per-site cookie; not a
+**Guest**, who signs in as a user).
 
 **Review mode** — `/review/<name>` on the app origin (`apps/web/src/pages/Review.tsx`): the site,
 untouched (the edge only rewrites), in a frame beside its comments. The frame holds the review

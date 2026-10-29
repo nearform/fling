@@ -4,7 +4,8 @@
  * `?q=`. The order (`sortSites`, last updated first by default) is kept in `?sort=` and
  * remembered in localStorage. No sites yet → the CLI quick start. With the `audiences`
  * capability, a Shared tab (`?view=shared`) lists the restricted sites others have shared with
- * you, each a `SharedSiteCard`, searched and ordered the same way. Admins also get All sites
+ * you, each a `SharedSiteCard`, searched and ordered the same way. A guest sees only that list,
+ * with no tabs and no quick start: they review what is shared with them. Admins also get All sites
  * (`?view=all`): every site on the instance from the site directory, fetched whole (up to the
  * server's ceiling, with a note when it stops short) and searched and ordered the same way, each
  * an `AdminSiteCard` (the listing only).
@@ -30,7 +31,7 @@ import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { countLabel, filterSites } from '../lib/search'
-import { chooseSiteSort, parseSiteSort, SITE_SORT_LABELS } from '../lib/sites'
+import { chooseSiteSort, parseSiteSort, SITE_SORT_LABELS, sitesViewOf } from '../lib/sites'
 import { QuickStart } from './GetStarted'
 
 /** "Good morning" by the reader's local clock. */
@@ -220,12 +221,13 @@ function NoMatch({ query, label, onClear }: { query: string; label: string; onCl
 export default function Sites() {
   const [params, setParams] = useSearchParams()
   const { data: me } = useMe()
-  const sharing = useInstance()?.capabilities.audiences === true
+  const guest = me?.guest === true
+  const sharing = useInstance()?.capabilities.audiences === true || guest
   const admin = showsAdmin(me)
-  const view = params.get('view')
+  const view = sitesViewOf(params.get('view'), { guest, sharing, admin })
   const archived = view === 'archived'
-  const shared = sharing && view === 'shared'
-  const all = admin && view === 'all'
+  const shared = view === 'shared'
+  const all = view === 'all'
   const query = params.get('q') ?? ''
   const searching = query.trim() !== ''
   const allList = useAdminSites(all)
@@ -234,8 +236,8 @@ export default function Sites() {
     DEFAULT_SITE_SORT
   )
   const sort = chooseSiteSort(params.get('sort'), savedSort)
-  const active = useSites(false)
-  const list = useSites(archived)
+  const active = useSites(false, !guest)
+  const list = useSites(archived, !guest)
   const sharedList = useSharedSites(sharing)
   const shown = useMemo(
     () => sortSites(filterSites(list.data ?? [], query), sort),
@@ -297,52 +299,56 @@ export default function Sites() {
         onSortChange={setSort}
       />
 
-      <div role="tablist" className="tabs tabs-border" aria-label="Which sites">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={!archived && !shared && !all}
-          className={`tab ${archived || shared || all ? '' : 'tab-active'}`}
-          onClick={() => setView('active')}
-        >
-          Active
-          {active.data && <span className="ml-1.5 text-muted">{active.data.length}</span>}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={archived}
-          className={`tab ${archived ? 'tab-active' : ''}`}
-          onClick={() => setView('archived')}
-        >
-          Archived
-        </button>
-        {sharing && (
+      {!guest && (
+        <div role="tablist" className="tabs tabs-border" aria-label="Which sites">
           <button
             type="button"
             role="tab"
-            aria-selected={shared}
-            className={`tab ${shared ? 'tab-active' : ''}`}
-            onClick={() => setView('shared')}
+            aria-selected={!archived && !shared && !all}
+            className={`tab ${archived || shared || all ? '' : 'tab-active'}`}
+            onClick={() => setView('active')}
           >
-            Shared with me
-            {sharedList.data && <span className="ml-1.5 text-muted">{sharedList.data.length}</span>}
+            Active
+            {active.data && <span className="ml-1.5 text-muted">{active.data.length}</span>}
           </button>
-        )}
-        {admin && (
           <button
             type="button"
             role="tab"
-            aria-selected={all}
-            className={`tab ${all ? 'tab-active' : ''}`}
-            onClick={() => setView('all')}
-            title="Every site on this instance (admins)"
+            aria-selected={archived}
+            className={`tab ${archived ? 'tab-active' : ''}`}
+            onClick={() => setView('archived')}
           >
-            <ShieldCheckIcon className="mr-1.5 h-4 w-4" aria-hidden />
-            All sites
+            Archived
           </button>
-        )}
-      </div>
+          {sharing && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={shared}
+              className={`tab ${shared ? 'tab-active' : ''}`}
+              onClick={() => setView('shared')}
+            >
+              Shared with me
+              {sharedList.data && (
+                <span className="ml-1.5 text-muted">{sharedList.data.length}</span>
+              )}
+            </button>
+          )}
+          {admin && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={all}
+              className={`tab ${all ? 'tab-active' : ''}`}
+              onClick={() => setView('all')}
+              title="Every site on this instance (admins)"
+            >
+              <ShieldCheckIcon className="mr-1.5 h-4 w-4" aria-hidden />
+              All sites
+            </button>
+          )}
+        </div>
+      )}
 
       {all ? (
         <AllSitesList

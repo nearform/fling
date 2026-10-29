@@ -38,7 +38,7 @@ import { useId, useState } from 'react'
 import { useInstance } from '../../hooks/instance'
 import { useGroups, useGroupsWithMembers, useMe, useSiteActions } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
-import { addToAudience, audienceWho, peopleLabel } from '../../lib/audience'
+import { addToAudience, audienceWho, peopleErrorMessage, peopleLabel } from '../../lib/audience'
 import { copyText } from '../../lib/clipboard'
 import { displayUrl } from '../../lib/format'
 import { type AudienceEdit, sameMembers, swapEmailsForGroup } from '../../lib/groups'
@@ -116,7 +116,7 @@ export function SiteAccess({ site }: { site: SiteWithAudience }) {
       setChosen(null)
       return true
     } catch (error) {
-      if (choice === 'audience') setProblem(errorMessage(error))
+      if (choice === 'audience') setProblem(peopleErrorMessage(error))
       else showToast(errorMessage(error), 'error')
       return false
     }
@@ -518,6 +518,7 @@ function AudiencePicker({
               <EmailBadge
                 email={person.email}
                 known={person.known}
+                guest={person.guest}
                 disabled={busy}
                 onRemove={() => void commit({ emails: emails.filter(e => e !== person.email) })}
               />

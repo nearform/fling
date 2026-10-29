@@ -408,9 +408,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     // existing one asked for an access level says it kept its own.
     const who = describeSiteAccess(result.site, await membersOn(t))
     const access = result.first
-      ? `\nWho can open it: ${who} ${accessChangeHint('mcp', result.name)}`
+      ? `\nWho can open it: ${who} ${accessChangeHint('mcp', result.name, { invites: instance?.capabilities.invites === true })}`
       : opts.access
-        ? `\nIts access is unchanged (deploying never changes it for an existing site): ${who} ${accessChangeHint('mcp', result.name)}`
+        ? `\nIts access is unchanged (deploying never changes it for an existing site): ${who} ${accessChangeHint('mcp', result.name, { invites: instance?.capabilities.invites === true })}`
         : ''
     return {
       kind: 'deployed',

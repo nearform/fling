@@ -165,7 +165,10 @@ It is remembered, and becomes the current one only if none is.
   its review page and comments still need sign-in); `"private"` gives it back the access it had
   (only the user, everyone signed in, or its list). Prefer a share link over making a site public.
 - `fling_set_audience { name, add?, remove?, set?, clear? }` edits that list of people
-  (addresses that can sign in to the Fling) and limits the site to them; `clear: true` opens it to
+  (addresses that can sign in to the Fling; where the Fling invites people from outside, as its tool
+  descriptions say, an outside address is invited as a guest, a reviewer who signs in by emailed
+  link and sees only what is shared with them, and `too_many_invites` means the day's invitations
+  are spent: nothing changed) and limits the site to them; `clear: true` opens it to
   everyone signed in. The owner always sees it. It only applies while the site is private, a share link still
   opens it to anyone (say so if one exists), and someone removed can keep seeing it for up to 5
   minutes. `fling_info` shows who can open a site.

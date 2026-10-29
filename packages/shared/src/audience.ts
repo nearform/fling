@@ -13,8 +13,16 @@ export const AUDIENCE_EMAILS_MAX = 100
 /** The most groups an audience names. */
 export const AUDIENCE_GROUPS_MAX = 10
 
-/** An address in an audience; `known` once it has signed in to the instance. */
-export const AudienceEmailSchema = z.object({ email: z.string(), known: z.boolean() })
+/**
+ * An address in an audience or a group; `known` once it has signed in to the instance; `guest`
+ * when it is a guest (invited from outside by a share or a group, reviewing only what is shared
+ * with them).
+ */
+export const AudienceEmailSchema = z.object({
+  email: z.string(),
+  known: z.boolean(),
+  guest: z.boolean().optional(),
+})
 export type AudienceEmail = z.infer<typeof AudienceEmailSchema>
 
 /**
@@ -45,7 +53,8 @@ export type Audience = z.infer<typeof AudienceSchema>
 
 /**
  * PATCH /api/sites/:name { audience }: the whole new audience. Each address must be one the
- * instance lets sign in, and each group (by slug) one that exists (else a 400 naming it).
+ * instance lets sign in, or, with outside invitations on (the `invites` capability), one from
+ * outside, invited as a guest (a reviewer); each group (by slug) must exist (else a 400 naming it).
  */
 export const AudienceInputSchema = z.object({
   emails: z
@@ -157,9 +166,14 @@ function whoIn(emails: readonly AudienceEmail[], groups: readonly AudienceGroup[
 const and = (parts: readonly string[]) =>
   parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : (parts[0] ?? '')
 
-/** `a@x.test, b@x.test (hasn't signed in yet)`. */
+/** `a@x.test, b@x.test (hasn't signed in yet), c@y.test (guest)`. */
 export const audienceList = (emails: readonly AudienceEmail[]) =>
-  emails.map(e => (e.known ? e.email : `${e.email} (hasn't signed in yet)`)).join(', ')
+  emails
+    .map(e => {
+      const notes = [e.guest ? 'guest' : '', e.known ? '' : "hasn't signed in yet"].filter(Boolean)
+      return notes.length ? `${e.email} (${notes.join(', ')})` : e.email
+    })
+    .join(', ')
 
 /**
  * Who can open the site, for the CLI and both MCP servers: public, every member

@@ -2,14 +2,17 @@
  * An email address as a badge, wherever people are listed (an audience, a group's members, an
  * owner): the local part in semibold and the `@domain` muted, so a list reads by name. A long
  * address truncates the domain first, then the name, and shows in full on hover. Optional: a
- * marker for someone who hasn't signed in yet, and a remove button named for the address.
+ * marker for a guest, one for someone who hasn't signed in yet, and a remove button named for the
+ * address.
  */
 import { XMarkIcon } from '@heroicons/react/24/outline'
+import { GUEST_TITLE } from '../lib/audience'
 import { splitEmail } from '../lib/groups'
 
 export function EmailBadge({
   email,
   known = true,
+  guest = false,
   onRemove,
   removeLabel = `Remove ${email}`,
   disabled = false,
@@ -18,6 +21,8 @@ export function EmailBadge({
   email: string
   /** false: marked "hasn't signed in yet" */
   known?: boolean
+  /** true: marked as a guest (invited from outside, reviews only what is shared with them) */
+  guest?: boolean
   onRemove?: () => void
   removeLabel?: string
   disabled?: boolean
@@ -32,6 +37,11 @@ export function EmailBadge({
         <span className="truncate font-semibold text-base-content">{local}</span>
         {domain && <span className="min-w-[4ch] shrink-[4] truncate text-muted">{domain}</span>}
       </span>
+      {guest && (
+        <span className="badge badge-xs badge-ghost shrink-0" title={GUEST_TITLE}>
+          Guest
+        </span>
+      )}
       {!known && (
         <span className="shrink-0 text-xs text-muted" title="They haven't signed in yet">
           · hasn’t signed in yet

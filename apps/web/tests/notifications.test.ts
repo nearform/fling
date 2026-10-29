@@ -27,6 +27,7 @@ const me = (over: Partial<Me> = {}): Me => ({
   picture: null,
   userSlug: 'boss',
   admin: false,
+  guest: false,
   ...over,
 })
 

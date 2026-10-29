@@ -217,11 +217,15 @@ fling access my-app --public                          # anyone, no sign-in
 ```
 
 Addresses are comma-separated or given after `--add` one by one, and each must be one that can sign
-in to the Fling. Someone who hasn't signed in yet is marked `(hasn't signed in yet)`; they can open
-the site once they do. The audience only applies while the site is private: on a public site it is
+in to the Fling. Where the Fling invites people from outside (its `invites` capability), an outside
+address is invited as a **guest**: a reviewer who signs in with a link emailed to them and sees only
+what is shared with them, marked `(guest)`. You can invite a few new outside addresses a day; past
+that, nothing changes and the CLI says so (`too_many_invites`). The same goes for `fling groups
+create` and `fling groups add`. Someone who hasn't signed in yet is marked `(hasn't signed in yet)`;
+they can open the site once they do. The audience only applies while the site is private: on a public site it is
 kept for later and `fling access` says so. A share link still opens a restricted site to anyone who
 has it, and `fling access` warns while one exists. Removing someone shuts them out within 5
-minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known }], groups:
+minutes. `--json` prints the site with its `audience` (`{ emails: [{ email, known, guest? }], groups:
 [{ slug, name, size }] }`) and `warnings`; `fling info` shows the same line, and `fling ls --json`
 gives each site's `access`, `restricted`, `audienceSize` and `audienceGroups` (how many of those
 are groups). A share link opens a site only you can see as well: it is your choice to hand it out.

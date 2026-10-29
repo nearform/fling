@@ -55,7 +55,8 @@ changes it.
 
 **Audiences.** The owner can limit a site to listed people and groups (`fling access <site>
 --add a@example.test --group design`, `fling_set_audience`, or the site's Access section in the web
-UI). Each address must be one that can sign in; the owner always sees the site, and share links
+UI). Each address must be one that can sign in, or, where the instance invites people from outside,
+one it invites as a reviewer (see Invitations); the owner always sees the site, and share links
 still open it. A **group** is a named list of people (`fling groups`, `fling_groups`, the Groups page
 in the web UI): anyone signed in can see one and use it, and only its owner can change it. The edge
 holds no access lists: the API checks the audience when someone signs in to the site and hands them
@@ -93,8 +94,20 @@ into one email. Each person chooses what they hear about from every client (Sett
 Notifications, `fling notifications`, `fling_notifications_set`), and every email has a one-click
 unsubscribe. Email goes out through each cloud's own service (SES on AWS, Email Service on
 Cloudflare) from a sender the operator already has; admins check the setup at `/admin/mail` with a
-test email, and see the whole configuration (secrets by name only) at `/admin/settings`. An instance without a mail sender lacks the `email` and `notifications` capabilities,
-and every client hides the settings. See each platform's deploy guide, Email.
+test email, and see the whole configuration (secrets by name only) at `/admin/settings`. An
+instance without a mail sender lacks the `email` and `notifications` capabilities, and every client
+hides the settings. See each platform's deploy guide, Email.
+
+**Invitations.** An instance with mail can let in people from outside its email domains
+(`INVITES=on`; off by default). Sharing a site, or adding someone to a group, with an outside
+address invites them as a **guest**: a reviewer who sees and comments on what is shared with them
+and on public sites, and nothing else (no sites, groups, API keys or app connections of their own).
+Their first email is the share's notification, with a sign-in link; guests sign in with emailed
+single-use links, never at the instance's identity provider. Each person invites at most
+`INVITES_PER_DAY` new outside addresses a day. Admins invite full members from Admin → Invitations
+and revoke any invitation there, which cuts that person off on their next request. A guest no
+audience or group names any more is cut off too, until someone shares with them again. See each
+platform's deploy guide, Outside invitations.
 
 ## Layout
 

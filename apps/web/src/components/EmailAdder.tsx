@@ -8,9 +8,13 @@
  * adds), and entries without a domain get it when added or pasted. With several, a list of
  * matching addresses opens under the input with the first one highlighted (an ARIA combobox:
  * arrows move, Tab fills in the highlighted one, Enter adds it, Escape closes). With none published there is no completion.
+ *
+ * With outside invitations on, it says that someone from outside is invited as a reviewer
+ * (`outsideInviteNote`).
  */
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import { useInstance } from '../hooks/instance'
+import { outsideInviteNote } from '../lib/audience'
 import {
   acceptSuggestion,
   completeEntries,
@@ -40,7 +44,9 @@ export function EmailAdder({
   hint?: ReactNode
   label?: string
 }) {
-  const domains = useInstance()?.auth.emailDomains ?? NO_DOMAINS
+  const instance = useInstance()
+  const domains = instance?.auth.emailDomains ?? NO_DOMAINS
+  const outside = outsideInviteNote(instance)
   const [closed, setClosed] = useState(false)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -198,6 +204,7 @@ export function EmailAdder({
           </p>
         )}
         {hint && <p className="text-muted">{hint}</p>}
+        {outside && <p className="text-muted">{outside}</p>}
       </div>
     </div>
   )

@@ -311,7 +311,10 @@ program
       'clear',
     ])
   )
-  .option('--add <emails...>', 'let these addresses in (comma-separated or repeated)')
+  .option(
+    '--add <emails...>',
+    'let these addresses in (comma-separated or repeated); where the Fling invites by sharing, an address from outside is invited as a reviewer'
+  )
   .option('--remove <emails...>', 'take these addresses out')
   .option('--group <slugs...>', 'let these groups in (see `fling groups`)')
   .option('--remove-group <slugs...>', 'take these groups out')

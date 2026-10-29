@@ -69,6 +69,10 @@ export interface Acting {
   impersonator?: string
 }
 
+/** The `Acting` of a request's principal (policy.ts). */
+export const actingOf = (p: { impersonator?: string }): Acting =>
+  p.impersonator === undefined ? {} : { impersonator: p.impersonator }
+
 export const eventIdOf = (event: Pick<NewEvent, 'key' | 'cause'>) => `${event.key}:${event.cause}`
 
 /** Record the event for the drainer. Never throws. */

@@ -45,8 +45,13 @@ export function useWhySite() {
   return useQuery({ queryKey: queryKeys.whySite, queryFn: api.whySite, staleTime: 5 * 60_000 })
 }
 
-export function useSites(archived: boolean) {
-  return useQuery({ queryKey: queryKeys.sites(archived), queryFn: () => api.listSites(archived) })
+/** The caller's own sites; `enabled` false for a guest, who owns none. */
+export function useSites(archived: boolean, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.sites(archived),
+    queryFn: () => api.listSites(archived),
+    enabled,
+  })
 }
 
 /** The sites shared with the caller; fetched once the Shared tab is offered. */

@@ -194,7 +194,7 @@ function errorFromResponse(status: number, body: unknown, method: string, path: 
       code,
       body,
       message: envelope.data.error.message,
-      hint: code ? NEVER_PUBLISHED_HINTS[code] : undefined,
+      hint: code ? ERROR_HINTS[code] : undefined,
     })
     // The server's secret checks (the guarantee behind the CLI's own): keep the details for --json.
     const extra = (body as { error?: { findings?: unknown; paths?: unknown } }).error
@@ -212,6 +212,13 @@ const NEVER_PUBLISHED_HINTS: Record<string, string> = {
   secret_file:
     'Move the secret files out of the folder, or add them to .flingignore if the site does not need them.',
   dotfile: `Dotfiles are never flung. Update the CLI (\`npm i -g ${PACKAGE_NAME}@latest\`), which skips them.`,
+}
+
+/** Hints for refusals a command can't fix itself, by the server's error code. */
+const ERROR_HINTS: Record<string, string> = {
+  ...NEVER_PUBLISHED_HINTS,
+  too_many_invites:
+    'Nothing changed. Addresses from outside are invited as reviewers, a few a day per person: add them tomorrow, or ask an admin to invite them.',
 }
 
 function describeCause(cause: unknown): string {

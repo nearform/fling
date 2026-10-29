@@ -57,6 +57,7 @@ import {
 import { computeVersionId } from '@fling/shared/version-id'
 import { guestRefusal } from './auth/middleware.ts'
 import { manifestKey } from './blobs/types.ts'
+import { inviterOf } from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
@@ -233,7 +234,7 @@ async function prepare(
   }
   // Who can open a site that has never been live. One that has keeps its access: PATCH changes it.
   const neverLive = !existing || existing.currentVersionId === null
-  const inviter = { email: user.email, may: canInstance(principal, 'account.invite') }
+  const inviter = inviterOf(principal)
   const access = neverLive ? await initialAccess(deps, req, inviter) : null
   if (existing && access && req.access !== undefined) {
     const before = existing.audience

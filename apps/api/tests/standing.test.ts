@@ -228,6 +228,15 @@ describe('a guest', () => {
     return { env, owner, guest }
   }
 
+  it('is told so by /api/me, which the web app reads to show them only what is shared', async () => {
+    const { env, owner, guest } = await world()
+    expect(await json(await api(env, guest.key, 'GET', '/api/me'))).toMatchObject({
+      email: GUEST,
+      guest: true,
+    })
+    expect((await json(await api(env, owner.key, 'GET', '/api/me'))).guest).toBe(false)
+  })
+
   it('reviews the sites shared with them and public ones, and nothing members-only', async () => {
     const { env, guest } = await world()
     const shared = await json(await api(env, guest.key, 'GET', '/api/shared'))

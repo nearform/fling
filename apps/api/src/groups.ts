@@ -23,11 +23,11 @@ import {
   type GroupSummary,
   isValidGroupSlug,
 } from '@fling/shared'
-import { checkAddresses, inviteGuests, inviterOf } from './invitations.ts'
+import { checkAddresses, guestsAmong, inviteGuests, inviterOf } from './invitations.ts'
 import { badRequest, conflict, forbidden, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
-import { type Acting, notifyMembersAdded } from './notifications/notify.ts'
-import { canGroup, type GroupAction, userActor } from './policy.ts'
+import { actingOf, notifyMembersAdded } from './notifications/notify.ts'
+import { canGroup, type GroupAction, type Principal, userActor } from './policy.ts'
 import { dropGroup } from './sites.ts'
 import type { GroupRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
@@ -103,10 +103,17 @@ export async function groupsWithMembers(
 
 async function detailOf(deps: Deps, user: User, group: GroupRecord): Promise<GroupDetail> {
   const members = await deps.store.listGroupMembers(group.id)
-  const known = await deps.store.knownEmails(members)
+  const [known, guests] = await Promise.all([
+    deps.store.knownEmails(members),
+    guestsAmong(deps, members),
+  ])
   return {
     ...summaryOf(group),
-    members: members.map(email => ({ email, known: known.has(email) })),
+    members: members.map(email => ({
+      email,
+      known: known.has(email),
+      ...(guests.has(email) ? { guest: true } : {}),
+    })),
     canManage: canGroup(userActor(user), 'group.manage', group),
   }
 }
@@ -125,12 +132,12 @@ export async function createGroup(
   deps: Deps,
   user: User,
   input: CreateGroupRequest,
-  acting: Acting = {}
+  principal: Principal
 ): Promise<GroupDetail> {
   const { slug, name, members = [] } = CreateGroupRequestSchema.parse(input)
   const emails = [...new Set(members)]
   capped(emails.length)
-  const inviter = inviterOf(user, acting)
+  const inviter = inviterOf(principal)
   const outside = await checkAddresses(deps, emails, inviter)
   const now = deps.clock.now().toISOString()
   const group: GroupRecord = {
@@ -145,7 +152,7 @@ export async function createGroup(
   const created = await deps.store.createGroup(group, emails)
   if (!created) throw conflict(`There is already a group named "${slug}"`, 'group_taken')
   await inviteGuests(deps, inviter, outside, { via: 'group', groupId: created.id })
-  await notifyMembersAdded(deps, user.email, created, emails, acting)
+  await notifyMembersAdded(deps, user.email, created, emails, actingOf(principal))
   return detailOf(deps, user, created)
 }
 
@@ -174,7 +181,7 @@ export async function changeMembers(
   user: User,
   slug: string,
   input: GroupMembersRequest,
-  acting: Acting = {}
+  principal: Principal
 ): Promise<GroupDetail> {
   const change = GroupMembersRequestSchema.parse(input)
   const group = await requireGroup(deps, user, slug, 'group.manage')
@@ -182,7 +189,7 @@ export async function changeMembers(
   const adding = [...new Set(change.add ?? [])].filter(e => !removing.has(e))
   const current = new Set(await deps.store.listGroupMembers(group.id))
   const add = adding.filter(e => !current.has(e))
-  const inviter = inviterOf(user, acting)
+  const inviter = inviterOf(principal)
   const outside = await checkAddresses(deps, add, inviter)
   const remove = [...removing].filter(e => current.has(e))
   const size = current.size + add.length - remove.length
@@ -191,7 +198,7 @@ export async function changeMembers(
   group.updatedAt = deps.clock.now().toISOString()
   await deps.store.putGroup(group, { add, remove })
   await inviteGuests(deps, inviter, outside, { via: 'group', groupId: group.id })
-  await notifyMembersAdded(deps, user.email, group, add, acting)
+  await notifyMembersAdded(deps, user.email, group, add, actingOf(principal))
   return detailOf(deps, user, group)
 }
 

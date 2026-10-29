@@ -155,6 +155,26 @@ describe('inviting by sharing', () => {
     })
   })
 
+  it('marks guests where people are listed: a site audience and a group', async () => {
+    const { env, alice, bossCookie } = await world()
+    const res = await share(env, alice.key, 'q3-report', [PAT, 'bob@example.test'])
+    const emails = (await json(res)).audience.emails as { email: string; guest?: boolean }[]
+    expect(emails.find(e => e.email === PAT)?.guest).toBe(true)
+    expect(emails.find(e => e.email === 'bob@example.test')?.guest).toBeUndefined()
+    await api(env, alice.key, 'POST', '/api/groups', {
+      slug: 'reviewers',
+      name: 'Reviewers',
+      members: [PAT, 'bob@example.test'],
+    })
+    const detail = await json(await api(env, alice.key, 'GET', '/api/groups/reviewers'))
+    expect(detail.members).toContainEqual({ email: PAT, known: false, guest: true })
+    expect(detail.members).toContainEqual({ email: 'bob@example.test', known: false })
+    // An admin's invitation makes them a member, who is not marked.
+    await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: PAT })
+    const site = await json(await api(env, alice.key, 'GET', '/api/sites/q3-report'))
+    expect(site.audience.emails).toContainEqual({ email: PAT, known: false })
+  })
+
   it('saving an audience again re-invites nobody; adding the address anew does', async () => {
     const { env, alice, bossCookie } = await world()
     expect((await share(env, alice.key, 'q3-report', [PAT])).status).toBe(200)
@@ -204,7 +224,7 @@ describe('inviting by sharing', () => {
     expect(await env.store.getInvitation(PAT)).toBeNull()
   })
 
-  it('an admin impersonating someone invites nobody: 400 email_not_allowed', async () => {
+  it('an admin impersonating someone invites nobody: 403 impersonating, nothing saved', async () => {
     const { env, bossCookie } = await world()
     const started = await browser(env, bossCookie, 'POST', '/api/admin/impersonate', {
       email: ALICE,
@@ -214,8 +234,32 @@ describe('inviting by sharing', () => {
     const res = await browser(env, as, 'PATCH', '/api/sites/q3-report', {
       audience: { emails: [PAT], groups: [] },
     })
-    expect(res.status).toBe(400)
-    expect((await json(res)).error.code).toBe('email_not_allowed')
+    expect(res.status).toBe(403)
+    expect((await json(res)).error.code).toBe('impersonating')
+    const group = await browser(env, as, 'POST', '/api/groups', {
+      slug: 'outsiders',
+      name: 'Outsiders',
+      members: [PAT],
+    })
+    expect(group.status).toBe(403)
+    expect((await json(group)).error.code).toBe('impersonating')
+    expect(await env.store.getInvitation(PAT)).toBeNull()
+    expect((await env.store.findSite('q3-report'))?.audience.emails).toEqual([])
+  })
+
+  it('an admin impersonating someone may name a guest invited already, inviting nobody new', async () => {
+    const { env, alice, bossCookie } = await world()
+    expect((await share(env, alice.key, 'q4-report', [PAT])).status).toBe(200)
+    const invited = await env.store.getInvitation(PAT)
+    const started = await browser(env, bossCookie, 'POST', '/api/admin/impersonate', {
+      email: ALICE,
+    })
+    const as = `${SESSION}=${cookiesOf(started)[SESSION]?.value}`
+    const res = await browser(env, as, 'PATCH', '/api/sites/q3-report', {
+      audience: { emails: [PAT], groups: [] },
+    })
+    expect(res.status).toBe(200)
+    expect(await env.store.getInvitation(PAT)).toEqual(invited)
   })
 })
 

@@ -1,18 +1,22 @@
 /**
  * Lists of people in the web UI, a site's audience and a group's members: turning what
  * someone types or pastes into addresses (lowercase, trimmed, each once, up to the list's cap),
- * and the words for an audience of people and groups. The API still checks every address against
- * the instance's email policy.
+ * and the words for an audience of people and groups. The API checks every address against the
+ * instance's email policy; with outside invitations on (the `invites` capability), an address from
+ * outside is invited as a guest, a reviewer (`outsideInviteNote`).
  */
 import {
   ACCESS_LABELS,
   AUDIENCE_EMAILS_MAX,
   GROUP_MEMBERS_MAX,
+  type InstanceMetadata,
   needsAudience,
   type SiteAccessFields,
   siteAccessLevel,
   splitEmails,
 } from '@fling/shared'
+
+import { ApiError, errorMessage } from './api'
 
 /** The same shape check the API makes before the email policy. */
 const EMAIL_RE = /^[^@\s]+@[^@\s]+$/
@@ -72,4 +76,30 @@ export function accessBadgeLabel(site: SiteAccessFields): string {
   const people = Math.max(0, (site.audienceSize ?? 0) - groups)
   const parts = [people ? peopleLabel(people) : '', groups ? groupsLabel(groups) : '']
   return [ACCESS_LABELS[level], ...parts.filter(Boolean)].join(' · ')
+}
+
+/**
+ * What the address field says about people from outside, on an instance with outside invitations
+ * on; null otherwise (the API refuses them).
+ */
+export function outsideInviteNote(
+  instance: Pick<InstanceMetadata, 'name' | 'capabilities'> | null | undefined
+): string | null {
+  if (instance?.capabilities.invites !== true) return null
+  return `Someone from outside ${instance.name} is invited as a reviewer: they sign in with an emailed link and see only what is shared with them.`
+}
+
+/** The guest badge's explanation, wherever people are listed. */
+export const GUEST_TITLE =
+  'A guest: invited from outside by a share or a group, reviews only what is shared with them'
+
+/**
+ * Why adding people failed, for the line under the address field. Past the day's invitations
+ * (`too_many_invites`), it says nobody was added, since the whole change was refused.
+ */
+export function peopleErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.code === 'too_many_invites') {
+    return `Nobody was added. ${error.message.replace(/\.?$/, '.')}`
+  }
+  return errorMessage(error)
 }

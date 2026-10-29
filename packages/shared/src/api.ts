@@ -16,6 +16,8 @@ export const MeSchema = z.object({
   userSlug: z.string(),
   /** one of the instance's admins (servers from before admins don't say: false) */
   admin: z.boolean().default(false),
+  /** a guest: someone invited from outside who reviews what is shared with them, nothing else */
+  guest: z.boolean().default(false),
   /** while an admin impersonates this user: the admin (browser sessions only) */
   impersonator: z.string().optional(),
   /** …and when the impersonation lapses */

@@ -1,6 +1,6 @@
 /**
- * Header avatar dropdown: who you are, your connections, your notifications (on an instance that
- * has them), sign out. Theme lives in `ThemeToggle`.
+ * Header avatar dropdown: who you are, your connections (not for a guest, who holds none), your
+ * notifications (on an instance that has them), sign out. Theme lives in `ThemeToggle`.
  */
 import { ArrowRightStartOnRectangleIcon, BellIcon, KeyIcon } from '@heroicons/react/24/outline'
 import { useRef } from 'react'
@@ -44,15 +44,17 @@ export function UserMenu() {
           <div className="text-xs text-muted truncate">{user.email}</div>
         </li>
         <li className="border-t border-[color:var(--border-subtle)] my-1" />
-        <li>
-          <Link
-            to="/connections"
-            onClick={close}
-            className="nav-item flex items-center gap-2 px-2.5 py-1.5 text-sm"
-          >
-            <KeyIcon className="w-4 h-4" /> Connections
-          </Link>
-        </li>
+        {!user.guest && (
+          <li>
+            <Link
+              to="/connections"
+              onClick={close}
+              className="nav-item flex items-center gap-2 px-2.5 py-1.5 text-sm"
+            >
+              <KeyIcon className="w-4 h-4" /> Connections
+            </Link>
+          </li>
+        )}
         {showsNotifications(instance) && (
           <li>
             <Link

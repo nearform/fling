@@ -5,6 +5,8 @@ import type {
   CommentAnchor,
   CommentAuthor,
   EventKey,
+  InvitationRole,
+  InvitationVia,
   LivePeer,
   NotificationPreferences,
   Visibility,
@@ -48,12 +50,6 @@ export type AuditAction =
   | 'impersonation.stop'
   | 'invitation.create'
   | 'invitation.revoke'
-
-/** What an invitation lets someone be: a full user, or a guest who reviews what is shared with them. */
-export type InvitationRole = 'member' | 'guest'
-
-/** How an invitation came about: an admin's invite, or a share (a site's audience or a group). */
-export type InvitationVia = 'admin' | 'share' | 'group'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory

@@ -96,21 +96,30 @@ Rules that hold for every event:
 
 ## 3. Recipients who have never signed in
 
-Audiences and groups may name any address the email policy admits (`checkEmails` in `sites.ts`),
-whether or not it has signed in (`knownEmails`, the `USERS` index). They are emailed like anyone
-else:
+Audiences and groups may name any address the email policy admits, whether or not it has signed in
+(`knownEmails`, the `USERS` index), and, with outside invitations on (`INVITES`), an address outside
+it, which the change invites as a guest (`checkAddresses` and `inviteGuests` in
+`apps/api/src/invitations.ts`). They are emailed like anyone else:
 
 - They get the catalogue's defaults: preferences are keyed by address (`USER#<email>/NOTIFYPREFS`),
   not by user record, so a person can set them (through an unsubscribe link) before they ever sign
   in, and they are still there after.
-- The link goes to the review or group page. The web sends them through sign-in, which the email
-  policy admits, because `checkEmails` already refused any address it would not. The email says
-  "sign in with your <issuer display name> account <address>" so they know which account to use.
+- The link goes to the review or group page. The web sends them through sign-in, which admits
+  them by standing (`auth/standing.ts`). The email says "sign in with your <issuer display name>
+  account <address>" so they know which account to use.
+- Someone invited from outside who has never signed in can't use the issuer. A `site.shared`,
+  `site.shared_via_group` or `group.member_added` email to them carries a 7-day sign-in link
+  instead (`invitationLink` in `drain.ts`), minted when the batch is sent, so the outbox never
+  holds a token: the email says who shared, the instance and "you've been invited as a reviewer"
+  (or just "invited", for a member), its button signs them in once and goes on to the review page,
+  and the footer drops the issuer line. Only one section of a message carries the link, as it
+  works once.
 - The email names only the actor, the site or group and the instance.
 - Fling can only ever mail people the instance would let sign in: production refuses to start
   without `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` (`apps/api/src/config.ts`), and an address
-  that later stops being admitted (the instance narrows its allowlist) is dropped at send time,
-  because the hub re-runs the email policy (`emailAllowed`) on every recipient.
+  without standing at send time (the instance narrowed its allowlist, an invitation was revoked, or
+  a guest is no longer named by any audience) is dropped, because the hub rechecks standing
+  (`standingOf`) for every recipient.
 
 ## 4. Preferences
 
@@ -341,8 +350,8 @@ only that crash window remains. That is acceptable for notifications.
 
 ### 5.5 Rate limits
 
-There is no per-actor limit. The email policy already confines recipients to people the instance
-admits (§3), and an action's notifications go out in full or not at all. The limits protect
+There is no per-actor limit on notifications. Standing already confines recipients to people the
+instance admits or invited (§3; inviting from outside has its own daily limit, `INVITES_PER_DAY`), and an action's notifications go out in full or not at all. The limits protect
 recipients and the provider:
 
 | Limit | Key | Default | Over the limit |

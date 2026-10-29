@@ -4,14 +4,14 @@
  *
  * - the event's capability is still on (comments), and the recipient's preferences want it on
  *   this channel (`effectivePreference`);
- * - policy still lets the recipient, as a user with their memberships loaded, see what the email
+ * - policy still lets the recipient, as a user with their memberships loaded (a guest as one), see what the email
  *   is about: `site.view` for shares, `comment.read` for comments, and the group still holds them
  *   for group events. A site that is gone or archived, a narrowed audience, a group they left, a
  *   deleted comment or thread: the item is dropped. This is the one guarantee that an email never
  *   reveals a site to someone who cannot see it.
  *
- * The email policy and suppression are about the address, not the item: drain.ts checks them per
- * batch.
+ * Standing (the email policy, or a live invitation) and suppression are about the address, not
+ * the item: drain.ts checks them per batch.
  */
 import {
   type ChannelId,
@@ -47,9 +47,15 @@ export class Resolver {
     private readonly email: string,
     private readonly memberships: readonly string[],
     private readonly prefs: NotificationPreferences | null,
-    private readonly channel: ChannelId
+    private readonly channel: ChannelId,
+    guest = false
   ) {
-    this.recipient = { kind: 'user', email, groups: memberships }
+    this.recipient = {
+      kind: 'user',
+      email,
+      groups: memberships,
+      ...(guest ? { guest: true as const } : {}),
+    }
     this.capabilities = instanceMetadata(deps.config).capabilities
   }
 

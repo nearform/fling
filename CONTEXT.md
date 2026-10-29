@@ -108,8 +108,8 @@ sharee sees the name, URL, review page, owner, when it was updated and how it re
 nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
 `fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.
 
-**Site pass** — how the edge lets someone into a restricted site (only the owner's included)
-without holding its audience: a
+**Site pass** — how the edge lets someone into a restricted site (only the owner's included), or
+a guest into any private site, without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
 for 5 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
 `/auth/login`, where the API asks policy and sends a viewer to `/_fling-pass?t=<handoff>` on the
@@ -118,7 +118,9 @@ handoff** naming only the site. The edge turns the handoff into the pass, and th
 a `fling_pass` that says the site refused them (`SITE_DENIED_TTL_SECONDS`, 10 seconds): while it
 lasts, the site answers as a missing one, its 404 page at the address asked for. An expired pass
 renews through the same redirects, so taking someone out of an audience shuts them out within 5
-minutes, and someone added gets in within 10 seconds.
+minutes, and someone added gets in within 10 seconds. A guest's `fling_site` on a members-level site
+goes the same way: `/auth/login` refreshes the cookie and asks policy, so a guest gets the deny
+handoff, and someone who has become a member since their cookie was set goes straight back.
 
 **Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
 `IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
@@ -144,15 +146,20 @@ the policy admits costs no store read.
 `apps/api/src/store/records.ts`): its role (`member` or `guest`), who invited them, how (`admin`,
 `share` or `group`) and when. One per address: an admin's invite upgrades a guest to a member,
 nothing demotes one, and revoking sets `revokedAt`, kept for the record; a later invite starts
-afresh.
+afresh. Made by sharing (`apps/api/src/invitations.ts`, while `INVITES` is on): an audience or a
+group that newly adds an outside address invites it as a guest, at most `INVITES_PER_DAY` a day
+per person (`too_many_invites`), and the share's email carries their first sign-in link. Made by an
+admin (Admin → Invitations, `/api/admin/invitations`): a member, emailed a 7-day sign-in link at
+once. Admins list and revoke them; every invitation and revocation is in the audit log.
 
 **Guest** — a user whose standing is `guest`: someone from outside the instance invited to review
 what is shared with them (`guest` on the policy actor and principal, `apps/api/src/policy.ts`).
 They see and comment on the sites whose audience names them and on public sites; they never
 reach members-level private sites, create sites or groups, list groups, invite anyone, or hold API
 keys or app connections. Over MCP they get only the reviewing tools. Their `fling_site` cookie
-says so (`g: 1`, `packages/shared/src/site-cookie.ts`), and the edge answers a members-level site
-to it as a missing one; restricted sites let them in by the site pass, like anyone.
+says so (`g: 1`, `packages/shared/src/site-cookie.ts`), and the edge sends it through the site pass
+on a members-level site, where they get a refusal (the site answers as a missing one); restricted
+sites let them in by the site pass, like anyone. Admin → Users marks them.
 
 **Sign-in link** — an emailed single-use link that signs an invited person in
 (`apps/api/src/auth/sign-in-link.ts`; `MAGIC#<sha256 of the token>/MAGIC` in

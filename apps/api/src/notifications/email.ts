@@ -13,7 +13,13 @@ import {
 } from '@fling/shared'
 import { instanceMetadata } from '../instance.ts'
 import type { Deps } from '../types.ts'
-import type { AnyDeliveryItem, Channel, DeliveryBatch, DeliveryItem } from './channel.ts'
+import {
+  type AnyDeliveryItem,
+  type Channel,
+  type DeliveryBatch,
+  type DeliveryItem,
+  INVITATION_EVENTS,
+} from './channel.ts'
 import { TEMPLATES } from './templates/index.ts'
 import { type RenderedEmail, renderEmail } from './templates/layout.ts'
 import type { Section, Template, TemplateContext } from './templates/types.ts'
@@ -35,10 +41,16 @@ export function renderBatchEmail(
     appOrigin: metadata.appOrigin,
     to: batch.to,
     site: batch.site,
+    invitation: null,
   }
+  // An invited newcomer's sign-in link works once: only the first section it fits carries it.
+  const invited = batch.invitation ? keys.find(k => INVITATION_EVENTS.has(k)) : undefined
   const sections: Section[] = keys.map(key => {
     const template = TEMPLATES[key].email as Template<EventKey>
-    return template(byKey.get(key) as DeliveryItem<EventKey>[], ctx)
+    return template(byKey.get(key) as DeliveryItem<EventKey>[], {
+      ...ctx,
+      invitation: key === invited ? (batch.invitation ?? null) : null,
+    })
   })
   const subject =
     sections.length === 1
@@ -52,7 +64,8 @@ export function renderBatchEmail(
   }))
   const rendered = renderEmail(metadata, sections, subject, {
     to: batch.to,
-    signIn: metadata.auth.displayName,
+    // Someone invited from outside signs in by the link, not at the instance's issuer.
+    ...(invited ? {} : { signIn: metadata.auth.displayName }),
     unsubscribe: links,
     settingsUrl: `${metadata.appOrigin}${NOTIFICATION_SETTINGS_PATH}`,
     commentNote: keys.some(k => eventDefinition(k).section === 'comments'),

@@ -4,7 +4,7 @@
  * escaping happens in one place. A message holds one section per event key it folds.
  */
 import type { ChannelId, EventKey } from '@fling/shared'
-import type { DeliveryItem, SiteView } from '../channel.ts'
+import type { DeliveryInvitation, DeliveryItem, SiteView } from '../channel.ts'
 
 export interface TemplateContext {
   /** the instance's name */
@@ -14,6 +14,11 @@ export interface TemplateContext {
   to: string
   /** the site the batch is about, if any */
   site: SiteView | null
+  /**
+   * an invited newcomer's sign-in link: the section's button signs them in (given to one section
+   * of a message only, as the link works once)
+   */
+  invitation: DeliveryInvitation | null
 }
 
 export interface Section {

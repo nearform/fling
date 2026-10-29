@@ -1,6 +1,7 @@
 import { type Me, notificationSettings } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import {
+  ADMIN_INVITATIONS_TAB,
   ADMIN_MAIL_TAB,
   ADMIN_SETTINGS_TAB,
   ADMIN_USERS_TAB,
@@ -61,6 +62,11 @@ describe('where notifications show', () => {
     expect(showsSentMail(me())).toBe(true)
     expect(showsSentMail(me({ impersonator: 'boss@example.test' }))).toBe(false)
     expect(showsSentMail(undefined)).toBe(false)
+  })
+
+  it('offers Invitations among the Admin tabs only with outside invitations on', () => {
+    expect(adminTabsFor(true, true)).toContain(ADMIN_INVITATIONS_TAB)
+    expect(adminTabsFor(true, false)).not.toContain(ADMIN_INVITATIONS_TAB)
   })
 
   it('offers Mail among the Admin tabs only on an instance that sends email', () => {

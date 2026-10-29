@@ -58,6 +58,28 @@ export interface DeliveryItem<K extends EventKey = EventKey> {
 /** A delivery item of any event, discriminated by `key`. */
 export type AnyDeliveryItem = { [K in EventKey]: DeliveryItem<K> }[EventKey]
 
+/**
+ * The events whose email carries an invited newcomer's sign-in link (`DeliveryInvitation`):
+ * something was shared with them, directly, through a group, or by adding them to one.
+ */
+export const INVITATION_EVENTS: ReadonlySet<EventKey> = new Set<EventKey>([
+  'site.shared',
+  'site.shared_via_group',
+  'group.member_added',
+])
+
+/**
+ * A sign-in link for someone invited from outside the email policy who has never signed in (the
+ * drainer mints it at send time): the message's button signs them in.
+ */
+export interface DeliveryInvitation {
+  /** the link: it works once */
+  url: string
+  ttlSeconds: number
+  /** invited as a guest (a reviewer), else as a member */
+  guest: boolean
+}
+
 /** One batch, resolved: one message to one recipient. */
 export interface DeliveryBatch {
   /** the batch id: what logs and provider tags name */
@@ -68,6 +90,8 @@ export interface DeliveryBatch {
   site: SiteView | null
   /** oldest event first; never empty */
   items: AnyDeliveryItem[]
+  /** an invited newcomer's sign-in link, on a batch about something shared with them */
+  invitation?: DeliveryInvitation
 }
 
 export type DeliveryResult =

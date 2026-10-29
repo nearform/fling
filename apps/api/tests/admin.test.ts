@@ -119,6 +119,7 @@ describe('the users list', () => {
         lastSignInAt: '2026-01-01T00:01:00.000Z',
         siteCount: 2,
         admin: false,
+        guest: false,
       },
       expect.objectContaining({ email: OTHER_ADMIN, admin: true }),
     ])

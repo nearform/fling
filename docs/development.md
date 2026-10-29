@@ -78,11 +78,14 @@ Open the same review page in two browser profiles to see each other's pointers.
   and `MAIL_FROM=fling@mail.flingcf.lvh.me` in `platforms/cloudflare/.dev.vars`). The real
   `CloudflareMailer` sends through wrangler's simulated `send_email` binding, which logs each
   message and saves its parts to local files whose paths it prints.
+- **Outside invitations** need mail: add `INVITES=on` (Node) or `--invites` (`wrangler dev`). An
+  address outside `example.test` named in an audience or a group is then invited as a guest, and
+  the share's email in `/dev/mail` carries their sign-in link.
 
 To read what was sent, open `/dev/mail` on the app (<http://fling.lvh.me:47100/dev/mail> on Node, through the UI dev server:
 the newest first, each message's HTML a click away; JSON with `Accept: application/json`), or the
-files themselves. On Node it lists FileMailer's and MemoryMailer's messages; under `wrangler dev`
-it is empty, and the files wrangler prints are the record. Each person's own list is on their
+files themselves. On Node it lists FileMailer's and MemoryMailer's messages; under `wrangler dev`,
+a copy of each message the Worker sent since it started (KeptMailer, `apps/api/src/mail/kept.ts`). Each person's own list is on their
 Settings → Notifications page and in `pnpm cli notifications sent`.
 
 Nothing is sent the moment you act. `pnpm dev` drains the outbox every minute, as the platforms'

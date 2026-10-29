@@ -1,6 +1,7 @@
 /**
  * The comment templates name the page a comment is on only when a member wrote it: a guest's
- * comment is unverified, so its email carries no name, no excerpt and no path (design §9).
+ * comment is unverified, so its email carries no name, no excerpt and no path (design §9). A share
+ * to someone invited from outside carries their sign-in link as its button.
  */
 import { describe, expect, it } from 'vitest'
 import type { ActorView, DeliveryItem } from '../src/notifications/channel.ts'
@@ -12,6 +13,7 @@ const ctx = {
   appOrigin: 'https://fling.example.test',
   to: 'alice@example.test',
   site,
+  invitation: null,
 }
 const PATH = '/visit-evil.example.test/'
 
@@ -54,4 +56,33 @@ describe('comment templates', () => {
       expect(section.quotes ?? []).toEqual([])
     })
   }
+})
+
+describe('a share to someone invited from outside', () => {
+  const shared = {
+    key: 'site.shared',
+    eventId: 'e1',
+    actor: BEN,
+    details: { site },
+  } as DeliveryItem<'site.shared'>
+  const invitation = { url: 'https://fling.example.test/auth/link?t=x', ttlSeconds: 7 * 86_400 }
+
+  it('says who shared, the instance and "invited as a reviewer"; the button is the link', () => {
+    const section = TEMPLATES['site.shared'].email([shared], {
+      ...ctx,
+      to: 'pat@outside.test',
+      invitation: { ...invitation, guest: true },
+    })
+    expect(section.lead).toBe('Ben (ben@example.test) shared q3-report with you on Acme Fling.')
+    expect(section.lines?.[0]).toContain("You've been invited to Acme Fling as a reviewer")
+    expect(section.lines?.at(-1)).toContain('signs you in as pat@outside.test')
+    expect(section.lines?.at(-1)).toContain('within 7 days')
+    expect(section.action).toEqual({ label: 'Sign in and open q3-report', url: invitation.url })
+  })
+
+  it('without an invitation, the button opens the review page', () => {
+    const section = TEMPLATES['site.shared'].email([shared], ctx)
+    expect(section.action.url).toBe(site.url)
+    expect(section.lines ?? []).toEqual([])
+  })
 })

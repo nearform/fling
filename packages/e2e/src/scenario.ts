@@ -13,7 +13,10 @@
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
  *   group (the member makes one the owner can see and use but not change; the owner names it in
  *   the audience; the outsider, once in it, gets in, and once out is refused; deleting it leaves
- *   the site to its owner) → conditional-write race (concurrent
+ *   the site to its owner) → invitations (where on, with the dev mailbox: an outsider shared with
+ *   signs in by the emailed link, sees the site through the pass and comments, finds members-only
+ *   sites missing and may not deploy, mint a key or make a group; revoked, refused; an admin's
+ *   member invitation signs another outsider in, who deploys) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
@@ -124,12 +127,21 @@ async function browse(
 }
 
 /**
- * Someone signed in (`session`, their app cookie) whom a restricted site refuses: a browser goes
+ * Someone signed in (`session`, their app cookie; `siteCookie`, their `fling_site`) whom a
+ * restricted site, or a members-level one to a guest, refuses: a browser goes
  * from `siteUrl` through sign-in and the site's `/_fling-pass` back to `siteUrl`, which answers
  * 404 with the sites' 404 page, exactly as a site that does not exist.
  */
-async function refusedAt(siteUrl: string, appOrigin: string, session: string, who: string) {
-  const jar = { [new URL(appOrigin).host]: session }
+async function refusedAt(
+  siteUrl: string,
+  appOrigin: string,
+  session: string,
+  who: string,
+  siteCookie?: string
+) {
+  const jar: Record<string, string> = { [new URL(appOrigin).host]: session }
+  // The browser's `fling_site`, which the sites host sees (a guest's goes through the pass).
+  if (siteCookie) jar[new URL(siteUrl).host] = siteCookie
   const end = await browse(siteUrl, jar)
   const origin = new URL(siteUrl).origin
   const route = `${end.hops.join(' → ')} → ${end.status} ${end.url}`
@@ -603,6 +615,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('groups: not on this instance (skipped)')
+    }
+
+    // Invitations: an outsider shared with signs in by the emailed link and reviews as a guest;
+    // an admin revokes them and invites another outsider as a member. Only where the instance has
+    // them and the dev mailbox (`/dev/mail`) shows the links, with an admin's browser session.
+    if (meta.capabilities.invites === true && mail && opts.admin?.cookie) {
+      await invitationStep({
+        appOrigin,
+        nonce,
+        work,
+        fling,
+        flingAs,
+        made,
+        opts,
+        step,
+        comments: meta.capabilities.comments === true,
+      })
+    } else {
+      step('invitations: off, or no dev mailbox or admin session (skipped)')
     }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
@@ -1234,6 +1265,210 @@ async function audienceStep(ctx: {
     `share link on a restricted site: ${viaShare.status}`
   )
   step('the share link still serves the restricted site')
+}
+
+/** The sign-in link in the latest `/dev/mail` message to `to`: its token, or null. */
+async function mailedLink(appOrigin: string, to: string): Promise<string | null> {
+  const res = await fetch(`${appOrigin}/dev/mail`, { headers: { accept: 'application/json' } })
+  check(res.ok, `GET /dev/mail: ${res.status}`)
+  const { messages } = (await res.json()) as { messages: { id: string; to: string }[] }
+  const latest = messages.find(m => m.to === to)
+  if (!latest) return null
+  const html = await (await fetch(`${appOrigin}/dev/mail/${encodeURIComponent(latest.id)}`)).text()
+  return html.match(/\/auth\/link\?t=([A-Za-z0-9_-]{43})/)?.[1] ?? null
+}
+
+/**
+ * Sign in by an emailed link as a browser would: open it (which takes nothing), then the confirm
+ * page's form POST. The session it starts, with no API key (a guest may not hold one).
+ */
+async function signInByLink(appOrigin: string, email: string, token: string): Promise<Session> {
+  for (let i = 0; i < 2; i++) {
+    const opened = await get(`${appOrigin}/auth/link?t=${token}`)
+    check(
+      opened.status === 302 && (opened.location ?? '').includes('/sign-in/link'),
+      `GET the sign-in link: ${opened.status} → ${opened.location}`
+    )
+    check(opened.headers.getSetCookie().length === 0, 'opening the sign-in link set cookies')
+  }
+  const res = await fetch(`${appOrigin}/auth/link/verify`, {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', origin: appOrigin },
+    body: new URLSearchParams({ t: token }).toString(),
+  })
+  const cookies = cookiePairs(res)
+  check(
+    res.status === 303 && cookies.some(c => c.startsWith('fling_site=')),
+    `POST /auth/link/verify: ${res.status} → ${res.headers.get('location')}`
+  )
+  return {
+    email,
+    apiKey: '',
+    cookie: cookies.join('; '),
+    siteCookie: cookies.find(c => c.startsWith('fling_site=')),
+  }
+}
+
+async function invitationStep(ctx: {
+  appOrigin: string
+  nonce: string
+  work: string
+  fling: (...args: string[]) => Promise<unknown>
+  flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+  comments: boolean
+}) {
+  const { appOrigin, nonce, work, fling, flingAs, made, opts, step } = ctx
+  const admin = opts.admin as Session & { cookie: string }
+  const guestEmail = 'guest@outside.test'
+  const memberEmail = 'member@outside.test'
+  const reviewName = `e2e-${nonce}-review`
+  const teamName = `e2e-${nonce}-team`
+  const memberSite = `e2e-${nonce}-invited`
+  const as = (session: { cookie?: string }, method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      redirect: 'manual',
+      headers: {
+        cookie: session.cookie ?? '',
+        origin: appOrigin,
+        accept: 'application/json',
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const drainNow = async () => {
+    for (let i = 0; i < 10; i++) {
+      const res = await fetch(`${appOrigin}/dev/notify/drain`, { method: 'POST' })
+      check(res.ok, `POST /dev/notify/drain: ${res.status}`)
+      if (((await res.json()) as { complete?: boolean }).complete) return
+      await sleep(500)
+    }
+  }
+  const marker = `review ${nonce}`
+  const deployed = async (label: string, siteName: string, access: string) => {
+    const dir = siteDir(work, label, { 'index.html': page(label, marker) })
+    made.push(siteName)
+    const out = (await fling('deploy', dir, '--name', siteName, '--access', access)) as {
+      site: CliSite
+    }
+    check(out.site?.url, `deploy ${siteName}: ${JSON.stringify(out)}`)
+    return out.site.url
+  }
+  const reviewUrl = await deployed('review', reviewName, 'members')
+  const teamUrl = await deployed('team', teamName, 'members')
+
+  // 1. The owner shares a site with an outsider: a guest invitation, and the share's email.
+  const shared = (await fling('access', reviewName, '--add', guestEmail)) as CliAccess
+  check(
+    shared.restricted && shared.audience?.emails.some(e => e.email === guestEmail),
+    `fling access --add ${guestEmail}: ${JSON.stringify(shared)}`
+  )
+  step(`shared ${reviewName} with ${guestEmail}, outside the email policy: invited as a guest`)
+
+  // 2. The share's email carries a sign-in link; opening it takes nothing.
+  await drainNow()
+  const token = await mailedLink(appOrigin, guestEmail)
+  check(token, `no sign-in link in the mail to ${guestEmail}`)
+  // 3. The confirm page's POST signs them in.
+  const guest = await signInByLink(appOrigin, guestEmail, token)
+  const me = (await (await as(guest, 'GET', '/api/me')).json()) as { email?: string }
+  check(me.email === guestEmail, `guest GET /api/me: ${JSON.stringify(me)}`)
+  step("the share's email carries a sign-in link: opening it takes nothing, the form POST signs in")
+
+  // 4. The guest sees the site through the site pass, and comments.
+  const jar = {
+    [new URL(appOrigin).host]: guest.cookie as string,
+    [new URL(reviewUrl).host]: guest.siteCookie as string,
+  }
+  const viewed = await browse(reviewUrl, jar)
+  check(
+    viewed.status === 200 && viewed.text.includes(marker),
+    `guest view of ${reviewName}: ${viewed.hops.join(' → ')} → ${viewed.status}`
+  )
+  if (ctx.comments) {
+    const posted = await as(guest, 'POST', `/api/sites/${reviewName}/comments`, {
+      body: 'Looks right to me',
+      path: '/',
+    })
+    check(posted.status === 201, `guest comment: ${posted.status}`)
+  }
+  step(`guest: sign-in → site pass → served${ctx.comments ? ', and comments' : ''}`)
+
+  // 5. Members-level sites answer them as missing ones; they deploy nothing, mint no keys, make no
+  // groups.
+  await refusedAt(teamUrl, appOrigin, guest.cookie as string, 'guest', guest.siteCookie)
+  const nope = page('nope', 'nope')
+  const deploy = await as(guest, 'POST', `/api/sites/e2e-${nonce}-nope/deploys`, {
+    manifest: {
+      files: [
+        {
+          path: 'index.html',
+          sha256: createHash('sha256').update(nope).digest('hex'),
+          size: Buffer.byteLength(nope),
+          contentType: 'text/html; charset=utf-8',
+        },
+      ],
+    },
+  })
+  check(deploy.status === 403, `guest deploy: ${deploy.status}`)
+  const cli = await as(
+    guest,
+    'GET',
+    `/auth/cli?redirect_uri=${encodeURIComponent('http://127.0.0.1:9/callback')}&hostname=e2e&state=e2e`
+  )
+  const cliTo = cli.headers.get('location') ?? ''
+  check(
+    !new URL(cliTo, appOrigin).searchParams.get('key'),
+    `guest CLI login minted a key: ${cli.status} → ${cliTo}`
+  )
+  const group = await as(guest, 'POST', '/api/groups', { slug: `e2e-${nonce}-g`, name: 'Nope' })
+  check(group.status === 403, `guest group create: ${group.status}`)
+  step(`guest: ${teamName} (members only) is a missing site; no deploy, API key or group`)
+
+  // 6. The admin revokes: the guest's next call is refused.
+  const revoked = await as(
+    admin,
+    'DELETE',
+    `/api/admin/invitations/${encodeURIComponent(guestEmail)}`
+  )
+  check(revoked.status === 200, `revoke ${guestEmail}: ${revoked.status}`)
+  const after = await as(guest, 'GET', '/api/me')
+  check(after.status === 401, `guest after revoking: ${after.status}`)
+  step(`the admin revoked ${guestEmail}: their next API call is a 401`)
+
+  // 7. The admin invites another outsider as a member, who signs in by link and deploys.
+  const invited = await as(admin, 'POST', '/api/admin/invitations', { email: memberEmail })
+  const invitedBody = (await invited.json()) as { sent?: boolean }
+  check(invited.status === 201 && invitedBody.sent, `invite ${memberEmail}: ${invited.status}`)
+  const memberToken = await mailedLink(appOrigin, memberEmail)
+  check(memberToken, `no sign-in link in the invitation to ${memberEmail}`)
+  const member = await signInByLink(appOrigin, memberEmail, memberToken)
+  const minted = await as(
+    member,
+    'GET',
+    `/auth/cli?redirect_uri=${encodeURIComponent('http://127.0.0.1:9/callback')}&hostname=e2e&state=e2e`
+  )
+  const apiKey = new URL(minted.headers.get('location') ?? '', appOrigin).searchParams.get('key')
+  check(apiKey, `invited member CLI login: ${minted.status} → ${minted.headers.get('location')}`)
+  const asMember = flingAs({ ...member, apiKey })
+  try {
+    const dir = siteDir(work, 'invited', { 'index.html': page('invited', `invited ${nonce}`) })
+    const out = (await asMember('deploy', dir, '--name', memberSite, '--access', 'members')) as {
+      status?: string
+    }
+    check(out.status === 'live', `invited member deploy: ${JSON.stringify(out)}`)
+    step(
+      `the admin invited ${memberEmail}: signed in by link, minted a key, deployed ${memberSite}`
+    )
+  } finally {
+    // 8. Clean up: their site, and the invitation (kept as revoked, for the record).
+    await asMember('rm', memberSite, '--yes').catch(() => {})
+    await as(admin, 'DELETE', `/api/admin/invitations/${encodeURIComponent(memberEmail)}`)
+  }
 }
 
 interface SharedListed {

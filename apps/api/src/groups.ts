@@ -6,7 +6,9 @@
  * renames one, changes its members or deletes it. Guests may be members, and read none.
  *
  * Groups are not secret, so an unknown slug is a 404 and a refusal a 403. Members are addresses the
- * instance would let sign in (`checkEmails`, as for audiences), at most GROUP_MEMBERS_MAX. Clients
+ * instance would let sign in, or outside ones the owner invites as guests by adding them
+ * (`checkAddresses` and `inviteGuests`, invitations.ts, as for audiences), at most
+ * GROUP_MEMBERS_MAX. Clients
  * name a group by slug; audiences store its id, so deleting a group first takes it out of the
  * audiences that name it (`dropGroup` in sites.ts), except where it is the only entry: there it
  * stays, matching nobody, so the site stays restricted to its owner.
@@ -21,11 +23,12 @@ import {
   type GroupSummary,
   isValidGroupSlug,
 } from '@fling/shared'
+import { checkAddresses, inviteGuests, inviterOf } from './invitations.ts'
 import { badRequest, conflict, forbidden, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { type Acting, notifyMembersAdded } from './notifications/notify.ts'
 import { canGroup, type GroupAction, userActor } from './policy.ts'
-import { checkEmails, dropGroup } from './sites.ts'
+import { dropGroup } from './sites.ts'
 import type { GroupRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -127,7 +130,8 @@ export async function createGroup(
   const { slug, name, members = [] } = CreateGroupRequestSchema.parse(input)
   const emails = [...new Set(members)]
   capped(emails.length)
-  checkEmails(deps, emails)
+  const inviter = inviterOf(user, acting)
+  const outside = await checkAddresses(deps, emails, inviter)
   const now = deps.clock.now().toISOString()
   const group: GroupRecord = {
     id: newId(),
@@ -140,6 +144,7 @@ export async function createGroup(
   }
   const created = await deps.store.createGroup(group, emails)
   if (!created) throw conflict(`There is already a group named "${slug}"`, 'group_taken')
+  await inviteGuests(deps, inviter, outside, { via: 'group', groupId: created.id })
   await notifyMembersAdded(deps, user.email, created, emails, acting)
   return detailOf(deps, user, created)
 }
@@ -175,15 +180,17 @@ export async function changeMembers(
   const group = await requireGroup(deps, user, slug, 'group.manage')
   const removing = new Set(change.remove ?? [])
   const adding = [...new Set(change.add ?? [])].filter(e => !removing.has(e))
-  checkEmails(deps, adding)
   const current = new Set(await deps.store.listGroupMembers(group.id))
   const add = adding.filter(e => !current.has(e))
+  const inviter = inviterOf(user, acting)
+  const outside = await checkAddresses(deps, add, inviter)
   const remove = [...removing].filter(e => current.has(e))
   const size = current.size + add.length - remove.length
   capped(size)
   group.size = size
   group.updatedAt = deps.clock.now().toISOString()
   await deps.store.putGroup(group, { add, remove })
+  await inviteGuests(deps, inviter, outside, { via: 'group', groupId: group.id })
   await notifyMembersAdded(deps, user.email, group, add, acting)
   return detailOf(deps, user, group)
 }

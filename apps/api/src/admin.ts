@@ -1,18 +1,20 @@
 /**
  * The instance's admins (ADMIN_EMAILS): the users list, every site's listing (the site
  * directory; policy still decides what an admin may open), the audit log, the mail page
- * (notifications/mail-admin.ts), the settings (configuration, secrets by name only), and
- * impersonation. Policy
- * (`canInstance`, `impersonationRefusal` in policy.ts) decides; this does it and keeps the record.
+ * (notifications/mail-admin.ts), the settings (configuration, secrets by name only), the
+ * invitations (invitations.ts) and impersonation. Policy (`canInstance`, `impersonationRefusal` in
+ * policy.ts) decides; this does it and keeps the record.
  * To anyone who isn't an admin, none of it exists (404).
  *
  * Impersonation is a browser session of the admin's that acts as someone else (auth/session.ts
  * for the claims, auth/middleware.ts for when they are honoured). It starts and stops here, and
- * every start and stop is audited twice: a structured log line and an AUDIT record (kept
- * AUDIT_TTL_DAYS). The record is written before the session changes, so an impersonation that
- * isn't on the record never happens.
+ * every start and stop is audited (audit.ts: an AUDIT record and a structured log line). The record
+ * is written before the session changes, so an impersonation that isn't on the record never
+ * happens.
  */
 import {
+  type AdminInvitation,
+  type AdminInviteResult,
   type AdminSettings,
   type AdminSite,
   type AdminUser,
@@ -23,10 +25,11 @@ import {
   siteLabel,
   siteUrl,
 } from '@fling/shared'
+import { audit } from './audit.ts'
 import { isAdminEmail, secretSettings } from './config.ts'
+import * as invitations from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, forbidden, notFound } from './lib/errors.ts'
-import { newSortableId } from './lib/ids.ts'
 import { mailOverview, sendTestMail } from './notifications/mail-admin.ts'
 import {
   canInstance,
@@ -35,10 +38,9 @@ import {
   impersonationRefusal,
   type Principal,
 } from './policy.ts'
-import type { AuditRecord, User } from './store/types.ts'
+import type { User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
-export const AUDIT_TTL_DAYS = 180
 /** Users per page of the list, by default and at most. */
 export const USERS_PAGE = 50
 export const USERS_PAGE_MAX = 100
@@ -76,6 +78,7 @@ export function meOf(
 const SESSION_ONLY: Partial<Record<InstanceAction, string>> = {
   'admin.impersonate': 'Impersonation',
   'admin.mail.test': 'Sending a test email',
+  'admin.invitations.manage': 'Inviting and revoking',
 }
 
 /** Non-admins see nothing here: the admin routes are 404s to them (an impersonator is told). */
@@ -107,6 +110,8 @@ export async function listUsers(
     ...u,
     siteCount: (await deps.store.listSites(u.email)).length,
     admin: isAdminEmail(deps.config, u.email),
+    // Read only for users the configuration doesn't admit, and only with invitations on.
+    guest: await invitations.isInvitedGuest(deps, u.email),
   }))
   return { users, cursor: page.cursor ?? null }
 }
@@ -162,33 +167,36 @@ export function settings(deps: Deps, p: Principal): AdminSettings {
   }
 }
 
+/** The invitation directory (404 with invitations off). */
+export function listInvitations(
+  deps: Deps,
+  p: Principal,
+  opts: { q?: string; cursor?: string; limit?: number }
+): Promise<{ invitations: AdminInvitation[]; cursor: string | null }> {
+  ensure(p, 'admin.invitations.read')
+  return invitations.listInvitations(deps, opts)
+}
+
+/** Invite `email` as a member and email them a sign-in link. */
+export function invite(deps: Deps, p: Principal, email: string): Promise<AdminInviteResult> {
+  ensure(p, 'admin.invitations.manage')
+  return invitations.inviteMember(deps, p.email, email)
+}
+
+/** Revoke `email`'s invitation: their access ends on their next request. */
+export function revokeInvitation(
+  deps: Deps,
+  p: Principal,
+  email: string
+): Promise<AdminInvitation> {
+  ensure(p, 'admin.invitations.manage')
+  return invitations.revokeInvitation(deps, p.email, email)
+}
+
 /** Send a test email to `to`, any address (at most MAIL_TESTS_PER_HOUR an hour per admin). */
 export function mailTest(deps: Deps, p: Principal, to: string): Promise<MailTestResult> {
   ensure(p, 'admin.mail.test')
   return sendTestMail(deps, p.email, to)
-}
-
-/** Write the record and the log line; throws (and nothing else happens) if the record fails. */
-async function audit(deps: Deps, entry: Omit<AuditRecord, 'id' | 'at' | 'expiresAt'>) {
-  const now = deps.clock.now()
-  const record: AuditRecord = {
-    id: newSortableId(now),
-    at: now.toISOString(),
-    ...entry,
-    expiresAt: new Date(now.getTime() + AUDIT_TTL_DAYS * 86_400_000).toISOString(),
-  }
-  await deps.store.addAuditEntry(record)
-  console.info(
-    JSON.stringify({
-      level: 'info',
-      msg: 'audit',
-      action: record.action,
-      actor: record.actor,
-      target: record.target,
-      ...(record.until && { until: record.until }),
-      ...(record.lapsed && { lapsed: true }),
-    })
-  )
 }
 
 const REFUSALS: Record<ImpersonationRefusal, () => ApiError> = {

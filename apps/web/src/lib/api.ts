@@ -5,6 +5,12 @@
  */
 import {
   type AccessLevel,
+  type AdminInvitation,
+  type AdminInvitationList,
+  AdminInvitationListSchema,
+  AdminInvitationSchema,
+  type AdminInviteResult,
+  AdminInviteResultSchema,
   type AdminSettings,
   AdminSettingsSchema,
   type AdminSiteList,
@@ -30,6 +36,7 @@ import {
   GroupListSchema,
   type GroupMembersRequest,
   type GroupSummary,
+  type InviteRequest,
   type LiveTicket,
   LiveTicketSchema,
   type MailAdmin,
@@ -268,6 +275,27 @@ export const api = {
   },
   /** Admins only: every site's listing, by name (`truncated`: the server's ceiling cut it). */
   adminSites: (): Promise<AdminSiteList> => request('/api/admin/sites', AdminSiteListSchema),
+  /** Admins, with outside invitations on: a page of the invitation directory, by address. */
+  adminInvitations(q: string, cursor?: string): Promise<AdminInvitationList> {
+    const params = new URLSearchParams()
+    if (q.trim()) params.set('q', q.trim())
+    if (cursor) params.set('cursor', cursor)
+    return request(
+      `/api/admin/invitations${params.size ? `?${params}` : ''}`,
+      AdminInvitationListSchema
+    )
+  },
+  /** Invite `email` as a member; they are emailed a sign-in link at once. */
+  invite: (email: string): Promise<AdminInviteResult> =>
+    request('/api/admin/invitations', AdminInviteResultSchema, {
+      method: 'POST',
+      body: { email } satisfies InviteRequest,
+    }),
+  /** Revoke `email`'s invitation: their access ends on their next request. */
+  revokeInvitation: (email: string): Promise<AdminInvitation> =>
+    request(`/api/admin/invitations/${encodeURIComponent(email)}`, AdminInvitationSchema, {
+      method: 'DELETE',
+    }),
   async adminAudit(): Promise<AuditEntry[]> {
     const { entries } = await request('/api/admin/audit', AuditListSchema)
     return entries

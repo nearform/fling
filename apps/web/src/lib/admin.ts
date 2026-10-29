@@ -1,8 +1,10 @@
 /** What the admin parts of the UI show, as plain functions of the signed-in user (tested). */
 import {
+  type AdminInvitation,
   type AdminSettings,
   type AdminUser,
   guideUrl,
+  type InstanceMetadata,
   type Me,
   SETTING_GROUPS,
   type SettingGroup,
@@ -29,6 +31,21 @@ export function impersonateBlocked(me: Me, user: AdminUser): string | null {
 
 /** Where the Admin item and the end of an impersonation lead. */
 export const ADMIN_USERS_PATH = '/admin/users'
+
+/** Admin → Invitations. */
+export const ADMIN_INVITATIONS_PATH = '/admin/invitations'
+
+/** Whether Admin offers Invitations: admins, on an instance with outside invitations on. */
+export const showsInvitationsAdmin = (
+  me: Me | null | undefined,
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+) => showsAdmin(me) && instance?.capabilities.invites === true
+
+/** What an invitation's row says of it: revoked, waiting for a first sign-in, or signed in. */
+export function invitationStatus(i: Pick<AdminInvitation, 'revokedAt' | 'signedIn'>): string {
+  if (i.revokedAt) return 'Revoked'
+  return i.signedIn ? 'Signed in' : 'Not signed in yet'
+}
 
 /** Admin → Settings. */
 export const ADMIN_SETTINGS_PATH = '/admin/settings'

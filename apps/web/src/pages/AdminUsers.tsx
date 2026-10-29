@@ -1,7 +1,8 @@
 /**
  * Admin → Users (admins only; the API answers 404 to anyone else): every user of the instance, by
  * email, searched by email prefix and paged with "Load more"; Impersonate (with a confirmation)
- * on everyone but yourself and other admins; and the latest impersonations, from the audit log.
+ * on everyone but yourself and other admins; guests marked (invited from outside by a share or a
+ * group); and the latest impersonations and invitations, from the audit log.
  */
 import type { AdminUser, AuditEntry } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
@@ -51,6 +52,14 @@ function UsersTable({
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium">{u.name}</span>
                     {u.admin && <span className="badge badge-sm badge-outline">Admin</span>}
+                    {u.guest && (
+                      <span
+                        className="badge badge-sm badge-ghost"
+                        title="Invited from outside by a share or a group: reviews only what is shared with them"
+                      >
+                        Guest
+                      </span>
+                    )}
                   </div>
                   <div className="truncate text-xs text-secondary">{u.email}</div>
                 </td>
@@ -87,6 +96,16 @@ function UsersTable({
 const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'impersonation.start': 'started impersonating',
   'impersonation.stop': 'stopped impersonating',
+  'invitation.create': 'invited',
+  'invitation.revoke': 'revoked the invitation of',
+}
+
+/** How an invitation came about, after its target: " as a guest, by sharing". */
+function invitedHow(e: AuditEntry): string {
+  if (e.action !== 'invitation.create') return ''
+  const role = e.role === 'guest' ? ' as a guest' : e.role === 'member' ? ' as a member' : ''
+  const via = e.via === 'share' ? ', by sharing a site' : e.via === 'group' ? ', by a group' : ''
+  return `${role}${via}`
 }
 
 function AuditLog() {
@@ -94,8 +113,11 @@ function AuditLog() {
   return (
     <section className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold">Recent impersonations</h2>
-        <p className="text-sm text-secondary">Every start and stop, kept for 180 days.</p>
+        <h2 className="text-base font-semibold">Recent activity</h2>
+        <p className="text-sm text-secondary">
+          Every impersonation's start and stop, and every invitation made or revoked, kept for 180
+          days.
+        </p>
       </div>
       <div className="surface-panel">
         {audit.isPending ? (
@@ -103,13 +125,14 @@ function AuditLog() {
         ) : audit.isError ? (
           <p className="text-sm text-error">{errorMessage(audit.error)}</p>
         ) : audit.data.length === 0 ? (
-          <p className="text-sm text-secondary">Nobody has impersonated anyone yet.</p>
+          <p className="text-sm text-secondary">Nothing yet.</p>
         ) : (
           <ul className="space-y-1.5 text-sm">
             {audit.data.map(e => (
               <li key={e.id}>
                 <span className="font-medium">{e.actor}</span> {ACTION_LABEL[e.action]}{' '}
                 <span className="font-medium">{e.target}</span>
+                {invitedHow(e)}
                 {e.lapsed && <span className="text-secondary"> (it had lapsed)</span>}
                 <span className="text-secondary">
                   {' · '}

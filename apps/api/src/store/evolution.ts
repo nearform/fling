@@ -52,6 +52,7 @@ export type Kind =
   | 'invitation'
   | 'invitationdirectory'
   | 'signinlink'
+  | 'signinlinkused'
   | 'counter'
 
 export type Fields = Record<string, unknown>

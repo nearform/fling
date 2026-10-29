@@ -8,8 +8,10 @@
  * `/auth/google/callback` are the pre-OIDC paths, kept because existing Google OAuth clients
  * allow only that callback. Also logout, the CLI loopback login and the dev-only login. Every way
  * in admits by standing (auth/standing.ts): the email policy, an admin, or a live invitation.
+ * Someone invited from outside the policy can also sign in by an emailed link (`/auth/link`,
+ * auth/sign-in-link.ts).
  */
-import { userSlugFromEmail } from '@fling/shared'
+import { SIGN_IN_LINK_PAGE, SignInLinkRequestSchema, userSlugFromEmail } from '@fling/shared'
 import { type Context, Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { base64url } from 'jose'
@@ -20,8 +22,16 @@ import { admitIdentity, type Identity, type SignInRequest } from '../auth/identi
 import { resolveSession, sessionPrincipal } from '../auth/middleware.ts'
 import { safeReturnUrl } from '../auth/return-url.ts'
 import { endSession, setSiteCookie, startSession } from '../auth/session.ts'
+import {
+  peekSignInLink,
+  requestSignInLink,
+  type SignInLinkError,
+  takeSignInLink,
+} from '../auth/sign-in-link.ts'
 import { standingOf } from '../auth/standing.ts'
 import { badRequest, forbidden, notFound } from '../lib/errors.ts'
+import { jsonBody } from '../lib/validate.ts'
+import { isMailAddress } from '../mail/types.ts'
 import { canInstance } from '../policy.ts'
 import { signedInReturn } from '../sites.ts'
 import type { AppEnv } from '../types.ts'
@@ -229,6 +239,69 @@ authRoutes.get('/cli', async c => {
     console.error(JSON.stringify({ level: 'error', msg: 'cli key mint failed', err: String(err) }))
     return back({ error: 'key_mint_failed' })
   }
+})
+
+/**
+ * `POST /auth/link { email, return? }`: the login page's "Email me a sign-in link" (the `invites`
+ * capability). Always 202, whatever the address and whatever happened, so the answer never says
+ * who is invited; auth/sign-in-link.ts decides whether to send.
+ */
+authRoutes.post('/link', async c => {
+  const deps = c.get('deps')
+  if (!deps.config.invites) throw notFound(`Not found: ${c.req.path}`)
+  if (c.req.header('origin') !== deps.config.appOrigin) {
+    throw forbidden('Cross-origin request refused', 'csrf')
+  }
+  const { email, return: ret } = await jsonBody(c, SignInLinkRequestSchema)
+  if (!isMailAddress(email)) throw badRequest('That is not an email address', 'invalid_email')
+  try {
+    await requestSignInLink(deps, email, ret)
+  } catch (err) {
+    // Logged, never answered: an error only an invited address could cause would say who is.
+    console.error(JSON.stringify({ level: 'error', msg: 'sign-in link failed', err: String(err) }))
+  }
+  return c.body(null, 202)
+})
+
+/** A sign-in link's error, on the login page (where the form to ask for another is). */
+const linkError = (c: Context<AppEnv>, code: SignInLinkError, status: 302 | 303 = 302) => {
+  c.header('Referrer-Policy', 'no-referrer')
+  return c.redirect(`/login?error=${code}`, status)
+}
+
+/**
+ * `GET /auth/link?t=<token>`: the link in the email. It takes nothing, since mail scanners open
+ * every link: it only sends the browser on to the confirm page, with the token and the address in
+ * the URL's fragment (never sent to a server, never in a Referer), or to the login page with what
+ * is wrong. `Referrer-Policy: no-referrer` keeps the token out of the next request's Referer.
+ */
+authRoutes.get('/link', async c => {
+  const peeked = await peekSignInLink(c.get('deps'), c.req.query('t'))
+  if (!peeked.ok) return linkError(c, peeked.error)
+  const hash = new URLSearchParams({ t: c.req.query('t') ?? '', email: peeked.email })
+  c.header('Referrer-Policy', 'no-referrer')
+  return c.redirect(`${SIGN_IN_LINK_PAGE}#${hash.toString()}`, 302)
+})
+
+/**
+ * `POST /auth/link/verify` (a form: `t=<token>`): the confirm page's button. Same-origin only.
+ * Takes the link, checks the address's standing now, signs them in (a guest's site cookie says
+ * so) and 303s to where the link was going, through the site pass when that is a restricted site.
+ */
+authRoutes.post('/link/verify', async c => {
+  const deps = c.get('deps')
+  if (c.req.header('origin') !== deps.config.appOrigin) {
+    throw forbidden('Cross-origin request refused', 'csrf')
+  }
+  const form = await c.req.parseBody()
+  const token = typeof form.t === 'string' ? form.t : undefined
+  const taken = await takeSignInLink(deps, token)
+  if (!taken.ok) return linkError(c, taken.error, 303)
+  const stored = await upsertUser(c, taken.email, taken.email.split('@')[0] ?? taken.email, null)
+  const user = taken.standing === 'guest' ? { ...stored, guest: true as const } : stored
+  await startSession(c, user)
+  c.header('Referrer-Policy', 'no-referrer')
+  return c.redirect(await signedInReturn(deps, user, taken.return), 303)
 })
 
 /**

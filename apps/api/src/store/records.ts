@@ -72,6 +72,9 @@
  *   MAGIC#<sha256>         MAGIC                         sign-in link (email, return) — 15 min or 7
  *                                                        days; taken with a conditional delete
  *                                                        (single use)
+ *   MAGIC#<sha256>         USED                          written as the link is taken, until it
+ *                                                        would have expired: tells "used" from
+ *                                                        "expired"
  *   USER#<email>           NINVITE#<day>                 new addresses the user invited by sharing
  *                                                        that day — 2 days
  *   MAGICRATE#<email>      <hour>                        sign-in links asked for the address that
@@ -321,6 +324,7 @@ const key = {
   invitation: (email: string) => ({ pk: `INVITE#${email}`, sk: 'INVITE' }),
   invitationDirectory: (email: string) => ({ pk: 'INVITES', sk: `INVITE#${email}` }),
   signInLink: (hash: string) => ({ pk: `MAGIC#${hash}`, sk: 'MAGIC' }),
+  signInLinkUsed: (hash: string) => ({ pk: `MAGIC#${hash}`, sk: 'USED' }),
   invitationCount: (email: string, day: Day) => ({ pk: userPk(email), sk: `NINVITE#${day}` }),
   signInLinkRate: (email: string, hour: Hour) => ({ pk: `MAGICRATE#${email}`, sk: hour }),
   signInLinkInstanceRate: (minute: Minute) => ({ pk: 'MAGICRATE', sk: minute }),
@@ -1681,16 +1685,35 @@ export class Records implements Store {
     await this.table.put(encode('signinlink', key.signInLink(link.hash), link), ifAbsent)
   }
 
+  getSignInLink(hash: string) {
+    return this.read<SignInLinkRecord>('signinlink', key.signInLink(hash))
+  }
+
   async consumeSignInLink(hash: string) {
-    // Conditional, so of two clicks racing exactly one signs in.
-    const { pk, sk } = key.signInLink(hash)
+    const link = await this.getSignInLink(hash)
+    if (!link) return null
+    // The delete is conditional, so of two clicks racing exactly one signs in; the marker goes
+    // with it.
     try {
-      const item = await this.table.delete(pk, sk, ifExists)
-      return item ? decode<SignInLinkRecord>('signinlink', item) : null
+      await this.table.transact([
+        { delete: key.signInLink(hash), cond: ifExists },
+        {
+          put: encode('signinlinkused', key.signInLinkUsed(hash), {
+            hash,
+            expiresAt: link.expiresAt,
+          }),
+        },
+      ])
+      return link
     } catch (err) {
       if (err instanceof ConditionFailed) return null
       throw err
     }
+  }
+
+  async signInLinkUsed(hash: string) {
+    const { pk, sk } = key.signInLinkUsed(hash)
+    return (await this.table.get(pk, sk)) !== null
   }
 
   countInvitation(email: string, day: Day) {

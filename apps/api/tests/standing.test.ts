@@ -20,6 +20,8 @@ import {
   token,
 } from './oauth-helpers.ts'
 
+/** Invitations count only on an instance that has them on. */
+const INVITES = { invites: true }
 const GUEST = 'guest@outside.test'
 const OUTSIDER = 'pat@outside.test'
 
@@ -89,7 +91,7 @@ describe('standingFrom', () => {
 
 describe('standingOf', () => {
   it('admits the policy and admins from configuration alone, with no store read', async () => {
-    const env = setup({ adminEmails: ['boss@example.test'] })
+    const env = setup({ ...INVITES, adminEmails: ['boss@example.test'] })
     const read = vi.spyOn(env.store, 'getInvitation')
     expect(await standingOf(env.deps, 'anyone@example.test')).toBe('member')
     expect(await standingOf(env.deps, 'boss@example.test')).toBe('member')
@@ -97,7 +99,7 @@ describe('standingOf', () => {
   })
 
   it('reads the invitation for anyone else, and a guest needs an audience or a group to name them', async () => {
-    const env = setup()
+    const env = setup(INVITES)
     const owner = await createUser(env)
     expect(await standingOf(env.deps, OUTSIDER)).toBe('none')
     await invite(env, OUTSIDER, 'member')
@@ -131,9 +133,25 @@ describe('standingOf', () => {
   })
 })
 
+describe('with invitations off', () => {
+  it('admits by the configuration alone: an invitation is no standing', async () => {
+    const env = setup({ invites: false })
+    await invite(env, OUTSIDER, 'member')
+    const read = vi.spyOn(env.store, 'getInvitation')
+    expect(await standingOf(env.deps, OUTSIDER)).toBe('none')
+    expect(await standingOf(env.deps, 'anyone@example.test')).toBe('member')
+    expect(read).not.toHaveBeenCalled()
+    const pat = await createUser(env, OUTSIDER)
+    expect((await api(env, pat.key, 'GET', '/api/me')).status).toBe(401)
+    // Turned on, the invitation still stands.
+    env.config.invites = true
+    expect((await api(env, pat.key, 'GET', '/api/me')).status).toBe(200)
+  })
+})
+
 describe('every request rechecks standing', () => {
   it('revoking an invitation cuts an existing session and API key on the next request', async () => {
-    const env = setup()
+    const env = setup(INVITES)
     await invite(env, OUTSIDER, 'member')
     const pat = await createUser(env, OUTSIDER)
     expect((await api(env, pat.key, 'GET', '/api/me')).status).toBe(200)
@@ -147,7 +165,7 @@ describe('every request rechecks standing', () => {
   })
 
   it('removing a domain from the policy cuts its users', async () => {
-    const env = setup()
+    const env = setup(INVITES)
     const alice = await createUser(env)
     expect((await api(env, alice.key, 'GET', '/api/me')).status).toBe(200)
     env.config.allowedEmailDomains = ['elsewhere.test']
@@ -156,7 +174,7 @@ describe('every request rechecks standing', () => {
   })
 
   it('a guest no audience names any more is cut off, and a new share brings them back', async () => {
-    const env = setup()
+    const env = setup(INVITES)
     const owner = await createUser(env)
     await deploy(env, owner.key, 'docs')
     await invite(env, GUEST, 'guest')
@@ -170,7 +188,7 @@ describe('every request rechecks standing', () => {
   })
 
   it('OAuth: a revoked invitation refuses the access token and the refresh', async () => {
-    const env = setup()
+    const env = setup(INVITES)
     await invite(env, OUTSIDER, 'member')
     const conn = await connect(env, OUTSIDER)
     expect((await rpc(env, conn.accessToken, 'tools/list')).status).toBe(200)
@@ -186,7 +204,7 @@ describe('every request rechecks standing', () => {
   })
 
   it('dev login admits by standing too', async () => {
-    const env = setup({ devLogin: true, secureCookies: false })
+    const env = setup({ ...INVITES, devLogin: true, secureCookies: false })
     const res = await env.app.request(`/auth/dev-login?email=${OUTSIDER}`)
     expect(res.headers.get('location')).toBe('/login?error=domain_not_allowed')
     expect(await env.store.getUser(OUTSIDER)).toBeNull()
@@ -199,7 +217,7 @@ describe('every request rechecks standing', () => {
 
 describe('a guest', () => {
   async function world() {
-    const env = setup()
+    const env = setup(INVITES)
     const owner = await createUser(env)
     await deploy(env, owner.key, 'shared')
     await deploy(env, owner.key, 'everyone', { access: 'members' })

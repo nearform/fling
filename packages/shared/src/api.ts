@@ -339,3 +339,24 @@ export const AuditListSchema = z.object({ entries: z.array(AuditEntrySchema) })
  * /api/admin/impersonate/stop → the admin's own Me again.
  */
 export const ImpersonateRequestSchema = z.object({ email: z.string().trim().toLowerCase().min(3) })
+
+/**
+ * POST /auth/link { email, return? } (the `invites` capability): email a sign-in link to someone
+ * invited from outside the email policy. Always 202 with no body, whatever the address, so the
+ * answer never says who is invited. `return`: where to go once signed in (an app path or a site
+ * URL; anything else becomes the app's home).
+ */
+export const SignInLinkRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().min(3).max(254),
+  return: z.string().max(2048).optional(),
+})
+export type SignInLinkRequest = z.infer<typeof SignInLinkRequestSchema>
+
+/** How long a sign-in link asked for on the login page works, in minutes. */
+export const SIGN_IN_LINK_MINUTES = 15
+
+/** The web page a sign-in link lands on (`/auth/link?t=` redirects here, the token in the hash). */
+export const SIGN_IN_LINK_PAGE = '/sign-in/link'
+
+/** Where a sign-in link's page posts the token (a native form POST: never sent until clicked). */
+export const SIGN_IN_LINK_VERIFY_PATH = '/auth/link/verify'

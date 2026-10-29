@@ -125,12 +125,16 @@ minutes, and someone added gets in within 10 seconds.
 **email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from it, decides who gets in: a
 verified email listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS` (production
 needs at least one; the public metadata names the domains, never the addresses), or one with
-**standing** from an invitation. A user is their email; the issuer's `sub` is not stored.
+**standing** from an invitation. Someone invited from outside the policy, who usually can't sign in
+at the issuer, signs in with a **sign-in link** instead: with the `invites` capability the login
+page offers the issuer first and, below it, "Email me a sign-in link". A user is their email; the
+issuer's `sub` is not stored.
 
 **Standing** — whether someone may be signed in, and as what (`standingOf`,
 `apps/api/src/auth/standing.ts`): `member` when the email policy admits them, they are an admin
 or they hold a live member invitation; `guest` with a live guest invitation while some audience
-still names them (a direct grant or a group membership); else `none`. Every sign-in admits by it
+still names them (a direct grant or a group membership); else `none`. Invitations count only
+while `INVITES` is on: with it off, standing is the configuration alone. Every sign-in admits by it
 and every request rechecks it (session, API key, OAuth and MCP tokens, refresh): with `none` the
 request is a 401, so removing a domain or revoking an invitation cuts access at once. An address
 the policy admits costs no store read.
@@ -151,9 +155,17 @@ says so (`g: 1`, `packages/shared/src/site-cookie.ts`), and the edge answers a m
 to it as a missing one; restricted sites let them in by the site pass, like anyone.
 
 **Sign-in link** — an emailed single-use link that signs an invited person in
-(`MAGIC#<sha256 of the token>/MAGIC`, `apps/api/src/store/records.ts`): 32 random bytes of which
-only the hash is stored, taken once by a conditional delete, alive 15 minutes when asked for and
-7 days when it comes with an invitation.
+(`apps/api/src/auth/sign-in-link.ts`; `MAGIC#<sha256 of the token>/MAGIC` in
+`apps/api/src/store/records.ts`): 32 random bytes of which only the hash is stored and the token
+never logged, alive 15 minutes when asked for and 7 days when it comes with an invitation
+(`mintSignInLink`). `POST /auth/link` answers 202 whatever the address and mails a link only to
+someone whose standing comes from a live invitation, at most 5 an hour per address and 30 a
+minute for the instance. Mail scanners open every link, so opening it (`GET /auth/link?t=`) takes
+nothing: it sends the browser to the confirm page (`/sign-in/link`, the token in the URL's
+fragment, which the page then clears from the address bar), and only that page's button, a form
+`POST /auth/link/verify` from the app's own origin, takes the link (a conditional delete, so
+once), checks standing again and signs in. A used, expired or no-longer-invited link lands on the
+login page (`link_used`, `link_expired`, `not_invited`) with the form to ask for another.
 
 **Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the

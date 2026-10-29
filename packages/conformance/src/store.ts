@@ -1217,19 +1217,27 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expiresAt,
       })
 
-      it('are taken once, even under a race; unknown and expired ones are null', async () => {
+      it('are read, taken once even under a race, then marked used; unknown and expired ones are null', async () => {
         const store = await factory()
         const l = link()
         await store.putSignInLink(l)
+        // Reading one leaves it to be taken.
+        expect(await store.getSignInLink(l.hash)).toEqual(l)
+        expect(await store.getSignInLink(l.hash)).toEqual(l)
         const taken = await Promise.all(
           Array.from({ length: 5 }, () => store.consumeSignInLink(l.hash))
         )
         expect(taken.filter(t => t !== null)).toEqual([l])
         expect(await store.consumeSignInLink(l.hash)).toBeNull()
+        expect(await store.getSignInLink(l.hash)).toBeNull()
+        expect(await store.signInLinkUsed(l.hash)).toBe(true)
         expect(await store.consumeSignInLink('missing')).toBeNull()
+        expect(await store.signInLinkUsed('missing')).toBe(false)
         const old = link('2000-01-01T00:00:00.000Z')
         await store.putSignInLink(old)
+        expect(await store.getSignInLink(old.hash)).toBeNull()
         expect(await store.consumeSignInLink(old.hash)).toBeNull()
+        expect(await store.signInLinkUsed(old.hash)).toBe(false)
       })
     })
 

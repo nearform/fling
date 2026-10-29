@@ -310,6 +310,10 @@ adding someone lets them in within 10 seconds; nothing else needs configuring.
 6. **First deploy.** Push to `main`, or run the Deploy workflow by hand. Until then the API answers
    503, the UI bucket is empty and the site router passes requests straight through.
 
+7. **Why Fling? (optional).** Signed in as an admin, publish the repository's `why/` page as a public
+   site: `fling deploy why --name why-fling --access public`. Once it is live, the Get started page
+   links to it (`GET /api/why`).
+
 ## How a deploy ships
 
 Every push to `main` runs `ci.yml` (`pnpm gate`). When it passes, `deploy.yml` builds the same commit

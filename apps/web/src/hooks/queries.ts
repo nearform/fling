@@ -12,6 +12,7 @@ import { showToast } from '../lib/toast'
 
 export const queryKeys = {
   me: ['me'] as const,
+  whySite: ['why'] as const,
   sites: (archived: boolean) => ['sites', archived ? 'archived' : 'active'] as const,
   allSites: ['sites'] as const,
   shared: ['sites', 'shared'] as const,
@@ -35,6 +36,11 @@ export const queryKeys = {
 
 export function useMe() {
   return useQuery({ queryKey: queryKeys.me, queryFn: api.me, staleTime: 5 * 60_000 })
+}
+
+/** The instance's public why-fling site, or `null`: Get started links to it. */
+export function useWhySite() {
+  return useQuery({ queryKey: queryKeys.whySite, queryFn: api.whySite, staleTime: 5 * 60_000 })
 }
 
 export function useSites(archived: boolean) {

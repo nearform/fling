@@ -14,3 +14,9 @@ export const REPO_URL = `https://github.com/${REPO_SLUG}`
 /** A guide in the repository (`path` from its root, e.g. `platforms/aws/DEPLOY.md`), on main. */
 export const guideUrl = (path: string, anchor?: string) =>
   `${REPO_URL}/blob/main/${path}${anchor ? `#${anchor}` : ''}`
+
+/**
+ * The site that says what Fling is for: the page in `why/`, which an admin publishes
+ * on their instance, public, after setup. Get started links to it once it is live.
+ */
+export const WHY_SITE_NAME = 'why-fling'

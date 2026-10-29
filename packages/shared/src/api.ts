@@ -117,6 +117,10 @@ export const NameCheckSchema = z.object({
 })
 export type NameCheck = z.infer<typeof NameCheckSchema>
 
+/** GET /api/why: the instance's public why-fling site (`WHY_SITE_NAME`), `null` unless it is live. */
+export const WhySiteSchema = z.object({ url: z.string().nullable() })
+export type WhySite = z.infer<typeof WhySiteSchema>
+
 /**
  * POST /api/sites/:name/deploys. `access` (and, for `groups` and `people`, `audience`) is who can
  * open a new site: it applies only while the site has never been live, so a re-deploy never

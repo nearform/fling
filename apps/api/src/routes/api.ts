@@ -31,6 +31,7 @@ import {
   UpdateGroupRequestSchema,
   UpdateSiteRequestSchema,
   VersionFilesSchema,
+  WhySiteSchema,
 } from '@fling/shared'
 import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
@@ -187,6 +188,8 @@ apiRoutes.get('/names/:name', async c => {
   const check = await sites.checkName(c.get('deps'), c.get('user'), c.req.param('name'))
   return c.json(NameCheckSchema.parse(check))
 })
+
+apiRoutes.get('/why', async c => c.json(WhySiteSchema.parse(await sites.whySite(c.get('deps')))))
 
 apiRoutes.get('/sites', async c => {
   const archived = ['1', 'true'].includes(c.req.query('archived') ?? '')

@@ -55,6 +55,7 @@ import {
   type VersionFiles,
   VersionFilesSchema,
   type Visibility,
+  WhySiteSchema,
 } from '@fling/shared'
 
 export type ApiKey = ReturnType<typeof ApiKeySchema.parse>
@@ -167,6 +168,11 @@ export const api = {
   async listShared(): Promise<SharedSite[]> {
     const { sites } = await request('/api/shared', SharedSiteListSchema)
     return sites
+  },
+  /** The instance's why-fling site, when it is public and live. */
+  async whySite(): Promise<string | null> {
+    const { url } = await request('/api/why', WhySiteSchema)
+    return url
   },
   getSite: (name: string): Promise<SiteDetail> => request(site(name), SiteDetailSchema),
   /** The files in one version of a site, sorted by path. */

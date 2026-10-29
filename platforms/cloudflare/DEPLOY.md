@@ -131,6 +131,8 @@ neither header (see
    ```
 
 Then open `https://$APP_HOST`, sign in, and `fling login https://$APP_HOST`.
+Optionally, publish the repository's `why/` page as a public site, `fling deploy why --name why-fling
+--access public`: once it is live, the Get started page links to it.
 
 ## The deploy config (CF_DEPLOY_CONFIG)
 

@@ -3,7 +3,7 @@
  * names, else the instance's default), how PATCH sets each level, what the route table and the
  * site response say, and that records from before access levels keep the access they had.
  */
-import { siteKvsKey } from '@fling/shared'
+import { siteKvsKey, WHY_SITE_NAME } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 
@@ -179,5 +179,22 @@ describe('records from before access levels', () => {
     expect((await api(env, carol.key, 'GET', '/api/sites/old-open/comments')).status).toBe(200)
     expect((await api(env, carol.key, 'GET', '/api/sites/old-team/comments')).status).toBe(404)
     expect(await bobSees('old-team')).toBe(true)
+  })
+})
+
+describe('the why-fling site', () => {
+  const why = async () => (await json(await api(env, bob.key, 'GET', '/api/why'))).url
+
+  it('is linked once it is public and live, and not while archived', async () => {
+    expect(await why()).toBeNull()
+    await deploy(WHY_SITE_NAME, { access: 'public' })
+    expect(await why()).toBe(`https://${WHY_SITE_NAME}.${env.config.sitesDomain}/`)
+    await api(env, alice.key, 'POST', `/api/sites/${WHY_SITE_NAME}/archive`)
+    expect(await why()).toBeNull()
+  })
+
+  it('is not revealed while it is not public', async () => {
+    await deploy(WHY_SITE_NAME, { access: 'members' })
+    expect(await why()).toBeNull()
   })
 })

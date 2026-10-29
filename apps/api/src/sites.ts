@@ -60,6 +60,8 @@ import {
   sortSites,
   type VersionFiles,
   type Visibility,
+  WHY_SITE_NAME,
+  type WhySite,
 } from '@fling/shared'
 import {
   PASS_HANDOFF_TTL_SECONDS,
@@ -227,6 +229,19 @@ export async function checkName(deps: Deps, user: User, name: string): Promise<N
   const claim = await deps.store.getNameClaim(name)
   if (!claim) return { name, status: 'available', suggestions: [] }
   return claim.email === user.email ? yours : taken()
+}
+
+/**
+ * The instance's why-fling site, when anyone may open it: public, live and not archived. A site of
+ * that name that is not public gives `null`, the same as none, so it reveals nothing.
+ */
+export async function whySite(deps: Deps): Promise<WhySite> {
+  const site = await deps.store.findSite(WHY_SITE_NAME)
+  const open =
+    site && !site.archived && site.currentVersionId && can({ kind: 'anonymous' }, 'site.view', site)
+  return {
+    url: open ? siteUrl(siteLabel(site.name), deps.config.sitesDomain, protocol(deps)) : null,
+  }
 }
 
 /** The ids of the groups `email` belongs to (one query): the one place policy's `groups` come from. */

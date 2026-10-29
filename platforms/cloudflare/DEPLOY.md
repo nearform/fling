@@ -201,6 +201,16 @@ and grows, and is not published; when it is spent (`E_DAILY_LIMIT_EXCEEDED`), Fl
 batch to the next UTC day and logs a warning the first time each day. Each message carries
 `List-Unsubscribe` and one-click unsubscribe headers and the batch id in `X-Fling-Batch`.
 
+## Outside invitations
+
+As on AWS ([Outside invitations](../aws/DEPLOY.md#outside-invitations)): `INVITES=on` lets people
+from outside the email policy in by invitation. Sharing a site or adding someone to a group with an
+outside address invites them as a guest (a reviewer of what is shared with them), at most
+`INVITES_PER_DAY` new addresses a day per person (default 20); admins invite full members and revoke
+invitations at **Admin → Invitations**. Invited people sign in with single-use links emailed to
+them, so it needs [Email](#email): the deploy refuses `INVITES` on without `MAIL`. Set both with
+`setup.mjs` (`--invites on`, `--invites-per-day`) or in `INSTANCE` in the deploy config, then deploy.
+
 ## Sign-in (OpenID Connect)
 
 Exactly as on AWS ([Sign-in](../aws/DEPLOY.md#sign-in-openid-connect): Google, Entra ID, Okta,

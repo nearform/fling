@@ -21,7 +21,7 @@ import { ExclamationTriangleIcon, PencilSquareIcon, TrashIcon } from '@heroicons
 import { type FormEvent, useId, useState } from 'react'
 import { useCreateGroup, useGroup, useGroupActions, useGroupsWithMembers } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
-import { addToGroup, peopleLabel } from '../lib/audience'
+import { addToGroup, peopleErrorMessage, peopleLabel } from '../lib/audience'
 import { checkNewGroup, slugFromName } from '../lib/groups'
 import { ConfirmModal } from './ConfirmModal'
 import { EmailAdder } from './EmailAdder'
@@ -420,7 +420,7 @@ function GroupMembers({ group }: { group: GroupDetail }) {
           setDraft(left.join(', '))
           setProblem(note)
         },
-        onError: error => setProblem(errorMessage(error)),
+        onError: error => setProblem(peopleErrorMessage(error)),
       }
     )
   }
@@ -441,6 +441,7 @@ function GroupMembers({ group }: { group: GroupDetail }) {
               <EmailBadge
                 email={person.email}
                 known={person.known}
+                guest={person.guest}
                 disabled={changeMembers.isPending}
                 onRemove={group.canManage ? () => remove(person.email) : undefined}
               />

@@ -175,7 +175,7 @@ Values reach the function two ways, and the function's own environment wins:
 | `MAIL_FROM_NAME` | no (`INSTANCE_NAME`) | The sender's display name, one line. |
 | `MAIL_REPLY_TO` | no (none) | The operator's address replies go to, on every email (never the person who acted). Never published. |
 | `SES_CONFIGURATION_SET` | no (the identity's default) | AWS: the SES configuration set each send names. |
-| `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. |
+| `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. See [Outside invitations](#outside-invitations). |
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
@@ -491,6 +491,27 @@ a real mailbox: it shows SES's message id or the mapped error (`rejected: Messag
 means the identity is not verified or the account is in the sandbox). In the received message's
 headers, check that SPF, DKIM and DMARC pass and align with the From domain. Fling never sends a
 message to check the setup on its own.
+
+## Outside invitations
+
+By default only the people the email policy admits (`ALLOWED_EMAIL_DOMAINS`, `ALLOWED_EMAILS`) and
+`ADMIN_EMAILS` can sign in. `INVITES=on` lets people from outside in by invitation:
+
+- **Sharing invites a guest.** Anyone signed in who adds an outside address to a site's audience or
+  to a group invites that person as a guest: a reviewer who sees and comments on what is shared with
+  them, and on public sites, and nothing else. Each person invites at most `INVITES_PER_DAY` (20 by
+  default) new outside addresses a day; past it, the change is refused (`too_many_invites`).
+- **Admins invite members** from **Admin → Invitations** (`/admin/invitations`): a full user, like
+  anyone the policy admits. Revoking an invitation there cuts that person off on their next request.
+- **Guests sign in with an emailed link**, single use, never at the OIDC issuer (which usually
+  admits only your organisation): the share's notification email carries their first one, and the
+  login page offers "Email me a sign-in link" for later.
+
+It needs [Email](#email): the function refuses to start with `INVITES=on` and no mail. With it on,
+`/.well-known/fling` advertises the `invites` capability and the clients show the invitation forms;
+**Admin → Settings** shows the values the instance runs with. Turning it off again stops every
+invitation counting at once (invited people are signed out on their next request); the invitation
+records stay, and count again if it is turned back on.
 
 ## Indexing and share-link referrers
 

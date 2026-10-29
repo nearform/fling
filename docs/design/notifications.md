@@ -38,7 +38,8 @@ Non-goals (for now):
 - Inbound email (reply-by-email to comment).
 - @mentions in comments (the catalogue has room; §2).
 - An in-app inbox, webhooks, Slack (designed for, built later; §12).
-- Notifying guests (share-link viewers, `docs/design/guest-reviews.md`): they have no address.
+- Notifying share-link reviewers (`docs/design/guest-reviews.md`; not the invited **guests** of
+  CONTEXT.md, who are users with an address): they have no address.
 - Provisioning a sending identity. The operator brings one (§6).
 
 ## 2. Events: the catalogue
@@ -351,8 +352,9 @@ only that crash window remains. That is acceptable for notifications.
 ### 5.5 Rate limits
 
 There is no per-actor limit on notifications. Standing already confines recipients to people the
-instance admits or invited (§3; inviting from outside has its own daily limit, `INVITES_PER_DAY`), and an action's notifications go out in full or not at all. The limits protect
-recipients and the provider:
+instance admits or invited (§3; inviting from outside has its own daily limit, `INVITES_PER_DAY`),
+and an action's notifications go out in full or not at all. The limits protect recipients and the
+provider:
 
 | Limit | Key | Default | Over the limit |
 |---|---|---|---|
@@ -572,7 +574,7 @@ development), CONTEXT.md, README, `apps/cli/README.md`, the plugin's `SKILL.md`,
 - **Content.** Emails carry what the recipient may already see: the site name, the actor's name and
   address, a comment excerpt for comment events. Never the audience, other recipients, versions or
   the share link.
-- **No phishing relay.** A comment by a guest (author kind `guest`, guest-reviews.md) is unverified,
+- **No phishing relay.** A comment by a share-link reviewer (author kind `guest`, guest-reviews.md) is unverified,
   so its email carries no excerpt, no guest name and no page path: "A guest left 3 comments on
   *q3-report*", with
   the button to the review page, where the guest badge shows. Excerpts come only from signed-in

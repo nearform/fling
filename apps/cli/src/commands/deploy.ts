@@ -245,7 +245,13 @@ async function deployPrepared(
     )
   }
   const accessNotes = result.first
-    ? [`Who can open it: ${who}`, accessChangeHint('cli', result.name, ctx.binName)]
+    ? [
+        `Who can open it: ${who}`,
+        accessChangeHint('cli', result.name, {
+          bin: ctx.binName,
+          invites: instance?.capabilities.invites === true,
+        }),
+      ]
     : level === 'public'
       ? []
       : [`${who} Share it with a link: \`${ctx.binName} share ${result.name}\`.`]

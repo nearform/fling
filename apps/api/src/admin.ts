@@ -67,6 +67,7 @@ export function meOf(
     picture: user.picture,
     userSlug: user.userSlug,
     admin: isAdminEmail(deps.config, user.email),
+    guest: user.guest === true,
     ...(impersonation && {
       impersonator: impersonation.by,
       impersonationEndsAt: impersonation.until.toISOString(),

@@ -139,12 +139,22 @@ export function parseAccessLevel(value: string): AccessLevel | null {
 
 /**
  * How to change who can see a site, for the CLI (`fling access …`) and both MCP servers
- * (`fling_set_access`).
+ * (`fling_set_access`). `invites`: the instance invites people from outside by sharing (the
+ * `invites` capability), which the hint mentions.
  */
-export function accessChangeHint(client: 'cli' | 'mcp', name: string, bin = 'fling'): string {
-  return client === 'cli'
-    ? `Change who can open it with \`${bin} access ${name} --only-me | --members | --add <email> | --group <slug> | --public\`.`
-    : `To change who can open it, call fling_set_access (only_me, members, groups, people or public).`
+export function accessChangeHint(
+  client: 'cli' | 'mcp',
+  name: string,
+  opts: { bin?: string; invites?: boolean } = {}
+): string {
+  const bin = opts.bin ?? 'fling'
+  const how =
+    client === 'cli'
+      ? `Change who can open it with \`${bin} access ${name} --only-me | --members | --add <email> | --group <slug> | --public\`.`
+      : `To change who can open it, call fling_set_access (only_me, members, groups, people or public).`
+  return opts.invites
+    ? `${how} An address from outside is invited as a reviewer, who sees only what is shared with them.`
+    : how
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`

@@ -128,9 +128,10 @@ function accessAfterPublish(
 ): string {
   const members = privateAudience(instanceMetadata(deps.config))
   const who = describeSiteAccess(site, members)
-  if (first) return ` Who can open it: ${who} ${accessChangeHint('mcp', site.name)}`
+  const hint = accessChangeHint('mcp', site.name, { invites: deps.config.invites })
+  if (first) return ` Who can open it: ${who} ${hint}`
   if (asked) {
-    return ` Its access is unchanged (publishing never changes it for an existing site): ${who} ${accessChangeHint('mcp', site.name)}`
+    return ` Its access is unchanged (publishing never changes it for an existing site): ${who} ${hint}`
   }
   return ''
 }
@@ -442,17 +443,29 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.setAccess, async args => {
-    const site = await sites.updateSite(deps, user, args.name, {
-      access: args.access,
-      ...(needsAudience(args.access)
-        ? { audience: { emails: args.emails ?? [], groups: args.groups ?? [] } }
-        : {}),
-    })
+    const site = await sites.updateSite(
+      deps,
+      user,
+      args.name,
+      {
+        access: args.access,
+        ...(needsAudience(args.access)
+          ? { audience: { emails: args.emails ?? [], groups: args.groups ?? [] } }
+          : {}),
+      },
+      principal
+    )
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
   registerSiteTool(mcpTools.setVisibility, async args => {
-    const site = await sites.updateSite(deps, user, args.name, { visibility: args.visibility })
+    const site = await sites.updateSite(
+      deps,
+      user,
+      args.name,
+      { visibility: args.visibility },
+      principal
+    )
     return { text: `${site.name} is now ${site.visibility}: ${site.url}`, data: site }
   })
 
@@ -474,9 +487,13 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       )
     }
     const current = await sites.requireSite(deps, user, args.name, 'site.audience')
-    const site = await sites.updateSite(deps, user, args.name, {
-      audience: editAudienceInput(await sites.audienceOf(deps, current), change),
-    })
+    const site = await sites.updateSite(
+      deps,
+      user,
+      args.name,
+      { audience: editAudienceInput(await sites.audienceOf(deps, current), change) },
+      principal
+    )
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
 
@@ -507,7 +524,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   if (canInstance(principal, 'account.groups.read')) {
-    registerGroupTools(deps, user, mcpTools, register)
+    registerGroupTools(deps, user, principal, mcpTools, register)
   }
   if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
   if (notificationChannels(deps.config).length > 0) {
@@ -521,6 +538,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
 function registerGroupTools(
   deps: Deps,
   user: User,
+  principal: Principal,
   mcpTools: ReturnType<typeof mcpToolsFor>,
   register: <S extends z.ZodRawShape>(
     def: McpToolDef<S>,
@@ -547,11 +565,16 @@ function registerGroupTools(
   })
 
   register(mcpTools.groupCreate, async args => {
-    const group = await groups.createGroup(deps, user, {
-      slug: args.slug,
-      name: args.name,
-      members: args.members,
-    })
+    const group = await groups.createGroup(
+      deps,
+      user,
+      {
+        slug: args.slug,
+        name: args.name,
+        members: args.members,
+      },
+      principal
+    )
     return { text: `Created ${describeGroup(group)}`, data: group }
   })
 
@@ -559,10 +582,13 @@ function registerGroupTools(
     if (!args.add?.length && !args.remove?.length) {
       throw new ApiError(400, 'bad_request', 'Pass `add` or `remove`')
     }
-    const group = await groups.changeMembers(deps, user, args.slug, {
-      add: args.add,
-      remove: args.remove,
-    })
+    const group = await groups.changeMembers(
+      deps,
+      user,
+      args.slug,
+      { add: args.add, remove: args.remove },
+      principal
+    )
     return { text: describeGroup(group), data: group }
   })
 

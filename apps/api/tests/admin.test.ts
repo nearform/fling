@@ -213,6 +213,7 @@ describe('impersonation', () => {
       picture: null,
       userSlug: 'member',
       admin: false,
+      guest: false,
       impersonator: BOSS,
       impersonationEndsAt: '2026-01-01T01:00:00.000Z',
     })

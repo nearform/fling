@@ -85,6 +85,12 @@ function Authenticated({ bare = false }: { bare?: boolean }) {
   )
 }
 
+/** Pages a guest has no use for (groups, connections, getting started): they go to their sites. */
+function MembersOnly() {
+  const { data: me } = useMe()
+  return me?.guest ? <Navigate to="/" replace /> : <Outlet />
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -94,11 +100,13 @@ export default function App() {
             <Route element={<Authenticated />}>
               <Route index element={<Sites />} />
               <Route path="sites/:name" element={<Site />} />
-              <Route path="groups" element={<Groups />} />
-              <Route path="groups/:slug" element={<Group />} />
-              <Route path="get-started" element={<GetStarted />} />
-              <Route path="connections" element={<ApiKeys />} />
-              <Route path="keys" element={<Navigate to="/connections" replace />} />
+              <Route element={<MembersOnly />}>
+                <Route path="groups" element={<Groups />} />
+                <Route path="groups/:slug" element={<Group />} />
+                <Route path="get-started" element={<GetStarted />} />
+                <Route path="connections" element={<ApiKeys />} />
+                <Route path="keys" element={<Navigate to="/connections" replace />} />
+              </Route>
               <Route path={NOTIFICATION_SETTINGS_PATH.slice(1)} element={<Notifications />} />
               <Route path="admin/users" element={<AdminUsers />} />
               <Route path={ADMIN_INVITATIONS_PATH.slice(1)} element={<AdminInvitations />} />

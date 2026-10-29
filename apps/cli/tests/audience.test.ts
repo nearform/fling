@@ -21,7 +21,10 @@ afterEach(runCleanups)
 
 const MEMBERS = 'anyone signed in to Example Fling (@example.test accounts)'
 
-const detail = (emails: { email: string; known: boolean }[], over: Partial<SiteDetail> = {}) =>
+const detail = (
+  emails: { email: string; known: boolean; guest?: boolean }[],
+  over: Partial<SiteDetail> = {}
+) =>
   ({
     ...site({ restricted: emails.length > 0, audienceSize: emails.length }),
     versions: [],
@@ -240,5 +243,41 @@ describe('MCP fling_set_audience', () => {
     expect(text(info)).toContain('Restricted: only you and 1 person can open it')
     const none = await call({})
     expect(none.isError).toBe(true)
+  })
+})
+
+describe('fling access --add, from outside', () => {
+  it("past the day's invitations: the server's message, and a hint that nothing changed", async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      'GET /api/sites/my-app': () => jsonResponse(detail([])),
+      'PATCH /api/sites/my-app': () =>
+        jsonResponse(
+          {
+            error: {
+              code: 'too_many_invites',
+              message:
+                'You can invite 20 people from outside Example Fling a day. Try again tomorrow, or ask an admin to invite them',
+            },
+          },
+          429
+        ),
+    })
+    const { ctx } = await testContext({ store, fetch: m.fetch })
+    const e = await captureError(runAccess(ctx, 'my-app', { add: ['pat@outside.test'] }))
+    expect(e.code).toBe('too_many_invites')
+    expect(e.message).toMatch(/You can invite 20 people from outside/)
+    expect(e.hint).toMatch(/^Nothing changed\. Addresses from outside are invited as reviewers/)
+  })
+
+  it('marks a guest in the audience', async () => {
+    const store = await loggedInStore()
+    const guest = mockFetch({
+      'GET /api/sites/my-app': () =>
+        jsonResponse(detail([{ email: 'pat@outside.test', known: false, guest: true }])),
+    })
+    const { ctx, out } = await testContext({ store, fetch: guest.fetch })
+    await runAccess(ctx, 'my-app', {})
+    expect(out.content()).toContain("pat@outside.test (guest, hasn't signed in yet)")
   })
 })

@@ -76,6 +76,11 @@ export interface McpWording {
    * when the wording names no one instance.
    */
   defaultAccess?: DefaultAccessLevel
+  /**
+   * The instance invites people from outside by sharing (the `invites` capability): an outside
+   * address in an audience or a group is invited as a guest, a reviewer.
+   */
+  invites?: boolean
 }
 
 const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
@@ -84,7 +89,7 @@ const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<na
 export function mcpWording(
   instance?:
     | (Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> &
-        Partial<Pick<InstanceMetadata, 'appOrigin' | 'defaultAccess'>>)
+        Partial<Pick<InstanceMetadata, 'appOrigin' | 'defaultAccess' | 'capabilities'>>)
     | null
 ): McpWording {
   if (!instance) {
@@ -103,8 +108,20 @@ export function mcpWording(
     signIn: `their ${instance.auth.displayName} account`,
     reviewPattern: instance.appOrigin ? reviewUrl(instance.appOrigin, '<name>') : GENERIC_REVIEW,
     defaultAccess: defaultAccessOf(instance),
+    invites: instance.capabilities?.invites === true,
   }
 }
+
+/**
+ * Which addresses an audience or a group takes, for copy: ones that can sign in, and on an
+ * instance that invites by sharing, ones from outside, invited as reviewers.
+ */
+export const addressRule = (w: Pick<McpWording, 'name' | 'invites'>) =>
+  w.invites
+    ? `Each address must be one that can sign in to ${w.name}, or one from outside it, which is invited ` +
+      'as a reviewer (a guest who signs in with an emailed link and sees only what is shared with them; a ' +
+      'few a day per person, else `too_many_invites`).'
+    : `Each address must be one that can sign in to ${w.name}.`
 
 /** Who can open a new site that names no access level, for copy. */
 const defaultAccessPhrase = (w: McpWording) =>
@@ -409,8 +426,8 @@ export function mcpToolsFor(w: McpWording) {
         w.privateAudience +
         '), `groups` and `people` (only the user, the groups in `groups` by slug and the addresses in `emails`; ' +
         'both levels take both, and replace the whole audience), or `public` (anyone can open the site; its review ' +
-        'page and comments still need sign-in). Only change it when the user asks. Each address must be one that can ' +
-        `sign in to ${w.name}. Share links still open the site to anyone who has them. Someone who loses access is ` +
+        'page and comments still need sign-in). Only change it when the user asks. ' +
+        `${addressRule(w)} Share links still open the site to anyone who has them. Someone who loses access is ` +
         'shut out within 5 minutes; people and groups added are told by email when the instance sends it.',
       inputSchema: {
         name: siteName,
@@ -439,8 +456,8 @@ export function mcpToolsFor(w: McpWording) {
         'fling_set_access does the same for whole levels, including only the user. ' +
         '`add` and `remove` change the addresses and `set` replaces them; `addGroups`, `removeGroups` and ' +
         '`setGroups` do the same for groups, by slug (fling_groups lists them); `clear` empties both (then every ' +
-        'signed-in member can see it again). The owner always sees the site. Each address must be one that can ' +
-        `sign in to ${w.name}. The audience only applies while the site is private (fling_set_visibility); share ` +
+        'signed-in member can see it again). The owner always sees the site. ' +
+        `${addressRule(w)} The audience only applies while the site is private (fling_set_visibility); share ` +
         'links still open it to anyone. Removing someone takes up to 5 minutes to shut them out. fling_info shows ' +
         'the audience.',
       inputSchema: {
@@ -480,7 +497,8 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_group_show',
       title: 'Show a group',
       description:
-        'Show a group and its members (each marked when they have not signed in yet), and whether the user owns ' +
+        'Show a group and its members (each marked when they have not signed in yet, and when they are a guest ' +
+        'invited from outside), and whether the user owns ' +
         'it (only the owner can change it).',
       inputSchema: { slug: groupSlug },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -492,7 +510,7 @@ export function mcpToolsFor(w: McpWording) {
       description:
         `Create a group the user owns: a named list of people that anyone signed in to ${w.name} can see and use ` +
         `in a site's audience, but only the user can change. The slug is ${GROUP_SLUG_RULES}, unique on ` +
-        `${w.name}; each member must be an address that can sign in (at most ${GROUP_MEMBERS_MAX}).`,
+        `${w.name}; at most ${GROUP_MEMBERS_MAX} members. ${addressRule(w)}`,
       inputSchema: {
         slug: groupSlug,
         name: groupName.describe('Its display name, e.g. "Design team"'),
@@ -505,7 +523,8 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_group_members',
       title: 'Change who is in a group',
       description:
-        'Add people to a group the user owns, or take them out. Every site whose audience names the group follows: someone taken out is shut out within 5 minutes.',
+        'Add people to a group the user owns, or take them out. Every site whose audience names the group follows: ' +
+        `someone taken out is shut out within 5 minutes. ${addressRule(w)}`,
       inputSchema: {
         slug: groupSlug,
         add: members.optional().describe('Addresses to add'),

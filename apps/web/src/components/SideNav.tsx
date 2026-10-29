@@ -50,13 +50,15 @@ export const GROUPS_NAV_ITEM: NavItem = { to: '/groups', label: 'Groups', icon: 
 
 /**
  * The side nav's items for this user: everyone's (with Groups where the instance has them), then
- * Admin for admins, then Get started.
+ * Admin for admins, then Get started. A guest gets Sites alone: they review what is shared with
+ * them, and have no groups, connections or sites of their own to get started with.
  */
 export function navItemsFor(
   me: Me | null | undefined,
   instance?: Pick<InstanceMetadata, 'capabilities'> | null
 ): NavItem[] {
   const [first, ...rest] = NAV_ITEMS
+  if (me?.guest) return first ? [first] : []
   const items =
     instance?.capabilities.groups === true && first ? [first, GROUPS_NAV_ITEM, ...rest] : NAV_ITEMS
   return [...items, ...(showsAdmin(me) ? [ADMIN_NAV_ITEM] : []), GET_STARTED_NAV_ITEM]

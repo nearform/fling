@@ -1,15 +1,15 @@
 /**
  * Invitations (store: `INVITE#<email>/INVITE` and the `INVITES` directory): how people outside the
  * email policy come in, while the instance has them on (`INVITES`, `config.invites`; off, every
- * route here is a 404 and an outside address in an audience or a group is refused as before).
+ * route here is a 404 and an outside address in an audience or a group is refused).
  *
  * - By sharing: an audience or a group that adds an address the configuration doesn't admit
  *   (`checkAddresses`, used by sites.ts and groups.ts) invites it as a guest (`inviteGuests`),
- *   when the person sharing may (`account.invite`: not a guest, not an impersonating admin). Only
- *   an address newly added counts, so saving an audience again never invites anybody again. At
- *   most `INVITES_PER_DAY` new outside addresses a day per person (`NINVITE`), else 429
- *   `too_many_invites` before anything changes. The first email they get is the share's own
- *   notification, which carries a sign-in link (notifications/drain.ts).
+ *   when the person sharing may (`account.invite`: not a guest, not an impersonating admin, who
+ *   gets a 403 `impersonating`). Only an address newly added counts, so saving an audience again
+ *   never invites anybody again. At most `INVITES_PER_DAY` new outside addresses a day per person
+ *   (`NINVITE`), else 429 `too_many_invites` before anything changes. The first email they get is
+ *   the share's own notification, which carries a sign-in link (notifications/drain.ts).
  * - By an admin (`/api/admin/invitations`): an invitation as a member, upgrading a guest (nothing
  *   ever demotes one), with an email sent at once carrying a 7-day sign-in link. Admins list the
  *   directory and revoke; revoking ends the access it gave on the next request (standing is
@@ -22,13 +22,12 @@ import { audit } from './audit.ts'
 import { INVITATION_LINK_TTL_SECONDS, mintSignInLink } from './auth/sign-in-link.ts'
 import { admittedByConfig } from './auth/standing.ts'
 import { mapLimit } from './lib/concurrency.ts'
-import { ApiError, badRequest, notFound } from './lib/errors.ts'
+import { ApiError, badRequest, forbidden, notFound } from './lib/errors.ts'
 import { sendDirectMail } from './notifications/direct-mail.ts'
 import { describeMailFailure } from './notifications/mail-admin.ts'
-import type { Acting } from './notifications/notify.ts'
 import { lifetimeInWords } from './notifications/templates/sign-in-link.ts'
 import { canInstance, type Principal } from './policy.ts'
-import { dayOf, type InvitationRecord, isLiveInvitation, type User } from './store/types.ts'
+import { dayOf, type InvitationRecord, isLiveInvitation } from './store/types.ts'
 import type { Deps } from './types.ts'
 
 /** Who is naming addresses in an audience or a group, and whether they may invite by it. */
@@ -36,21 +35,17 @@ export interface Inviter {
   email: string
   /** `account.invite` */
   may: boolean
+  /** an admin acting as `email`: refused with 403 `impersonating` rather than as an address */
+  impersonating: boolean
 }
 
-/**
- * The user as an inviter. `account.invite` turns only on being a guest and on impersonation, so
- * the principal's other fields (admin, how it signed in) don't change the answer.
- */
-export function inviterOf(user: Pick<User, 'email' | 'guest'>, acting: Acting = {}): Inviter {
-  const principal: Principal = {
-    email: user.email,
-    admin: false,
-    via: 'session',
-    guest: user.guest === true,
-    ...(acting.impersonator ? { impersonator: acting.impersonator } : {}),
+/** The caller as an inviter, from the request's real principal (impersonation included). */
+export function inviterOf(principal: Principal): Inviter {
+  return {
+    email: principal.email,
+    may: canInstance(principal, 'account.invite'),
+    impersonating: principal.impersonator !== undefined,
   }
-  return { email: user.email, may: canInstance(principal, 'account.invite') }
 }
 
 const ADDRESS_RE = /^[^@\s]+@[^@\s]+$/
@@ -58,19 +53,21 @@ const ADDRESS_RE = /^[^@\s]+@[^@\s]+$/
 /**
  * Check the addresses an audience or a group is adding (`added`: only those it didn't name
  * before). Anything that isn't an address, or an outside one when invitations are off or `inviter`
- * may not invite, is a 400 `email_not_allowed` naming them; more new invitations than the
- * inviter has left today is a 429 `too_many_invites`. Returns the outside addresses, to pass to
- * `inviteGuests` once the audience or group is saved.
+ * is a guest, is a 400 `email_not_allowed` naming them. While impersonating, an outside address
+ * without a live invitation is a 403 `impersonating` (an invitation outlives the session; someone
+ * invited already may still be named). More new invitations than the inviter has left today is a
+ * 429 `too_many_invites`. Returns the outside addresses, to pass to `inviteGuests` once the
+ * audience or group is saved.
  */
 export async function checkAddresses(
   deps: Deps,
   added: readonly string[],
-  inviter: Inviter | null
+  inviter: Inviter
 ): Promise<string[]> {
   const { config } = deps
   const invalid = added.filter(e => !ADDRESS_RE.test(e))
   const outside = added.filter(e => ADDRESS_RE.test(e) && !admittedByConfig(config, e))
-  const inviting = config.invites && inviter?.may === true
+  const inviting = config.invites && (inviter.may || inviter.impersonating)
   const refused = inviting ? invalid : [...invalid, ...outside]
   if (refused.length) {
     // The domains are public (the metadata names them); the listed addresses never are.
@@ -83,19 +80,24 @@ export async function checkAddresses(
       { emails: refused }
     )
   }
-  if (!inviter || outside.length === 0) return outside
+  if (outside.length === 0) return outside
   const invitations = await Promise.all(outside.map(e => deps.store.getInvitation(e)))
-  const fresh = invitations.filter(i => !isLiveInvitation(i)).length
-  if (fresh > 0) {
-    const used = await deps.store.invitationsOn(inviter.email, dayOf(deps.clock.now()))
-    if (used + fresh > config.invitesPerDay) {
-      throw new ApiError(
-        429,
-        'too_many_invites',
-        `You can invite ${config.invitesPerDay} people from outside ${config.instanceName} a day. Try again tomorrow, or ask an admin to invite them`,
-        { limit: config.invitesPerDay }
-      )
-    }
+  const fresh = outside.filter((_, i) => !isLiveInvitation(invitations[i] ?? null))
+  if (fresh.length === 0) return outside
+  if (!inviter.may) {
+    throw forbidden(
+      `Not while impersonating ${inviter.email}: inviting people from outside ${config.instanceName} (${fresh.join(', ')})`,
+      'impersonating'
+    )
+  }
+  const used = await deps.store.invitationsOn(inviter.email, dayOf(deps.clock.now()))
+  if (used + fresh.length > config.invitesPerDay) {
+    throw new ApiError(
+      429,
+      'too_many_invites',
+      `You can invite ${config.invitesPerDay} people from outside ${config.instanceName} a day. Try again tomorrow, or ask an admin to invite them`,
+      { limit: config.invitesPerDay }
+    )
   }
   return outside
 }
@@ -255,6 +257,23 @@ export async function revokeInvitation(
   const revoked = await deps.store.revokeInvitation(email, at)
   if (!revoked) throw notFound(`No invitation for ${email}`)
   return rowOf(deps, revoked)
+}
+
+/** Invitations read at once for `guestsAmong`. */
+const INVITATION_READS = 10
+
+/**
+ * Which of `emails` are guests by invitation (`isInvitedGuest`), for the guest badge where people
+ * are listed (an audience, a group's members). Reads only addresses outside the configuration, and
+ * nothing while invitations are off.
+ */
+export async function guestsAmong(deps: Deps, emails: readonly string[]): Promise<Set<string>> {
+  if (!deps.config.invites) return new Set()
+  const outside = emails.filter(e => !admittedByConfig(deps.config, e))
+  const guests = await mapLimit(outside, INVITATION_READS, async e =>
+    (await isInvitedGuest(deps, e)) ? e : null
+  )
+  return new Set(guests.filter((e): e is string => e !== null))
 }
 
 /** Whether `email` is a guest by invitation: outside the configuration, on a live guest invitation. */

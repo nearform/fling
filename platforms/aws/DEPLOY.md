@@ -345,7 +345,8 @@ and, with the deploy role over OIDC:
    router rewrites `/robots.txt` on every sites host to it (see
    [Indexing and share-link referrers](#indexing-and-share-link-referrers)).
 4. Builds the site router (`edge/dist/site-router.js`: the shared routing decision,
-   `packages/shared/src/site-routing.ts`, in a CloudFront Function shell), fills its
+   `packages/shared/src/site-routing.ts`, in a CloudFront Function shell, minified; the readable
+   bundle beside it, `site-router.readable.js`, is the one to read its errors against), fills its
    `__APP_ORIGIN__` and `__SITE_SCHEME__`, updates the CloudFront Function (keeping its KeyValueStore association) and publishes it to LIVE.
 5. Invalidates `/index.html` on the app distribution and `/_fling/*` on the sites distribution.
 

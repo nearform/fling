@@ -101,7 +101,10 @@ function filesRow(
   const current = site.versions?.find(v => v.id === site.currentVersionId)
   if (!current) return []
   const n = current.fileCount
-  return [row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`)]
+  return [
+    row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`),
+    ...(current.publishedBy ? [row('Published by', current.publishedBy)] : []),
+  ]
 }
 
 /** Who may open a private site, for copy: the instance's members, or a generic phrase. */
@@ -136,6 +139,7 @@ export async function runVersions(ctx: CommandContext, name: string): Promise<vo
         { header: 'VERSION', value: v => v.id },
         { header: 'FILES', value: v => v.fileCount },
         { header: 'SIZE', value: v => formatBytes(v.totalBytes) },
+        { header: 'BY', value: v => v.publishedBy ?? '-' },
         { header: 'CREATED', value: v => formatDate(v.createdAt) },
       ])
   )

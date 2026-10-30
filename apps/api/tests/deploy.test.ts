@@ -128,6 +128,33 @@ describe('deploy', () => {
     )
   })
 
+  it('each version records who published it; older versions without it list without it', async () => {
+    const first = await deployLive(v1)
+    await deployLive(v2)
+    const site = await env.store.findSite('hello')
+    if (!site) throw new Error('no site')
+    const legacy = 'legacy-version'
+    await env.store.putVersion(site, {
+      siteId: site.id,
+      id: legacy,
+      status: 'complete',
+      fileCount: 1,
+      totalBytes: 1,
+      createdAt: '2020-01-01T00:00:00.000Z',
+    })
+    // A repoint makes nothing new: the version keeps its publisher.
+    const back = await json(
+      await api(env, key, 'POST', '/api/sites/hello/deploys', { manifest: manifest(v1) })
+    )
+    expect(back.status).toBe('repointed')
+
+    const detail = await json(await api(env, key, 'GET', '/api/sites/hello'))
+    const by = Object.fromEntries(detail.versions.map((v: any) => [v.id, v.publishedBy]))
+    expect(by[first.versionId]).toBe('alice@example.test')
+    expect(Object.values(by).filter(p => p === 'alice@example.test')).toHaveLength(2)
+    expect(detail.versions.find((v: any) => v.id === legacy)).not.toHaveProperty('publishedBy')
+  })
+
   it('applies spa/visibility from the deploy request', async () => {
     await deployLive(v1, 'hello', { spa: true, visibility: 'public' })
     expect(kvsSite()).toMatchObject({ spa: true, vis: 'public' })

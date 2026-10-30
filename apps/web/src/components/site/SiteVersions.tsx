@@ -1,7 +1,7 @@
 /**
- * The site's files and history: the files being served, then every version, newest first, each
- * with its files on demand and a restore (rollback) for any but the current one. An archived
- * site keeps its versions but can't be pointed at another until it is unarchived.
+ * The site's files and history: the files being served, then every version, newest first, with
+ * who published it, its files on demand and a restore (rollback) for any but the current one. An
+ * archived site keeps its versions but can't be pointed at another until it is unarchived.
  */
 import type { SiteDetail } from '@fling/shared'
 import { Fragment, useState } from 'react'
@@ -57,7 +57,12 @@ export function SiteVersions({ site }: { site: SiteDetail }) {
                             {shortVersion(version.id)}
                           </code>
                         </td>
-                        <td title={fullDate(version.createdAt)}>{timeAgo(version.createdAt)}</td>
+                        <td title={fullDate(version.createdAt)}>
+                          {timeAgo(version.createdAt)}
+                          {version.publishedBy && (
+                            <span className="text-muted"> by {version.publishedBy}</span>
+                          )}
+                        </td>
                         <td className="tabular-nums">{version.fileCount}</td>
                         <td className="tabular-nums">{formatBytes(version.totalBytes)}</td>
                         <td className="text-right whitespace-nowrap space-x-1">

@@ -54,6 +54,8 @@ export const VersionSchema = z.object({
   id: z.string(),
   fileCount: z.number(),
   totalBytes: z.number(),
+  /** who published it (email); absent on versions published before it was recorded */
+  publishedBy: z.string().optional(),
   createdAt: z.string(),
 })
 export type Version = z.infer<typeof VersionSchema>

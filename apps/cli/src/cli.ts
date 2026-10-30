@@ -148,6 +148,10 @@ program
     '-n, --name <name>',
     'site name — names are global, first come first served (default: generated from the project and folder, e.g. rocketpod-docs; you confirm it on a terminal)'
   )
+  .option(
+    '--path <folder>',
+    'publish into this folder of the site (e.g. 30-10-26, served at <site>/30-10-26/) and keep the rest of the site; needs --name'
+  )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
   .option(
     '--access <level>',
@@ -179,6 +183,7 @@ program
           public?: boolean
           yes?: boolean
           listHtml?: boolean
+          path?: string
         }
       ) => runDeploy(ctx, path, opts)
     )

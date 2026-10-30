@@ -61,7 +61,9 @@ team`). Signed in as the other address, `pnpm cli ls --shared` (or the Sites pag
 me tab) lists what was shared with it. Owners and publishers work the same way: `pnpm cli
 publishers <site> --add b@example.test` lets the other address deploy the site and roll it back
 (the site page shows it the read-only Owners and publishers section, and no Access or danger zone),
-and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. To try a real provider, set `OIDC_ISSUER`,
+and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. `pnpm cli deploy <folder>
+--name <site> --path 30-10-26` publishes the folder at `http://<site>.fling.lvh.me:47102/30-10-26/`
+and keeps the rest of the site; `pnpm cli versions <site>` shows the PATH it went to. To try a real provider, set `OIDC_ISSUER`,
 `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client.
 

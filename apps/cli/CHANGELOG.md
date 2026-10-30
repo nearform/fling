@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Path publish.** `fling deploy <dir> --name <site> --path <folder>` publishes the folder into
+  that folder of the site (`<site>/30-10-26/`) and keeps the rest. When someone else published the
+  site meanwhile it deploys once more on top of theirs. `fling versions` has a PATH column and
+  `fling info` a Published to line. The MCP tools take `path` on `fling_publish` (and the remote
+  `fling_upload_begin`) and `sitePath` on `fling_deploy`. On a Fling without the `pathPublish`
+  capability they refuse instead of replacing the whole site.
+
 - **Owners and publishers.** `fling owners <name>` and `fling publishers <name>` show who owns and
   who publishes a site and, with `--add`, `--remove`, `--set <emails>`, `--group` and
   `--remove-group <slugs>`, change one list. Owners are equal; publishers publish and roll back,

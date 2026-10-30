@@ -47,6 +47,8 @@ import {
   NOT_READY_NOTE,
   NOTIFICATIONS_NOTE,
   needsAudience,
+  normalizePublishPath,
+  PATH_PUBLISH_NOTE,
   privateAudience,
   reviewUrl,
   shareForFeedback,
@@ -122,6 +124,7 @@ import {
   listShared,
   listSites,
   notificationsEnabled,
+  pathPublishEnabled,
   renameGroup,
   resolveComment,
   rollback,
@@ -307,6 +310,27 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     return instance
   }
 
+  /**
+   * A path publish's folder, normalised, on a Fling that takes it (its metadata fetched again when
+   * the stored copy predates it). Refused without it: an older server would ignore the path and
+   * replace the whole site with the folder.
+   */
+  async function publishFolder(target: Target, raw: string) {
+    const folder = normalizePublishPath(raw)
+    if (folder === null) {
+      throw new CliError(
+        `Invalid path "${raw}": use a folder of the site, like "30-10-26" or "reports/2026" (no dotfiles)`
+      )
+    }
+    const instance = await loadInstanceWith(store, target.config, fetchImpl, 'pathPublish')
+    if (!pathPublishEnabled(instance)) {
+      throw new CliError(
+        `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)}) can't publish to a path yet: publish the whole site instead`
+      )
+    }
+    return folder
+  }
+
   /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
   async function run(
     tool: string,
@@ -337,12 +361,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       emails?: string[]
       groups?: string[]
       listHtml?: boolean
+      /** a path publish: the folder of the site, as the agent wrote it */
+      folder?: string
       retryWith: string
       /** Dotfiles already left out (from a zip or the inline files). */
       skippedDotfiles?: string[]
     }
   ): Promise<DeployOutcome> {
     if (opts.access) await requireAccessLevels(t)
+    const folder = opts.folder === undefined ? undefined : await publishFolder(t, opts.folder)
+    const inFolder = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
+    const top = folder === undefined ? 'at the root' : `in /${folder}/`
     let local = await buildManifest(dir)
     local.skipped.dotfiles.unshift(...(opts.skippedDotfiles ?? []))
     const skippedNote = describeSkipped(local.skipped)
@@ -356,7 +385,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         return {
           kind: 'needs_decision',
           summary:
-            `Not published yet: there is no index.html at the root, but there ${pages.length === 1 ? 'is 1 HTML page' : `are ${pages.length} HTML pages`}. ` +
+            `Not published yet: there is no index.html ${top}, but there ${pages.length === 1 ? 'is 1 HTML page' : `are ${pages.length} HTML pages`}. ` +
             'Ask the user whether to generate an index.html listing them (call again with `listHtml: true`) or to publish ' +
             `without one (\`listHtml: false\` — the root URL will 404, the pages still work at their own paths). Then call ${opts.retryWith} again with the same arguments plus \`listHtml\`.`,
           data: {
@@ -378,6 +407,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         dir,
         name: opts.name,
         manifest: local,
+        path: folder,
         spa: opts.spa,
         ...(opts.access
           ? {
@@ -404,23 +434,24 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         ? 'Unchanged — already live'
         : result.status === 'repointed'
           ? `Restored version ${result.versionId}`
-          : `Deployed ${result.fileCount} files (uploaded ${result.uploaded})`
+          : `Deployed ${result.fileCount} files${folder === undefined ? '' : ` to /${folder}/ (the rest of the site kept as it was)`} (uploaded ${result.uploaded})`
     const warnings = result.warnings.length ? `\nWarnings:\n- ${result.warnings.join('\n- ')}` : ''
     const edge =
       result.status === 'unchanged'
         ? { ready: true, note: '' }
         : await edgeReady(
             result.url,
-            local.files.map(f => f.path)
+            local.files.map(f => inFolder(f.path))
           )
+    const url = folder === undefined ? result.url : new URL(`${folder}/`, result.url).href
     const instance = await t.instance()
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
     const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
     const level = result.site.access ?? result.site.visibility
     const head = review
-      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${result.url} (${level})`
-      : `${what}: ${result.url} (${level})${listing}`
+      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${url} (${level})`
+      : `${what}: ${url} (${level})${listing}`
     // A new site says who can open it (asked for, or the Fling's default) and how to change it; an
     // existing one asked for an access level says it kept its own.
     const who = describeSiteAccess(result.site, await membersOn(t))
@@ -442,6 +473,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
         site: result.site,
+        ...(folder === undefined ? {} : { path: folder, url }),
         ...(result.first ? { created: true } : {}),
         ...(review ? { reviewUrl: review } : {}),
         generatedIndex,
@@ -482,6 +514,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'If there is no index.html but there are HTML pages, it does not deploy: ask the user whether to generate an index ' +
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
         `Re-deploying identical content is a no-op. ${ACCESS_NOTE(wording)} ` +
+        `${PATH_PUBLISH_NOTE.replace('With `path`', 'With `sitePath`')} ` +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
@@ -496,6 +529,14 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           .describe(
             'Site name (lowercase letters, digits, single hyphens; max 50). Defaults to a name generated from the file or folder'
           ),
+        sitePath: z
+          .string()
+          .min(1)
+          .max(1024)
+          .optional()
+          .describe(
+            'Publish into this folder of the site only, e.g. "30-10-26" (served at <site>/30-10-26/), keeping every other file of the site. Needs `name`. Omit to replace the whole site'
+          ),
         spa,
         access,
         emails,
@@ -509,6 +550,11 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     args =>
       run('fling_deploy', args.server, async t => {
         const located = await resolveInput(args.path, locate)
+        if (args.sitePath !== undefined && args.name === undefined) {
+          throw new CliError(
+            '`sitePath` needs `name`: the site to publish into. Ask the user which site, then call fling_deploy again'
+          )
+        }
         const prepared = await prepareInput(located.path)
         try {
           const name =
@@ -525,6 +571,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             emails: args.emails,
             groups: args.groups,
             listHtml: args.listHtml,
+            folder: args.sitePath,
             retryWith: 'fling_deploy',
             skippedDotfiles: prepared.skippedDotfiles,
           })
@@ -624,6 +671,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             emails: args.emails,
             groups: args.groups,
             listHtml: args.listHtml,
+            folder: args.path,
             retryWith: 'fling_publish',
           })
         } finally {
@@ -875,8 +923,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     run(t.info.name, args.server, async target => {
       const site = await getSite(target.client, args.name)
       const access = site.audience ? `\n${describeAudience(site, await membersOn(target))}` : ''
-      const by = site.versions.find(v => v.id === site.currentVersionId)?.publishedBy
-      const published = by ? `\nCurrent version published by ${by}` : ''
+      const current = site.versions.find(v => v.id === site.currentVersionId)
+      const by = current?.publishedBy ? ` by ${current.publishedBy}` : ''
+      const to = current?.path ? ` to /${current.path}/` : ''
+      const published = by || to ? `\nCurrent version published${by}${to}` : ''
       const roles = site.owners ? `\n${describeRoles(site)}` : ''
       return { summary: `${site.name}: ${site.url}${access}${roles}${published}`, data: site }
     })

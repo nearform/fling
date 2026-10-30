@@ -1,6 +1,11 @@
 /**
  * Deploy a folder: build the manifest, ask the API what to do, upload only what it asks for
  * straight to S3 (presigned PUTs, 8 at a time, 3 retries with backoff), then finalize.
+ *
+ * With `path` (a path publish, `pathPublish` capability) the folder becomes that folder of the
+ * site: every file is sent as `<path>/<file>` and the server keeps the rest of the site. When
+ * someone else publishes the site meanwhile, the server answers 409 `base_changed`; the whole
+ * deploy then runs once more, on top of what they published.
  */
 import { readFile } from 'node:fs/promises'
 import {
@@ -92,6 +97,8 @@ export interface DeployOptions {
    */
   access?: AccessLevel
   audience?: AudienceInput
+  /** A path publish: the folder of the site (normalised, `normalizePublishPath`) to replace. */
+  path?: string
   /** A manifest already built from `dir` (so the caller can inspect it before deploying). */
   manifest?: LocalManifest
   onProgress?: (event: {
@@ -122,25 +129,49 @@ export interface DeployResult {
   warnings: string[]
   /** this deploy made the site live for the first time: a new site, its access just set */
   first: boolean
+  /** a path publish: the folder it replaced */
+  path?: string
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
+const baseChanged = (error: unknown) =>
+  error instanceof CliApiError && error.status === 409 && error.code === 'base_changed'
+
 export async function deploy(deps: DeployDeps, opts: DeployOptions): Promise<DeployResult> {
   const name = resolveSiteName(opts.dir, opts.name)
   const local = opts.manifest ?? (await buildManifest(opts.dir))
+  try {
+    return await deployOnce(deps, opts, name, local)
+  } catch (error) {
+    if (opts.path === undefined || !baseChanged(error)) throw error
+    return deployOnce(deps, opts, name, local)
+  }
+}
+
+async function deployOnce(
+  deps: DeployDeps,
+  opts: DeployOptions,
+  name: string,
+  local: LocalManifest
+): Promise<DeployResult> {
+  const folder = opts.path
+  const sitePath = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
   const base = {
     name,
     fileCount: local.files.length,
     totalBytes: local.totalBytes,
     warnings: local.warnings,
+    ...(folder === undefined ? {} : { path: folder }),
   }
   const path = `/api/sites/${encodeURIComponent(name)}/deploys`
+  const manifest = toManifest(local)
   const res = await deps.client
     .request('POST', path, {
       schema: DeployResponseSchema,
       body: {
-        manifest: toManifest(local),
+        manifest: { files: manifest.files.map(f => ({ ...f, path: sitePath(f.path) })) },
+        ...(folder === undefined ? {} : { path: folder }),
         ...(opts.spa !== undefined ? { spa: opts.spa } : {}),
         ...(opts.public ? { visibility: 'public' as const } : {}),
         ...(opts.access ? { access: opts.access } : {}),
@@ -164,7 +195,7 @@ export async function deploy(deps: DeployDeps, opts: DeployOptions): Promise<Dep
     }
   }
 
-  const byPath = new Map(local.files.map(f => [f.path, f]))
+  const byPath = new Map(local.files.map(f => [sitePath(f.path), f]))
   const uploads = res.uploads.map(u => {
     const file = byPath.get(u.path)
     if (!file) throw new CliError(`Server asked for a file that is not in the manifest: ${u.path}`)

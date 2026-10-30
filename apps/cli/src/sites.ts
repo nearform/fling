@@ -272,6 +272,16 @@ export function siteRolesEnabled(
   return instance?.capabilities.siteRoles === true
 }
 
+/**
+ * Whether the instance takes path publishes (`pathPublish`). Without it a server ignores `path`
+ * and would replace the whole site with the folder, so clients refuse instead.
+ */
+export function pathPublishEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  return instance?.capabilities.pathPublish === true
+}
+
 /** A site with its owners and publishers, as GET and PATCH report them. */
 export type SiteWithRoles = SiteWithAudience & {
   owners: SiteRoleMembers

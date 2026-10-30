@@ -180,6 +180,22 @@ const listHtml = z
 
 const siteName = z.string().min(1).max(200).describe('Site name, e.g. "q3-report"')
 
+/** A path publish (publish-path.ts): the folder to replace, keeping the rest of the site. */
+export const PATH_PUBLISH_NOTE =
+  'With `path` (e.g. "30-10-26"), only that folder of the site is replaced: the files go to ' +
+  '<site>/30-10-26/… (give their paths relative to the folder, its page being "index.html") and every other ' +
+  "file of the site stays as it is. Use it to add one report, release note or week's page to a shared site " +
+  'without republishing the rest; rolling back removes it again.'
+
+const publishPath = z
+  .string()
+  .min(1)
+  .max(1024)
+  .optional()
+  .describe(
+    'Publish into this folder of the site only, e.g. "30-10-26" or "reports/2026" (served at <site>/30-10-26/), keeping every other file. File paths are relative to it. Omit to replace the whole site'
+  )
+
 const sitePath = z
   .string()
   .min(1)
@@ -328,8 +344,8 @@ export function mcpToolsFor(w: McpWording) {
         'Publish a static site to Fling in one call and get back its URL. Pass every file of the site inline in ' +
         `\`files\` (whole site, up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB decoded in total; bigger sites: ` +
         `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
-        'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too); ' +
-        'publishing identical content again is a no-op. ' +
+        'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too), ' +
+        `unless \`path\` is given; publishing identical content again is a no-op. ${PATH_PUBLISH_NOTE} ` +
         `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
         'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
         'the site has.',
@@ -345,7 +361,8 @@ export function mcpToolsFor(w: McpWording) {
           )
           .min(1)
           .max(MAX_FILES)
-          .describe('Every file of the site'),
+          .describe('Every file of the site (with `path`: of that folder)'),
+        path: publishPath,
         spa,
         access,
         emails: accessEmails,
@@ -363,9 +380,10 @@ export function mcpToolsFor(w: McpWording) {
         `Start publishing a site too big for one fling_publish call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, ` +
         'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
         `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
-        `${NAME_REQUIRED} ${VISIBILITY}`,
+        `${NAME_REQUIRED} ${VISIBILITY} ${PATH_PUBLISH_NOTE}`,
       inputSchema: {
         name: siteName,
+        path: publishPath,
         spa,
         access,
         emails: accessEmails,

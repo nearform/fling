@@ -39,6 +39,37 @@
  * version records whoever staged it, and finalizing records whoever finalized it. A version is
  * content-addressed, so an `unchanged` or `repointed` deploy creates nothing and the version keeps
  * the publisher it was first published by.
+ *
+ * Path publish (`DeployRequest.path`, publish-path.ts in @fling/shared): replace one folder of the
+ * site and keep the rest. The edge serves `sites/<id>/<versionId>/<file>` straight from the route,
+ * so every version holds every file: a path publish makes a whole new version, its files those
+ * sent (each under `<path>/`, else 400 `outside_path`) plus the current version's files outside
+ * the folder. That current version is its **base**.
+ *   - `prepare` reads the base's manifest, merges, checks the caps on the merged set, and computes
+ *     the version id from it: the unchanged/repointed shortcuts then mean what they always mean
+ *     (this exact site is current, or was published before). The stored manifest carries
+ *     `layer: {path, base, kept}`; the version records `path` and `base`. Upload URLs are only for
+ *     the files sent. At most MAX_KEPT_FILES files are carried forward (413 `too_large`), since
+ *     each is a copy in the request that makes the version live.
+ *   - Finalizing refuses with 409 `base_changed` once the site's current version is no longer the
+ *     base (someone published, or rolled back, meanwhile: going live would undo it). It HEADs and
+ *     scans only the files sent, then copies the kept files (`Blobs.copy`). Kept files need no
+ *     rescan or HEAD: they are byte-for-byte copies of a version that passed this scan to go live,
+ *     and a copy whose source is missing fails rather than leaving a gap.
+ *   - Going live saves the site only while its current version is still the base
+ *     (`putSite(…, { ifCurrentVersion })`), so of two path publishes racing on the same base one
+ *     wins and the other gets 409 `base_changed` (its version goes back to pending). Clients
+ *     publish again on top of the new current version. The shortcuts are guarded the same way.
+ *   - A site with no current version has nothing to carry forward: the path publish is a plain
+ *     publish of those files (the site's root has nothing until something is published there).
+ *     There is no base to guard on, and the Table port can't condition on a null field, so two
+ *     racing first publishes behave like two plain ones: the last to go live wins.
+ *   - The generated index (a root index.html listing the HTML pages, `listHtml`) is a file like
+ *     any other: a path publish carries the base's forward as it is, so it doesn't list the pages
+ *     under the new folder until the whole site is published again. A folder published with
+ *     `listHtml` gets its own `<path>/index.html` listing.
+ *   - Rollback needs nothing new: a layered version is complete, so rolling back to the base
+ *     removes the folder's new files.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -49,13 +80,15 @@ import {
   DeployRequestSchema,
   type DeployResponse,
   describeSecretFindings,
+  displayPublishPath,
   forbiddenPathReason,
   isScannablePath,
+  isUnderPath,
   isValidSiteName,
   MAX_DEPLOY_BYTES,
   MAX_FILE_BYTES,
   MAX_FILES,
-  type Manifest,
+  MAX_KEPT_FILES,
   type ManifestFile,
   NEVER_PUBLISHED_NOTE,
   SECRET_SCAN_MAX_FILE_BYTES,
@@ -101,6 +134,7 @@ import {
   toSite,
 } from './sites.ts'
 import type { SiteRecord, User, VersionRecord } from './store/types.ts'
+import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
 /** Upload URLs from stage() live this long; the CLI uploads straight away. */
@@ -113,6 +147,8 @@ const PRESIGN_CONCURRENCY = 32
 const PUT_CONCURRENCY = 16
 /** Objects read back in parallel at publish. */
 const SCAN_CONCURRENCY = 8
+/** Kept files copied in parallel by a path publish. */
+const COPY_CONCURRENCY = 16
 
 export type Published = {
   status: 'live' | 'unchanged' | 'repointed'
@@ -178,14 +214,64 @@ function assertWithinLimits(files: readonly unknown[]) {
   }
 }
 
-/** Limits → path rules → schema, so the specific errors win over the schema's generic ones. */
+/**
+ * Limits → path rules → schema, so the specific errors win over the schema's generic ones; then,
+ * for a path publish, every file under the path (400 `outside_path`).
+ */
 function admit(raw: unknown): DeployRequest {
   const files = (raw as { manifest?: { files?: unknown } } | null)?.manifest?.files
   if (Array.isArray(files)) {
     assertWithinLimits(files)
     assertPublishablePaths(files.map(f => (f as { path?: unknown } | null)?.path))
   }
-  return DeployRequestSchema.parse(raw)
+  const req = DeployRequestSchema.parse(raw)
+  if (req.path !== undefined) {
+    const path = req.path
+    const outside = req.manifest.files.filter(f => !isUnderPath(f.path, path)).map(f => f.path)
+    if (outside.length > 0) {
+      throw new ApiError(
+        400,
+        'outside_path',
+        `Publishing to ${displayPublishPath(path)} takes only files under it: ${list(outside)}`,
+        { paths: outside }
+      )
+    }
+  }
+  return req
+}
+
+/** 409 `base_changed`: the site moved on while a path publish was on its way. */
+const baseChanged = (name: string, path: string) =>
+  conflict(
+    `"${name}" changed while publishing to ${displayPublishPath(path)}: publish it again`,
+    'base_changed'
+  )
+
+/** Save the site; with a base, only while that is still its current version. */
+async function saveOnBase(
+  deps: Deps,
+  site: SiteRecord,
+  layer: { path: string; base: string } | null
+) {
+  if (!layer) return save(deps, site)
+  try {
+    await save(deps, site, undefined, { ifCurrentVersion: layer.base })
+  } catch (err) {
+    if (err instanceof ConditionFailed) throw baseChanged(site.name, layer.path)
+    throw err
+  }
+}
+
+/** Copy a path publish's kept files from its base into the new version. */
+async function copyKept(
+  deps: Deps,
+  siteId: string,
+  versionId: string,
+  layer: { base: string; kept: readonly string[] }
+) {
+  await mapLimit(layer.kept, COPY_CONCURRENCY, path =>
+    deps.blobs.copy(siteObjectKey(siteId, layer.base, path), siteObjectKey(siteId, versionId, path))
+  )
 }
 
 // --- secret scanning ----------------------------------------------------------------------------
@@ -224,6 +310,8 @@ async function scanStoredVersion(
 
 // --- shared steps -------------------------------------------------------------------------------
 
+type Layer = NonNullable<StoredManifest['layer']>
+
 type Prepared =
   | { kind: 'done'; result: Published & { status: 'unchanged' | 'repointed' } }
   | {
@@ -231,7 +319,11 @@ type Prepared =
       site: SiteRecord
       actor: Actor
       version: VersionRecord
+      /** every file of the version */
       files: ManifestFile[]
+      /** the files this deploy sends (all of them, unless it is a path publish with a base) */
+      sent: ManifestFile[]
+      layer: Layer | null
     }
 
 const sameSet = (a: readonly string[], b: readonly string[]) =>
@@ -304,6 +396,36 @@ function settingsFor(actor: Actor, site: SiteRecord, version: VersionRecord) {
   }
 }
 
+/**
+ * A path publish on a site with a current version: the base's files outside the path, merged with
+ * those sent and checked against the caps. Null for any other deploy.
+ */
+async function layerFor(
+  deps: Deps,
+  site: SiteRecord | null,
+  req: DeployRequest
+): Promise<{ layer: Layer; files: ManifestFile[] } | null> {
+  const { path } = req
+  const base = site?.currentVersionId
+  if (path === undefined || !site || !base) return null
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, base))
+  if (!manifest) {
+    throw conflict(
+      `The files of "${site.name}"'s current version are missing: publish the whole site`,
+      'base_missing'
+    )
+  }
+  const kept = manifest.files.filter(f => !isUnderPath(f.path, path))
+  if (kept.length > MAX_KEPT_FILES) {
+    throw tooLarge(
+      `Publishing to ${displayPublishPath(path)} carries the rest of "${site.name}" forward, at most ${MAX_KEPT_FILES} files; it has ${kept.length} outside that folder. Publish the whole site instead`
+    )
+  }
+  const files = [...kept, ...req.manifest.files]
+  assertWithinLimits(files)
+  return { layer: { path, base, kept: kept.map(f => f.path) }, files }
+}
+
 /** Name checks, the unchanged / repointed shortcuts, else a pending version (manifest stored). */
 async function prepare(
   deps: Deps,
@@ -319,7 +441,6 @@ async function prepare(
     )
   }
   const { store, blobs, clock } = deps
-  const versionId = computeVersionId(req.manifest.files)
   const existing = await store.findSite(name)
   const actor = existing ? await siteActor(deps, user, existing) : userActor(user)
   if (existing && !can(actor, 'site.deploy', existing)) {
@@ -349,10 +470,15 @@ async function prepare(
     await inviteAdded(deps, inviter, existing, before)
   }
 
+  const layered = await layerFor(deps, existing, req)
+  const layer = layered?.layer ?? null
+  const files = layered?.files ?? req.manifest.files
+  const versionId = computeVersionId(files)
+
   if (existing && existing.currentVersionId === versionId) {
     applySettings(existing, req)
     existing.archived = false
-    await save(deps, existing)
+    await saveOnBase(deps, existing, layer)
     return {
       kind: 'done',
       result: { status: 'unchanged', versionId, site: toSite(deps, actor, existing) },
@@ -365,7 +491,7 @@ async function prepare(
       existing.currentVersionId = versionId
       existing.archived = false
       applySettings(existing, req)
-      await save(deps, existing)
+      await saveOnBase(deps, existing, layer)
       return {
         kind: 'done',
         result: { status: 'repointed', versionId, site: toSite(deps, actor, existing) },
@@ -395,7 +521,6 @@ async function prepare(
   if (!site) throw await nameTaken(deps, user, name)
   if (!existing) await inviteAdded(deps, inviter, site, { emails: [], groups: [] })
 
-  const files = req.manifest.files
   const version: VersionRecord = {
     siteId: site.id,
     id: versionId,
@@ -405,14 +530,23 @@ async function prepare(
     spa: req.spa,
     visibility: req.visibility,
     publishedBy: user.email,
+    ...(req.path !== undefined ? { path: req.path } : {}),
+    ...(layer ? { base: layer.base } : {}),
     createdAt: now,
   }
-  await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
+  await blobs.putJson(manifestKey(site.id, versionId), {
+    files,
+    ...(layer ? { layer } : {}),
+  } satisfies StoredManifest)
   await store.putVersion(site, version)
-  return { kind: 'pending', site, actor, version, files }
+  return { kind: 'pending', site, actor, version, files, sent: req.manifest.files, layer }
 }
 
-/** Pending → complete → current. Only reached once the version's bytes have been scanned. */
+/**
+ * Pending → complete → current. Only reached once the version's bytes have been scanned. With a
+ * `layer`, the site is saved only while its base is current; otherwise the version goes back to
+ * pending and this is 409 `base_changed`.
+ */
 async function goLive(
   deps: Deps,
   user: User,
@@ -420,7 +554,8 @@ async function goLive(
   site: SiteRecord,
   version: VersionRecord,
   files: readonly ManifestFile[],
-  acting: Acting
+  acting: Acting,
+  layer: Layer | null = null
 ): Promise<Published> {
   const first = site.currentVersionId === null
   if (version.status === 'pending') {
@@ -428,13 +563,19 @@ async function goLive(
     await deps.blobs.putJson(manifestKey(site.id, version.id), {
       files: [...files],
       generatedIndex,
+      ...(layer ? { layer } : {}),
     } satisfies StoredManifest)
     await deps.store.putVersion(site, { ...version, status: 'complete', publishedBy: user.email })
   }
   site.currentVersionId = version.id
   site.archived = false
   applySettings(site, settingsFor(actor, site, version))
-  await save(deps, site)
+  try {
+    await saveOnBase(deps, site, layer)
+  } catch (err) {
+    if (version.status === 'pending') await deps.store.putVersion(site, version)
+    throw err
+  }
   if (first && isRestricted(site)) {
     await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
   }
@@ -461,8 +602,8 @@ export async function stage(
 ): Promise<DeployResponse> {
   const prepared = await prepare(deps, user, name, admit(raw), principal)
   if (prepared.kind === 'done') return prepared.result
-  const { site, version, files } = prepared
-  const uploads = await mapLimit(files, PRESIGN_CONCURRENCY, async file => {
+  const { site, version, sent } = prepared
+  const uploads = await mapLimit(sent, PRESIGN_CONCURRENCY, async file => {
     const signed = await deps.blobs.presignPut(siteObjectKey(site.id, version.id, file.path), {
       contentType: file.contentType,
       cacheControl: cacheControlFor(file.path),
@@ -487,11 +628,23 @@ export async function publish(
   const version = await store.getVersion(site, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
   await checkRestore(deps, actor, site)
-  if (version.status === 'complete') return goLive(deps, user, actor, site, version, [], acting)
+  if (version.status === 'complete') {
+    // Finalizing again: a path publish still goes live only on top of its base.
+    if (!version.base || site.currentVersionId === version.id) {
+      return goLive(deps, user, actor, site, version, [], acting)
+    }
+    const layer = { path: version.path ?? '', base: version.base, kept: [] }
+    if (site.currentVersionId !== version.base) throw baseChanged(name, layer.path)
+    return goLive(deps, user, actor, site, version, [], acting, layer)
+  }
 
   const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
-  const checks = await mapLimit(manifest.files, HEAD_CONCURRENCY, async file => {
+  const layer = manifest.layer ?? null
+  if (layer && site.currentVersionId !== layer.base) throw baseChanged(name, layer.path)
+  const kept = new Set(layer?.kept)
+  const sent = manifest.files.filter(f => !kept.has(f.path))
+  const checks = await mapLimit(sent, HEAD_CONCURRENCY, async file => {
     const head = await blobs.head(siteObjectKey(site.id, versionId, file.path))
     return head && head.size === file.size ? null : file.path
   })
@@ -509,18 +662,20 @@ export async function publish(
   // live. (Upload URLs only accept the manifest's bytes, so what was scanned is what is served.)
   // A secret → delete what was uploaded (the version stays pending with no manifest; deploying
   // again starts over) and refuse.
-  const findings = await scanStoredVersion(deps, site.id, versionId, manifest.files)
+  const findings = await scanStoredVersion(deps, site.id, versionId, sent)
   if (findings.length > 0) {
     await blobs.deletePrefix(siteVersionPrefix(site.id, versionId))
     await blobs.delete(manifestKey(site.id, versionId))
     throw secretDetected(findings)
   }
-  return goLive(deps, user, actor, site, version, manifest.files, acting)
+  if (layer) await copyKept(deps, site.id, versionId, layer)
+  return goLive(deps, user, actor, site, version, manifest.files, acting, layer)
 }
 
 /**
  * Remote MCP: publish files the server holds. Paths must already be site-relative (see
- * mcp/publish.ts normalizePath); content types come from the extension.
+ * mcp/publish.ts normalizePath), and with `path` already under it; content types come from the
+ * extension.
  */
 export async function publishBytes(
   deps: Deps,
@@ -530,6 +685,8 @@ export async function publishBytes(
   opts: {
     /** who is publishing: a new site needs `account.site.create` */
     principal: Principal
+    /** a path publish: replace only this folder (publish-path.ts) */
+    path?: string
     spa?: boolean
     visibility?: Visibility
     access?: AccessLevel
@@ -545,6 +702,7 @@ export async function publishBytes(
   }))
   const req = admit({
     manifest: { files },
+    path: opts.path,
     spa: opts.spa,
     visibility: opts.visibility,
     access: opts.access,
@@ -556,13 +714,14 @@ export async function publishBytes(
 
   const prepared = await prepare(deps, user, name, req, opts.principal)
   if (prepared.kind === 'done') return prepared.result
-  const { site, actor, version } = prepared
-  await mapLimit(prepared.files, PUT_CONCURRENCY, async f => {
+  const { site, actor, version, layer } = prepared
+  await mapLimit(prepared.sent, PUT_CONCURRENCY, async f => {
     await deps.blobs.put(
       siteObjectKey(site.id, version.id, f.path),
       bytesByPath.get(f.path) as Uint8Array,
       { contentType: f.contentType, cacheControl: cacheControlFor(f.path) }
     )
   })
-  return goLive(deps, user, actor, site, version, prepared.files, {})
+  if (layer) await copyKept(deps, site.id, version.id, layer)
+  return goLive(deps, user, actor, site, version, prepared.files, {}, layer)
 }

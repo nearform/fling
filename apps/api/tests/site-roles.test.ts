@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
+import { callTool, connect } from './oauth-helpers.ts'
 
 const ALICE = 'alice@example.test'
 const BOB = 'bob@example.test'
@@ -189,6 +190,38 @@ describe('a publisher', () => {
     expect(await env.store.findSite('team')).toMatchObject({ visibility: 'private', spa: false })
   })
 
+  it("can't restore an archived site by deploying: 400 owner_only, and it stays archived", async () => {
+    const { env, alice, bob, patch } = await world()
+    await patch(alice.key, { publishers: { emails: [BOB] } })
+    const v1 = (await env.store.findSite('team'))?.currentVersionId
+    // A pending version staged while the site was live can't be made live once it is archived.
+    const files = pageOf('v3')
+    const staged = await json(
+      await api(env, bob.key, 'POST', '/api/sites/team/deploys', {
+        manifest: { files: files.map(f => f.meta) },
+      })
+    )
+    await upload(env, staged.uploads, files)
+    expect((await api(env, alice.key, 'POST', '/api/sites/team/archive')).status).toBe(200)
+    for (const content of ['v2', 'v1']) {
+      const res = await deploy(env, bob.key, 'team', pageOf(content))
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe('owner_only')
+    }
+    const finalize = await api(
+      env,
+      bob.key,
+      'POST',
+      `/api/sites/team/deploys/${staged.versionId}/finalize`
+    )
+    expect(finalize.status).toBe(400)
+    expect((await json(finalize)).error.code).toBe('owner_only')
+    expect(await env.store.findSite('team')).toMatchObject({ archived: true, currentVersionId: v1 })
+    // An owner's deploy restores it.
+    expect((await deploy(env, alice.key, 'team', pageOf('v2'))).status).toBe(200)
+    expect(await env.store.findSite('team')).toMatchObject({ archived: false })
+  })
+
   it("making an owner's staged version live applies only what the publisher may change", async () => {
     const { env, alice, bob, patch } = await world()
     await patch(alice.key, { publishers: { emails: [BOB] } })
@@ -269,5 +302,51 @@ describe('deleting a group', () => {
     expect(site?.owners).toEqual({ emails: [ALICE], groups: [] })
     expect(await env.store.listGroupRoleSites(group?.id ?? '')).toEqual([])
     expect(await names(env, carol.key)).toEqual([])
+  })
+})
+
+describe('fling_set_owners, fling_set_publishers and fling_info', () => {
+  it('edit the lists, and fling_info and fling_list show the roles', async () => {
+    const { env, alice } = await world()
+    await api(env, alice.key, 'POST', '/api/groups', { slug: 'ops', name: 'Ops', members: [DAN] })
+    const { accessToken } = await connect(env, ALICE)
+    const added = await callTool(env, accessToken, 'fling_set_publishers', {
+      name: 'team',
+      add: [BOB],
+      addGroups: ['ops'],
+    })
+    expect(added.isError).toBeFalsy()
+    expect(added.content[0]?.text).toContain(
+      `Owners: ${ALICE}. Publishers: ${BOB}, the group ops (Ops, 1 person). You are an owner.`
+    )
+    const owners = await callTool(env, accessToken, 'fling_set_owners', {
+      name: 'team',
+      add: [CAROL],
+    })
+    expect(owners.structuredContent.owners.emails.map((e: { email: string }) => e.email)).toEqual([
+      ALICE,
+      CAROL,
+    ])
+    const last = await callTool(env, accessToken, 'fling_set_owners', {
+      name: 'team',
+      set: [],
+    })
+    expect(last.isError).toBe(true)
+    expect(last.content[0]?.text).toContain('last_owner')
+    expect((await callTool(env, accessToken, 'fling_set_owners', { name: 'team' })).isError).toBe(
+      true
+    )
+
+    const asBob = (await connect(env, BOB)).accessToken
+    const info = await callTool(env, asBob, 'fling_info', { name: 'team' })
+    expect(info.content[0]?.text).toContain('You are a publisher.')
+    const list = await callTool(env, asBob, 'fling_list', {})
+    expect(list.content[0]?.text).toContain('you are a publisher')
+    const refused = await callTool(env, asBob, 'fling_set_publishers', {
+      name: 'team',
+      add: [DAN],
+    })
+    expect(refused.isError).toBe(true)
+    expect((await env.store.findSite('team'))?.publishers.emails).toEqual([BOB])
   })
 })

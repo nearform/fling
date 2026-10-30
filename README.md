@@ -65,6 +65,15 @@ audience or from a group in it) takes effect within 5 minutes. **Shared with me*
 restricted sites other people have limited to you, or to a group you are in (`fling ls --shared`,
 `fling_list { shared: true }`, the Sites page's Shared with me tab).
 
+**Owners and publishers.** A site's owners are equal: each publishes, rolls back, changes its
+access and settings, its owners and publishers, and archives or deletes it. Its publishers publish
+and roll back, and change nothing else. Both are people or groups (`fling owners <site> --add
+a@example.test --group design`, `fling publishers <site> …`, `fling_set_owners`,
+`fling_set_publishers`, or the site's Owners and publishers section in the web UI), members of the
+instance only, never guests. A site always keeps at least one person as an owner, so it carries on
+when whoever created it is away or leaves. Naming a group trusts whoever manages it. People given a
+role are told by email, where the instance sends it.
+
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.
 - The frame follows the site's own navigation (single-page apps included) and stays on the site:

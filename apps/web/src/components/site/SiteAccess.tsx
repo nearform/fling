@@ -10,7 +10,7 @@
  * site to anyone with the link whatever the level. Refreshing and revoking break the link people
  * already have, so they ask first. Groups open in the group editor from the pickers: to see one,
  * to change one the user owns, or to make one (from scratch, or from the listed people, to use in
- * their place).
+ * their place); the group picker is shared with the owners and publishers (`PeoplePicker`).
  *
  * An instance without the `accessLevels` capability has no "only you": the other options save
  * through `visibility` and `audience` instead. On someone else's site (an admin's, `owner`), "you"
@@ -32,14 +32,13 @@ import {
   ExclamationTriangleIcon,
   LinkIcon,
   NoSymbolIcon,
-  PlusIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline'
 import { useId, useState } from 'react'
 import { useInstance } from '../../hooks/instance'
-import { useGroups, useGroupsWithMembers, useMe, useSiteActions } from '../../hooks/queries'
+import { useGroups, useGroupsWithMembers, useSiteActions } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
-import { addToAudience, audienceWho, peopleErrorMessage, peopleLabel } from '../../lib/audience'
+import { addToAudience, audienceWho, peopleErrorMessage } from '../../lib/audience'
 import { copyText } from '../../lib/clipboard'
 import { displayUrl } from '../../lib/format'
 import { type AudienceEdit, sameMembers, swapEmailsForGroup } from '../../lib/groups'
@@ -49,8 +48,8 @@ import { ConfirmModal } from '../ConfirmModal'
 import { CopyButton } from '../CopyButton'
 import { EmailAdder } from '../EmailAdder'
 import { EmailBadge } from '../EmailBadge'
-import { GroupChip } from '../GroupChip'
 import { type CreateOffer, GroupEditor, type GroupEditorTarget } from '../GroupEditor'
+import { GroupPicker } from '../PeoplePicker'
 import { SiteSection } from './SiteSection'
 
 /** An option of the radio group: an access level, with `groups` and `people` as one. */
@@ -582,8 +581,10 @@ function AudiencePicker({
         )
       )}
       {groupsOn && (
-        <AudienceGroups
+        <GroupPicker
           named={named}
+          max={AUDIENCE_GROUPS_MAX}
+          listLabel="Groups who can open it"
           busy={busy}
           onChange={groups => void commit({ groups })}
           onOpen={slug => setEditor({ mode: 'open', slug })}
@@ -612,85 +613,5 @@ function AudiencePicker({
         onCreated={created}
       />
     </>
-  )
-}
-
-/**
- * The groups in the audience, each opening in the group editor (with Edit for the user's own), a
- * picker over every group on the instance (any member may name any group), up to
- * AUDIENCE_GROUPS_MAX, and "New group".
- */
-function AudienceGroups({
-  named,
-  busy,
-  onChange,
-  onOpen,
-  onNew,
-}: {
-  named: readonly AudienceGroup[]
-  busy: boolean
-  onChange: (slugs: string[]) => void
-  onOpen: (slug: string) => void
-  onNew: () => void
-}) {
-  const all = useGroups(false)
-  const { data: me } = useMe()
-  const slugs = named.map(g => g.slug)
-  const choices = (all.data ?? []).filter(g => !slugs.includes(g.slug))
-  const owned = new Set((all.data ?? []).filter(g => g.owner === me?.email).map(g => g.slug))
-  const full = slugs.length >= AUDIENCE_GROUPS_MAX
-  const id = useId()
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {named.length > 0 && (
-        <ul className="contents" aria-label="Groups who can open it">
-          {named.map(g => (
-            <li key={g.slug} className="max-w-full">
-              <GroupChip
-                name={g.name}
-                size={g.size}
-                deleted={g.deleted}
-                onOpen={() => onOpen(g.slug)}
-                onEdit={owned.has(g.slug) ? () => onOpen(g.slug) : undefined}
-                onRemove={() => onChange(slugs.filter(s => s !== g.slug))}
-                removeLabel={g.deleted ? 'Remove the deleted group' : `Remove the group ${g.name}`}
-                disabled={busy}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-      {!full && choices.length > 0 && (
-        <>
-          <label htmlFor={`${id}-group`} className="sr-only">
-            Add a group
-          </label>
-          <select
-            id={`${id}-group`}
-            className="select select-sm w-auto"
-            value=""
-            disabled={busy}
-            onChange={e => e.target.value && onChange([...slugs, e.target.value])}
-          >
-            <option value="">Add a group…</option>
-            {choices.map(g => (
-              <option key={g.slug} value={g.slug}>
-                {`${g.name}${g.name !== g.slug ? ` (${g.slug})` : ''} · ${peopleLabel(g.size)}`}
-              </option>
-            ))}
-          </select>
-        </>
-      )}
-      <button type="button" className="btn btn-xs btn-ghost" onClick={onNew}>
-        <PlusIcon className="h-3.5 w-3.5" aria-hidden />
-        New group
-      </button>
-      {full && (
-        <span className="text-xs text-muted">
-          A site can name at most {AUDIENCE_GROUPS_MAX} groups.
-        </span>
-      )}
-    </div>
   )
 }

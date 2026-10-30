@@ -224,6 +224,70 @@ describe('sharing a site', () => {
   })
 })
 
+describe('owners and publishers', () => {
+  const roles = (env: Env, key: string, body: object) =>
+    api(env, key, 'PATCH', '/api/sites/q3-report', body)
+
+  it('emails each person and group member given a role, once, and only what changed', async () => {
+    const { env, alice, bob } = await world()
+    await api(env, bob.key, 'POST', '/api/groups', {
+      slug: 'design',
+      name: 'Design team',
+      members: [CAROL, DAN, ALICE],
+    })
+    await settle(env)
+    env.mailer.clear()
+    env.advance(1000)
+    const res = await roles(env, alice.key, {
+      owners: { emails: [ALICE, BOB] },
+      publishers: { emails: [DAN], groups: ['design'] },
+    })
+    expect(res.status).toBe(200)
+    await settle(env)
+    expect(subjects(env, BOB)).toEqual(['Acme Fling: You are now an owner of q3-report'])
+    expect(subjects(env, DAN)).toEqual(['Acme Fling: You are now a publisher of q3-report'])
+    expect(subjects(env, CAROL)).toEqual(['Acme Fling: You are now a publisher of q3-report'])
+    expect(subjects(env, ALICE)).toEqual([])
+    const text = env.mailer.sentTo(CAROL)[0]?.message.text ?? ''
+    expect(text).toContain(
+      'Alice (alice@example.test) made you a publisher of q3-report through Design team'
+    )
+    expect(text).toContain(`${APP_ORIGIN}/sites/q3-report`)
+
+    // The same lists again: nobody hears.
+    env.mailer.clear()
+    env.advance(1000)
+    await roles(env, alice.key, {
+      owners: { emails: [ALICE, BOB] },
+      publishers: { emails: [DAN], groups: ['design'] },
+    })
+    await settle(env)
+    expect(env.mailer.sent).toHaveLength(0)
+  })
+
+  it('drops a role taken back before the drain', async () => {
+    const { env, alice } = await world()
+    await roles(env, alice.key, { publishers: { emails: [BOB, CAROL] } })
+    env.advance(1000)
+    await roles(env, alice.key, { publishers: { emails: [CAROL] } })
+    await settle(env)
+    expect(subjects(env, BOB)).toEqual([])
+    expect(subjects(env, CAROL)).toHaveLength(1)
+  })
+
+  it('notifies through the remote MCP tools as through the API', async () => {
+    const { env } = await world()
+    const { accessToken } = await connect(env, ALICE)
+    const result = await callTool(env, accessToken, 'fling_set_owners', {
+      name: 'q3-report',
+      add: [BOB],
+    })
+    expect(result.isError).toBeFalsy()
+    await settle(env)
+    expect(subjects(env, BOB)).toEqual(['Acme Fling: You are now an owner of q3-report'])
+  })
+})
+
 describe('groups', () => {
   it('emails the people added, on creation and later, with the sites it opens to them', async () => {
     const { env, alice, bob } = await world()

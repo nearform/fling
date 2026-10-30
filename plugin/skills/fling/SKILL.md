@@ -183,6 +183,19 @@ It is remembered, and becomes the current one only if none is.
   limited to a deleted group alone shows "a deleted group (#<id>)" and is its owner's only until
   they add people or groups.
 
+## Owners and publishers
+
+- A site's **owners** all have every right over it (publish, roll back, change its access and
+  settings, its owners and publishers, archive, delete); its **publishers** publish and roll back,
+  and change nothing else. Both are people (members of the Fling, never guests) and groups.
+  `fling_info` names them and the user's own role (`fling_list` too: "you are a publisher").
+- `fling_set_owners { name, add?, remove?, set?, addGroups?, removeGroups?, setGroups? }` and
+  `fling_set_publishers { … }` change them, like `fling_set_audience`. Only owners may, and only
+  when the user asks. A site keeps at least one person as an owner (`last_owner`), and naming a
+  group trusts whoever manages it: say so when the user names one.
+- As a publisher, the user can't change who can open the site, its settings or owners, nor restore
+  an archived site by publishing (`owner_only`): suggest asking one of its owners.
+
 ## Archive vs delete
 
 - `fling_archive { name }` takes a site offline (404) and hides it, but keeps every file and
@@ -236,6 +249,6 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
 CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
-[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
+[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling owners|publishers <name> [--add|--remove|--set <emails>|--group|--remove-group <slugs>]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

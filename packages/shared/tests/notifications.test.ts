@@ -145,8 +145,12 @@ describe('cell changes, as the CLI and the MCP tools take them', () => {
 
   it('read back as text: every event with its key, values per channel, and your own marked', () => {
     const prefs = applyPreferencesUpdate(null, { cells: { 'site.shared': { email: 'off' } } })
+    // Every capability an event needs, so every event is listed.
+    const capabilities = Object.fromEntries(
+      EVENT_CATALOGUE.flatMap(e => (e.capability ? [[e.capability, true]] : []))
+    )
     const text = describeNotificationSettings(
-      notificationSettings(prefs, { channels: ['email'], capabilities: { comments: true } })
+      notificationSettings(prefs, { channels: ['email'], capabilities })
     )
     for (const e of EVENT_CATALOGUE) expect(text).toContain(`- ${e.key}: ${e.title}`)
     expect(text).toContain('site.shared: Someone shares a site with you — email off (yours)')

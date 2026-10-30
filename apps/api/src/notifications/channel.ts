@@ -42,6 +42,9 @@ export interface CommentView {
 export interface EventDetails {
   'site.shared': { site: SiteView }
   'site.shared_via_group': { site: SiteView; group: GroupView }
+  /** `site`: the site's page in the app; `group`: the group that made them one, if not directly */
+  'site.owner_added': { site: SiteView; group: GroupView | null }
+  'site.publisher_added': { site: SiteView; group: GroupView | null }
   /** `sites`: the sites the group opens to the recipient that they can see (some of them) */
   'group.member_added': { group: GroupView; sites: SiteView[]; moreSites: number }
   'comment.created': { site: SiteView; comment: CommentView }

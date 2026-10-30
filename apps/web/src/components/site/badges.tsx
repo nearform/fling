@@ -1,6 +1,7 @@
 /**
  * The badges a site wears in the list and on its page: its access level (or archived), with how
- * many people and teams a list names, and whether it has a share link. Neutral and muted, so they
+ * many people and teams a list names, whether it has a share link, and Publisher when the user
+ * publishes it without owning it. Neutral and muted, so they
  * read as status beside the tinted Review button, never as actions; the icon tells the levels
  * apart.
  */
@@ -15,6 +16,7 @@ import {
   GlobeAltIcon,
   LinkIcon,
   LockClosedIcon,
+  PaperAirplaneIcon,
   UserGroupIcon,
   UserIcon,
 } from '@heroicons/react/24/outline'
@@ -64,6 +66,15 @@ export function SiteBadges({ site, othersSite = false }: { site: Site; othersSit
         <span className="badge badge-sm badge-ghost gap-1" title="Has a share link">
           <LinkIcon className="h-3 w-3" aria-hidden />
           Shared
+        </span>
+      )}
+      {site.role === 'publisher' && (
+        <span
+          className="badge badge-sm badge-ghost gap-1"
+          title="You publish this site: its owners manage who can open it and its settings"
+        >
+          <PaperAirplaneIcon className="h-3 w-3" aria-hidden />
+          Publisher
         </span>
       )}
     </>

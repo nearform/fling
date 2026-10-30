@@ -5,7 +5,8 @@
  * - the event's capability is still on (comments), and the recipient's preferences want it on
  *   this channel (`effectivePreference`);
  * - policy still lets the recipient, as a user with their memberships loaded (a guest as one), see what the email
- *   is about: `site.view` for shares, `comment.read` for comments, and the group still holds them
+ *   is about: `site.view` for shares, the role itself for a new owner or publisher (owners change
+ *   the owners, publishers deploy and are no owner), `comment.read` for comments, and the group still holds them
  *   for group events. A site that is gone or archived, a narrowed audience, a group they left, a
  *   deleted comment or thread: the item is dropped. This is the one guarantee that an email never
  *   reveals a site to someone who cannot see it.
@@ -33,6 +34,10 @@ export const EXCERPT_CHARS = 300
 const GROUP_SITES_MAX = 10
 /** How many of a group's sites are checked for that list (each one is read and asked of policy). */
 const GROUP_SITES_READ = 50
+
+/** The site's page in the app (`/sites/<name>`), where its owners and publishers manage it. */
+const sitePage = (deps: Deps, name: string) =>
+  `${deps.config.appOrigin}/sites/${encodeURIComponent(name)}`
 
 /** What one batch's checks read once and share. */
 export class Resolver {
@@ -133,6 +138,26 @@ export class Resolver {
           key: item.key,
           details: { site: this.siteView(site), group: this.groupView(group) },
         }
+      }
+      case 'site.owner_added':
+      case 'site.publisher_added': {
+        const site = await this.site(item.siteId, data.siteName)
+        if (!site) return null
+        const group = data.groupId === undefined ? null : await this.group(data.groupId)
+        if (data.groupId !== undefined && (!group || !this.memberships.includes(group.id))) {
+          return null
+        }
+        const owner = can(this.recipient, 'site.owners', site)
+        const holds =
+          item.key === 'site.owner_added'
+            ? owner
+            : !owner && can(this.recipient, 'site.deploy', site)
+        if (!holds) return null
+        const details = {
+          site: { name: site.name, url: sitePage(this.deps, site.name) },
+          group: group ? this.groupView(group) : null,
+        }
+        return { ...base, key: item.key, details } as AnyDeliveryItem
       }
       case 'group.member_added': {
         const group = await this.group(data.groupId)

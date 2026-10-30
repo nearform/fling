@@ -31,6 +31,7 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describeRoles,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
@@ -127,8 +128,10 @@ import {
   setAccess,
   setAudience,
   setNotifications,
+  setRoles,
   setVisibility,
   share,
+  siteRolesEnabled,
   sitesBaseOf,
   sitesPattern,
   siteUrlFor,
@@ -288,6 +291,20 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         `${instance.name} (${serverLabel(target.url)}) has no access levels yet: leave out \`access\`, then use fling_set_visibility or fling_set_audience`
       )
     }
+  }
+
+  /**
+   * Refuse to change owners or publishers on a Fling without them, its metadata fetched again when
+   * the stored copy predates them.
+   */
+  async function requireSiteRoles(target: Target) {
+    const instance = await loadInstanceWith(store, target.config, fetchImpl, 'siteRoles')
+    if (instance && !siteRolesEnabled(instance)) {
+      throw new CliError(
+        `${instance.name} (${serverLabel(target.url)}) has no site owners and publishers yet`
+      )
+    }
+    return instance
   }
 
   /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
@@ -860,7 +877,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       const access = site.audience ? `\n${describeAudience(site, await membersOn(target))}` : ''
       const by = site.versions.find(v => v.id === site.currentVersionId)?.publishedBy
       const published = by ? `\nCurrent version published by ${by}` : ''
-      return { summary: `${site.name}: ${site.url}${access}${published}`, data: site }
+      const roles = site.owners ? `\n${describeRoles(site)}` : ''
+      return { summary: `${site.name}: ${site.url}${access}${roles}${published}`, data: site }
     })
   )
 
@@ -948,6 +966,36 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         const site = await setAudience(target.client, args.name, change)
         return {
           summary: `${site.name}: ${describeAudience(site, await membersOn(target))}${onFling(target.url, instance)}`,
+          data: site,
+        }
+      })
+    )
+  }
+
+  // Owners and publishers: each call checks the Fling it goes to.
+  for (const [def, which] of [
+    [t.setOwners, 'owners'],
+    [t.setPublishers, 'publishers'],
+  ] as const) {
+    server.registerTool(def.name, serverTool(def), args =>
+      run(def.name, args.server, async target => {
+        const instance = await requireSiteRoles(target)
+        const change = {
+          add: args.add,
+          remove: args.remove,
+          set: args.set,
+          addGroups: args.addGroups,
+          removeGroups: args.removeGroups,
+          setGroups: args.setGroups,
+        }
+        if (!changesAudience(change)) {
+          throw new CliError(
+            'Pass `add`, `remove`, `set`, `addGroups`, `removeGroups` or `setGroups`'
+          )
+        }
+        const site = await setRoles(target.client, args.name, which, change)
+        return {
+          summary: `${site.name}: ${describeRoles(site)}${onFling(target.url, instance)}`,
           data: site,
         }
       })

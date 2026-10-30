@@ -18,6 +18,8 @@ export type Delivery = z.infer<typeof DeliverySchema>
 export const EVENT_KEYS = [
   'site.shared',
   'site.shared_via_group',
+  'site.owner_added',
+  'site.publisher_added',
   'group.member_added',
   'comment.created',
   'comment.reply',
@@ -59,6 +61,24 @@ export const EVENT_CATALOGUE: readonly EventDefinition[] = [
     section: 'sharing',
     defaults: { email: 'on' },
     coolDown: false,
+  },
+  {
+    key: 'site.owner_added',
+    title: 'Someone makes you an owner of a site',
+    description: "A site's owner adds you, or a group you are in, to its owners.",
+    section: 'sharing',
+    defaults: { email: 'on' },
+    coolDown: false,
+    capability: 'siteRoles',
+  },
+  {
+    key: 'site.publisher_added',
+    title: 'Someone makes you a publisher of a site',
+    description: "A site's owner adds you, or a group you are in, to who may publish it.",
+    section: 'sharing',
+    defaults: { email: 'on' },
+    coolDown: false,
+    capability: 'siteRoles',
   },
   {
     key: 'group.member_added',

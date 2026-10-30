@@ -13,10 +13,12 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describeRoles,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
   editAudienceInput,
+  editRoleInput,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
   mcpRemoteInstructions,
@@ -30,6 +32,7 @@ import {
   READY_TIMEOUT_LAMBDA_MS,
   readinessWaitDisabled,
   reviewUrl,
+  roleLabel,
   type Site,
   shareForFeedback,
   sortSites,
@@ -94,6 +97,7 @@ export function describeError(err: unknown): string {
 
 const describeSite = (s: Site) =>
   `${s.url} (${s.access ?? s.visibility}${s.archived ? ', archived' : ''}${s.spa ? ', spa' : ''})` +
+  (s.role ? ` — you are ${roleLabel(s.role)}` : '') +
   (s.shareUrl ? ` — share link: ${s.shareUrl}` : '')
 
 /** Wait (capped well inside the connector's ~10 s timeout) for the edge to route a new URL. */
@@ -305,6 +309,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     return {
       text:
         `${site.name}: ${describeSite(site)}\n${describeAudience(site, members)}\n` +
+        `${describeRoles(site)}\n` +
         `Versions (newest first):\n${versions || '(none)'}`,
       data: site,
     }
@@ -497,6 +502,40 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     )
     return { text: `${site.name}: ${describeAudience(site, members)}`, data: site }
   })
+
+  for (const [def, which] of [
+    [mcpTools.setOwners, 'owners'],
+    [mcpTools.setPublishers, 'publishers'],
+  ] as const) {
+    registerSiteTool(def, async args => {
+      const change = {
+        add: args.add,
+        remove: args.remove,
+        set: args.set,
+        addGroups: args.addGroups,
+        removeGroups: args.removeGroups,
+        setGroups: args.setGroups,
+      }
+      if (!changesAudience(change)) {
+        throw new ApiError(
+          400,
+          'bad_request',
+          'Pass `add`, `remove`, `set`, `addGroups`, `removeGroups` or `setGroups`'
+        )
+      }
+      // Reading the list to edit it; updateSite asks for site.owners or site.publishers.
+      const current = await sites.requireSite(deps, user, args.name, 'site.read')
+      const roles = await sites.rolesView(deps, current)
+      const site = await sites.updateSite(
+        deps,
+        user,
+        args.name,
+        { [which]: editRoleInput(roles[which], change) },
+        principal
+      )
+      return { text: `${site.name}: ${describeRoles(site)}`, data: site }
+    })
+  }
 
   registerSiteTool(mcpTools.archive, async args => {
     const site = await sites.setArchived(deps, user, args.name, !args.unarchive)

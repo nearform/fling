@@ -1,9 +1,13 @@
-/** Site management: ls, info, versions, rollback, share, visibility, access, archive/unarchive, rm. */
+/**
+ * Site management: ls, info, versions, rollback, share, visibility, access, owners, publishers,
+ * archive/unarchive, rm.
+ */
 import {
   ACCESS_LABELS,
   type AccessLevel,
   changesAudience,
   describeAudience,
+  describeRoles,
   privateAudience,
   type Site,
   type SiteDetail,
@@ -13,6 +17,7 @@ import {
   splitEmails,
   splitGroups,
   type Visibility,
+  whoHolds,
 } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
@@ -26,15 +31,19 @@ import {
   audienceWarnings,
   deleteSite,
   getAudience,
+  getRoles,
   getSite,
   groupsEnabled,
   listShared,
   listSites,
+  type RoleList,
   rollback,
   setAccess,
   setAudience,
+  setRoles,
   setVisibility,
   share,
+  siteRolesEnabled,
   versionFiles,
 } from '../sites.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
@@ -52,6 +61,7 @@ export async function runList(
         header: 'ACCESS',
         value: s => accessLabel(s) + (s.archived ? ' (archived)' : ''),
       },
+      ...(sites.some(s => s.role) ? [{ header: 'ROLE', value: (s: Site) => s.role ?? '-' }] : []),
       { header: 'SHARE', value: s => s.shareUrl },
       { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
     ])
@@ -79,8 +89,9 @@ export async function runListShared(ctx: CommandContext, opts: { sort?: SiteSort
 /** `Only you`, `Everyone signed in`, `Specific people`…: a site's access level, for tables. */
 const accessLabel = (site: Site) => ACCESS_LABELS[siteAccessLevel(site)]
 
+const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
+
 function describeSite(site: Site & { versions?: SiteDetail['versions'] }): string[] {
-  const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
   return [
     row('Name', site.name),
     row('URL', site.url),
@@ -88,16 +99,22 @@ function describeSite(site: Site & { versions?: SiteDetail['versions'] }): strin
     row('SPA', site.spa ? 'yes' : 'no'),
     row('Share link', site.shareUrl ?? '-'),
     row('Version', site.currentVersionId ?? '-'),
-    ...filesRow(site, row),
+    ...filesRow(site),
     row('Created', formatDate(site.createdAt)),
     row('Updated', formatDate(site.updatedAt)),
   ]
 }
 
-function filesRow(
-  site: Site & { versions?: SiteDetail['versions'] },
-  row: (label: string, value: string) => string
-): string[] {
+/** Owners, Publishers and You: the site's roles, from servers with site roles. */
+function rolesRows(site: SiteDetail): string[] {
+  return [
+    ...(site.owners ? [row('Owners', whoHolds(site.owners))] : []),
+    ...(site.owners ? [row('Publishers', whoHolds(site.publishers))] : []),
+    ...(site.role ? [row('You', site.role)] : []),
+  ]
+}
+
+function filesRow(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   const current = site.versions?.find(v => v.id === site.currentVersionId)
   if (!current) return []
   const n = current.fileCount
@@ -121,6 +138,7 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
     [
       ...describeSite(site),
       ...access,
+      ...rolesRows(site),
       '',
       chalk.dim(
         `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
@@ -315,6 +333,49 @@ async function runSetLevel(
   const warnings = audienceWarnings(site)
   for (const w of warnings) ctx.log.warn(w)
   ctx.out.data({ ...site, warnings }, () => describeAudience(site, membersOf(ctx)))
+}
+
+/**
+ * `fling owners|publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …]`:
+ * show a site's owners and publishers or, with options, change one list (the whole new list goes
+ * to the server, which keeps at least one person owner and only takes members).
+ */
+export async function runRoles(
+  ctx: CommandContext,
+  which: RoleList,
+  name: string,
+  opts: {
+    add?: string[]
+    remove?: string[]
+    set?: string[]
+    group?: string[]
+    removeGroup?: string[]
+  }
+): Promise<void> {
+  const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'siteRoles')
+  if (instance && !siteRolesEnabled(instance)) {
+    throw new CliError(`${instance.name} has no site owners and publishers yet`, {
+      hint: 'Ask its operator to update it.',
+    })
+  }
+  const change = {
+    ...(opts.set ? { set: splitEmails(opts.set) } : {}),
+    add: splitEmails(opts.add ?? []),
+    remove: splitEmails(opts.remove ?? []),
+    addGroups: splitGroups(opts.group ?? []),
+    removeGroups: splitGroups(opts.removeGroup ?? []),
+  }
+  if (instance && (change.addGroups.length || change.removeGroups.length)) {
+    if (!groupsEnabled(instance)) throw new CliError(`${instance.name} has no groups`)
+  }
+  const client = requireClient(ctx)
+  const changed = changesAudience(change)
+  const site = changed ? await setRoles(client, name, which, change) : await getRoles(client, name)
+  if (changed) ctx.log.success(`${name}'s ${which} changed`)
+  ctx.out.data(
+    { name: site.name, role: site.role, owners: site.owners, publishers: site.publishers },
+    () => describeRoles(site)
+  )
 }
 
 export async function runArchive(

@@ -5,7 +5,7 @@
  * error is logged, without addresses, and swallowed). The drainer (drain.ts) does the rest.
  *
  * Event ids are derived from the cause (`comment.created:<siteId>:<commentId>`,
- * `site.shared:<siteId>:<site updatedAt>`, `group.member_added:<groupId>:<group updatedAt>`), so a
+ * `site.shared:<siteId>:<site updatedAt>`, `site.owner_added:<siteId>:<site updatedAt>`, `group.member_added:<groupId>:<group updatedAt>`), so a
  * retried request records the event once.
  *
  * Nothing is recorded on an instance without a notifications channel, for an event whose
@@ -13,11 +13,17 @@
  * nothing done in an impersonated session may outlive it.
  *
  * The helpers below are what the actions call (sites.ts `updateSite`, groups.ts, comments.ts):
- * they name only what changed, so saving the same audience or group again notifies nobody.
+ * they name only what changed, so saving the same audience, roles or group again notifies nobody.
  */
 import { type EventKey, eventDefinition } from '@fling/shared'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
-import { type CommentRecord, minuteOf, type SiteAudience, type SiteRecord } from '../store/types.ts'
+import {
+  type CommentRecord,
+  minuteOf,
+  type SiteAudience,
+  type SiteRecord,
+  type SiteRoleList,
+} from '../store/types.ts'
 import type { Deps } from '../types.ts'
 import { errorName, logNotify } from './log.ts'
 
@@ -35,10 +41,25 @@ export interface EventData {
     direct: string[]
     kept: string[]
   }
+  'site.owner_added': RoleEventData
+  'site.publisher_added': RoleEventData
   /** `emails`: the members this change added */
   'group.member_added': { groupId: string; emails: string[] }
   'comment.created': CommentEventData
   'comment.reply': CommentEventData
+}
+
+/**
+ * A change to a site's owners or publishers: `emails` and `groups` it added to the role; `direct`:
+ * every address the role names (they hear of it by address, or held it already); `kept`: groups it
+ * named before.
+ */
+export interface RoleEventData {
+  siteName: string
+  emails: string[]
+  groups: string[]
+  direct: string[]
+  kept: string[]
 }
 
 export interface CommentEventData {
@@ -144,6 +165,47 @@ export async function notifyAudienceChange(
           groups,
           direct: [...site.audience.emails],
           kept: site.audience.groups.filter(g => before.groups.includes(g)),
+        },
+      },
+      acting
+    )
+  }
+}
+
+/**
+ * An owner saved the site's owners or publishers (already written, so `site.updatedAt` is this
+ * change's): `site.owner_added` and `site.publisher_added` for the people and groups each role
+ * gained since `before`.
+ */
+export async function notifyRoleChange(
+  deps: Deps,
+  owner: string,
+  site: SiteRecord,
+  before: { owners: SiteRoleList; publishers: SiteRoleList },
+  acting: Acting = {}
+) {
+  const cause = `${site.id}:${site.updatedAt}`
+  for (const [key, which] of [
+    ['site.owner_added', 'owners'],
+    ['site.publisher_added', 'publishers'],
+  ] as const) {
+    const now = site[which]
+    const emails = added(now.emails, before[which].emails)
+    const groups = added(now.groups, before[which].groups)
+    if (emails.length === 0 && groups.length === 0) continue
+    await notify(
+      deps,
+      {
+        key,
+        cause,
+        actor: owner,
+        siteId: site.id,
+        data: {
+          siteName: site.name,
+          emails,
+          groups,
+          direct: [...now.emails],
+          kept: now.groups.filter(g => before[which].groups.includes(g)),
         },
       },
       acting

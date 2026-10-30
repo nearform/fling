@@ -60,6 +60,7 @@ import {
   type SiteDetail,
   SiteDetailSchema,
   SiteListSchema,
+  type SiteRoleInput,
   type VersionFiles,
   VersionFilesSchema,
   type Visibility,
@@ -193,6 +194,8 @@ export const api = {
       visibility?: Visibility
       spa?: boolean
       audience?: AudienceInput
+      owners?: SiteRoleInput
+      publishers?: SiteRoleInput
     }
   ) => request(site(name), ignoreBody, { method: 'PATCH', body }),
   /** Creates the share link, or rotates it when one exists (the old link stops working). */

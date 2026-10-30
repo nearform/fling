@@ -5,7 +5,7 @@
  * adapter in @fling/conformance.
  */
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import type { S3Client } from '@aws-sdk/client-s3'
+import { HeadObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { Records } from '@fling/api/store/records'
 import {
   blobsConformance,
@@ -40,5 +40,11 @@ describe.runIf(S3_ENDPOINT)('MinIO', () => {
   beforeAll(async () => {
     s3 = await s3Bucket()
   }, 60_000)
-  blobsConformance('S3Blobs', () => ({ blobs: new S3Blobs(s3.bucket, s3.client) }))
+  blobsConformance('S3Blobs', () => ({
+    blobs: new S3Blobs(s3.bucket, s3.client),
+    metadata: async key => {
+      const res = await s3.client.send(new HeadObjectCommand({ Bucket: s3.bucket, Key: key }))
+      return { contentType: res.ContentType, cacheControl: res.CacheControl }
+    },
+  }))
 })

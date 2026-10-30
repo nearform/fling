@@ -10,6 +10,11 @@ export interface BlobsHarness {
   blobs: Blobs
   /** The client's half of a presigned upload (default: global fetch). */
   upload?: (url: string, init: RequestInit) => Promise<Response>
+  /**
+   * The object's stored Content-Type and Cache-Control, read beside the port, for adapters that
+   * keep them (S3, R2). FsBlobs keeps none: its dev server derives the type from the name.
+   */
+  metadata?: (key: string) => Promise<{ contentType?: string; cacheControl?: string } | null>
 }
 
 const bytes = (s: string) => new TextEncoder().encode(s)
@@ -86,6 +91,28 @@ export function blobsConformance(
       expect(text(await blobs.get(`${p}_manifests/v10.json`))).toBe('3')
       await expect(blobs.delete(`${p}_manifests/v1.json`)).resolves.toBeUndefined()
       await expect(blobs.delete(`${p}never/was.txt`)).resolves.toBeUndefined()
+    })
+
+    it('copy duplicates an object with its metadata and leaves the source', async () => {
+      const { blobs, metadata, p } = await setup()
+      const bin = new Uint8Array([0, 137, 80, 78, 71, 255, 10])
+      const meta = { contentType: 'image/png', cacheControl: 'public, max-age=300' }
+      await blobs.put(`${p}v1/img/a b.png`, bin, meta)
+      await blobs.copy(`${p}v1/img/a b.png`, `${p}v2/img/a b.png`)
+      expect([...((await blobs.get(`${p}v2/img/a b.png`)) ?? [])]).toEqual([...bin])
+      expect(await blobs.head(`${p}v2/img/a b.png`)).toEqual({ size: bin.length })
+      expect([...((await blobs.get(`${p}v1/img/a b.png`)) ?? [])]).toEqual([...bin])
+      if (metadata) expect(await metadata(`${p}v2/img/a b.png`)).toMatchObject(meta)
+    })
+
+    it('copy overwrites the destination and refuses a missing source', async () => {
+      const { blobs, p } = await setup()
+      await blobs.put(`${p}from.txt`, bytes('new'))
+      await blobs.put(`${p}to.txt`, bytes('old and longer'))
+      await blobs.copy(`${p}from.txt`, `${p}to.txt`)
+      expect(text(await blobs.get(`${p}to.txt`))).toBe('new')
+      await expect(blobs.copy(`${p}never/was.txt`, `${p}x.txt`)).rejects.toThrow()
+      expect(await blobs.head(`${p}x.txt`)).toBeNull()
     })
 
     it('deletePrefix on a prefix with nothing under it is a no-op', async () => {

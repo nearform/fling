@@ -5,7 +5,7 @@
  * body's SHA-256 checked like S3 checks `x-amz-checksum-sha256`.
  */
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { type SignedUploadRequest, signUpload, verifyUpload } from './signed-upload.ts'
 import type { Blobs, PresignedPut } from './types.ts'
@@ -86,6 +86,13 @@ export class FsBlobs implements Blobs {
     } catch {
       return null
     }
+  }
+
+  /** Files carry no metadata here: the dev sites server derives the content type from the name. */
+  async copy(from: string, to: string) {
+    const file = this.pathFor(to)
+    await mkdir(dirname(file), { recursive: true })
+    await copyFile(this.pathFor(from), file)
   }
 
   async delete(key: string) {

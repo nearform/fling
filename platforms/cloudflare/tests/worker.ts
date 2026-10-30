@@ -1,6 +1,8 @@
 /**
  * The Worker the tests run in workerd (bundled by miniflare.ts): R2Blobs' upload route, so signed
- * uploads arrive as real requests and stream into R2 the way they will in production; and
+ * uploads arrive as real requests and stream into R2 the way they will in production;
+ * `POST /copy` runs `R2Blobs.copy` on a list of `[from, to]` pairs in workerd (where R2 streams
+ * need a known length, which the Node proxy can't show); and
  * `*.sites.example.test` is the sites host (src/sites.ts) over the KV + D1 route table and R2,
  * with a stub for the assets' 404 page, review shell and robots.txt.
  */
@@ -28,6 +30,13 @@ export default {
     if (url.pathname.startsWith(`${UPLOAD_ROUTE}/`)) {
       const blobs = new R2Blobs(env.BUCKET, { secret: env.UPLOAD_SECRET, baseUrl: '' })
       return blobs.handleUpload(request)
+    }
+    if (url.pathname === '/copy' && request.method === 'POST') {
+      const blobs = new R2Blobs(env.BUCKET, { secret: env.UPLOAD_SECRET, baseUrl: '' })
+      const pairs = (await request.json()) as [string, string][]
+      const started = Date.now()
+      await Promise.all(pairs.map(([from, to]) => blobs.copy(from, to)))
+      return Response.json({ ms: Date.now() - started })
     }
     if (!url.hostname.endsWith('.sites.example.test')) return new Response(null, { status: 404 })
     return handleSiteRequest(request, {

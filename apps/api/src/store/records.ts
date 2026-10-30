@@ -6,8 +6,9 @@
  * access is policy's business (policy.ts), not the keys'.
  *
  *   pk                     sk                            item
- *   SITE#<siteId>          SITE                          site (email = owner, name, visibility, spa,
- *                                                        archived, currentVersionId, shareToken, …)
+ *   SITE#<siteId>          SITE                          site (email = creator, owners, publishers,
+ *                                                        name, visibility, spa, archived,
+ *                                                        currentVersionId, shareToken, …)
  *   SITE#<siteId>          VERSION#<versionId>           version (status, fileCount, totalBytes, …)
  *   SITE#<siteId>          COMMENT#<commentId>           comment (parentId, path, versionId, body,
  *                                                        author, resolvedAt, …); ids sort by time,
@@ -19,7 +20,13 @@
  *                                                        written with it (a hub knows only the
  *                                                        connection id when it closes)
  *   USER#<email>           SITE#<name>                   site index: a copy of the site record (a
- *                                                        projection), so a user's sites are one query
+ *                                                        projection) under its creator, so the
+ *                                                        sites a user created are one query
+ *   USER#<email>           ROLE#<siteId>                 role item: a copy of the site record and
+ *                                                        the role (owner, publisher) the address
+ *                                                        holds on it, for everyone but the creator
+ *                                                        (whose index item stands in), so the sites
+ *                                                        a user owns or publishes are one query
  *   USER#<email>           SHARED#<siteId>               direct grant: the email is in the audience
  *                                                        of someone else's site — a projection of
  *                                                        `audience` carrying the site's listing
@@ -52,6 +59,10 @@
  *                                                        with the site's listing (as a grant):
  *                                                        what deleting the group updates, and how
  *                                                        its members find the site
+ *   GROUP#<groupId>        ROLE#<siteId>                 role item: a copy of the site record and
+ *                                                        the role the group holds on it, so its
+ *                                                        members find the site, and deleting the
+ *                                                        group can take it out of the roles
  *   USER#<email>           GROUP#<groupId>               membership: written with the member item,
  *                                                        so a user's groups (what policy reads) are
  *                                                        one query
@@ -109,6 +120,22 @@
  * site is still refused. No release wrote v1 items (name and owner only), only development
  * builds, so no migration fills them in: Shared with me reads the site for any item without a
  * listing.
+ *
+ * Role items (site Record v3) follow the same pattern: `putSite` compares the roles of the stored
+ * site with the new ones, deletes the items of those who lost their role first, then rewrites
+ * every holder's item with the site (each is a full copy, so every save changes it), batched with
+ * the grants. An interrupted write can leave an item missing or out of date until the next save,
+ * and two saves racing can leave an item for someone who no longer holds a role: listing reads
+ * the copy and asks policy, so such a site is not listed, and opening it is refused. `ROLE#` is a
+ * prefix of its own, so code from before role items (and migration 0002) never reads or deletes
+ * them. A site has no role items until its roles name someone besides its creator, so no
+ * migration is needed: the creator's index item lists it to them.
+ *
+ * Rolling back one release (to code from before site Record v3): that code reads a v3 site,
+ * passing `owners` and `publishers` through, and treats the creator as the only owner, so
+ * co-owners and publishers lose their rights until the newer code is back. Writing the site it
+ * keeps the fields but not the role items, which then carry an older copy of the site; the next
+ * save by the newer code rewrites them all.
  *
  * A group's record, its two copies and (on creation) its claim are written in one transaction with
  * as many member changes as fit; the rest follow in batches of 12 (a member item and its
@@ -248,6 +275,8 @@ import {
   type SiteGrantRecord,
   type SiteRecord,
   type SiteRef,
+  type SiteRoleName,
+  type SiteRoleRecord,
   type Store,
   type SuppressionRecord,
   slugCandidate,
@@ -282,6 +311,7 @@ const key = {
   groupMember: (id: string, email: string) => ({ pk: groupPk(id), sk: `MEMBER#${email}` }),
   membership: (email: string, id: string) => ({ pk: userPk(email), sk: `GROUP#${id}` }),
   groupSite: (id: string, siteId: string) => ({ pk: groupPk(id), sk: `SITE#${siteId}` }),
+  groupRole: (id: string, siteId: string) => ({ pk: groupPk(id), sk: `ROLE#${siteId}` }),
   comment: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `COMMENT#${id}` }),
   live: (siteId: string, connectionId: string) => ({
     pk: sitePk(siteId),
@@ -420,6 +450,31 @@ function batches(head: TransactOp[], pairs: [TransactOp, TransactOp][]): Transac
   if (batch.length) out.push(batch)
   return out
 }
+
+/**
+ * Who holds a role item on the site, and which role: `USER#` and `GROUP#` partitions by key, an
+ * owner before a publisher (someone in both is an owner). The creator has none: their index item
+ * stands in for it.
+ */
+function roleHolders(site: SiteRecord | null): Map<string, SiteRoleName> {
+  const out = new Map<string, SiteRoleName>()
+  if (!site) return out
+  const add = (list: SiteRecord['owners'], role: SiteRoleName) => {
+    for (const email of list.emails) {
+      const k = userPk(email)
+      if (email !== site.email && !out.has(k)) out.set(k, role)
+    }
+    for (const id of list.groups) {
+      const k = groupPk(id)
+      if (!out.has(k)) out.set(k, role)
+    }
+  }
+  add(site.owners, 'owner')
+  add(site.publishers, 'publisher')
+  return out
+}
+
+const roleKey = (holder: string, siteId: string) => ({ pk: holder, sk: `ROLE#${siteId}` })
 
 const newestFirst = <T extends { createdAt: string }>(xs: T[]) =>
   xs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -625,6 +680,14 @@ export class Records implements Store {
     return sites.sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  listRoleSites(email: string) {
+    return this.list<SiteRoleRecord>('siterole', userPk(email), 'ROLE#')
+  }
+
+  listGroupRoleSites(groupId: string) {
+    return this.list<SiteRoleRecord>('siterole', groupPk(groupId), 'ROLE#')
+  }
+
   async createSite(site: SiteRecord) {
     const claim: NameClaim = {
       name: site.name,
@@ -650,7 +713,7 @@ export class Records implements Store {
     }
   }
 
-  async putSite(site: SiteRecord) {
+  async putSite(site: SiteRecord, opts: { ifCurrentVersion?: string } = {}) {
     const stored = await this.storedSite(site)
     const before = stored?.audience ?? { emails: [], groups: [] }
     const after = site.audience
@@ -666,6 +729,10 @@ export class Records implements Store {
         .filter(groupId => !after.groups.includes(groupId))
         .map(groupId => ({ delete: key.groupSite(groupId, site.id) })),
     ]
+    const holders = roleHolders(site)
+    for (const holder of roleHolders(stored).keys()) {
+      if (!holders.has(holder)) removed.push({ delete: roleKey(holder, site.id) })
+    }
     const written: TransactOp[] = [
       ...after.emails
         .filter(email => email !== site.email && (relist || !before.emails.includes(email)))
@@ -679,6 +746,10 @@ export class Records implements Store {
           const item: GroupSiteRecord = { groupId, ...listing }
           return { put: encode('groupsite', key.groupSite(groupId, site.id), item) }
         }),
+      ...[...holders].map(([holder, role]) => {
+        const item: SiteRoleRecord = { ...site, role }
+        return { put: encode('siterole', roleKey(holder, site.id), item) }
+      }),
     ]
     // Removals land before the site stops naming them, so an interrupted write never leaves an
     // item for someone outside the stored audience (the header has the rest of the story).
@@ -686,7 +757,12 @@ export class Records implements Store {
       await this.table.transact(removed.slice(i, i + TRANSACT_MAX))
     }
     const ops: TransactOp[] = [
-      { put: encode('site', key.site(site.id), site) },
+      {
+        put: encode('site', key.site(site.id), site),
+        ...(opts.ifCurrentVersion === undefined
+          ? {}
+          : { cond: fieldEquals('currentVersionId', opts.ifCurrentVersion) }),
+      },
       { put: encode('site', key.siteIndex(site.email, site.name), site) },
       ...(rewriteDirectory
         ? [{ put: encode('sitedirectory', key.siteDirectory(site.name), entry) }]
@@ -751,7 +827,8 @@ export class Records implements Store {
     const rest = owned.items.filter(i => i.sk !== 'SITE')
     const grants = site.audience.emails.map(email => key.siteGrant(email, site.id))
     const groups = site.audience.groups.map(groupId => key.groupSite(groupId, site.id))
-    await this.deleteAll([...rest, ...legacy.items, ...grants, ...groups])
+    const roles = [...roleHolders(site).keys()].map(holder => roleKey(holder, site.id))
+    await this.deleteAll([...rest, ...legacy.items, ...grants, ...groups, ...roles])
     // Release the name claim and the directory item only if they are this site's (or absent). If
     // another site holds the name, the site is still deleted and the holder's items kept.
     const ops: TransactOp[] = [
@@ -887,9 +964,10 @@ export class Records implements Store {
   async deleteGroup(group: GroupRecord) {
     // Members, memberships and site items first, so an interrupted delete leaves the group
     // findable and the delete can be repeated.
-    const [members, sites] = await Promise.all([
+    const [members, sites, roles] = await Promise.all([
       this.listGroupMembers(group.id),
       this.listGroupSites(group.id),
+      this.listGroupRoleSites(group.id),
     ])
     await this.deleteAll([
       ...members.flatMap(email => [
@@ -897,6 +975,7 @@ export class Records implements Store {
         key.groupMember(group.id, email),
       ]),
       ...sites.map(s => key.groupSite(group.id, s.siteId)),
+      ...roles.map(s => key.groupRole(group.id, s.id)),
     ])
     await this.table.transact([
       { delete: key.group(group.id) },

@@ -2,6 +2,12 @@ import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { ManifestSchema } from './manifest.ts'
+import {
+  OwnersInputSchema,
+  PublishersInputSchema,
+  SiteRoleMembersSchema,
+  SiteRoleSchema,
+} from './site-roles.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
 // `__Host-fling_session` cookie (web UI) or `Authorization: Bearer <api key>` (CLI/MCP).
@@ -41,13 +47,22 @@ export const SiteSchema = z.object({
   audienceSize: z.number().default(0),
   /** how many of those are groups */
   audienceGroups: z.number().default(0),
+  /** the caller's role on it (site-roles.ts); servers before site roles omit it */
+  role: SiteRoleSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
 export type Site = z.infer<typeof SiteSchema>
 
-/** A site with its audience, for its owner (`audiences` capability; older servers omit it). */
-export const SiteWithAudienceSchema = SiteSchema.extend({ audience: AudienceSchema.optional() })
+/**
+ * A site with its audience, for its owner (`audiences` capability; older servers omit it), and its
+ * owners and publishers (site-roles.ts; servers before site roles omit them).
+ */
+export const SiteWithAudienceSchema = SiteSchema.extend({
+  audience: AudienceSchema.optional(),
+  owners: SiteRoleMembersSchema.optional(),
+  publishers: SiteRoleMembersSchema.optional(),
+})
 export type SiteWithAudience = z.infer<typeof SiteWithAudienceSchema>
 
 export const VersionSchema = z.object({
@@ -61,8 +76,8 @@ export const VersionSchema = z.object({
 export type Version = z.infer<typeof VersionSchema>
 
 /**
- * GET /api/sites/:name. `owner`: who holds the site (an admin may open anyone's); servers before
- * admins could open other people's sites omit it.
+ * GET /api/sites/:name. `owner`: its first person owner (an admin may open anyone's); servers
+ * before admins could open other people's sites omit it.
  */
 export const SiteDetailSchema = SiteWithAudienceSchema.extend({
   owner: z.string().optional(),
@@ -187,13 +202,20 @@ export const RollbackRequestSchema = z.object({ versionId: z.string() })
  * to every member. An address the instance wouldn't let sign in is a 400 `email_not_allowed`, unless
  * the instance has outside invitations on (the `invites` capability): then an address the audience
  * adds is invited as a guest, at most `INVITES_PER_DAY` new ones a day per person (429
- * `too_many_invites` past it).
+ * `too_many_invites` past it). `owners` and `publishers` (site-roles.ts) each replace the whole
+ * list and come back with the site: their addresses must be members (400 `email_not_allowed`),
+ * their groups must exist (400 `unknown_group`), and the owners must keep an address (400
+ * `last_owner`); someone in both lists is an owner.
  */
 export const UpdateSiteRequestSchema = z.object({
   access: AccessLevelSchema.optional(),
   visibility: VisibilitySchema.optional(),
   spa: z.boolean().optional(),
   audience: AudienceInputSchema.optional(),
+  /** the whole new list of owners (site-roles.ts): owners only */
+  owners: OwnersInputSchema.optional(),
+  /** the whole new list of publishers (site-roles.ts): owners only */
+  publishers: PublishersInputSchema.optional(),
 })
 
 export const ApiKeySchema = z.object({

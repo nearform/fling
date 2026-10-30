@@ -25,6 +25,8 @@ const site = (email: string, name: string, overrides: Partial<SiteRecord> = {}):
   currentVersionId: null,
   shareToken: null,
   audience: { emails: [], groups: [] },
+  owners: { emails: [email], groups: [] },
+  publishers: { emails: [], groups: [] },
   createdAt: NOW,
   updatedAt: NOW,
   ...overrides,
@@ -308,6 +310,21 @@ describe('record versions', () => {
     const kept = { emails: ['b@example.test'], groups: [] }
     await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 1, ...v1, audience: kept })
     expect((await records.findSite('hello'))?.audience).toEqual(kept)
+  })
+
+  it('reads a v2 site (no owners or publishers) as its creator alone, and keeps those a v2 reader wrote back', async () => {
+    const table = new MemoryTable()
+    const { owners: _o, publishers: _p, ...v2 } = site('a@example.test', 'hello')
+    await table.put(old.claim('hello', 'a@example.test'))
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 2, ...v2 })
+    const records = new Records(table)
+    const read = await records.findSite('hello')
+    expect(read?.owners).toEqual({ emails: ['a@example.test'], groups: [] })
+    expect(read?.publishers).toEqual({ emails: [], groups: [] })
+    const owners = { emails: ['b@example.test'], groups: ['g1'] }
+    const publishers = { emails: ['c@example.test'], groups: [] }
+    await table.put({ pk: 'SITE#site1', sk: 'SITE', type: 'site', v: 2, ...v2, owners, publishers })
+    expect(await records.findSite('hello')).toMatchObject({ owners, publishers })
   })
 
   it('reads a record one version ahead, passing unknown fields through', async () => {

@@ -311,13 +311,13 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.files, async args => {
-    const site = await sites.requireSite(deps, user, args.name, 'version.read')
+    const { site, actor } = await sites.requireSiteAs(deps, user, args.name, 'version.read')
     const versionId = args.versionId ?? site.currentVersionId
     if (!versionId)
       throw new ApiError(404, 'not_found', `${args.name} has no published version yet`)
     const files = await sites.versionFiles(deps, user, args.name, versionId)
     const current = versionId === site.currentVersionId
-    const url = sites.toSite(deps, user, site).url
+    const url = sites.toSite(deps, actor, site).url
     return {
       text: describeVersionFiles(site.name, files, { current, url }),
       data: { name: site.name, current, ...files },
@@ -412,9 +412,9 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       const site = await sites.revokeShare(deps, user, args.name)
       return { text: `Share link for ${site.name} revoked.`, data: { action: 'revoked', site } }
     }
-    const current = await sites.requireSite(deps, user, args.name, 'share.read')
+    const { site: current, actor } = await sites.requireSiteAs(deps, user, args.name, 'share.read')
     if (current.shareToken && !args.refresh) {
-      const site = sites.toSite(deps, user, current)
+      const site = sites.toSite(deps, actor, current)
       return {
         text: `Share link for ${site.name}: ${site.shareUrl} — anyone with it can view the site.`,
         data: { action: 'existing', shareUrl: site.shareUrl },

@@ -79,6 +79,8 @@ function site(owner: string, name: string): SiteRecord {
     currentVersionId: 'v1',
     shareToken: null,
     audience: { emails: [], groups: [] },
+    owners: { emails: [owner], groups: [] },
+    publishers: { emails: [], groups: [] },
     createdAt: now,
     updatedAt: now,
   }

@@ -38,6 +38,7 @@ import {
   impersonationRefusal,
   type Principal,
 } from './policy.ts'
+import { roleSites } from './sites.ts'
 import type { User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
@@ -106,10 +107,11 @@ export async function listUsers(
     limit,
     cursor: opts.cursor || undefined,
   })
-  // Site counts: one key query per user on the page (a user's index items), never a scan.
+  // Site counts: the sites each user owns or publishes, from their index items and their groups'
+  // (`roleSites`), never a scan.
   const users = await mapLimit(page.users, COUNT_CONCURRENCY, async u => ({
     ...u,
-    siteCount: (await deps.store.listSites(u.email)).length,
+    siteCount: (await roleSites(deps, u, await deps.store.listMemberships(u.email))).length,
     admin: isAdminEmail(deps.config, u.email),
     // Read only for users the configuration doesn't admit, and only with invitations on.
     guest: await invitations.isInvitedGuest(deps, u.email),

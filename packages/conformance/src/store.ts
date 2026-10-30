@@ -21,7 +21,7 @@ import type {
   UploadFileRecord,
   VersionRecord,
 } from '@fling/api/store'
-import { compareSk } from '@fling/api/table'
+import { ConditionFailed, compareSk } from '@fling/api/table'
 import { describe, expect, it } from 'vitest'
 import { notificationStoreConformance } from './store-notifications.ts'
 
@@ -45,6 +45,8 @@ function site(owner: string, name = siteName(), overrides: Partial<SiteRecord> =
     currentVersionId: null,
     shareToken: null,
     audience: { emails: [], groups: [] },
+    owners: { emails: [owner], groups: [] },
+    publishers: { emails: [], groups: [] },
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
@@ -474,6 +476,87 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.createSite(other)).toEqual(other)
       })
 
+      it('putSite keeps role items in step with the owners and publishers; deleteSite removes them', async () => {
+        const store = await factory()
+        const creator = email()
+        const [coOwner, publisher, later] = [email(), email(), email()]
+        const [ownerGroup, publisherGroup] = [uid(), uid()]
+        const s = site(creator)
+        await store.createSite(s)
+        // A new site has no role items: its creator's index item lists it.
+        expect(await store.listRoleSites(creator)).toEqual([])
+        const shared: SiteRecord = {
+          ...s,
+          owners: { emails: [creator, coOwner], groups: [ownerGroup] },
+          // Someone in both lists has the owner's item.
+          publishers: { emails: [publisher, coOwner], groups: [publisherGroup] },
+          updatedAt: LATER,
+        }
+        await store.putSite(shared)
+        expect(await store.listRoleSites(coOwner)).toEqual([{ ...shared, role: 'owner' }])
+        expect(await store.listRoleSites(publisher)).toEqual([{ ...shared, role: 'publisher' }])
+        expect(await store.listGroupRoleSites(ownerGroup)).toEqual([{ ...shared, role: 'owner' }])
+        expect(await store.listGroupRoleSites(publisherGroup)).toEqual([
+          { ...shared, role: 'publisher' },
+        ])
+        expect(await store.listRoleSites(creator)).toEqual([])
+        // Every save rewrites the copies; those who lose their role lose their item.
+        const changed: SiteRecord = {
+          ...shared,
+          spa: true,
+          owners: { emails: [coOwner], groups: [] },
+          publishers: { emails: [later, creator], groups: [publisherGroup] },
+        }
+        await store.putSite(changed)
+        expect(await store.listRoleSites(coOwner)).toEqual([{ ...changed, role: 'owner' }])
+        expect(await store.listRoleSites(publisher)).toEqual([])
+        expect(await store.listRoleSites(later)).toEqual([{ ...changed, role: 'publisher' }])
+        expect(await store.listRoleSites(creator)).toEqual([])
+        expect(await store.listGroupRoleSites(ownerGroup)).toEqual([])
+        expect(await store.listGroupRoleSites(publisherGroup)).toEqual([
+          { ...changed, role: 'publisher' },
+        ])
+        // The creator's index item stays, whatever their role.
+        expect(await store.listSites(creator)).toEqual([changed])
+        await store.deleteSite(changed)
+        expect(await store.listRoleSites(coOwner)).toEqual([])
+        expect(await store.listRoleSites(later)).toEqual([])
+        expect(await store.listGroupRoleSites(publisherGroup)).toEqual([])
+      })
+
+      it('putSite writes role items past one transaction', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const publishers = Array.from({ length: 50 }, () => email())
+        const many: SiteRecord = {
+          ...s,
+          owners: { emails: [s.email, ...Array.from({ length: 19 }, () => email())], groups: [] },
+          publishers: { emails: publishers, groups: [uid(), uid()] },
+        }
+        await store.putSite(many)
+        for (const e of [...many.owners.emails.slice(1), ...publishers]) {
+          expect(await store.listRoleSites(e)).toHaveLength(1)
+        }
+        await store.putSite(s)
+        for (const e of [...many.owners.emails, ...publishers]) {
+          expect(await store.listRoleSites(e)).toEqual([])
+        }
+      })
+
+      it('putSite with ifCurrentVersion writes only while the stored site is on that version', async () => {
+        const store = await factory()
+        const s = site(email(), siteName(), { currentVersionId: 'v1' })
+        await store.createSite(s)
+        const next = { ...s, currentVersionId: 'v2', updatedAt: LATER }
+        await expect(store.putSite(next, { ifCurrentVersion: 'v0' })).rejects.toThrow(
+          ConditionFailed
+        )
+        expect(await store.findSite(s.name)).toEqual(s)
+        await store.putSite(next, { ifCurrentVersion: 'v1' })
+        expect(await store.findSite(s.name)).toEqual(next)
+      })
+
       it('deleteSite of a site that does not exist is a no-op', async () => {
         const store = await factory()
         await expect(store.deleteSite(site(email()))).resolves.toBeUndefined()
@@ -672,7 +755,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.findSite(s.name)).toBeNull()
       })
 
-      it('deleteGroup removes members, memberships, site items, copies and frees the slug', async () => {
+      it('deleteGroup removes members, memberships, site and role items, copies and frees the slug', async () => {
         const store = await factory()
         const owner = email()
         const member = email()
@@ -680,8 +763,14 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createGroup(g, [member])
         const s = site(email())
         await store.createSite(s)
-        await store.putSite({ ...s, audience: { emails: [], groups: [g.id] } })
+        await store.putSite({
+          ...s,
+          audience: { emails: [], groups: [g.id] },
+          publishers: { emails: [], groups: [g.id] },
+        })
+        expect(await store.listGroupRoleSites(g.id)).toHaveLength(1)
         await store.deleteGroup(g)
+        expect(await store.listGroupRoleSites(g.id)).toEqual([])
         expect(await store.findGroup(g.slug)).toBeNull()
         expect(await store.getGroups([g.id])).toEqual([])
         expect(await store.listGroupMembers(g.id)).toEqual([])

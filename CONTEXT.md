@@ -11,6 +11,38 @@ every file). `pending` until it passes publication, then `complete`. It records 
 (`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`). Rollback only
 ever points a site at a complete version.
 
+**Owner** — someone who holds a site: a person or a group the site's owners name
+(`SiteRecord.owners`, `apps/api/src/store/types.ts`; contract in `packages/shared/src/site-roles.ts`).
+Owners are equal: they publish, roll back, change its access and settings, its owners and
+publishers and its share link, archive and delete it (`policy.ts`). A site always keeps at least one
+person as an owner (400 `last_owner`), so it carries on when its creator is away or leaves; a group
+alone never counts. Only members hold a role (400 `email_not_allowed`): a **Guest** never does, even
+through a group. At most 20 addresses and 5 groups. Set with `PATCH /api/sites/<name> { owners }`
+(the whole list, groups by slug), which only owners (and admins from their browser session) may.
+Every owner hears of a new comment thread, the members of owner groups included. In a listing
+(admin All sites, Shared with me, the audit log) a site's `owner` is its first person owner.
+
+**Publisher** — someone who publishes a site without owning it: a person or a group its publishers
+name (`SiteRecord.publishers`; at most 50 addresses and 10 groups, `PATCH { publishers }`).
+Publishers deploy, roll back, and read the site, its versions, its owners, publishers and audience;
+they get no share link (`shareUrl: null`) and change nothing else. A deploy of theirs that would
+change the site's `visibility`, `spa` or a never-live site's `access` is a 400 `owner_only`
+(`apps/api/src/publication.ts`), and a version they make live keeps the site's settings. Someone
+named in both lists is an owner (the server takes them out of the publishers). The caller's role on
+a site is `Site.role` (`owner`, `publisher` or `admin`).
+
+**Creator** — who first deployed a site (`SiteRecord.email`). It never changes and grants nothing by
+itself: the creator is an owner only while the owners name them. It keys the name claim, the
+`USER#<email>/SITE#<name>` index item and the old-layout version keys.
+
+**Role item** — how a site reaches the lists of those who hold a role on it
+(`USER#<email>/ROLE#<siteId>` and `GROUP#<groupId>/ROLE#<siteId>` in
+`apps/api/src/store/records.ts`): a full copy of the site with the role, written by `putSite` for
+every owner and publisher but the creator (whose index item stands in), and removed when they lose
+it. Someone's sites (`listSites` in `apps/api/src/sites.ts`, `GET /api/sites`) are the union of the
+sites they created, while they still hold a role, their role items and their groups' role items,
+each copy asked of policy. Deleting a group takes it out of every site's owners and publishers.
+
 **Manifest** — the list of files in a version: path, sha256, size, content type.
 
 **Publication** — the only way a version becomes live (`apps/api/src/publication.ts`). It owns:
@@ -28,7 +60,7 @@ and files containing secrets. The CLI and local MCP check first for early, speci
 Publication is the guarantee.
 
 **Share link** — `s--<token>.<sites domain>`: serves a site to anyone with the link, whatever its
-access level (a restricted one, only the owner's included: handing out the link is the owner's
+access level (a restricted one, an `only_me` one included: handing out the link is the owners'
 choice). The address
 is the secret, so responses on a share host say `Referrer-Policy: no-referrer` and the browser
 sends it to no one (`siteResponseHeaders` in `packages/shared/src/site-routing.ts`). Known limits:
@@ -44,8 +76,8 @@ one of your sites (overview, access, versions, archive and delete), in sections 
 (`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or
 name (A–Z). The web list keeps it in `?sort=`, `fling ls` takes `--sort` and `fling_list` `sort`.
 
-**Access level** — who can open a site, one of five, narrowest first: **only you** (`only_me`, the
-owner alone), **teams** (`groups`) and **specific people** (`people`), both an audience (one site may
+**Access level** — who can open a site, one of five, narrowest first: **only you** (`only_me`, its
+owners and publishers alone), **teams** (`groups`) and **specific people** (`people`), both an audience (one site may
 name groups and addresses; its level is `people` when it names an address), **everyone signed in**
 (`members`) and **public** (`public`). The contract (names, labels, descriptions, the mapping onto
 visibility, restriction and audience, the CLI's and MCP's words) is
@@ -62,12 +94,12 @@ restricted. **Public** — anyone can open the site itself; its review page and 
 sign-in (`comment.*` in `policy.ts` is for signed-in users only). Making a public site private gives
 it back the access it had (only you, its audience, or every member).
 
-**Restricted** — a private site only its owner and its audience see, and only they take part in its
-comments (`SiteRecord.restricted`; `isRestricted` in `policy.ts`). With an empty audience, only its
-owner: the `only_me` level. A record from before access levels has no `restricted`, and is
+**Restricted** — a private site only its owners, publishers and audience see, and only they take part
+in its comments (`SiteRecord.restricted`; `isRestricted` in `policy.ts`). With an empty audience,
+only its owners and publishers: the `only_me` level. A record from before access levels has no `restricted`, and is
 restricted exactly when its audience names someone, so every existing site keeps its access.
 
-**Audience** — the people, besides its owner, who may see a restricted site: addresses, each one the
+**Audience** — the people, besides its owners and publishers, who may see a restricted site: addresses, each one the
 instance's email policy admits or, while `INVITES` is on, one from outside that adding invites as a
 guest (**Invitation**), and groups (`SiteRecord.audience`, `apps/api/src/sites.ts`; contract in
 `packages/shared/src/audience.ts`). As the API reports it, each address says whether it has signed
@@ -78,7 +110,7 @@ it is emptied; the `only_me` and `members` levels empty it. The audience is kept
 while the site is public. Each address also gets a
 **direct grant** (`USER#<email>/SHARED#<siteId>`), a projection for listing the sites shared with
 someone; each group a group-site item (`GROUP#<id>/SITE#<siteId>`), so deleting the group can take
-it out of every audience. Both carry the site's **listing** (`SharedListing` in
+it out of every audience. Only owners change it; publishers see it. Both carry the site's **listing** (`SharedListing` in
 `apps/api/src/store/types.ts`): its id, name, owner, when it was created and updated, and whether
 it is archived, live and restricted, rewritten by `putSite` whenever one of those changes. Set with `PATCH /api/sites/<name> { audience }`, `fling access` and
 `fling_set_audience`; the `audiences` capability.
@@ -92,8 +124,9 @@ who is in one and uses it in their sites' audiences; only the owner renames it, 
 or deletes it (`canGroup` in `policy.ts`; no co-managers, and admins get nothing extra). Each
 member has a **membership** item (`USER#<email>/GROUP#<id>`), what policy reads for a restricted
 site. Deleting a group never widens who sees a site: it leaves the audiences that name others too,
-and where it was the only entry its id stays, matching nobody, so the site is the owner's alone
-(shown as "a deleted group", `#<id>`) until they change it. The groups of exactly a given set of
+and where it was the only entry its id stays, matching nobody, so the site is its owners' and
+publishers' alone (shown as "a deleted group", `#<id>`) until an owner changes it. It leaves every
+site's owners and publishers. The groups of exactly a given set of
 people (`GET /api/groups?members=…`, `fling groups --members`, `fling_groups { members }`) come
 from the memberships, intersected, then compared with each group's member count, never a scan:
 how clients suggest a group that already holds the people listed. `/api/groups`, `fling groups`,
@@ -105,14 +138,14 @@ names them, by address or through a group they are a member of (`listShared` in
 `apps/api/src/sites.ts`; `SharedSite` in `packages/shared/src/api.ts`). Read from index items
 alone, one query per source (their direct grants, their memberships, each group's site items),
 and from the listing those items carry, so no site is read; a group counts only while they are in
-it. Archived sites, sites with no current version, their own sites and private sites every member
-sees anyway are left out. An item the audience no longer backs (two saves of a site racing) can
+it. Archived sites, sites with no current version, sites they own or publish and private sites every
+member sees anyway are left out. An item the audience no longer backs (two saves of a site racing) can
 list a site's name, nothing more: opening the site still goes through policy and the site pass. A
 sharee sees the name, URL, review page, owner, when it was updated and how it reached them,
-nothing of the owner's (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
+nothing of the owners' (versions, share link, audience). `GET /api/shared`, `fling ls --shared`,
 `fling_list { shared: true }` and the Sites page's Shared with me tab; the `audiences` capability.
 
-**Site pass** — how the edge lets someone into a restricted site (only the owner's included)
+**Site pass** — how the edge lets someone into a restricted site (an `only_me` one included)
 without holding its audience: a
 host-only `fling_pass` cookie, signed with the site HMAC key, naming the site's id and the viewer,
 for 5 minutes (`packages/shared/src/site-cookie.ts`). The edge sends a visitor without one to
@@ -204,10 +237,11 @@ response of at most `ADMIN_SITES_MAX` sites, with `truncated` past it; the Sites
 tab, shown to admins alone, searched and ordered like the other tabs, each row opening the site's
 page). Admins **administer** every site (the `admin` and `admin-token` roles in `policy.ts`):
 with any credential they open, read and review any site, restricted ones included; from their
-browser session they also change it as its owner would (access, settings, archive, roll back,
-share link, delete, anyone's comment). Nobody but the owner deploys. What an admin does only
+browser session they also change it as an owner would (access, settings, owners and publishers,
+archive, roll back, share link, delete, anyone's comment). Nobody but an owner or a publisher
+deploys: an admin who is also a publisher deploys, and may then change the settings as an admin. What an admin does only
 because they are one is audited: `site.change` for each change, `site.open` for each site pass to
-a restricted site (`auditAdmin` in `apps/api/src/sites.ts`); the owner is not emailed. The site
+a restricted site (`auditAdmin` in `apps/api/src/sites.ts`); the owners are not emailed. The site
 page tells an admin whose site it is. They may **impersonate** a user: from a browser session
 only, they act as that user, with that user's rights alone, for at most 60 minutes, with a banner
 on every page, and stop to return to their own session. While impersonating they can create
@@ -232,14 +266,17 @@ while it is public and live, `GET /api/why` gives its URL and the Get started pa
 new tab.
 
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
-pure function every site route and MCP tool goes through. Actors resolve to a role on the site:
-**owner** (holds it), **viewer** (a signed-in user in its audience, by address or through a
-group), **member** (any other
-signed-in user), **guest** (a signed-in guest not in its audience: public sites only), **share**
-(holds its current share link), **anonymous**. What a role may do depends
-on the site's access: public, private, or restricted. `site.view` and the comment actions reach
-beyond the owner (on a restricted site, only to its viewers and share-link holders; on an `only_me`
-one, to share-link holders alone). A refusal looks
+pure function every site route and MCP tool goes through. Actors resolve to a set of roles on the
+site (`rolesOf`), and may do what any of them allows: **owner** and **publisher** (its owners and
+publishers name them, by address or through a group; never a guest), **admin** and
+**admin-token**, **viewer** (a signed-in user in its audience, by address or through a group),
+**member** (any other signed-in user), **guest** (a signed-in guest not in its audience: public
+sites only), **share** (holds its current share link), **anonymous**. A user's groups are loaded
+(`actorOn` in `apps/api/src/sites.ts`) only for a site whose owners or publishers name groups, or a
+restricted one whose audience does. What a role may do depends on the site's access: public,
+private, or restricted. `site.view` and the comment actions reach beyond its owners and publishers
+(on a restricted site, only to its viewers and share-link holders; on an `only_me` one, to
+share-link holders alone). A refusal looks
 like a missing site (404). Groups have their own, smaller table, `canGroup(actor, action, group)`:
 anyone signed in may read one, its owner may change or delete it, and a refusal is a 403 (groups
 are not secret).
@@ -247,7 +284,7 @@ are not secret).
 **Comment** — a note on one page of a site (`COMMENT#<id>` in the site's partition, ids sortable by
 time): a **thread** or a one-level **reply** to one. It records the page **path** and the version
 being served when it was written, so it outlives new versions; an optional **pin** marks the spot
-it is about, recorded as an anchor. Owners and members read, write and
+it is about, recorded as an anchor. Owners, publishers and members read, write and
 resolve; authors delete their own, owners any. The author is a user (`{ kind: 'user', email }`) or,
 later, a share-link visitor (`{ kind: 'guest', name }`, with a signed per-site cookie; not a
 **Guest**, who signs in as a user).
@@ -372,8 +409,9 @@ ports:
 **Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of
 its shape; reads upgrade older records and tolerate one version ahead. Keys are site-centric: a
-site's partition (`SITE#<id>`) holds its record and versions; a user's sites are index items
-(`USER#<email>/SITE#<name>`); a site is found by name through its name claim.
+site's partition (`SITE#<id>`) holds its record and versions; the sites a user created and those
+they hold a role on are index items (`USER#<email>/SITE#<name>`, **Role item**); a site is found by
+name through its name claim.
 
 **Migration** — a one-off rewrite of stored data, written once against Table
 (`apps/api/src/migrations/NNNN-*.ts`), idempotent and resumable, with its checkpoint and lock in

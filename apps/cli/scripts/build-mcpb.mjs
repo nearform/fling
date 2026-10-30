@@ -7,7 +7,8 @@
 //    instance's app origin, so the extension a Fling serves adds that Fling to the ones it knows)
 //    and mcpb/icon.png next to it. Name, display name and author never change, so a copy from any
 //    Fling installs as the same extension and updates it in place;
-// 3. `mcpb validate` + `mcpb pack` (npx -y @anthropic-ai/mcpb) → dist/fling.mcpb.
+// 3. `mcpb validate` + `mcpb pack` → dist/fling.mcpb, with the devDependency @anthropic-ai/mcpb:
+//    installed from the lockfile, so building needs no network after `pnpm install`.
 //
 // Run after `build` (which clears dist/); `build:mcpb` does both.
 import { execFileSync } from 'node:child_process'
@@ -20,7 +21,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
 const stage = join(root, 'dist/mcpb')
 const out = join(root, 'dist/fling.mcpb')
-const MCPB = ['-y', '@anthropic-ai/mcpb@^2']
+// Its package.json is not exported, so it is read where pnpm links it.
+const mcpbDir = join(root, 'node_modules/@anthropic-ai/mcpb')
+const { bin } = JSON.parse(await readFile(join(mcpbDir, 'package.json'), 'utf8'))
+const MCPB = join(mcpbDir, typeof bin === 'string' ? bin : bin.mcpb)
 
 await rm(stage, { recursive: true, force: true })
 await rm(out, { force: true })
@@ -49,8 +53,7 @@ if (serverUrl) manifest.server.mcp_config.env.FLING_ADD_SERVER = new URL(serverU
 await writeFile(join(stage, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 await copyFile(join(root, 'mcpb/icon.png'), join(stage, 'icon.png'))
 
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-const run = args => execFileSync(npx, [...MCPB, ...args], { stdio: 'inherit', cwd: root })
+const run = args => execFileSync(process.execPath, [MCPB, ...args], { stdio: 'inherit', cwd: root })
 run(['validate', join(stage, 'manifest.json')])
 run(['pack', stage, out])
 

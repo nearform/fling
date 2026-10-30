@@ -21,7 +21,6 @@ await build({
   banner: { js: '#!/usr/bin/env node' },
   // Externalise each dependency and its subpaths (e.g. @modelcontextprotocol/sdk/server/mcp.js).
   external: Object.keys(pkg.dependencies ?? {}).flatMap(name => [name, `${name}/*`]),
-  sourcemap: true,
   logLevel: 'warning',
 })
 await chmod(outfile, 0o755)

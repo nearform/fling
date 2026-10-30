@@ -99,7 +99,7 @@ resources with the providers' `default_tags`.
 | `github` | (required) | `{ owner, owner_id, repo, repo_id, environment = "production" }`: who may assume the deploy role. Ids are numeric (`gh api repos/<owner>/<repo> --jq '.owner.id, .id'`), so a renamed or re-created repository can't inherit trust |
 | `github_oidc_provider_arn` | looked up | The account's IAM OIDC provider for `token.actions.githubusercontent.com` (one per account, so the module never creates it; create it once if you have none) |
 | `instance` | `{}` | The [instance configuration](#instance-configuration), passed through as `INSTANCE` in the `deploy` output |
-| `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, the drivers and `NODE_OPTIONS` from `hostname`, `LIVE_URL` from the WebSocket stage, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
+| `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, and the drivers from `hostname`, `LIVE_URL` from the WebSocket stage, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
 | `manual_secrets` | `["oidc-client-secret"]` | SSM parameters created as `unset`, for you to fill (see [Secrets](#secrets)) |
 | `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |

@@ -89,7 +89,7 @@ export async function runListShared(ctx: CommandContext, opts: { sort?: SiteSort
 /** `Only you`, `Everyone signed in`, `Specific people`…: a site's access level, for tables. */
 const accessLabel = (site: Site) => ACCESS_LABELS[siteAccessLevel(site)]
 
-const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(12))}${value}`
+const row = (label: string, value: string) => `${chalk.bold(`${label}:`.padEnd(14))}${value}`
 
 function describeSite(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   return [
@@ -132,7 +132,7 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
   const site = await getSite(requireClient(ctx), name)
   const access =
     site.audience && audiencesEnabled(ctx.config.instance)
-      ? [`${chalk.bold('Who:'.padEnd(12))}${describeAudience(site, membersOf(ctx))}`]
+      ? [`${chalk.bold('Who:'.padEnd(14))}${describeAudience(site, membersOf(ctx))}`]
       : []
   ctx.out.data(site, () =>
     [

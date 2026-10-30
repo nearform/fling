@@ -41,7 +41,6 @@ locals {
       STORAGE_DRIVER     = "s3"
       KVS_DRIVER         = "cloudfront"
       LIVE_URL           = local.live_url
-      NODE_OPTIONS       = "--enable-source-maps"
     },
     var.environment,
     {

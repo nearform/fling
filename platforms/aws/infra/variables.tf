@@ -72,9 +72,9 @@ variable "github_oidc_provider_arn" {
 variable "environment" {
   description = <<-EOT
     Extra or overriding environment variables for the function. The module already sets APP_ENV,
-    APP_ORIGIN, SITES_DOMAIN, SITE_SCHEME, SITE_COOKIE_DOMAIN, the drivers and NODE_OPTIONS (from the
-    hostname) and LIVE_URL (the live rooms' stage, live.tf), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN and SSM_PREFIX. Not secret: they are
-    in the function's configuration. Instance values belong in var.instance instead. MAIL_* and
+    APP_ORIGIN, SITES_DOMAIN, SITE_SCHEME, SITE_COOKIE_DOMAIN and the drivers (from the hostname)
+    and LIVE_URL (the live rooms' stage, live.tf), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN
+    and SSM_PREFIX. Not secret: they are in the function's configuration. Instance values belong in var.instance instead. MAIL_* and
     SES_CONFIGURATION_SET are refused: email is set in var.mail.
   EOT
   type        = map(string)

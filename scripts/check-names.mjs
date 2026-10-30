@@ -24,6 +24,9 @@ const ALLOWED = {
   'plugin/skills/fling/SKILL.md': [PACKAGE],
   'apps/cli/README.md': [PACKAGE, REPO],
   'README.md': [PACKAGE, REPO],
+  // The deploy guides open with a prompt that tells an agent which repository to clone.
+  'platforms/aws/DEPLOY.md': [REPO],
+  'platforms/cloudflare/DEPLOY.md': [REPO],
   '.github/workflows/release-cli.yml': [PACKAGE, REPO],
   // The "Why Fling?" page, a static site published with Fling itself.
   'why/index.html': [PACKAGE, REPO],

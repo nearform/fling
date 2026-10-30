@@ -1,5 +1,16 @@
 # Deploying Fling on Cloudflare
 
+**Ask your agent:**
+
+```text
+Clone https://github.com/nearform/fling and follow platforms/cloudflare/DEPLOY.md
+to install Fling on my Cloudflare account at fling.yourdomain.com.
+Before you create or change anything, ask me for what you need
+(the Cloudflare account and zone, and the sign-in provider) and show me the plan.
+```
+
+Or follow the steps below yourself.
+
 Fling runs on Cloudflare as **one Worker** with a D1 database, an R2 bucket and a Workers KV
 namespace. `scripts/setup.mjs` creates them once; `scripts/deploy.mjs` (run by the
 `Deploy (Cloudflare)` workflow, or by hand) ships the code. One deployment is an **instance**: its

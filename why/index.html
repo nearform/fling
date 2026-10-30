@@ -437,6 +437,22 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .copy { border: 1px solid var(--line); background: var(--bg-2); border-radius: 10px; padding: 0.4rem 0.7rem; cursor: pointer; font-size: 0.82rem; font-weight: 700; }
 .copy:active { scale: 0.95; }
 .copy.done { background: var(--green); color: oklch(20% 0.05 150); border-color: transparent; }
+.cmd.install { grid-template-columns: auto 1fr; row-gap: 0.7rem; }
+.install-text { display: grid; gap: 0.2rem; }
+.install-text > span { color: var(--muted); font-size: 0.9rem; }
+.install-text code { font-size: 0.85rem; }
+.platforms { grid-column: 2; display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.6rem; }
+.platform {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.8rem;
+  border-radius: 12px; border: 2px solid var(--outline); background: var(--bg-2);
+  color: inherit; font-weight: 800; text-decoration: none; box-shadow: 3px 3px 0 var(--outline);
+}
+.platform svg { inline-size: 3.6rem; block-size: auto; flex: none; }
+.platform:hover { translate: -1px -1px; box-shadow: 4px 4px 0 var(--outline); }
+.platform:active { translate: 2px 2px; box-shadow: 1px 1px 0 var(--outline); }
+@media (prefers-reduced-motion: no-preference) {
+  .platform { transition: translate 120ms var(--ease-out), box-shadow 120ms var(--ease-out); }
+}
 .foot { color: var(--muted); font-size: 0.85rem; }
 .big-f { inline-size: clamp(64px, 10vw, 104px); }
 @media (prefers-reduced-motion: no-preference) {
@@ -675,13 +691,27 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   <section class="slide start" id="start" data-label="Start">
     <div class="inner">
       <svg class="big-f reveal" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rb2" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#ff375f"/><stop offset=".2" stop-color="#ff9f0a"/><stop offset=".4" stop-color="#ffd60a"/><stop offset=".6" stop-color="#30d158"/><stop offset=".8" stop-color="#0a84ff"/><stop offset="1" stop-color="#bf5af2"/></linearGradient></defs><polygon points="12.65,6 30.65,6 29.27,12 17.77,12 16.96,15.5 24.96,15.5 23.69,21 15.69,21 13.85,29 7.35,29" fill="#1c1c3a"/><polygon points="11.15,4.5 29.15,4.5 27.77,10.5 16.27,10.5 15.46,14 23.46,14 22.19,19.5 14.19,19.5 12.35,27.5 5.85,27.5" fill="url(#rb2)" stroke="#1c1c3a" stroke-width="1.4" stroke-linejoin="round"/></svg>
-      <h2 class="reveal">Three lines. <span class="rainbow-text">Then just fling.</span></h2>
+      <h2 class="reveal">Set it up once. <span class="rainbow-text">Then just fling.</span></h2>
       <div class="cmds reveal">
         <div class="cmd"><span class="n">1</span><code>npm install -g @nearform/fling</code><button class="copy" type="button">Copy</button></div>
-        <div class="cmd"><span class="n">2</span><code id="setupcmd">fling setup https://&lt;your Fling&gt;</code><button class="copy" type="button">Copy</button></div>
-        <div class="cmd"><span class="n">3</span><code>fling deploy ./dist</code><button class="copy" type="button">Copy</button></div>
+        <div class="cmd install">
+          <span class="n">2</span>
+          <span class="install-text"><b>Install it on AWS or Cloudflare</b><span>In your own account, at your own domain, such as <code>fling.yourdomain.com</code>. Fling is not a hosted service: it runs where you put it.</span></span>
+          <span class="platforms">
+            <a class="platform" href="https://github.com/nearform/fling/blob/main/platforms/aws/DEPLOY.md" aria-label="Install on AWS" title="Install on AWS">
+              <svg viewBox="0 0 64 40" aria-hidden="true"><text x="32" y="22" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="21" letter-spacing="-0.5" fill="currentColor">aws</text><path d="M13 27.5 Q32 37 50 27.5" fill="none" stroke="#ff9900" stroke-width="3.2" stroke-linecap="round"/><path d="M45 25.2 L51.5 27 L48.6 33" fill="none" stroke="#ff9900" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>AWS</span>
+            </a>
+            <a class="platform" href="https://github.com/nearform/fling/blob/main/platforms/cloudflare/DEPLOY.md" aria-label="Install on Cloudflare" title="Install on Cloudflare">
+              <svg viewBox="0 0 64 40" aria-hidden="true"><path d="M10 31 C4 31 4 22.5 10.5 22 C10.5 15 18.5 12.5 22.5 16.5 C25 8 39 7 42 16.5 C49.5 15.5 54 21 52.5 26 C58 26.5 58.5 31 54 31 Z" fill="#f38020"/><path d="M45 31 C46 26 50 24.5 53 25.5 C58 26.5 58.5 31 54 31 Z" fill="#fbad41"/><path d="M20 26.5 H44" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".85"/></svg>
+              <span>Cloudflare</span>
+            </a>
+          </span>
+        </div>
+        <div class="cmd"><span class="n">3</span><code>fling setup https://fling.yourdomain.com</code><button class="copy" type="button">Copy</button></div>
+        <div class="cmd"><span class="n">4</span><code>fling deploy ./dist</code><button class="copy" type="button">Copy</button></div>
       </div>
-      <p class="lead reveal">Step 2 signs you in and adds Fling to Claude Code and Claude Desktop, if you have them. On the web or your phone, add the connector <code id="mcpurl">https://&lt;your Fling&gt;/mcp</code> in Claude's settings.</p>
+      <p class="lead reveal">Step 3 signs you in to your Fling and adds it to Claude Code and Claude Desktop, if you have them. On the web or your phone, add the connector <code>https://fling.yourdomain.com/mcp</code> in Claude's settings.</p>
       <p class="foot reveal">This page was flung. <a href="https://github.com/nearform/fling">Fling is open source.</a></p>
     </div>
   </section>
@@ -695,13 +725,12 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, reduce ? 0 : ms); }); };
   // The Fling this page is served from: a site is `<name>.<sites domain>`, and the Fling's
   // /.well-known/fling (readable cross-origin) names its app origin and sites domain. Until it
-  // answers, or away from a Fling, the copy says "your Fling".
+  // answers, or away from a Fling, the demos say "your Fling". The Start slide always says
+  // fling.yourdomain.com: a reader installs their own Fling first.
   var fling = 'https://<your Fling>';
   var sites = '<your Fling>';
   function useFling(appOrigin, sitesDomain) {
     fling = appOrigin; sites = sitesDomain;
-    $('#setupcmd').textContent = 'fling setup ' + fling;
-    $('#mcpurl').textContent = fling + '/mcp';
   }
   useFling(fling, sites);
   (function () {

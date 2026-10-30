@@ -1,6 +1,6 @@
 /**
- * `fling [path] [--name x] [--spa] [--access <level> [--add …] [--group …]] [--public] [--yes]
- * [--[no-]list-html]` — the default command.
+ * `fling [path] [--name x] [--path <folder>] [--spa] [--access <level> [--add …] [--group …]]
+ * [--public] [--yes] [--[no-]list-html]` — the default command.
  *
  * `path` is a folder, a single .html file, a .zip or any other file (inputs.ts). It must exist as
  * given: the CLI never goes looking for it elsewhere (the MCP server does, see locate.ts).
@@ -17,6 +17,13 @@
  * instance's default, and the CLI says who that is. A site that has been live keeps its access
  * (`fling access` changes it).
  *
+ * `--path <folder>` (a path publish, `pathPublish` capability) publishes into that folder of the
+ * site named by `--name`, keeping the rest of the site: `fling ./report --name changelog --path
+ * 30-10-26` serves the report at `<changelog>/30-10-26/`. It needs `--name`, so a folder never
+ * lands in a site picked from the directory's name, and refuses an instance without the
+ * capability (an older server would ignore `path` and replace the whole site). A generated listing
+ * is the folder's own index.html.
+ *
  * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
  * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
  */
@@ -32,6 +39,7 @@ import {
   type InstanceMetadata,
   isValidSiteName,
   needsAudience,
+  normalizePublishPath,
   parseAccessLevel,
   privateAudience,
   reviewUrl,
@@ -60,6 +68,7 @@ import {
   accessLevelsEnabled,
   checkName,
   commentsEnabled,
+  pathPublishEnabled,
   type SitesBase,
   sitesBaseOf,
   siteUrlFor,
@@ -81,6 +90,8 @@ export interface DeployCommandOptions {
   yes?: boolean
   /** No root index.html: true → generate a listing of the HTML pages; false → fling anyway. */
   listHtml?: boolean
+  /** a path publish: the folder of the site to publish into */
+  path?: string
 }
 
 export type NoIndexChoice = 'list' | 'fling'
@@ -124,12 +135,19 @@ export async function runDeploy(
   const client = requireClient(ctx)
   const ask = ctx.interactive && !opts.yes
   const choice = accessChoice(opts, ctx.binName)
+  const folder = publishFolder(ctx, opts)
   // Where the site will be served and who can see it: from the instance stored at login.
-  // (Asked for an access level: fetched again if the stored copy predates them.)
-  const instance = choice.access
-    ? await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'accessLevels')
+  // (Asked for an access level or a path: fetched again if the stored copy predates them.)
+  const needs = folder !== undefined ? 'pathPublish' : choice.access ? 'accessLevels' : null
+  const instance = needs
+    ? await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, needs)
     : await loadInstance(ctx.store, ctx.config, ctx.fetch)
   const base = sitesBaseOf(instance)
+  if (folder !== undefined && !pathPublishEnabled(instance)) {
+    throw new CliError(`${instance?.name ?? 'This Fling'} can't publish to a path yet`, {
+      hint: 'Leave out --path to publish the whole site, or ask its operator to update it.',
+    })
+  }
   if (choice.access && instance && !accessLevelsEnabled(instance)) {
     throw new CliError(`${instance.name} can't take --access yet`, {
       hint: `Leave it out, then use \`${ctx.binName} access\` or \`${ctx.binName} visibility\`.`,
@@ -143,11 +161,28 @@ export async function runDeploy(
     })
   const prepared = await prepareInput(path)
   try {
-    const { access: _asked, ...rest } = opts
-    await deployPrepared(ctx, client, instance, base, prepared, { ...rest, ...choice }, ask)
+    const { access: _asked, path: _path, ...rest } = opts
+    await deployPrepared(ctx, client, instance, base, prepared, { ...rest, ...choice, folder }, ask)
   } finally {
     await prepared.cleanup()
   }
+}
+
+/** `--path`, normalised; it needs `--name`. */
+function publishFolder(ctx: CommandContext, opts: DeployCommandOptions): string | undefined {
+  if (opts.path === undefined) return undefined
+  const folder = normalizePublishPath(opts.path)
+  if (folder === null) {
+    throw new CliError(`Invalid --path "${opts.path}"`, {
+      hint: 'Use a folder of the site, like 30-10-26 or reports/2026 (no dotfiles).',
+    })
+  }
+  if (opts.name === undefined) {
+    throw new CliError('--path needs --name: the site to publish into', {
+      hint: `e.g. \`${ctx.binName} deploy ./report --name changelog --path ${folder}\`.`,
+    })
+  }
+  return folder
 }
 
 async function deployPrepared(
@@ -156,9 +191,12 @@ async function deployPrepared(
   instance: InstanceMetadata | null,
   base: SitesBase | null,
   prepared: PreparedInput,
-  opts: Omit<DeployCommandOptions, 'access'> & ReturnType<typeof accessChoice>,
+  opts: Omit<DeployCommandOptions, 'access' | 'path'> &
+    ReturnType<typeof accessChoice> & { folder?: string },
   ask: boolean
 ): Promise<void> {
+  const { folder } = opts
+  const inFolder = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
   let local = await buildManifest(prepared.dir)
   local.skipped.dotfiles.unshift(...prepared.skippedDotfiles)
   // Never flung, whatever the flags: say so, so nobody wonders where .env went.
@@ -169,8 +207,8 @@ async function deployPrepared(
 
   if (!hasRootIndex(local)) {
     const pages = htmlPages(local).length
-    const root = base ? siteUrlFor(name, base) : 'the site root'
-    const warning = `No index.html at the root — ${root} will show a 404.`
+    const root = base ? siteUrlFor(name, base) + (folder ? `${folder}/` : '') : 'the site root'
+    const warning = `No index.html ${folder ? `in ${folder}/` : 'at the root'} — ${root} will show a 404.`
     const choice: NoIndexChoice =
       opts.listHtml === true
         ? 'list'
@@ -194,6 +232,7 @@ async function deployPrepared(
       dir: prepared.dir,
       name,
       manifest: local,
+      path: folder,
       spa: opts.spa ? true : undefined,
       public: opts.public,
       access: opts.access,
@@ -217,8 +256,10 @@ async function deployPrepared(
     ctx.log.success(`Restored version ${result.versionId} ${chalk.dim(`(${summary})`)}`)
   else
     ctx.log.success(
-      `Deployed ${result.name} ${chalk.dim(`(${summary}; uploaded ${result.uploaded}, version ${result.versionId})`)}`
+      `Deployed ${result.name}${folder ? ` to /${folder}/` : ''} ${chalk.dim(`(${summary}; uploaded ${result.uploaded}, version ${result.versionId})`)}`
     )
+  // A path publish's link is its folder.
+  const url = folder ? new URL(`${folder}/`, result.url).href : result.url
 
   // A new or re-pointed version takes a few seconds to reach every edge: don't hand out a URL
   // that 404s. (`unchanged` was already live.)
@@ -228,8 +269,8 @@ async function deployPrepared(
       : (
           await waitWithSpinner(
             ctx.waitReady,
-            result.url,
-            local.files.map(f => f.path),
+            url,
+            local.files.map(f => inFolder(f.path)),
             { progress: ctx.progress, warn: m => ctx.log.warn(m) }
           )
         ).ready
@@ -264,6 +305,7 @@ async function deployPrepared(
   const data = {
     status: result.status,
     site: result.site,
+    ...(folder ? { path: folder, url } : {}),
     access: level,
     ...(result.first ? { created: true } : {}),
     ...(review ? { reviewUrl: review } : {}),
@@ -277,12 +319,12 @@ async function deployPrepared(
       return box(
         [
           ...(review ? [chalk.dim(reviewNote), brand.url(review), '', chalk.dim('Site:')] : []),
-          brand.url(result.url),
+          brand.url(url),
           ...accessNotes.map(n => chalk.dim(n)),
         ],
         chalk.bold(`flung · ${ACCESS_LABELS[level].toLowerCase()}`)
       )
-    const lines = [chalk.bold(result.url)]
+    const lines = [chalk.bold(url)]
     if (review) lines.push(chalk.dim(`${reviewNote} ${review}`))
     for (const n of accessNotes) lines.push(chalk.dim(n))
     return lines.join('\n')

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { ManifestSchema } from './manifest.ts'
+import { PublishPathSchema } from './publish-path.ts'
 import {
   OwnersInputSchema,
   PublishersInputSchema,
@@ -71,6 +72,13 @@ export const VersionSchema = z.object({
   totalBytes: z.number(),
   /** who published it (email); absent on versions published before it was recorded */
   publishedBy: z.string().optional(),
+  /**
+   * A path publish (`pathPublish` capability): the folder it replaced (`30-10-26`, shown as
+   * `/30-10-26/`), and the version it carried the rest of the site forward from (absent when the
+   * site had none)
+   */
+  path: z.string().optional(),
+  base: z.string().optional(),
   createdAt: z.string(),
 })
 export type Version = z.infer<typeof VersionSchema>
@@ -151,9 +159,12 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  * POST /api/sites/:name/deploys. `access` (and, for `groups` and `people`, `audience`) is who can
  * open a new site: it applies only while the site has never been live, so a re-deploy never
  * changes it. Without it a new site gets the instance's default (`defaultAccess` in the metadata).
+ * `path` (`pathPublish` capability; publish-path.ts) replaces only that folder: every file in the
+ * manifest is under it (`<path>/…`), and the current version's other files are carried forward.
  */
 export const DeployRequestSchema = z.object({
   manifest: ManifestSchema,
+  path: PublishPathSchema.optional(),
   spa: z.boolean().optional(),
   visibility: VisibilitySchema.optional(),
   access: AccessLevelSchema.optional(),

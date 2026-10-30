@@ -173,6 +173,29 @@ describe('commands', () => {
     expect(out.content()).toMatch(/\*\s+abcdef0123456789\s+2\s+2\.0 KB/)
   })
 
+  it('versions shows where a path publish went', async () => {
+    const store = await loggedInStore()
+    const detail = {
+      ...site(),
+      versions: [
+        {
+          id: 'abcdef0123456789',
+          fileCount: 2,
+          totalBytes: 2048,
+          publishedBy: 'bob@example.test',
+          path: '30-10-26',
+          base: '0000000000000000',
+          createdAt: site().createdAt,
+        },
+      ],
+    }
+    const m = mockFetch({ '/api/sites/my-app': () => jsonResponse(detail) })
+    const { ctx, out } = await testContext({ store, fetch: m.fetch })
+    await runVersions(ctx, 'my-app')
+    expect(out.content()).toMatch(/BY\s+PATH/)
+    expect(out.content()).toMatch(/bob@example\.test\s+\/30-10-26\//)
+  })
+
   it("info shows the live version's file count and size", async () => {
     const store = await loggedInStore()
     const detail = {

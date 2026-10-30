@@ -121,6 +121,7 @@ function filesRow(site: Site & { versions?: SiteDetail['versions'] }): string[] 
   return [
     row('Files', `${n} file${n === 1 ? '' : 's'}, ${formatBytes(current.totalBytes)}`),
     ...(current.publishedBy ? [row('Published by', current.publishedBy)] : []),
+    ...(current.path ? [row('Published to', `/${current.path}/`)] : []),
   ]
 }
 
@@ -158,6 +159,7 @@ export async function runVersions(ctx: CommandContext, name: string): Promise<vo
         { header: 'FILES', value: v => v.fileCount },
         { header: 'SIZE', value: v => formatBytes(v.totalBytes) },
         { header: 'BY', value: v => v.publishedBy ?? '-' },
+        { header: 'PATH', value: v => (v.path ? `/${v.path}/` : '-') },
         { header: 'CREATED', value: v => formatDate(v.createdAt) },
       ])
   )

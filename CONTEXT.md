@@ -8,8 +8,22 @@ the site and listed to admins alone.
 
 **Version** — one immutable set of files, identified by a hash of its manifest (path + sha256 of
 every file). `pending` until it passes publication, then `complete`. It records who published it
-(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`). Rollback only
-ever points a site at a complete version.
+(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`) and, for a path
+publish, the folder it replaced (`path`) and its **base** (`base`). Rollback only ever points a
+site at a complete version.
+
+**Path publish** — a deploy that replaces one folder of a site (`DeployRequest.path`, e.g.
+`30-10-26`, spelled as in `packages/shared/src/publish-path.ts`) and keeps the rest. The edge serves
+every version whole, so the server makes a whole new version: the files sent (each under the
+folder, else 400 `outside_path`) plus the current version's files outside it, copied forward with
+`Blobs.copy`. That current version is the **base**; the new version goes live only while the base
+is still current (409 `base_changed` otherwise: clients publish again on top of the new one). At
+most 1,000 files are carried forward (`MAX_KEPT_FILES`, 413 `too_large`), and only the files sent
+are scanned: the rest are copies of a version already scanned. On a site with no current version
+it is a plain publish of the folder. Rolling back to the base removes it. `fling deploy <dir>
+--name <site> --path <folder>`, `path` on `fling_publish` and `fling_upload_begin`, `sitePath` on
+the local `fling_deploy`, all behind the `pathPublish` capability; publishers may path-publish
+like any other deploy.
 
 **Owner** — someone who holds a site: a person or a group the site's owners name
 (`SiteRecord.owners`, `apps/api/src/store/types.ts`; contract in `packages/shared/src/site-roles.ts`).
@@ -61,7 +75,8 @@ each copy asked of policy. Deleting a group takes it out of every site's owners 
   bytes named in the manifest (sha256 signed into the URL) and expire quickly.
 - **Publishing** — staged bytes are read back and scanned for secrets before the version goes
   live; bytes the server holds (remote MCP) are scanned before they are written. There is no way
-  to skip the scan.
+  to skip the scan. A path publish (above) scans the files it sends and copies the rest from its
+  base.
 
 **Never published** — dotfiles, gitignored files, secret files (keys, certificates, credentials)
 and files containing secrets. The CLI and local MCP check first for early, specific messages;

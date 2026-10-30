@@ -108,6 +108,8 @@ export const CORE_CAPABILITIES = {
   accessLevels: true,
   /** a site's owners and publishers, people and groups (site-roles.ts), set with `owners`/`publishers` */
   siteRoles: true,
+  /** a deploy can replace one folder of a site and keep the rest (`DeployRequest.path`) */
+  pathPublish: true,
 } as const
 
 /** The access level the instance gives a new site when its first deploy names none. */

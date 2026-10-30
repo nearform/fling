@@ -172,7 +172,7 @@ async function publishResult(
       ? 'Unchanged — this exact content is already live'
       : status === 'repointed'
         ? `Restored previously published version ${outcome.versionId}`
-        : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}`
+        : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}${outcome.path === undefined ? '' : ` to /${outcome.path}/ (the rest of the site kept as it was)`}`
   const extra = outcome.generatedIndex ? ' (with a generated index.html listing the pages)' : ''
   const warnings = outcome.warnings.length ? `\nWarnings:\n- ${outcome.warnings.join('\n- ')}` : ''
   const privacy = accessAfterPublish(deps, site, outcome.first === true, asked)
@@ -199,6 +199,7 @@ async function publishResult(
       spa: site.spa,
       shareUrl: site.shareUrl,
       versionId: outcome.versionId,
+      ...(outcome.path === undefined ? {} : { path: outcome.path }),
       ready: edge.ready,
       fileCount: outcome.fileCount,
       totalBytes: outcome.totalBytes,
@@ -303,7 +304,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       .slice(0, 10)
       .map(
         v =>
-          `- ${v.id}${v.id === site.currentVersionId ? ' (current)' : ''}: ${v.fileCount} files, ${v.createdAt}${v.publishedBy ? `, by ${v.publishedBy}` : ''}`
+          `- ${v.id}${v.id === site.currentVersionId ? ' (current)' : ''}: ${v.fileCount} files, ${v.createdAt}${v.publishedBy ? `, by ${v.publishedBy}` : ''}${v.path ? `, to /${v.path}/` : ''}`
       )
       .join('\n')
     return {
@@ -363,6 +364,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     }
     const outcome = await publishFiles(deps, user, args.name, files, {
       principal,
+      path: args.path,
       spa: args.spa,
       ...accessOf(args),
       listHtml: args.listHtml,
@@ -371,10 +373,14 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.uploadBegin, async args => {
-    const upload = await beginUpload(deps, user, args.name, { spa: args.spa, ...accessOf(args) })
+    const upload = await beginUpload(deps, user, args.name, {
+      spa: args.spa,
+      path: args.path,
+      ...accessOf(args),
+    })
     return {
       text:
-        `Upload ${upload.id} started for "${upload.name}". Send each file with fling_upload_file ` +
+        `Upload ${upload.id} started for "${upload.name}"${upload.path ? `, into /${upload.path}/` : ''}. Send each file with fling_upload_file ` +
         `(uploadId "${upload.id}"), then call fling_upload_finish. Expires at ${upload.expiresAt}.`,
       data: { uploadId: upload.id, name: upload.name, expiresAt: upload.expiresAt },
     }

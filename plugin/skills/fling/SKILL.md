@@ -196,6 +196,24 @@ It is remembered, and becomes the current one only if none is.
 - As a publisher, the user can't change who can open the site, its settings or owners, nor restore
   an archived site by publishing (`owner_only`): suggest asking one of its owners.
 
+## Publishing one folder (path publish)
+
+- To add or replace **one part of a shared site** without republishing the rest, publish into a
+  folder: one report per week under a team changelog site (`changelog/30-10-26/`), release notes
+  per version, a page per meeting. `fling_publish { name, path: "30-10-26", files }` (file paths
+  relative to the folder, its page `index.html`), `fling_deploy { path: "./report", name,
+  sitePath: "30-10-26" }`, or `fling deploy ./report --name changelog --path 30-10-26 --yes`.
+  Every other file of the site stays as it was; the result's URL is the folder's.
+- Use it only for an existing site the user publishes to (theirs, or one they are a publisher of),
+  and confirm the site and folder with them. For a site's first version, or to change pages outside
+  the folder, publish the whole site.
+- `base_changed`: someone else published the site meanwhile. The CLI retries once by itself; with
+  the MCP tools, publish again. `too_large`: the site has more than 1,000 files outside the folder;
+  publish the whole site instead. A Fling that can't do it says so: never fall back to publishing
+  just the folder as the whole site.
+- `fling_info` shows which folder each version went to; `fling_rollback` to the version before
+  removes it.
+
 ## Archive vs delete
 
 - `fling_archive { name }` takes a site offline (404) and hides it, but keeps every file and

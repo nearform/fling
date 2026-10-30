@@ -130,8 +130,13 @@ const MAX_LISTING_BYTES = 1024 * 1024
 /**
  * What's kept at manifestKey(): the deploy manifest plus, once finalized, whether the root
  * index.html is Fling's generated "List HTML files" page (absent on versions finalized earlier).
+ * A path publish's manifest is the whole merged version, with `layer`: the folder it replaced, the
+ * version it builds on, and the paths it carries forward from it (copied at finalize).
  */
-export type StoredManifest = Manifest & { generatedIndex?: boolean }
+export type StoredManifest = Manifest & {
+  generatedIndex?: boolean
+  layer?: { path: string; base: string; kept: string[] }
+}
 
 /** Is the version's root index.html the generated listing page? Reads it (it's small) to check. */
 export async function detectGeneratedIndex(
@@ -413,10 +418,18 @@ export function requireSiteAs(
   return resolveSite(deps, userActor(user), name, ...actions)
 }
 
-/** Write the site (with its index items) and its routes. */
-export async function save(deps: Deps, site: SiteRecord, oldShareToken?: string) {
+/**
+ * Write the site (with its index items) and its routes. `ifCurrentVersion`: only while the stored
+ * site's current version is that one (`ConditionFailed` otherwise, nothing written).
+ */
+export async function save(
+  deps: Deps,
+  site: SiteRecord,
+  oldShareToken?: string,
+  opts: { ifCurrentVersion?: string } = {}
+) {
   site.updatedAt = deps.clock.now().toISOString()
-  await deps.store.putSite(site)
+  await deps.store.putSite(site, opts)
   await syncRouteTable(deps, site, oldShareToken)
 }
 
@@ -829,6 +842,8 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
         ...(v.publishedBy ? { publishedBy: v.publishedBy } : {}),
+        ...(v.path ? { path: v.path } : {}),
+        ...(v.base ? { base: v.base } : {}),
         createdAt: v.createdAt,
       })),
   }

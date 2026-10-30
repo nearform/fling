@@ -709,3 +709,91 @@ describe('fling deploy --access', () => {
     expect(warnings).toMatch(/--access only applies to a new site: my-app keeps its access/)
   })
 })
+
+describe('fling deploy --path', () => {
+  const PATH_INSTANCE = {
+    ...INSTANCE,
+    capabilities: { ...INSTANCE.capabilities, pathPublish: true },
+  }
+
+  /** A deploy to my-app answering each POST with the next of `answers` (a status or a 409 code). */
+  async function pathDeploy(opts: Parameters<typeof runDeploy>[2], answers = ['upload']) {
+    const dir = await folder()
+    const bodies: any[] = []
+    let finalizes = 0
+    const m = mockFetch({
+      'POST /api/sites/my-app/deploys': (_url, init) => {
+        const body = JSON.parse(String(init.body))
+        bodies.push(body)
+        const answer = answers[bodies.length - 1] ?? 'upload'
+        if (answer !== 'upload') {
+          return jsonResponse({ error: { code: answer, message: 'it moved' } }, 409)
+        }
+        return jsonResponse({
+          status: 'upload',
+          versionId: VERSION,
+          uploads: body.manifest.files.map((f: { path: string }) => ({
+            path: f.path,
+            url: `https://s3.test/put/${f.path}`,
+            headers: {},
+          })),
+        })
+      },
+      'PUT /put/30-10-26/index.html': () => new Response(null, { status: 200 }),
+      'PUT /put/30-10-26/assets/app.js': () => new Response(null, { status: 200 }),
+      [`POST /api/sites/my-app/deploys/${VERSION}/finalize`]: () => {
+        finalizes++
+        return finalizes === 1 && answers.includes('base_changed@finalize')
+          ? jsonResponse({ error: { code: 'base_changed', message: 'it moved' } }, 409)
+          : jsonResponse({ status: 'live', versionId: VERSION, site: site() })
+      },
+    })
+    const store = await loggedInStore()
+    await store.putServer(SERVER, { instance: PATH_INSTANCE })
+    const { ctx, out, log } = await testContext({ store, fetch: m.fetch })
+    await runDeploy(ctx, dir, opts)
+    return { bodies, finalizes, text: out.content(), log: log.lines.join('\n'), waited: m.calls }
+  }
+
+  it('sends the folder and every file under it, and links to the folder', async () => {
+    const { bodies, text, log } = await pathDeploy({ name: 'my-app', path: '/30-10-26/' })
+    expect(bodies[0].path).toBe('30-10-26')
+    expect(bodies[0].manifest.files.map((f: { path: string }) => f.path).sort()).toEqual([
+      '30-10-26/assets/app.js',
+      '30-10-26/index.html',
+    ])
+    expect(log).toContain('Deployed my-app to /30-10-26/')
+    expect(text).toContain('/30-10-26/')
+  })
+
+  it('runs the whole deploy once more when the site changed meanwhile', async () => {
+    const { bodies, finalizes } = await pathDeploy({ name: 'my-app', path: '30-10-26' }, [
+      'upload',
+      'upload',
+      'base_changed@finalize',
+    ])
+    expect(bodies).toHaveLength(2)
+    expect(finalizes).toBe(2)
+    const twice = await captureError(
+      pathDeploy({ name: 'my-app', path: '30-10-26' }, ['base_changed', 'base_changed'])
+    )
+    expect(twice.message).toContain('it moved')
+  })
+
+  it('needs --name and a valid folder, and an instance that takes paths', async () => {
+    const dir = await folder()
+    const { ctx } = await testContext({ store: await loggedInStore() })
+    expect((await captureError(runDeploy(ctx, dir, { path: '30-10-26' }))).message).toMatch(
+      /--path needs --name/
+    )
+    expect(
+      (await captureError(runDeploy(ctx, dir, { name: 'my-app', path: '.git' }))).message
+    ).toMatch(/Invalid --path/)
+    const m = mockFetch({})
+    const old = await testContext({ store: await loggedInStore(), fetch: m.fetch })
+    expect(
+      (await captureError(runDeploy(old.ctx, dir, { name: 'my-app', path: '30-10-26' }))).message
+    ).toMatch(/can't publish to a path yet/)
+    expect(m.calls.some(c => c.url.pathname.endsWith('/deploys'))).toBe(false)
+  })
+})

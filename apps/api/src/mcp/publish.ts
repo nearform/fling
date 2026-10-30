@@ -8,6 +8,10 @@
  * writes its content, as sent (still encoded), to `uploads/<id>/<sha(path)>/<part>` and bumps the
  * file's part count in the store; fling_upload_finish concatenates and decodes each file, then
  * publishes like fling_publish and deletes the staging area.
+ *
+ * With `path` (a path publish, publication.ts) the files are the folder's, given relative to it:
+ * the listing page, if asked for, is the folder's own index.html, and every path is prefixed with
+ * the folder before publishBytes, which carries the rest of the site forward.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -18,6 +22,7 @@ import {
   MAX_DEPLOY_BYTES,
   MCP_UPLOAD_MAX_FILES,
   MCP_UPLOAD_TTL_SECONDS,
+  normalizePublishPath,
   renderHtmlListing,
   type Site,
   type Visibility,
@@ -48,6 +53,8 @@ export interface AccessOptions {
 export interface PublishOptions extends AccessOptions {
   /** who is publishing: a new site needs `account.site.create` */
   principal: Principal
+  /** a path publish: the folder (as the agent wrote it) the files go to */
+  path?: string
   spa?: boolean
   visibility?: Visibility
   /** no root index.html: true → generate a listing page; false → publish anyway; undefined → ask */
@@ -67,8 +74,10 @@ export type PublishOutcome =
       totalBytes: number
       generatedIndex: boolean
       warnings: string[]
-      /** every path in the published version (picks the URL the readiness wait polls) */
+      /** every path published (picks the URL the readiness wait polls) */
       paths: string[]
+      /** a path publish: the folder (normalised) */
+      path?: string
     }
 
 const tooLarge = (message: string) => new ApiError(413, 'too_large', message)
@@ -87,6 +96,18 @@ export function normalizePath(raw: string): string {
   if (!isValidSitePath(path)) {
     throw badRequest(
       `Invalid file path "${raw}": use a site-relative path with forward slashes, like "index.html" or "img/logo.png"`,
+      'invalid_path'
+    )
+  }
+  return path
+}
+
+/** A path publish's folder, normalised; 400 `invalid_path` unless it is a valid site folder. */
+export function normalizeFolder(raw: string): string {
+  const path = normalizePublishPath(raw)
+  if (path === null) {
+    throw badRequest(
+      `Invalid path "${raw}": use a folder of the site, like "30-10-26" or "reports/2026" (no dotfiles)`,
       'invalid_path'
     )
   }
@@ -112,6 +133,9 @@ export async function publishFiles(
   opts: PublishOptions
 ): Promise<PublishOutcome> {
   if (input.length === 0) throw badRequest('No files to publish', 'no_files')
+  const folder = opts.path === undefined ? undefined : normalizeFolder(opts.path)
+  const root = folder === undefined ? 'at the root' : `in /${folder}/`
+  const url = folder === undefined ? 'the site URL' : `/${folder}/`
   const files = new Map<string, Uint8Array>()
   for (const f of input) {
     const path = normalizePath(f.path)
@@ -124,7 +148,7 @@ export async function publishFiles(
     const htmlPages = [...files.keys()].filter(isHtmlPath).sort()
     if (htmlPages.length === 0) {
       warnings.push(
-        'No index.html at the root and no HTML pages: the site URL will 404; link to the files by path.'
+        `No index.html ${root} and no HTML pages: ${url} will 404; link to the files by path.`
       )
     } else if (opts.listHtml === undefined) {
       return { kind: 'needs_decision', htmlPages, fileCount: files.size }
@@ -136,22 +160,22 @@ export async function publishFiles(
       files.set('index.html', new Uint8Array(Buffer.from(renderHtmlListing(name, entries), 'utf8')))
       generatedIndex = true
     } else {
-      warnings.push(
-        'No index.html at the root: the site URL will 404; the pages work at their own paths.'
-      )
+      warnings.push(`No index.html ${root}: ${url} will 404; the pages work at their own paths.`)
     }
   }
   if (opts.spa && !files.has('index.html')) {
     warnings.push('spa is on but there is no index.html to fall back to.')
   }
 
+  const sitePath = (path: string) => (folder === undefined ? path : `${folder}/${path}`)
   const published = await publishBytes(
     deps,
     user,
     name,
-    [...files].map(([path, bytes]) => ({ path, bytes })),
+    [...files].map(([path, bytes]) => ({ path: sitePath(path), bytes })),
     {
       principal: opts.principal,
+      path: folder,
       spa: opts.spa,
       visibility: opts.visibility,
       access: opts.access,
@@ -165,7 +189,8 @@ export async function publishFiles(
     totalBytes: [...files.values()].reduce((n, b) => n + b.byteLength, 0),
     generatedIndex,
     warnings,
-    paths: [...files.keys()],
+    paths: [...files.keys()].map(sitePath),
+    ...(folder === undefined ? {} : { path: folder }),
   }
 }
 
@@ -179,8 +204,9 @@ export async function beginUpload(
   deps: Deps,
   user: User,
   name: string,
-  opts: { spa?: boolean; visibility?: Visibility } & AccessOptions
+  opts: { spa?: boolean; visibility?: Visibility; path?: string } & AccessOptions
 ): Promise<UploadRecord> {
+  const path = opts.path === undefined ? undefined : normalizeFolder(opts.path)
   // Fail early on a bad or taken name, before anything is uploaded.
   const check = await sites.checkName(deps, user, name)
   if (check.status === 'invalid') {
@@ -201,6 +227,7 @@ export async function beginUpload(
     name,
     spa: opts.spa,
     visibility: opts.visibility,
+    ...(path === undefined ? {} : { path }),
     ...(opts.access ? { access: opts.access } : {}),
     ...(opts.audience ? { audience: opts.audience } : {}),
     createdAt: now.toISOString(),
@@ -293,6 +320,7 @@ export async function finishUpload(
   })
   const outcome = await publishFiles(deps, user, upload.name, files, {
     principal: opts.principal,
+    path: upload.path,
     spa: upload.spa,
     visibility: upload.visibility,
     access: upload.access,

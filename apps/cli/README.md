@@ -103,6 +103,13 @@ does; see below).
 
 - Re-fling to update. Identical content is a no-op, and content you deployed before is restored
   instantly without uploading.
+- **Publish one folder of a site** with `--path` (and `--name`): `fling deploy ./report --name
+  changelog --path 30-10-26` serves the report at `https://changelog.<sites domain>/30-10-26/` and
+  keeps every other file of the site. Only the folder's files are uploaded; the server copies the
+  rest into the new version (at most 1,000 files, else `too_large`: deploy the whole site). If
+  someone else publishes the site in between, the deploy runs once more on top of theirs. `fling
+  versions` shows where each one went (PATH), and rolling back removes it. On a Fling without path
+  publishing (`pathPublish`) the CLI refuses rather than replace the whole site.
 - **Fling never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or
   files that contain secrets; it stops and tells you which file and line.** There is no flag to
   override this, and the server enforces it too.
@@ -182,7 +189,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 |---|---|
 | `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
 | `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
-| `fling info <name>` / `fling versions <name>` | details and version history, with who published each version |
+| `fling info <name>` / `fling versions <name>` | details and version history, with who published each version and, for a path publish, the folder (PATH) |
 | `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
@@ -370,9 +377,10 @@ accepts).
 The MCP tools:
 
 - `fling_deploy`: a folder, `.html`, `.zip` or other file on this computer, by path or just its
-  name (looked up like the CLI does).
+  name (looked up like the CLI does). `sitePath` (with `name`) publishes it into that folder of the
+  site and keeps the rest, like `--path`.
 - `fling_publish`: files passed inline, for content Claude wrote in the conversation. It has the same
-  definition as the remote connector's tool.
+  definition as the remote connector's tool; `path` publishes them into that folder of the site.
 - `fling_find_files`: recent `.html`/`.zip` files and folders with an `index.html` in those folders,
   newest first (last 14 days by default).
 - `fling_login`: opens the browser sign-in. If you haven't finished after about 30 seconds it returns

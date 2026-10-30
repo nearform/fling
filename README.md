@@ -74,6 +74,13 @@ instance only, never guests. A site always keeps at least one person as an owner
 when whoever created it is away or leaves. Naming a group trusts whoever manages it. People given a
 role are told by email, where the instance sends it.
 
+**Path publish.** A deploy can replace just one folder of a site and keep the rest: `fling deploy
+./report --name changelog --path 30-10-26` serves the report at `<changelog>/30-10-26/` while every
+other page stays as it was (`path` on the MCP tools). One report a week under a shared changelog
+site, each by whichever owner or publisher wrote it, is the use it is for. If someone else publishes
+the site meanwhile, the deploy runs again on top of theirs; rolling back removes the folder. The
+rest of the site is copied into the new version, up to 1,000 files.
+
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.
 - The frame follows the site's own navigation (single-page apps included) and stays on the site:

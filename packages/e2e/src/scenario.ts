@@ -650,6 +650,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       step('owners and publishers: not on this instance (skipped)')
     }
 
+    // Path publish: a publisher replaces one folder of a site and the rest stays served.
+    if (meta.capabilities.pathPublish === true) {
+      await pathPublishStep({
+        name: `e2e-${nonce}-path`,
+        nonce,
+        work,
+        levels,
+        roles: meta.capabilities.siteRoles === true,
+        fling,
+        flingAs,
+        made,
+        opts,
+        step,
+        propagationMs,
+      })
+    } else {
+      step('path publish: not on this instance (skipped)')
+    }
+
     // Invitations: an outsider shared with signs in by the emailed link and reviews as a guest;
     // an admin revokes them and invites another outsider as a member. Only where the instance has
     // them and the dev mailbox (`/dev/mail`) shows the links, with an admin's browser session.
@@ -1983,6 +2002,101 @@ async function rolesStep(ctx: {
       check([204, 404].includes(res.status), `owner deletes group ${groupSlug}: ${res.status}`)
     }
   }
+}
+
+/**
+ * A public site of its own (removed with the others at the end): the member, made a publisher,
+ * publishes `/30-10-26/` (or the owner does, without a second user); the folder serves the new
+ * page while `/` and the other files still serve the first version; versions show where and by
+ * whom; rolling back removes the folder's new page.
+ */
+async function pathPublishStep(ctx: {
+  name: string
+  nonce: string
+  work: string
+  levels: boolean
+  roles: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+  propagationMs: number
+}) {
+  const { name, nonce, fling, step } = ctx
+  const base = siteDir(ctx.work, 'path-base', {
+    'index.html': page('changelog', `changelog ${nonce}`),
+    'notes.html': page('notes', `notes ${nonce}`),
+    '30-10-26/index.html': page('draft', `draft week ${nonce}`),
+  })
+  const first = (await fling(
+    'deploy',
+    base,
+    '--name',
+    name,
+    ...(ctx.levels ? ['--access', 'public'] : ['--public'])
+  )) as { status: string; site: CliSite }
+  ctx.made.push(name)
+  check(first.status === 'live', `path publish base: ${JSON.stringify(first)}`)
+  const siteUrl = first.site.url
+  const v1 = first.site.currentVersionId
+  check(v1, 'path publish base: no currentVersionId')
+  const member = ctx.roles ? ctx.opts.member : undefined
+  if (member) await fling('publishers', name, '--add', member.email)
+  const publisher = member ?? ctx.opts.session
+  const asPublisher = member ? ctx.flingAs(member) : fling
+
+  const week = siteDir(ctx.work, 'path-week', {
+    'index.html': page('week', `week ${nonce}`),
+    'chart.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
+  })
+  const layered = (await asPublisher('deploy', week, '--name', name, '--path', '30-10-26')) as {
+    status: string
+    path?: string
+    url?: string
+    site: CliSite
+  }
+  check(
+    layered.status === 'live' &&
+      layered.path === '30-10-26' &&
+      layered.url === `${siteUrl}30-10-26/`,
+    `path publish: ${JSON.stringify(layered)}`
+  )
+  await eventually(
+    'the folder serves the new page',
+    `${siteUrl}30-10-26/`,
+    r => r.text.includes(`week ${nonce}`),
+    { timeoutMs: ctx.propagationMs }
+  )
+  const home = await get(siteUrl)
+  const notes = await get(`${siteUrl}notes.html`)
+  const chart = await get(`${siteUrl}30-10-26/chart.svg`)
+  check(
+    home.text.includes(`changelog ${nonce}`) &&
+      notes.text.includes(`notes ${nonce}`) &&
+      chart.status === 200,
+    `after the path publish: / ${home.status}, notes.html ${notes.status}, chart.svg ${chart.status}`
+  )
+  const versions = (await fling('versions', name)) as {
+    versions: { id: string; path?: string; base?: string; publishedBy?: string }[]
+  }
+  const current = versions.versions.find(v => v.id === layered.site.currentVersionId)
+  check(
+    current?.path === '30-10-26' && current.base === v1 && current.publishedBy === publisher.email,
+    `versions after the path publish: ${JSON.stringify(versions)}`
+  )
+  step(
+    `${publisher.email} published /30-10-26/ of ${name}: the folder is new, / and notes.html are as they were`
+  )
+
+  await fling('rollback', name, v1)
+  await eventually(
+    "rollback removes the folder's new page",
+    `${siteUrl}30-10-26/`,
+    r => r.text.includes(`draft week ${nonce}`),
+    { timeoutMs: ctx.propagationMs }
+  )
+  step('rolling back to the base removes the path publish')
 }
 
 async function adminStep(ctx: {

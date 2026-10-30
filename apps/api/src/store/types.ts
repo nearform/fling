@@ -336,6 +336,12 @@ export interface VersionRecord {
   visibility?: Visibility
   /** who published it: the email of whoever made it live (absent on versions published before it was recorded) */
   publishedBy?: string
+  /**
+   * A path publish: the folder it replaced (normalised, `30-10-26`), and the version whose other
+   * files it carried forward (absent when the site had no current version)
+   */
+  path?: string
+  base?: string
   createdAt: string
 }
 
@@ -452,6 +458,8 @@ export interface UploadRecord {
   name: string
   spa?: boolean
   visibility?: Visibility
+  /** a path publish: the folder the files go to (normalised; `DeployRequest.path`) */
+  path?: string
   /** who can open the site, if the upload creates it (`DeployRequest`) */
   access?: AccessLevel
   audience?: { emails: string[]; groups: string[] }

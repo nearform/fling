@@ -487,6 +487,76 @@ describe('MCP server', () => {
     expect(text(bad)).toMatch(/Invalid file path/)
   })
 
+  it('fling_publish and fling_deploy publish into a folder with `path` / `sitePath`', async () => {
+    const store = await loggedInStore()
+    await store.putServer(SERVER, {
+      instance: { ...INSTANCE, capabilities: { ...INSTANCE.capabilities, pathPublish: true } },
+    })
+    const bodies: any[] = []
+    const m = mockFetch({
+      'POST /api/sites/changelog/deploys': (_url, init) => {
+        bodies.push(JSON.parse(String(init.body)))
+        return jsonResponse({ status: 'upload', versionId: '0123456789abcdef', uploads: [] })
+      },
+      'POST /api/sites/changelog/deploys/0123456789abcdef/finalize': () =>
+        jsonResponse({
+          status: 'live',
+          versionId: '0123456789abcdef',
+          site: site({ name: 'changelog', url: 'https://changelog.sites.example.test/' }),
+        }),
+    })
+    const cwd = await tempDir()
+    await writeTree(join(cwd, 'week'), { 'index.html': '<h1>week</h1>' })
+    const client = await connect(store, m.fetch, cwd)
+    const res = await client.callTool({
+      name: 'fling_publish',
+      arguments: {
+        name: 'changelog',
+        path: '/30-10-26/',
+        files: [{ path: 'index.html', content: '<h1>week</h1>' }],
+      },
+    })
+    expect(res.isError).toBeFalsy()
+    expect(text(res)).toMatch(/^Deployed 1 files to \/30-10-26\/ \(the rest of the site kept/)
+    expect(text(res)).toContain('https://changelog.sites.example.test/30-10-26/')
+    expect(bodies[0].path).toBe('30-10-26')
+    expect(bodies[0].manifest.files.map((f: { path: string }) => f.path)).toEqual([
+      '30-10-26/index.html',
+    ])
+
+    const deployed = await client.callTool({
+      name: 'fling_deploy',
+      arguments: { path: 'week', name: 'changelog', sitePath: 'reports/2026' },
+    })
+    expect(deployed.isError).toBeFalsy()
+    expect(bodies[1].manifest.files.map((f: { path: string }) => f.path)).toEqual([
+      'reports/2026/index.html',
+    ])
+    expect(dataOf(deployed).path).toBe('reports/2026')
+
+    const unnamed = await client.callTool({
+      name: 'fling_deploy',
+      arguments: { path: 'week', sitePath: '30-10-26' },
+    })
+    expect(text(unnamed)).toMatch(/`sitePath` needs `name`/)
+
+    // A Fling without path publishing: refused before anything is sent.
+    await store.putServer(SERVER, { instance: INSTANCE })
+    const old = mockFetch({ ...instanceRoute })
+    const before = await connect(store, old.fetch, cwd)
+    const refused = await before.callTool({
+      name: 'fling_publish',
+      arguments: {
+        name: 'changelog',
+        path: '30-10-26',
+        files: [{ path: 'index.html', content: 'x' }],
+      },
+    })
+    expect(refused.isError).toBe(true)
+    expect(text(refused)).toMatch(/can't publish to a path yet/)
+    expect(old.calls.every(c => c.method === 'GET')).toBe(true)
+  })
+
   it('fling_publish without index.html asks for a listHtml decision', async () => {
     const store = await loggedInStore()
     const m = mockFetch({})

@@ -1,6 +1,6 @@
 /**
  * The site's files and history: the files being served, then every version, newest first, with
- * who published it, its files on demand and a restore (rollback) for any but the current one. An
+ * who published it (and, for a path publish, the folder it replaced), its files on demand and a restore (rollback) for any but the current one. An
  * archived site keeps its versions but can't be pointed at another until it is unarchived.
  */
 import type { SiteDetail } from '@fling/shared'
@@ -61,6 +61,12 @@ export function SiteVersions({ site }: { site: SiteDetail }) {
                           {timeAgo(version.createdAt)}
                           {version.publishedBy && (
                             <span className="text-muted"> by {version.publishedBy}</span>
+                          )}
+                          {version.path && (
+                            <span className="text-muted">
+                              {' · to '}
+                              <code className="text-xs">/{version.path}/</code>
+                            </span>
                           )}
                         </td>
                         <td className="tabular-nums">{version.fileCount}</td>

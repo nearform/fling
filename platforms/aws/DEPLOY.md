@@ -1,5 +1,16 @@
 # Deploying Fling on AWS
 
+**Ask your agent:**
+
+```text
+Clone https://github.com/nearform/fling and follow platforms/aws/DEPLOY.md
+to install Fling on my AWS account at fling.yourdomain.com.
+Before you create or change anything, ask me for what you need
+(the AWS region, the domain and its DNS, and the sign-in provider) and show me the plan.
+```
+
+Or follow the steps below yourself.
+
 Fling runs serverless in your own AWS account (one region plus global CloudFront). The
 infrastructure is a Terraform module in this repository, [`platforms/aws/infra`](infra), that you
 call from your own Terraform; this repository's `deploy.yml` ships the code. One deployment is an

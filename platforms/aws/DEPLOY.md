@@ -708,7 +708,8 @@ Admin → Settings lists each one under its environment name (`OIDC_CLIENT_SECRE
 
 To rotate the generated ones, bump the module's `secrets_version` and apply, then redeploy so warm
 functions pick them up. Rotating `session-secret` signs everyone out. Rotating `site-hmac-key`
-also needs the copy the site router reads from the KeyValueStore updated by the API.
+also changes the copy the site router reads from the KeyValueStore: each new function instance
+puts it there alongside its first request, and logs `edge key` when done.
 
 ## Deploy security (public repository)
 

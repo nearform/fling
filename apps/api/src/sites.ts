@@ -24,12 +24,19 @@
  *
  * Shared with me (`listShared`): the restricted sites of others that the user may see, listed from
  * their direct grants and their groups' site items, which carry each site's listing.
+ *
+ * Owners and publishers (site-roles.ts): the owners may name other members, people or groups, as
+ * owners or publishers (`applyRoles` through `updateSite`); the owners always keep an address.
+ * A user's sites (`listSites`) are those they hold a role on: the sites they created while they
+ * still do, and those their role items and their groups' role items name. Deleting a group takes
+ * it out of every site's roles.
  */
 import {
   type AccessLevel,
   AUDIENCE_EMAILS_MAX,
   AUDIENCE_GROUPS_MAX,
   type Audience,
+  type AudienceEmail,
   type AudienceInput,
   AudienceInputSchema,
   accessProblem,
@@ -44,12 +51,21 @@ import {
   type NameCheck,
   nameSuggestions,
   needsAudience,
+  OWNER_EMAILS_MAX,
+  OWNER_GROUPS_MAX,
+  OwnersInputSchema,
+  PUBLISHER_EMAILS_MAX,
+  PUBLISHER_GROUPS_MAX,
+  PublishersInputSchema,
   parseLabel,
   reviewUrl,
   type SharedSite,
   SITE_PASS_PATH,
   type Site,
   type SiteDetail,
+  type SiteRole,
+  type SiteRoleInput,
+  type SiteRoleMembers,
   shareKvsKey,
   shareLabel,
   siteKvsKey,
@@ -74,6 +90,7 @@ import { admittedByConfig, asRequestUser } from './auth/standing.ts'
 import { manifestKey } from './blobs/types.ts'
 import {
   checkAddresses,
+  checkMembers,
   guestsAmong,
   type Inviter,
   inviteGuests,
@@ -90,16 +107,19 @@ import {
   can,
   isRestricted,
   type Principal,
+  rolesOf,
   SITE_CHANGES,
   userActor,
 } from './policy.ts'
 import {
   accessOfSite,
+  firstOwner,
   hasListing,
   listingOf,
   type SharedListing,
   type SiteAudience,
   type SiteRecord,
+  type SiteRoleList,
   type User,
 } from './store/types.ts'
 import type { Deps } from './types.ts'
@@ -128,8 +148,23 @@ export async function detectGeneratedIndex(
 
 const protocol = (deps: Deps) => `${deps.config.siteScheme}:`
 
-export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
+/**
+ * The caller's role on the site, as clients show it: owner, publisher, or an admin administering
+ * it; none for anyone else.
+ */
+export function siteRoleOf(actor: Actor, site: SiteRecord): SiteRole | undefined {
+  const [role] = rolesOf(actor, site)
+  if (role === 'owner' || role === 'publisher') return role
+  return role === 'admin' || role === 'admin-token' ? 'admin' : undefined
+}
+
+/**
+ * The site as `actor` (resolved against it, `actorOn`) sees it: with their role, and the share
+ * link only if they may read it (not a publisher).
+ */
+export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
   const { sitesDomain } = deps.config
+  const role = siteRoleOf(actor, site)
   return {
     name: site.name,
     url: siteUrl(siteLabel(site.name), sitesDomain, protocol(deps)),
@@ -137,13 +172,15 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
     spa: site.spa,
     archived: site.archived,
     currentVersionId: site.currentVersionId,
-    shareUrl: site.shareToken
-      ? siteUrl(shareLabel(site.shareToken), sitesDomain, protocol(deps))
-      : null,
+    shareUrl:
+      site.shareToken && can(actor, 'share.read', site)
+        ? siteUrl(shareLabel(site.shareToken), sitesDomain, protocol(deps))
+        : null,
     access: accessOfSite(site),
     restricted: isRestricted(site),
     audienceSize: site.audience.emails.length + site.audience.groups.length,
     audienceGroups: site.audience.groups.length,
+    ...(role ? { role } : {}),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
   }
@@ -155,26 +192,50 @@ export function toSite(deps: Deps, _user: User, site: SiteRecord): Site {
  * slug, with its name and size. A group that has been deleted (kept because it was the only entry,
  * `dropGroup`) is `deleted`, named by its reference.
  */
-export async function audienceOf(deps: Deps, site: SiteRecord): Promise<Audience> {
+export function audienceOf(deps: Deps, site: SiteRecord): Promise<Audience> {
+  return peopleOf(deps, site.audience)
+}
+
+/**
+ * Addresses and groups (an audience, the owners or the publishers) as the API reports them: each
+ * address, whether it has signed in yet and whether it is a guest; each group by slug, with its
+ * name and size, or `deleted`.
+ */
+async function peopleOf(
+  deps: Deps,
+  list: SiteAudience | SiteRoleList
+): Promise<{ emails: AudienceEmail[]; groups: Audience['groups'] }> {
   const [known, guests, groups] = await Promise.all([
-    deps.store.knownEmails(site.audience.emails),
-    guestsAmong(deps, site.audience.emails),
-    deps.store.getGroups(site.audience.groups),
+    deps.store.knownEmails(list.emails),
+    guestsAmong(deps, list.emails),
+    deps.store.getGroups(list.groups),
   ])
   const byId = new Map(groups.map(g => [g.id, g]))
   return {
-    emails: site.audience.emails.map(email => ({
+    emails: list.emails.map(email => ({
       email,
       known: known.has(email),
       ...(guests.has(email) ? { guest: true } : {}),
     })),
-    groups: site.audience.groups.map(id => {
+    groups: list.groups.map(id => {
       const g = byId.get(id)
       return g
         ? { slug: g.slug, name: g.name, size: g.size }
         : { slug: deletedGroupRef(id), name: 'a deleted group', size: 0, deleted: true }
     }),
   }
+}
+
+/** The site's owners and publishers as the API reports them (`peopleOf`). */
+export async function rolesView(
+  deps: Deps,
+  site: SiteRecord
+): Promise<{ owners: SiteRoleMembers; publishers: SiteRoleMembers }> {
+  const [owners, publishers] = await Promise.all([
+    peopleOf(deps, site.owners),
+    peopleOf(deps, site.publishers),
+  ])
+  return { owners, publishers }
 }
 
 /** Make the route table reflect the site: live (not archived, has a version) → keys present, else gone. */
@@ -248,7 +309,7 @@ export async function checkName(deps: Deps, user: User, name: string): Promise<N
     suggestions: await freeNameSuggestions(deps, user, name),
   })
   const site = await deps.store.findSite(name)
-  if (site) return can(userActor(user), 'site.deploy', site) ? yours : taken()
+  if (site) return can(await siteActor(deps, user, site), 'site.deploy', site) ? yours : taken()
   // A claim without a site (only ever transient): it is the claimant's.
   const claim = await deps.store.getNameClaim(name)
   if (!claim) return { name, status: 'available', suggestions: [] }
@@ -273,13 +334,25 @@ function groupsOf(deps: Deps, email: string): Promise<string[]> {
   return deps.store.listMemberships(email)
 }
 
+/** Whether policy reads the actor's groups for this site: where groups hold roles or let people in. */
+const readsGroups = (site: SiteRecord) =>
+  site.owners.groups.length > 0 ||
+  site.publishers.groups.length > 0 ||
+  (isRestricted(site) && site.audience.groups.length > 0)
+
 /**
- * The actor as policy needs them for this site: a user carries their groups on a restricted site,
- * the only place policy reads them (so other sites cost no lookup).
+ * The actor as policy needs them for this site: a user carries their groups where the site's
+ * owners or publishers name groups, or it is restricted to an audience that does, the only places
+ * policy reads them (so other sites cost no lookup).
  */
 export async function actorOn(deps: Deps, actor: Actor, site: SiteRecord): Promise<Actor> {
-  if (actor.kind !== 'user' || !isRestricted(site)) return actor
+  if (actor.kind !== 'user' || actor.groups || !readsGroups(site)) return actor
   return { ...actor, groups: await groupsOf(deps, actor.email) }
+}
+
+/** A signed-in user as policy needs them for this site (`actorOn`). */
+export function siteActor(deps: Deps, user: User, site: SiteRecord): Promise<Actor> {
+  return actorOn(deps, userActor(user), site)
 }
 
 /**
@@ -315,7 +388,7 @@ export async function auditAdmin(deps: Deps, actor: Actor, site: SiteRecord, act
     action: action === 'site.view' ? 'site.open' : 'site.change',
     actor: actor.email,
     target: site.name,
-    owner: site.email,
+    owner: firstOwner(site),
     ...(action === 'site.view' ? {} : { change: action }),
   })
 }
@@ -327,7 +400,17 @@ export async function requireSite(
   name: string,
   ...actions: [Action, ...Action[]]
 ): Promise<SiteRecord> {
-  return (await resolveSite(deps, userActor(user), name, ...actions)).site
+  return (await requireSiteAs(deps, user, name, ...actions)).site
+}
+
+/** `requireSite`, with the user resolved against the site (for `toSite`). */
+export function requireSiteAs(
+  deps: Deps,
+  user: User,
+  name: string,
+  ...actions: [Action, ...Action[]]
+): Promise<{ site: SiteRecord; actor: Actor }> {
+  return resolveSite(deps, userActor(user), name, ...actions)
 }
 
 /** Write the site (with its index items) and its routes. */
@@ -366,10 +449,25 @@ export async function applyAudience(
     emails.filter(e => !had.has(e)),
     inviter
   )
+  const groups = await groupIds(deps, slugs, site.audience.groups)
+  const before = site.audience
+  site.audience = { emails, groups }
+  return before
+}
+
+/**
+ * Group slugs as ids, each once: every slug one that exists (400 `unknown_group`, naming them). A
+ * deleted group's reference (`#<id>`) keeps it, if `current` already names it.
+ */
+async function groupIds(
+  deps: Deps,
+  slugs: readonly string[],
+  current: readonly string[]
+): Promise<string[]> {
   const ids = await Promise.all(
     slugs.map(async slug => {
       const kept = deletedGroupId(slug)
-      if (kept !== null) return site.audience.groups.includes(kept) ? kept : null
+      if (kept !== null) return current.includes(kept) ? kept : null
       return (await deps.store.findGroup(slug))?.id ?? null
     })
   )
@@ -379,9 +477,78 @@ export async function applyAudience(
       groups: unknown,
     })
   }
-  const before = site.audience
-  site.audience = { emails, groups: [...new Set(ids as string[])] }
-  return before
+  return [...new Set(ids as string[])]
+}
+
+/**
+ * New owners and publishers for the site, checked (site-roles.ts): each list within its caps,
+ * every address it adds a member of the instance (`checkMembers`: never a guest, and nobody is
+ * invited), every group slug one that exists, stored by id. The owners must keep an address (400
+ * `last_owner`), and whoever is in both lists stays an owner only. What isn't given is kept.
+ */
+export async function applyRoles(
+  deps: Deps,
+  site: Pick<SiteRecord, 'owners' | 'publishers'>,
+  input: { owners?: SiteRoleInput; publishers?: SiteRoleInput }
+): Promise<void> {
+  const parse = (
+    given: SiteRoleInput | undefined,
+    schema: typeof OwnersInputSchema,
+    caps: [emails: number, groups: number, what: string]
+  ) => {
+    if (given === undefined) return undefined
+    const parsed = schema.parse(given)
+    const emails = [...new Set(parsed.emails)]
+    const slugs = [...new Set(parsed.groups)]
+    const [emailsMax, groupsMax, what] = caps
+    if (emails.length > emailsMax) {
+      throw badRequest(`A site has at most ${emailsMax} ${what} addresses`)
+    }
+    if (slugs.length > groupsMax)
+      throw badRequest(`A site names at most ${groupsMax} ${what} groups`)
+    return { emails, slugs }
+  }
+  const owners = parse(input.owners, OwnersInputSchema, [
+    OWNER_EMAILS_MAX,
+    OWNER_GROUPS_MAX,
+    'owner',
+  ])
+  const publishers = parse(input.publishers, PublishersInputSchema, [
+    PUBLISHER_EMAILS_MAX,
+    PUBLISHER_GROUPS_MAX,
+    'publisher',
+  ])
+  if (owners && owners.emails.length === 0) {
+    throw new ApiError(
+      400,
+      'last_owner',
+      'A site needs at least one person as an owner: add another owner before removing the last'
+    )
+  }
+  const had = new Set([...site.owners.emails, ...site.publishers.emails])
+  await checkMembers(
+    deps,
+    [...(owners?.emails ?? []), ...(publishers?.emails ?? [])].filter(e => !had.has(e))
+  )
+  const next = {
+    owners: owners
+      ? {
+          emails: owners.emails,
+          groups: await groupIds(deps, owners.slugs, site.owners.groups),
+        }
+      : site.owners,
+    publishers: publishers
+      ? {
+          emails: publishers.emails,
+          groups: await groupIds(deps, publishers.slugs, site.publishers.groups),
+        }
+      : site.publishers,
+  }
+  site.owners = next.owners
+  site.publishers = {
+    emails: next.publishers.emails.filter(e => !next.owners.emails.includes(e)),
+    groups: next.publishers.groups.filter(g => !next.owners.groups.includes(g)),
+  }
 }
 
 /**
@@ -456,20 +623,41 @@ export async function initialAccess(
 }
 
 /**
- * Take a group out of the audiences that name it (deleting the group), never widening who sees a
- * site: an audience that names others as well loses it (each site saved the usual way); one it is
- * the only entry of keeps its id, which matches nobody, so the site stays restricted to its owner
- * until they change the audience.
+ * Take a group out of the audiences and the roles that name it (deleting the group), never
+ * widening who sees a site: an audience that names others as well loses it; one it is the only
+ * entry of keeps its id, which matches nobody, so the site stays restricted to its owners until
+ * they change the audience. Owners and publishers always lose it (the owners keep their
+ * addresses). Each site is saved the usual way.
  */
 export async function dropGroup(deps: Deps, groupId: string) {
-  for (const item of await deps.store.listGroupSites(groupId)) {
-    const site = await deps.store.findSite(item.name)
-    if (site?.id !== item.siteId || !site.audience.groups.includes(groupId)) continue
-    const before = site.audience
-    const groups = before.groups.filter(g => g !== groupId)
-    if (before.emails.length + groups.length === 0) continue
-    site.audience = { ...before, groups }
-    await save(deps, site)
+  const [audiences, roles] = await Promise.all([
+    deps.store.listGroupSites(groupId),
+    deps.store.listGroupRoleSites(groupId),
+  ])
+  const named = new Map<string, string>()
+  for (const item of audiences) named.set(item.siteId, item.name)
+  for (const item of roles) named.set(item.id, item.name)
+  const without = (list: SiteRoleList) => ({
+    ...list,
+    groups: list.groups.filter(g => g !== groupId),
+  })
+  for (const [siteId, name] of named) {
+    const site = await deps.store.findSite(name)
+    if (site?.id !== siteId) continue
+    let changed = false
+    const audience = site.audience
+    const groups = audience.groups.filter(g => g !== groupId)
+    if (groups.length < audience.groups.length && audience.emails.length + groups.length > 0) {
+      site.audience = { ...audience, groups }
+      changed = true
+    }
+    for (const role of ['owners', 'publishers'] as const) {
+      if (site[role].groups.includes(groupId)) {
+        site[role] = without(site[role])
+        changed = true
+      }
+    }
+    if (changed) await save(deps, site)
   }
 }
 
@@ -478,11 +666,49 @@ export function applySettings(site: SiteRecord, opts: { spa?: boolean; visibilit
   if (opts.visibility !== undefined) site.visibility = opts.visibility
 }
 
+/**
+ * The sites `email` holds a role on (owner or publisher), each once, newest copy first, read from
+ * index items alone: the sites they created (kept only while they still hold a role), their role
+ * items, and their groups' role items (`groups`, their memberships). Each copy is asked of policy,
+ * so an item a role no longer backs (two saves of a site racing) lists nothing.
+ */
+export async function roleSites(
+  deps: Deps,
+  user: { email: string; guest?: true },
+  groups: readonly string[]
+): Promise<SiteRecord[]> {
+  // A guest holds no role, even one an address or a group names.
+  if (user.guest) return []
+  const { email } = user
+  const [created, held, viaGroups] = await Promise.all([
+    deps.store.listSites(email),
+    deps.store.listRoleSites(email),
+    mapLimit([...groups], SHARED_READ_CONCURRENCY, id => deps.store.listGroupRoleSites(id)),
+  ])
+  const newest = new Map<string, SiteRecord>()
+  for (const copy of [...created, ...held, ...viaGroups.flat()]) {
+    const { role: _role, ...site } = copy as SiteRecord & { role?: string }
+    if ((newest.get(site.id)?.updatedAt ?? '') < site.updatedAt) newest.set(site.id, site)
+  }
+  // No admin flag: an admin's sites are the ones they hold a role on.
+  const actor: Actor = { kind: 'user', email, groups }
+  return [...newest.values()].filter(s =>
+    rolesOf(actor, s).some(r => r === 'owner' || r === 'publisher')
+  )
+}
+
+/**
+ * GET /api/sites — the sites the user owns or publishes (`roleSites`), newest first: live ones, or
+ * the archived ones.
+ */
 export async function listSites(deps: Deps, user: User, archived: boolean): Promise<Site[]> {
-  const sites = await deps.store.listSites(user.email)
+  const groups = await groupsOf(deps, user.email)
+  const actor: Actor = { ...userActor(user), groups }
+  const sites = await roleSites(deps, user, groups)
   return sites
     .filter(s => s.archived === archived && (archived || s.currentVersionId !== null))
-    .map(s => toSite(deps, user, s))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .map(s => toSite(deps, actor, s))
 }
 
 /** Group-site queries, and sites read for v1 index items, run at once while listing. */
@@ -493,7 +719,8 @@ const SHARED_READ_CONCURRENCY = 10
  * names them, directly or through a group they are in. One query for their direct grants, one for
  * their memberships and one per group for its site items; each item carries the site's listing
  * (`SharedListing`), so no site is read. Sites that aren't live (archived, or no current version)
- * are left out, as are merely private ones, which every member sees anyway. Last updated first.
+ * are left out, as are merely private ones, which every member sees anyway, and those the user
+ * owns or publishes (`roleSites`), which are in their own list. Last updated first.
  *
  * Being in the audience is implied by the item existing (items are written and removed with the
  * audience, `putSite`), and a group counts only while the user is a member of it now. An item the
@@ -507,9 +734,12 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
     deps.store.listSiteGrants(user.email),
     groupsOf(deps, user.email),
   ])
-  const groupSites = (
-    await mapLimit(groups, SHARED_READ_CONCURRENCY, id => deps.store.listGroupSites(id))
-  ).flat()
+  const [groupSites, held] = await Promise.all([
+    mapLimit(groups, SHARED_READ_CONCURRENCY, id => deps.store.listGroupSites(id)).then(s =>
+      s.flat()
+    ),
+    roleSites(deps, user, groups).then(sites => new Set(sites.map(s => s.id))),
+  ])
 
   const listed = new Map<string, SharedListing>()
   const unlisted = new Map<string, string>()
@@ -524,8 +754,7 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
   for (const item of groupSites) {
     viaGroups.set(item.siteId, [...(viaGroups.get(item.siteId) ?? []), item.groupId])
   }
-  const shown = (s: SharedListing) =>
-    s.owner !== user.email && !s.archived && s.live && s.restricted
+  const shown = (s: SharedListing) => !held.has(s.siteId) && !s.archived && s.live && s.restricted
   const visible: { listing: SharedListing; direct: boolean; groups: string[] }[] = [
     ...listed.values(),
   ]
@@ -581,15 +810,17 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
 }
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
-  const site = await requireSite(deps, user, name, 'site.read', 'version.list')
-  const [versions, audience] = await Promise.all([
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.read', 'version.list')
+  const [versions, audience, roles] = await Promise.all([
     deps.store.listVersions(site),
     audienceOf(deps, site),
+    rolesView(deps, site),
   ])
   return {
-    ...toSite(deps, user, site),
-    owner: site.email,
+    ...toSite(deps, actor, site),
+    owner: firstOwner(site),
     audience,
+    ...roles,
     versions: versions
       .filter(v => v.status === 'complete')
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -631,7 +862,8 @@ export async function versionFiles(
 /**
  * PATCH /api/sites/:name. `access` sets the level (with `audience` for `groups` and `people`);
  * without it, `visibility` and `audience` edit those alone, and an audience edit restricts the site
- * when the audience names someone and opens it to every member when it is empty.
+ * when the audience names someone and opens it to every member when it is empty. `owners` and
+ * `publishers` replace those lists (`applyRoles`).
  */
 export async function updateSite(
   deps: Deps,
@@ -642,9 +874,11 @@ export async function updateSite(
     visibility?: Visibility
     audience?: AudienceInput
     access?: AccessLevel
+    owners?: SiteRoleInput
+    publishers?: SiteRoleInput
   },
   principal: Principal
-): Promise<Site & { audience?: Audience }> {
+): Promise<Site & { audience?: Audience; owners?: SiteRoleMembers; publishers?: SiteRoleMembers }> {
   if (patch.access !== undefined && patch.visibility !== undefined) {
     throw badRequest('Pass `access` or `visibility`, not both')
   }
@@ -656,9 +890,13 @@ export async function updateSite(
     ...(patch.audience === undefined && patch.access === undefined
       ? []
       : (['site.audience'] as const)),
+    ...(patch.owners === undefined ? [] : (['site.owners'] as const)),
+    ...(patch.publishers === undefined ? [] : (['site.publishers'] as const)),
   ]
   const [first = 'site.settings', ...rest] = actions
   const site = await requireSite(deps, user, name, first, ...rest)
+  const roles = patch.owners !== undefined || patch.publishers !== undefined
+  if (roles) await applyRoles(deps, site, patch)
   applySettings(site, patch)
   let before: SiteAudience | undefined
   const inviter = inviterOf(principal)
@@ -672,19 +910,22 @@ export async function updateSite(
   // The invitations first: the share's email, sent later, goes only to people with standing.
   if (before) await inviteAdded(deps, inviter, site, before)
   if (before) await notifyAudienceChange(deps, user.email, site, before, actingOf(principal))
+  // The caller may have just changed their own role.
+  const after = await siteActor(deps, user, site)
   return {
-    ...toSite(deps, user, site),
+    ...toSite(deps, after, site),
     ...(before ? { audience: await audienceOf(deps, site) } : {}),
+    ...(roles ? await rolesView(deps, site) : {}),
   }
 }
 
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
-  const site = await requireSite(deps, user, name, 'site.rollback')
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.rollback')
   const version = await deps.store.getVersion(site, versionId)
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
   await save(deps, site)
-  return toSite(deps, user, site)
+  return toSite(deps, actor, site)
 }
 
 export async function rotateShare(deps: Deps, user: User, name: string) {
@@ -698,18 +939,18 @@ export async function rotateShare(deps: Deps, user: User, name: string) {
 }
 
 export async function revokeShare(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name, 'share.revoke')
+  const { site, actor } = await requireSiteAs(deps, user, name, 'share.revoke')
   const old = site.shareToken ?? undefined
   site.shareToken = null
   await save(deps, site, old)
-  return toSite(deps, user, site)
+  return toSite(deps, actor, site)
 }
 
 export async function setArchived(deps: Deps, user: User, name: string, archived: boolean) {
-  const site = await requireSite(deps, user, name, 'site.archive')
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.archive')
   site.archived = archived
   await save(deps, site)
-  return toSite(deps, user, site)
+  return toSite(deps, actor, site)
 }
 
 /**

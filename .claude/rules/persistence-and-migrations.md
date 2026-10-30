@@ -32,7 +32,8 @@ paths:
 - All domain persistence goes through `Records`, behind the `Store` interface. Routes never touch
   `Table` directly.
 - Keys are site-centric. The site partition is `SITE#<id>` (`SITE`, `VERSION#…`, `COMMENT#…`).
-  Lookups use index items: `USER#<email>/SITE#<name>`, `NAME#<name>/NAME`, `USERS/USER#<email>`.
+  Lookups use index items: `USER#<email>/SITE#<name>` (the creator's), `USER#<email>/ROLE#<siteId>`
+  and `GROUP#<id>/ROLE#<siteId>` (role items), `NAME#<name>/NAME`, `USERS/USER#<email>`.
   The audit log is `AUDIT/<sortable id>`. Writes that span items (a claim and its site, a record and
   its index) go in one `transact`.
 - Every record has `v`, the version of its shape. Bump `v` when a shape changes. Reads upgrade older

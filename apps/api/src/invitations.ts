@@ -104,6 +104,31 @@ export async function checkAddresses(
 }
 
 /**
+ * Refuse, with a 400 `email_not_allowed` naming them, the addresses that aren't members of the
+ * instance: neither admitted by the email policy nor holding a live member invitation (counted
+ * only while `INVITES` is on). Only members hold a role on a site (site-roles.ts): nobody is
+ * invited by being named as an owner or a publisher.
+ */
+export async function checkMembers(deps: Deps, emails: readonly string[]): Promise<void> {
+  const { config } = deps
+  const outside = emails.filter(e => !ADDRESS_RE.test(e) || !admittedByConfig(config, e))
+  const invitations = config.invites
+    ? await Promise.all(outside.map(e => (ADDRESS_RE.test(e) ? deps.store.getInvitation(e) : null)))
+    : []
+  const refused = outside.filter((_, i) => {
+    const invitation = invitations[i] ?? null
+    return !(isLiveInvitation(invitation) && invitation.role === 'member')
+  })
+  if (refused.length === 0) return
+  throw new ApiError(
+    400,
+    'email_not_allowed',
+    `Not a member of ${config.instanceName}: ${refused.join(', ')}. Owners and publishers must be members`,
+    { emails: refused }
+  )
+}
+
+/**
  * Invite `emails` (outside addresses an audience or group just added, through `checkAddresses`)
  * as guests: a new invitation for each without a live one, counted against the inviter's day and
  * audited. A live invitation, guest or member, stays as it is.

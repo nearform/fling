@@ -160,9 +160,24 @@ export interface SiteAudience {
   groups: string[]
 }
 
+/**
+ * A site's owners or publishers: addresses, and group ids (`site-roles.ts` in @fling/shared). The
+ * owners always hold an address.
+ */
+export interface SiteRoleList {
+  /** lowercase, each a member of the instance when it was added */
+  emails: string[]
+  groups: string[]
+}
+
 export interface SiteRecord {
   /** random siteId; S3 prefix `sites/<id>/` */
   id: string
+  /**
+   * The creator: who first deployed it. Never changes and grants nothing by itself (`owners`
+   * does); it keys the name claim, the `USER#<email>/SITE#<name>` index item and the old-layout
+   * version keys.
+   */
   email: string
   name: string
   visibility: Visibility
@@ -178,9 +193,28 @@ export interface SiteRecord {
    * exactly when the audience names someone, as they were then (`restrictsToAudience`, policy.ts).
    */
   restricted?: boolean
+  /** v3; older records read as the creator alone */
+  owners: SiteRoleList
+  /** v3; older records read as none */
+  publishers: SiteRoleList
   createdAt: string
   updatedAt: string
 }
+
+/** A role a person or group holds on a site (policy.ts). */
+export type SiteRoleName = 'owner' | 'publisher'
+
+/**
+ * A role item (`USER#<email>/ROLE#<siteId>`, `GROUP#<groupId>/ROLE#<siteId>`): a full copy of
+ * the site and the role the person or group holds on it, written with the site while they hold
+ * one, so the sites someone owns or publishes are one query per source. A projection: policy reads
+ * the site's `owners` and `publishers`.
+ */
+export type SiteRoleRecord = SiteRecord & { role: SiteRoleName }
+
+/** The person a listing names as the site's owner: its first person owner. */
+export const firstOwner = (site: Pick<SiteRecord, 'email' | 'owners'>): string =>
+  site.owners.emails[0] ?? site.email
 
 /**
  * What Shared with me shows and filters on, copied from a site onto its index items (direct grants
@@ -203,7 +237,7 @@ export function listingOf(site: SiteRecord): SharedListing {
   return {
     siteId: site.id,
     name: site.name,
-    owner: site.email,
+    owner: firstOwner(site),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
     archived: site.archived,
@@ -472,8 +506,15 @@ export interface Store extends NotificationStore {
    * record for it). Access is policy's decision, not the lookup's.
    */
   findSite(name: string): Promise<SiteRecord | null>
-  /** The user's own sites, by name. */
+  /**
+   * The sites `email` created (their `USER#<email>/SITE#<name>` index items), by name, whatever
+   * role they hold on them now.
+   */
   listSites(email: string): Promise<SiteRecord[]>
+  /** The sites `email` holds a role on by address (their role items), by site id. */
+  listRoleSites(email: string): Promise<SiteRoleRecord[]>
+  /** The sites a group holds a role on (its role items), by site id. */
+  listGroupRoleSites(groupId: string): Promise<SiteRoleRecord[]>
   /** Who owns `name` globally (null → free). */
   getNameClaim(name: string): Promise<NameClaim | null>
   /**
@@ -488,12 +529,15 @@ export interface Store extends NotificationStore {
    * one: the directory item is rewritten when the listing or access level changed; emails that
    * leave the audience lose their direct grant and groups their group-site item; those that join
    * gain one; and when the listing (`SharedListing`) changed, every grant and group-site item is
-   * rewritten.
+   * rewritten. Every person (but the creator, whose index item stands in) and group holding a role
+   * has a role item, rewritten with each save; one that no longer holds one loses it.
+   * `ifCurrentVersion`: only while the stored site's current version is that one, else
+   * `ConditionFailed` and the site is unchanged.
    */
-  putSite(site: SiteRecord): Promise<void>
+  putSite(site: SiteRecord, opts?: { ifCurrentVersion?: string }): Promise<void>
   /**
-   * Delete the site with its versions, grants, group-site items and directory item, and release
-   * its name claim (if the claim is its).
+   * Delete the site with its versions, grants, group-site items, role items and directory item,
+   * and release its name claim (if the claim is its).
    */
   deleteSite(site: SiteRecord): Promise<void>
   /** The sites shared with `email` directly (its grants, with their listings), by site id. */
@@ -585,7 +629,10 @@ export interface Store extends NotificationStore {
   ): Promise<void>
   /** The sites whose audience names the group, with their listings. */
   listGroupSites(groupId: string): Promise<GroupSiteRecord[]>
-  /** Delete the group: its members and memberships, its site items, its index items and claim. */
+  /**
+   * Delete the group: its members and memberships, its site items and role items, its index items
+   * and claim.
+   */
   deleteGroup(group: GroupRecord): Promise<void>
 
   getVersion(site: SiteRef, id: string): Promise<VersionRecord | null>

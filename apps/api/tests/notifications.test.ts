@@ -290,6 +290,25 @@ describe('comments', () => {
     expect(dan).toBeDefined()
   })
 
+  it('tells every owner of a new thread, owner groups included, never the writer or a publisher', async () => {
+    const { env, alice, bob, carol } = await world()
+    await api(env, alice.key, 'POST', '/api/groups', { slug: 'ops', name: 'Ops', members: [CAROL] })
+    const roles = await api(env, alice.key, 'PATCH', '/api/sites/q3-report', {
+      owners: { emails: [ALICE, BOB], groups: ['ops'] },
+      publishers: { emails: [DAN] },
+    })
+    expect(roles.status).toBe(200)
+    await settle(env)
+    env.mailer.clear()
+    await comment(env, bob.key, { body: 'Ready to go' })
+    await settle(env)
+    expect(subjects(env, ALICE)).toEqual(['Acme Fling: Bob commented on q3-report'])
+    expect(subjects(env, CAROL)).toEqual(['Acme Fling: Bob commented on q3-report'])
+    expect(subjects(env, BOB)).toEqual([])
+    expect(subjects(env, DAN)).toEqual([])
+    expect(carol).toBeDefined()
+  })
+
   it('folds a burst into one email, then waits out the cool-down', async () => {
     const { env, bob, carol } = await world()
     await comment(env, bob.key, { body: 'One' })

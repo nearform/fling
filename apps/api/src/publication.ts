@@ -27,6 +27,12 @@
  * (`initialAccess`). It never changes a site that has been live. When the site first goes live
  * restricted to an audience, the audience hears it was shared with them.
  *
+ * Owners and publishers deploy (`site.deploy`). A deploy that would change the site's settings
+ * needs what changing them needs (`deployChanges`): `spa` needs `site.settings`, `visibility` and a
+ * never-live site's `access` need `site.visibility` (and `site.audience` for `access`); a publisher
+ * asking for one gets 400 `owner_only` before anything is stored. The settings a pending version
+ * carries are applied when it goes live only as far as whoever makes it live may change them.
+ *
  * Who published (`VersionRecord.publishedBy`): the user who makes a version live. A pending
  * version records whoever staged it, and finalizing records whoever finalized it. A version is
  * content-addressed, so an `unchanged` or `repointed` deploy creates nothing and the version keeps
@@ -68,17 +74,28 @@ import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { can, canInstance, isRestricted, type Principal, userActor } from './policy.ts'
+import {
+  type Action,
+  type Actor,
+  can,
+  canInstance,
+  isRestricted,
+  type Principal,
+  restrictsToAudience,
+  userActor,
+} from './policy.ts'
 import {
   type AccessFields,
   applySettings,
+  auditAdmin,
   detectGeneratedIndex,
   initialAccess,
   inviteAdded,
   nameTaken,
-  requireSite,
+  requireSiteAs,
   type StoredManifest,
   save,
+  siteActor,
   toSite,
 } from './sites.ts'
 import type { SiteRecord, User, VersionRecord } from './store/types.ts'
@@ -207,7 +224,67 @@ async function scanStoredVersion(
 
 type Prepared =
   | { kind: 'done'; result: Published & { status: 'unchanged' | 'repointed' } }
-  | { kind: 'pending'; site: SiteRecord; version: VersionRecord; files: ManifestFile[] }
+  | {
+      kind: 'pending'
+      site: SiteRecord
+      actor: Actor
+      version: VersionRecord
+      files: ManifestFile[]
+    }
+
+const sameSet = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every(x => b.includes(x))
+
+/**
+ * What changing the site's settings as a deploy asks would need: `spa` → `site.settings`,
+ * `visibility` → `site.visibility`, and `access` (never-live sites only: the fields it sets) →
+ * `site.visibility` and `site.audience`. Settings that match the site's need nothing.
+ */
+function deployChanges(
+  site: SiteRecord,
+  req: { spa?: boolean; visibility?: Visibility },
+  access: AccessFields | null
+): Action[] {
+  const actions = new Set<Action>()
+  if (req.spa !== undefined && req.spa !== site.spa) actions.add('site.settings')
+  if (req.visibility !== undefined && req.visibility !== site.visibility) {
+    actions.add('site.visibility')
+  }
+  if (
+    access &&
+    (access.visibility !== site.visibility ||
+      restrictsToAudience(access) !== restrictsToAudience(site) ||
+      !sameSet(access.audience.emails, site.audience.emails) ||
+      !sameSet(access.audience.groups, site.audience.groups))
+  ) {
+    actions.add('site.visibility')
+    actions.add('site.audience')
+  }
+  return [...actions]
+}
+
+/**
+ * Refuse (400 `owner_only`) a deploy that changes settings the actor may not change, and audit
+ * those an admin changes only because they are one.
+ */
+async function checkDeployChanges(deps: Deps, actor: Actor, site: SiteRecord, actions: Action[]) {
+  if (!actions.every(a => can(actor, a, site))) {
+    throw new ApiError(
+      400,
+      'owner_only',
+      `Only an owner of "${site.name}" changes its access or settings: deploy without them, or ask an owner`
+    )
+  }
+  for (const action of actions) await auditAdmin(deps, actor, site, action)
+}
+
+/** The settings a version carries that `actor` may apply to the site as it goes live. */
+function settingsFor(actor: Actor, site: SiteRecord, version: VersionRecord) {
+  return {
+    ...(can(actor, 'site.settings', site) ? { spa: version.spa } : {}),
+    ...(can(actor, 'site.visibility', site) ? { visibility: version.visibility } : {}),
+  }
+}
 
 /** Name checks, the unchanged / repointed shortcuts, else a pending version (manifest stored). */
 async function prepare(
@@ -226,7 +303,8 @@ async function prepare(
   const { store, blobs, clock } = deps
   const versionId = computeVersionId(req.manifest.files)
   const existing = await store.findSite(name)
-  if (existing && !can(userActor(user), 'site.deploy', existing)) {
+  const actor = existing ? await siteActor(deps, user, existing) : userActor(user)
+  if (existing && !can(actor, 'site.deploy', existing)) {
     throw await nameTaken(deps, user, name)
   }
   if (!existing) {
@@ -241,6 +319,10 @@ async function prepare(
   const neverLive = !existing || existing.currentVersionId === null
   const inviter = inviterOf(principal)
   const access = neverLive ? await initialAccess(deps, req, inviter) : null
+  if (existing) {
+    const asked = req.access === undefined ? null : access
+    await checkDeployChanges(deps, actor, existing, deployChanges(existing, req, asked))
+  }
   if (existing && access && req.access !== undefined) {
     const before = existing.audience
     Object.assign(existing, access)
@@ -254,7 +336,7 @@ async function prepare(
     await save(deps, existing)
     return {
       kind: 'done',
-      result: { status: 'unchanged', versionId, site: toSite(deps, user, existing) },
+      result: { status: 'unchanged', versionId, site: toSite(deps, actor, existing) },
     }
   }
 
@@ -267,7 +349,7 @@ async function prepare(
       await save(deps, existing)
       return {
         kind: 'done',
-        result: { status: 'repointed', versionId, site: toSite(deps, user, existing) },
+        result: { status: 'repointed', versionId, site: toSite(deps, actor, existing) },
       }
     }
   }
@@ -281,6 +363,8 @@ async function prepare(
       email: user.email,
       name,
       ...(access as AccessFields),
+      owners: { emails: [user.email], groups: [] },
+      publishers: { emails: [], groups: [] },
       spa: false,
       archived: false,
       currentVersionId: null,
@@ -306,13 +390,14 @@ async function prepare(
   }
   await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
   await store.putVersion(site, version)
-  return { kind: 'pending', site, version, files }
+  return { kind: 'pending', site, actor, version, files }
 }
 
 /** Pending → complete → current. Only reached once the version's bytes have been scanned. */
 async function goLive(
   deps: Deps,
   user: User,
+  actor: Actor,
   site: SiteRecord,
   version: VersionRecord,
   files: readonly ManifestFile[],
@@ -329,7 +414,7 @@ async function goLive(
   }
   site.currentVersionId = version.id
   site.archived = false
-  applySettings(site, version)
+  applySettings(site, settingsFor(actor, site, version))
   await save(deps, site)
   if (first && isRestricted(site)) {
     await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
@@ -337,7 +422,7 @@ async function goLive(
   return {
     status: 'live',
     versionId: version.id,
-    site: toSite(deps, user, site),
+    site: toSite(deps, actor, site),
     ...(first ? { first } : {}),
   }
 }
@@ -379,10 +464,10 @@ export async function publish(
   acting: Acting = {}
 ): Promise<Published> {
   const { store, blobs } = deps
-  const site = await requireSite(deps, user, name, 'site.deploy')
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.deploy')
   const version = await store.getVersion(site, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
-  if (version.status === 'complete') return goLive(deps, user, site, version, [], acting)
+  if (version.status === 'complete') return goLive(deps, user, actor, site, version, [], acting)
 
   const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
   if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
@@ -410,7 +495,7 @@ export async function publish(
     await blobs.delete(manifestKey(site.id, versionId))
     throw secretDetected(findings)
   }
-  return goLive(deps, user, site, version, manifest.files, acting)
+  return goLive(deps, user, actor, site, version, manifest.files, acting)
 }
 
 /**
@@ -451,7 +536,7 @@ export async function publishBytes(
 
   const prepared = await prepare(deps, user, name, req, opts.principal)
   if (prepared.kind === 'done') return prepared.result
-  const { site, version } = prepared
+  const { site, actor, version } = prepared
   await mapLimit(prepared.files, PUT_CONCURRENCY, async f => {
     await deps.blobs.put(
       siteObjectKey(site.id, version.id, f.path),
@@ -459,5 +544,5 @@ export async function publishBytes(
       { contentType: f.contentType, cacheControl: cacheControlFor(f.path) }
     )
   })
-  return goLive(deps, user, site, version, prepared.files, {})
+  return goLive(deps, user, actor, site, version, prepared.files, {})
 }

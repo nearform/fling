@@ -34,12 +34,14 @@ import {
   ROLES,
   type Role,
   roleOf,
+  rolesOf,
   SITE_CHANGES,
 } from '../src/policy.ts'
 import { APP_ORIGIN, api, cookiesOf, createUser, file, json, setup, upload } from './helpers.ts'
 import { callTool, connect } from './oauth-helpers.ts'
 
 const OWNER = 'owner@example.test'
+const PUBLISHER = 'publisher@example.test'
 const VIEWER = 'viewer@example.test'
 const GUEST = 'guest@outside.test'
 const ADMIN = 'boss@example.test'
@@ -50,7 +52,8 @@ const TOKEN = 'abcdefghij0123456789'
  * and ignored, while public); a private site without one has no viewers, so they are a member.
  */
 const siteWith = (access: Access): PolicySite => ({
-  email: OWNER,
+  owners: { emails: [OWNER], groups: [] },
+  publishers: { emails: [PUBLISHER], groups: [] },
   visibility: access === 'public' ? 'public' : 'private',
   shareToken: TOKEN,
   audience: { emails: access === 'private' ? [] : [VIEWER], groups: [] },
@@ -62,6 +65,7 @@ const adminToken: UserActor = { kind: 'user', email: ADMIN, admin: 'token' }
 
 const actorFor: Record<Role, Actor> = {
   owner: { kind: 'user', email: OWNER },
+  publisher: { kind: 'user', email: PUBLISHER },
   admin: adminSession,
   'admin-token': adminToken,
   viewer: { kind: 'user', email: VIEWER },
@@ -72,11 +76,12 @@ const actorFor: Record<Role, Actor> = {
 }
 
 /**
- * Each role's letter: o(wner) d (an admin's browser session) t (an admin's key or token) v(iewer)
- * m(ember) g(uest) s(hare) a(nonymous).
+ * Each role's letter: o(wner) p(ublisher) d (an admin's browser session) t (an admin's key or
+ * token) v(iewer) m(ember) g(uest) s(hare) a(nonymous).
  */
 const LETTER: Record<Role, string> = {
   owner: 'o',
+  publisher: 'p',
   admin: 'd',
   'admin-token': 't',
   viewer: 'v',
@@ -86,25 +91,29 @@ const LETTER: Record<Role, string> = {
   anonymous: 'a',
 }
 
-const ownerOnly = { public: 'o', private: 'o', restricted: 'o' }
-const reads = { public: 'odt', private: 'odt', restricted: 'odt' }
+const publishes = { public: 'op', private: 'op', restricted: 'op' }
+const reads = { public: 'opdt', private: 'opdt', restricted: 'opdt' }
+const ownerReads = { public: 'odt', private: 'odt', restricted: 'odt' }
+const rollsBack = { public: 'opd', private: 'opd', restricted: 'opd' }
 const changes = { public: 'od', private: 'od', restricted: 'od' }
-const takesPart = { public: 'odtvmg', private: 'odtvm', restricted: 'odtv' }
+const takesPart = { public: 'opdtvmg', private: 'opdtvm', restricted: 'opdtv' }
 
 /** Allowed roles (LETTER) per action and access. */
 const EXPECTED: Record<Action, Record<Access, string>> = {
-  'site.view': { public: 'odtvmgsa', private: 'odtvms', restricted: 'odtvs' },
+  'site.view': { public: 'opdtvmgsa', private: 'opdtvms', restricted: 'opdtvs' },
   'site.read': reads,
   'version.list': reads,
   'version.read': reads,
-  'site.deploy': ownerOnly,
-  'site.rollback': changes,
+  'site.deploy': publishes,
+  'site.rollback': rollsBack,
   'site.settings': changes,
   'site.visibility': changes,
   'site.audience': changes,
+  'site.owners': changes,
+  'site.publishers': changes,
   'site.archive': changes,
   'site.delete': changes,
-  'share.read': reads,
+  'share.read': ownerReads,
   'share.create': changes,
   'share.revoke': changes,
   'comment.read': takesPart,
@@ -120,7 +129,8 @@ const stored = (
   restricted: boolean | undefined,
   audience: { emails?: string[]; groups?: string[] } = {}
 ): PolicySite => ({
-  email: OWNER,
+  owners: { emails: [OWNER], groups: [] },
+  publishers: { emails: [PUBLISHER], groups: [] },
   visibility,
   shareToken: TOKEN,
   ...(restricted === undefined ? {} : { restricted }),
@@ -130,17 +140,17 @@ const stored = (
 describe('every access level', () => {
   // Who may open the site (site.view); those signed in among them take part in its comments.
   const cases: [string, PolicySite, string][] = [
-    ['only you', stored('private', true), 'odts'],
-    ['members', stored('private', false), 'odtvms'],
-    ['people', stored('private', true, { emails: [VIEWER] }), 'odtvs'],
-    ['groups', stored('private', true, { groups: ['g1'] }), 'odtvs'],
-    ['public', stored('public', true), 'odtvmgsa'],
-    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'odtvmgsa'],
-    ['a record from before access levels, no audience', stored('private', undefined), 'odtvms'],
+    ['only you', stored('private', true), 'opdts'],
+    ['members', stored('private', false), 'opdtvms'],
+    ['people', stored('private', true, { emails: [VIEWER] }), 'opdtvs'],
+    ['groups', stored('private', true, { groups: ['g1'] }), 'opdtvs'],
+    ['public', stored('public', true), 'opdtvmgsa'],
+    ['public, its audience kept', stored('public', true, { emails: [VIEWER] }), 'opdtvmgsa'],
+    ['a record from before access levels, no audience', stored('private', undefined), 'opdtvms'],
     [
       'a record from before access levels, with an audience',
       stored('private', undefined, { emails: [VIEWER] }),
-      'odtvs',
+      'opdtvs',
     ],
   ]
   const actors: Record<Role, Actor> = {
@@ -358,6 +368,7 @@ describe('canDeleteComment', () => {
     const expected: Record<Role, [boolean, boolean, boolean]> = {
       // [the owner's comment, the member's comment, a guest's comment]
       owner: [true, true, true],
+      publisher: [false, false, false],
       admin: [true, true, true],
       'admin-token': [false, false, false],
       viewer: [false, false, false],
@@ -397,6 +408,53 @@ describe('roleOf', () => {
     expect(roleOf({ kind: 'share', token: TOKEN }, site)).toBe('share')
     expect(roleOf({ kind: 'share', token: 'zyxwvutsrq9876543210' }, site)).toBe('anonymous')
     expect(roleOf({ kind: 'share', token: TOKEN }, { ...site, shareToken: null })).toBe('anonymous')
+  })
+})
+
+describe('owners and publishers', () => {
+  const site = (owners: string[], publishers: string[]): PolicySite => ({
+    ...siteWith('restricted'),
+    audience: { emails: [], groups: [] },
+    owners: { emails: [OWNER], groups: owners },
+    publishers: { emails: [], groups: publishers },
+  })
+  const member = { kind: 'user', email: 'member@example.test' } as const
+
+  it('a group makes its members owners or publishers, once their groups are loaded', () => {
+    expect(rolesOf(member, site(['g1'], []))).toEqual(['member'])
+    expect(roleOf({ ...member, groups: ['g1'] }, site(['g1'], []))).toBe('owner')
+    expect(roleOf({ ...member, groups: ['g2'] }, site(['g1'], ['g2']))).toBe('publisher')
+    expect(can({ ...member, groups: ['g2'] }, 'site.deploy', site(['g1'], ['g2']))).toBe(true)
+    expect(can({ ...member, groups: ['g2'] }, 'site.audience', site(['g1'], ['g2']))).toBe(false)
+    // In both: an owner.
+    expect(rolesOf({ ...member, groups: ['g1'] }, site(['g1'], ['g1']))).toEqual(['owner'])
+  })
+
+  it('a guest holds no role, by address or through a group', () => {
+    const guest = { kind: 'user', email: GUEST, guest: true, groups: ['g1'] } as const
+    const named: PolicySite = {
+      ...site(['g1'], ['g1']),
+      owners: { emails: [OWNER, GUEST], groups: ['g1'] },
+    }
+    expect(rolesOf(guest, named)).toEqual(['guest'])
+    for (const action of ACTIONS) expect(can(guest, action, named)).toBe(false)
+  })
+
+  it('an admin who publishes deploys and changes settings; one who does not, only the latter', () => {
+    const published: PolicySite = {
+      ...siteWith('restricted'),
+      publishers: { emails: [ADMIN], groups: [] },
+    }
+    expect(rolesOf(adminSession, published)).toEqual(['publisher', 'admin'])
+    for (const action of ['site.deploy', 'site.settings', 'site.visibility'] as const) {
+      expect(can(adminSession, action, published)).toBe(true)
+    }
+    expect(byAdminOnly(adminSession, 'site.deploy', published)).toBe(false)
+    expect(byAdminOnly(adminSession, 'site.settings', published)).toBe(true)
+    expect(can(adminSession, 'site.deploy', siteWith('restricted'))).toBe(false)
+    // An admin's key or token reads, and publishes only as a publisher.
+    expect(can(adminToken, 'site.deploy', published)).toBe(true)
+    expect(can(adminToken, 'site.settings', published)).toBe(false)
   })
 })
 
@@ -464,12 +522,21 @@ describe('the edge agrees with site.view', () => {
     const owner = await createUser(env, 'alice@example.test')
     const viewer = await createUser(env, 'bob@example.test')
     const member = await createUser(env, 'carol@example.test')
+    await createUser(env, 'dave@example.test')
     await deploy(env, owner.key, 'pub', { access: 'public' })
     await deploy(env, owner.key, 'priv', { access: 'members' })
     // the instance's default: only the owner
     await deploy(env, owner.key, 'mine')
+    // dave publishes every site
+    for (const name of ['pub', 'priv', 'mine', 'team', 'other']) {
+      if (name === 'team' || name === 'other')
+        await deploy(env, owner.key, name, { access: 'members' })
+      const res = await api(env, owner.key, 'PATCH', `/api/sites/${name}`, {
+        publishers: { emails: ['dave@example.test'] },
+      })
+      expect(res.status).toBe(200)
+    }
     for (const name of ['team', 'other']) {
-      await deploy(env, owner.key, name, { access: 'members' })
       const res = await api(env, owner.key, 'PATCH', `/api/sites/${name}`, {
         audience: { emails: ['bob@example.test'] },
       })
@@ -507,6 +574,7 @@ describe('the edge agrees with site.view', () => {
       // What each role's browser holds: a site pass only where the API would hand one out.
       const actors: Record<Role, Actor> = {
         owner: { kind: 'user', email: 'alice@example.test' },
+        publisher: { kind: 'user', email: 'dave@example.test' },
         admin: { kind: 'user', email: ADMIN, admin: 'session' },
         'admin-token': { kind: 'user', email: ADMIN, admin: 'token' },
         viewer: { kind: 'user', email: 'bob@example.test' },

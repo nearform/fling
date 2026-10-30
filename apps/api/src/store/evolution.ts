@@ -20,6 +20,7 @@ export type Kind =
   | 'apikeyref'
   | 'name'
   | 'site'
+  | 'siterole'
   | 'sitegrant'
   | 'sitedirectory'
   | 'group'
@@ -63,12 +64,24 @@ export type Upgrade = (fields: Fields) => Fields
  * `UPGRADES[kind][n - 1]` turns a version-n record of `kind` into version n+1, so a kind's
  * current version is its number of upgrades + 1. Kinds not listed are at version 1.
  */
+const SITE_UPGRADES: readonly Upgrade[] = [
+  // v2: `audience`. A v1 record has none (or, written back by a v1 reader, kept the field it
+  // passed through): every member sees it.
+  fields => ({ ...fields, audience: fields.audience ?? { emails: [], groups: [] } }),
+  // v3: `owners` and `publishers`; `email` is the creator. A v2 record has neither (or, written
+  // back by a v2 reader, kept the ones it passed through): its creator is its only owner.
+  fields => ({
+    ...fields,
+    owners: fields.owners ?? { emails: [fields.email], groups: [] },
+    publishers: fields.publishers ?? { emails: [], groups: [] },
+  }),
+]
+
 export const UPGRADES: Partial<Record<Kind, readonly Upgrade[]>> = {
-  site: [
-    // v2: `audience`. A v1 record has none (or, written back by a v1 reader, kept the field it
-    // passed through): every member sees it.
-    fields => ({ ...fields, audience: fields.audience ?? { emails: [], groups: [] } }),
-  ],
+  site: SITE_UPGRADES,
+  // A role item is a copy of the site (and its role), so it evolves with the site. None was
+  // written before v3.
+  siterole: SITE_UPGRADES,
   // v2: the site's listing (`SharedListing`). A v1 item has only the site's id, name and owner, and
   // nothing to fill the rest from, so it reads as it is and readers fall back to the site
   // (`hasListing`).

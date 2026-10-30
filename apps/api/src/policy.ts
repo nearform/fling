@@ -4,37 +4,49 @@
  * access, and no key layout implies it. What is not about a site (the admins' actions, and what
  * an impersonating admin may not do to the user's account) is `canInstance`, at the end.
  *
- * Actors are resolved against the site into a role:
- * - `owner`: the signed-in user who holds the site (`site.email`).
+ * Actors are resolved against the site into a set of roles (`rolesOf`), and may do what any of
+ * them allows (one person can be an admin and a publisher, and then deploys and changes settings):
+ * - `owner`: a signed-in member the site's owners name (`site.owners`), by email or through one of
+ *   their groups. Owners are equal: whoever created the site (`site.email`) is an owner only while
+ *   the owners name them.
+ * - `publisher`: a signed-in member the site's publishers name (`site.publishers`), the same way.
+ *   A guest is never an owner or a publisher, even through a group.
  * - `viewer`: a signed-in user in the site's audience (`site.audience`), by email or through one
- *   of their groups (`groups` on the actor, which requireSite loads only for a restricted site).
+ *   of their groups. The actor's `groups` are loaded (`actorOn` in sites.ts) only for a site
+ *   whose owners or publishers name groups, or a restricted one whose audience does.
  * - `member`: any other signed-in user whose standing is `member` (auth/standing.ts: the email
  *   policy admits them, they are an admin, or they hold a member invitation).
  * - `guest`: any other signed-in user whose standing is `guest` (`guest` on the actor): someone
  *   from outside the email policy, invited to review what is shared with them. Standing is
  *   rechecked on every request, so whoever the API sees signed in is admitted now.
- * - `admin`, `admin-token`: an admin (ADMIN_EMAILS) who isn't the owner, through their browser
- *   session or through an API key or OAuth token (`admin` on the actor). They come before
- *   `viewer`, as they may do more.
+ * - `admin`, `admin-token`: an admin (ADMIN_EMAILS), through their browser session or through an
+ *   API key or OAuth token (`admin` on the actor).
  * - `share`: whoever holds the site's current share link (`s--<token>`). A revoked or rotated
  *   token is `anonymous`.
  * - `anonymous`: nobody we know.
+ * A user who holds none of owner, publisher, admin or viewer is a `member` or a `guest`.
  *
  * What a role may do depends on the site's access (`accessOf`): `public`, `private` (signed-in
- * members), or `restricted` (private and limited to the owner and the viewers; with an empty
- * audience, the owner alone: the `only_me` access level). The audience is kept while a site is
- * public, and ignored.
+ * members), or `restricted` (private and limited to its owners, publishers and viewers; with an
+ * empty audience, its owners and publishers alone: the `only_me` access level). The audience is
+ * kept while a site is public, and ignored.
  *
  * The edge enforces `site.view` on its own (it serves sites without calling the API), from the
  * visibility in the route table and, for a restricted site, a site pass the edge mints from the
  * API's say-so (`/auth/login` asks `can(…, 'site.view', …)` here): tests/policy.test.ts runs the
  * real site router against this table so the two cannot drift.
  *
+ * Owners publish, roll back, and change everything about the site: its access and settings, its
+ * owners and publishers, its share link; they archive and delete it. Publishers publish and roll
+ * back, and read the site and its versions, but get no share link and change nothing else (a
+ * deploy that would change the site's access or settings needs those actions too: publication.ts).
+ *
  * Admins administer every site: with any credential they open, read and review any site,
- * restricted ones included; from their browser session they also change it as its owner would
- * (access, settings, archive, roll back, share link, delete, anyone's comment), so a key or token
- * that leaked cannot. Nobody but the owner deploys: a version is never published in someone else's
- * name. Whatever an admin may do only because they are one is audited (`byAdminOnly`, used by
+ * restricted ones included; from their browser session they also change it as an owner would
+ * (access, settings, owners and publishers, archive, roll back, share link, delete, anyone's
+ * comment), so a key or token that leaked cannot. Nobody but an owner or a publisher deploys: a
+ * version is never published in someone else's name. Whatever an admin may do only because they
+ * are one is audited (`byAdminOnly`, used by
  * `resolveSite` and the site-pass handoff in sites.ts). Notifications ask policy with an actor
  * that carries no `admin`, so admins hear only about what they would without it.
  *
@@ -49,7 +61,7 @@ import type { GroupRecord, SiteRecord } from './store/types.ts'
 export type AdminVia = 'session' | 'token'
 
 export type Actor =
-  /** `groups`: the ids of the user's groups, when policy needs them (a restricted site) */
+  /** `groups`: the ids of the user's groups, when policy needs them (`actorOn` in sites.ts) */
   /** `guest`: their standing is `guest` (auth/standing.ts) */
   /** `admin`: they are an admin, and how they are signed in (never while impersonating) */
   | {
@@ -64,6 +76,7 @@ export type Actor =
 
 export type Role =
   | 'owner'
+  | 'publisher'
   | 'admin'
   | 'admin-token'
   | 'viewer'
@@ -74,6 +87,7 @@ export type Role =
 
 export const ROLES: readonly Role[] = [
   'owner',
+  'publisher',
   'admin',
   'admin-token',
   'viewer',
@@ -86,10 +100,13 @@ export const ROLES: readonly Role[] = [
 /** What policy needs to know about a site. */
 export type PolicySite = Pick<
   SiteRecord,
-  'email' | 'visibility' | 'shareToken' | 'audience' | 'restricted'
+  'owners' | 'publishers' | 'visibility' | 'shareToken' | 'audience' | 'restricted'
 >
 
-/** Who may see a site: anyone, signed-in members, or (restricted) the owner and its audience. */
+/**
+ * Who may see a site: anyone, signed-in members, or (restricted) its owners, publishers and
+ * audience.
+ */
 export type Access = 'public' | 'private' | 'restricted'
 
 export const ACCESSES: readonly Access[] = ['public', 'private', 'restricted']
@@ -103,7 +120,10 @@ type AccessFields = Pick<SiteRecord, 'visibility' | 'audience' | 'restricted'>
 export const restrictsToAudience = (site: Omit<AccessFields, 'visibility'>): boolean =>
   site.restricted ?? site.audience.emails.length + site.audience.groups.length > 0
 
-/** Private and restricted: only the owner and the people in its audience (if any) see the site. */
+/**
+ * Private and restricted: only its owners and publishers and the people in its audience (if any)
+ * see the site.
+ */
 export const isRestricted = (site: AccessFields): boolean =>
   site.visibility === 'private' && restrictsToAudience(site)
 
@@ -115,17 +135,20 @@ export const accessOf = (site: AccessFields): Access =>
  *
  *   site.view        open the served site (edge; `/auth/login` refreshes the cookie for it, and
  *                    hands a restricted site's viewers a site pass)
- *   site.read        GET /api/sites/:name (its audience included), fling_info, fling_check_name
- *                    "yours"
+ *   site.read        GET /api/sites/:name (its audience, owners and publishers included),
+ *                    fling_info, fling_check_name "yours"
  *   version.list     the versions in GET /api/sites/:name and fling_info
  *   version.read     GET …/versions/:id/files, fling_files
  *   site.deploy      POST …/deploys, …/finalize, fling_publish, fling_upload_*; also what makes a
  *                    claimed name "yours" rather than "taken"
  *   site.rollback    POST …/current, fling_rollback
- *   site.settings    PATCH { spa }
+ *   site.settings    PATCH { spa }; a deploy that changes `spa`
  *   site.visibility  PATCH { visibility }, fling_set_visibility; with site.audience, PATCH
- *                    { access } and fling_set_access (a new site's `access` is its creator's)
+ *                    { access } and fling_set_access (a new site's `access` is its creator's); a
+ *                    deploy that changes `visibility` or a never-live site's `access`
  *   site.audience    PATCH { audience }, fling_set_audience
+ *   site.owners      PATCH { owners }
+ *   site.publishers  PATCH { publishers }
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete
  *   share.read       fling_share returning the existing link
@@ -139,9 +162,9 @@ export const accessOf = (site: AccessFields): Access =>
  *   comment.delete.own  the same, for a comment the actor wrote (`canDeleteComment`)
  *
  * Comments are the conversation around a site, so everyone who can see a site by signing in
- * takes part: members (on a restricted site, only its viewers) read, write and resolve (resolving
- * is reversible, and review threads are closed by whoever addressed them), and delete what they
- * wrote; only the owner deletes anyone's. Guests take part where they are viewers, and on public
+ * takes part: owners, publishers and members (on a restricted site, only its owners, publishers
+ * and viewers) read, write and resolve (resolving is reversible, and review threads are closed by
+ * whoever addressed them), and delete what they wrote; only owners delete anyone's. Guests take part where they are viewers, and on public
  * sites; a private site that isn't restricted is the members', so a guest gets nothing there,
  * not even `site.view`.
  * Admins take part in every site's comments, and from their browser session delete anyone's.
@@ -159,6 +182,8 @@ export const ACTIONS = [
   'site.settings',
   'site.visibility',
   'site.audience',
+  'site.owners',
+  'site.publishers',
   'site.archive',
   'site.delete',
   'share.read',
@@ -174,33 +199,38 @@ export const ACTIONS = [
 export type Action = (typeof ACTIONS)[number]
 
 const isAdmin = (role: Role) => role === 'admin' || role === 'admin-token'
-/** The owner, or an admin with any credential: reading what only the owner otherwise reads. */
+/** An owner, or an admin with any credential: what only owners otherwise read. */
 const ownerOrAdmin = (role: Role) => role === 'owner' || isAdmin(role)
-/** The owner, or an admin in their browser session: changing the site. */
+/** An owner, a publisher, or an admin with any credential: reading the site and its versions. */
+const onTheSite = (role: Role) => role === 'owner' || role === 'publisher' || isAdmin(role)
+/** An owner, or an admin in their browser session: changing the site. */
 const ownerOrAdminSession = (role: Role) => role === 'owner' || role === 'admin'
 /**
- * Signed in and able to see the site: the owner, any admin and its viewers, on a site that isn't
- * restricted any member, and on a public one any guest.
+ * Signed in and able to see the site: its owners and publishers, any admin and its viewers, on a
+ * site that isn't restricted any member, and on a public one any guest.
  */
 const signedIn = (role: Role, access: Access) =>
   role === 'owner' ||
+  role === 'publisher' ||
   isAdmin(role) ||
   role === 'viewer' ||
   (role === 'member' && access !== 'restricted') ||
   (role === 'guest' && access === 'public')
 
 const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
-  // Public: anyone. Private: any signed-in user, or anyone with the share link. Restricted: the
-  // owner, its viewers, or anyone with the share link.
+  // Public: anyone. Private: any signed-in user, or anyone with the share link. Restricted: its
+  // owners, publishers and viewers, or anyone with the share link.
   'site.view': (role, access) => access === 'public' || role === 'share' || signedIn(role, access),
-  'site.read': ownerOrAdmin,
-  'version.list': ownerOrAdmin,
-  'version.read': ownerOrAdmin,
-  'site.deploy': role => role === 'owner',
-  'site.rollback': ownerOrAdminSession,
+  'site.read': onTheSite,
+  'version.list': onTheSite,
+  'version.read': onTheSite,
+  'site.deploy': role => role === 'owner' || role === 'publisher',
+  'site.rollback': role => role === 'publisher' || ownerOrAdminSession(role),
   'site.settings': ownerOrAdminSession,
   'site.visibility': ownerOrAdminSession,
   'site.audience': ownerOrAdminSession,
+  'site.owners': ownerOrAdminSession,
+  'site.publishers': ownerOrAdminSession,
   'site.archive': ownerOrAdminSession,
   'site.delete': ownerOrAdminSession,
   'share.read': ownerOrAdmin,
@@ -213,28 +243,44 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'comment.delete.own': signedIn,
 }
 
-/** The actor's role on this site. */
-export function roleOf(actor: Actor, site: PolicySite): Role {
+/** Whether a list of people and groups names the user, by address or through one of `groups`. */
+const names = (
+  list: { emails: readonly string[]; groups: readonly string[] },
+  email: string,
+  groups: readonly string[]
+) => list.emails.includes(email) || list.groups.some(g => groups.includes(g))
+
+/**
+ * The actor's roles on this site, the strongest first: owner, publisher, admin (or admin-token),
+ * viewer; a user who holds none of them is a member or a guest.
+ */
+export function rolesOf(actor: Actor, site: PolicySite): Role[] {
   switch (actor.kind) {
     case 'user': {
-      if (actor.email === site.email) return 'owner'
-      if (actor.admin) return actor.admin === 'session' ? 'admin' : 'admin-token'
       const groups = actor.groups ?? []
-      const inAudience =
-        site.audience.emails.includes(actor.email) ||
-        site.audience.groups.some(g => groups.includes(g))
-      if (inAudience) return 'viewer'
-      return actor.guest ? 'guest' : 'member'
+      const roles: Role[] = []
+      if (!actor.guest) {
+        if (names(site.owners, actor.email, groups)) roles.push('owner')
+        else if (names(site.publishers, actor.email, groups)) roles.push('publisher')
+      }
+      if (actor.admin) roles.push(actor.admin === 'session' ? 'admin' : 'admin-token')
+      if (names(site.audience, actor.email, groups)) roles.push('viewer')
+      if (roles.length === 0) roles.push(actor.guest ? 'guest' : 'member')
+      return roles
     }
     case 'share':
-      return site.shareToken !== null && actor.token === site.shareToken ? 'share' : 'anonymous'
+      return [site.shareToken !== null && actor.token === site.shareToken ? 'share' : 'anonymous']
     case 'anonymous':
-      return 'anonymous'
+      return ['anonymous']
   }
 }
 
+/** The actor's strongest role on this site (`rolesOf`). */
+export const roleOf = (actor: Actor, site: PolicySite): Role => rolesOf(actor, site)[0] as Role
+
 export function can(actor: Actor, action: Action, site: PolicySite): boolean {
-  return RULES[action](roleOf(actor, site), accessOf(site))
+  const access = accessOf(site)
+  return rolesOf(actor, site).some(role => RULES[action](role, access))
 }
 
 /**
@@ -247,6 +293,8 @@ export const SITE_CHANGES: ReadonlySet<Action> = new Set<Action>([
   'site.settings',
   'site.visibility',
   'site.audience',
+  'site.owners',
+  'site.publishers',
   'site.archive',
   'site.delete',
   'share.create',
@@ -267,7 +315,11 @@ export function byAdminOnly(actor: Actor, action: Action, site: PolicySite): boo
  * A signed-in user as an actor; a request's user carries `guest` when their standing is, and
  * `admin` when they are one.
  */
-export const userActor = (user: { email: string; guest?: true; admin?: AdminVia }): Actor => ({
+export const userActor = (user: {
+  email: string
+  guest?: true
+  admin?: AdminVia
+}): Extract<Actor, { kind: 'user' }> => ({
   kind: 'user',
   email: user.email,
   ...(user.guest ? { guest: true as const } : {}),

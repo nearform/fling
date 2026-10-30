@@ -23,9 +23,13 @@ paths:
   `fling login`, no OAuth approvals, no nested impersonation. Audit every start and stop.
 - Admins' rights over sites are roles in `can` (`admin`, `admin-token`), carried by the request's
   user (`asRequestUser` in `auth/standing.ts`): any credential reads, only the browser session
-  changes (`SITE_CHANGES`), and only the owner deploys. Whatever an admin may do only as one is
-  audited before it happens (`auditAdmin` in `sites.ts`). Actors built for notifications carry no
-  `admin`.
+  changes (`SITE_CHANGES`), and only an owner or a publisher deploys. Whatever an admin may do only
+  as one is audited before it happens (`auditAdmin` in `sites.ts`). Actors built for notifications
+  carry no `admin`.
+- Owners and publishers (`site.owners`, `site.publishers`) come from emails or groups, so resolve
+  the user against the site with `siteActor`/`actorOn` (`sites.ts`), never a bare `userActor`,
+  before asking policy about a site. `SiteRecord.email` is the creator: it keys items and grants
+  nothing. A guest never holds a role.
 - Sign-in is generic OIDC (`auth/oidc.ts`, behind `IdentityProvider`), plus emailed sign-in links
   for invited people (`auth/sign-in-link.ts`). Never add code specific to one provider. Who may
   sign in is decided only by standing (`auth/standing.ts`): the email policy (`auth/identity.ts`:

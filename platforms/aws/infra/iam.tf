@@ -57,6 +57,8 @@ data "aws_iam_policy_document" "api" {
   }
 
   # Presigned PUTs are signed with this role, so it needs PutObject itself. GetObject covers HEAD.
+  # CopyObject (a path publish carrying files forward) needs GetObject on the source and PutObject
+  # on the destination, both in this bucket.
   statement {
     sid       = "SitesList"
     actions   = ["s3:ListBucket"]

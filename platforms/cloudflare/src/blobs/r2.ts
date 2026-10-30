@@ -5,12 +5,20 @@
  * the same one FsBlobs uses in dev). `handleUpload` is that route: it verifies the signature, then
  * streams the body into R2 with the signed SHA-256, which R2 checks before it stores anything.
  */
-import type { R2Bucket } from '@cloudflare/workers-types'
+import type { R2Bucket, R2ObjectBody } from '@cloudflare/workers-types'
 import type { Blobs, PresignedPut } from '@fling/api/blobs'
 import { signUpload, uploadKeyFromPath, verifyUpload } from '@fling/api/blobs/signed-upload'
 
 /** Where the Worker mounts `handleUpload`. */
 export const UPLOAD_ROUTE = '/blob-upload'
+
+/** Objects up to this size are copied through memory; larger ones stream. */
+const BUFFER_COPY_BYTES = 1024 * 1024
+
+type FixedLengthStreamClass = new (
+  length: number
+) => { readable: R2Readable; writable: Parameters<R2Readable['pipeTo']>[0] }
+type R2Readable = R2ObjectBody['body']
 
 /** R2's cap on keys per `delete` and objects per `list` page. */
 const PAGE = 1000
@@ -105,6 +113,27 @@ export class R2Blobs implements Blobs {
   async getJson<T>(key: string): Promise<T | null> {
     const object = await this.bucket.get(key)
     return object ? ((await object.json()) as T) : null
+  }
+
+  /**
+   * R2 bindings have no server-side copy: read the object and put it back with its httpMetadata.
+   * Small objects are buffered; a large one streams through a FixedLengthStream (R2 only takes
+   * streams of known length), so a run of concurrent copies never holds 25 MB files in memory.
+   */
+  async copy(from: string, to: string) {
+    const object = await this.bucket.get(from)
+    if (!object) throw new Error(`copy: no object at ${from}`)
+    const options = { httpMetadata: object.httpMetadata }
+    const Fixed = (globalThis as { FixedLengthStream?: FixedLengthStreamClass }).FixedLengthStream
+    if (object.size <= BUFFER_COPY_BYTES || !Fixed) {
+      await this.bucket.put(to, await object.arrayBuffer(), options)
+      return
+    }
+    const sized = new Fixed(object.size)
+    await Promise.all([
+      object.body.pipeTo(sized.writable),
+      this.bucket.put(to, sized.readable, options),
+    ])
   }
 
   async delete(key: string) {

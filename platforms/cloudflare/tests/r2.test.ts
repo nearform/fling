@@ -56,3 +56,31 @@ it('answers 400 for other bytes, 403 for a bad or expired signature, 404 off the
   expect((await put(expired.url)).status).toBe(403)
   expect(await cf.bucket.head(key)).toBeNull()
 })
+
+it('copies in workerd, buffering small objects and streaming large ones, metadata kept', async () => {
+  const p = `r2/${crypto.randomUUID()}/`
+  const large = new Uint8Array(3 * 1024 * 1024).map((_, i) => i % 251)
+  const meta = { httpMetadata: { contentType: 'image/png', cacheControl: 'public, max-age=60' } }
+  await cf.bucket.put(`${p}v1/small.png`, body, meta)
+  await cf.bucket.put(`${p}v1/large.png`, large, meta)
+  const res = await send('https://app.test/copy', {
+    method: 'POST',
+    body: JSON.stringify([
+      [`${p}v1/small.png`, `${p}v2/small.png`],
+      [`${p}v1/large.png`, `${p}v2/large.png`],
+    ]),
+  })
+  expect(res.status).toBe(200)
+  for (const [name, bytes] of [
+    ['small', body],
+    ['large', large],
+  ] as const) {
+    const copied = await cf.bucket.get(`${p}v2/${name}.png`)
+    expect(copied?.httpMetadata).toMatchObject(meta.httpMetadata)
+    expect(
+      createHash('sha256')
+        .update(new Uint8Array(await copied!.arrayBuffer()))
+        .digest('hex')
+    ).toBe(createHash('sha256').update(bytes).digest('hex'))
+  }
+})

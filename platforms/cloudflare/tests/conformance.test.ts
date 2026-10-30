@@ -39,4 +39,5 @@ blobsConformance('R2Blobs', () => ({
   blobs: new R2Blobs(cf.bucket, { secret: cf.uploadSecret, baseUrl: APP_ORIGIN }),
   upload: async (url, init) =>
     (await cf.mf.dispatchFetch(url, init as never)) as unknown as Response,
+  metadata: async key => (await cf.bucket.head(key))?.httpMetadata ?? null,
 }))

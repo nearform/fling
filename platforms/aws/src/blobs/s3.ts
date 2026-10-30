@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -116,6 +117,18 @@ export class S3Blobs implements Blobs {
       if (isNotFound(err)) return null
       throw err
     }
+  }
+
+  /** CopyObject (up to 5 GB, far above MAX_FILE_BYTES); COPY keeps Content-Type and Cache-Control. */
+  async copy(from: string, to: string) {
+    await this.client.send(
+      new CopyObjectCommand({
+        Bucket: this.bucket,
+        Key: to,
+        CopySource: `${this.bucket}/${from.split('/').map(encodeURIComponent).join('/')}`,
+        MetadataDirective: 'COPY',
+      })
+    )
   }
 
   async delete(key: string) {

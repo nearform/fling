@@ -858,7 +858,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     run(t.info.name, args.server, async target => {
       const site = await getSite(target.client, args.name)
       const access = site.audience ? `\n${describeAudience(site, await membersOn(target))}` : ''
-      return { summary: `${site.name}: ${site.url}${access}`, data: site }
+      const by = site.versions.find(v => v.id === site.currentVersionId)?.publishedBy
+      const published = by ? `\nCurrent version published by ${by}` : ''
+      return { summary: `${site.name}: ${site.url}${access}${published}`, data: site }
     })
   )
 

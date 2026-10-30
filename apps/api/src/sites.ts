@@ -597,6 +597,7 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
         id: v.id,
         fileCount: v.fileCount,
         totalBytes: v.totalBytes,
+        ...(v.publishedBy ? { publishedBy: v.publishedBy } : {}),
         createdAt: v.createdAt,
       })),
   }

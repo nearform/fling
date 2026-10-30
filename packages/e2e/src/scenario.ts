@@ -4,8 +4,8 @@
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
  *   metadata → whoami → deploy v1 (`--access public`) → view → robots.txt → 404 / trailing-slash →
- *   deploy v2 (keeps its access) → view → rollback to v1 → open to members: anonymous redirect to
- *   sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
+ *   deploy v2 (keeps its access) → view → versions (who published) → rollback to v1 → open to
+ *   members: anonymous redirect to sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
  *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
  *   comment changes) → admin (the users list; every site's listing, the owner's site included;
@@ -483,8 +483,15 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     })
     step('deployed v2')
 
-    const versions = (await fling('versions', name)) as { versions: { id: string }[] }
-    check(versions.versions.length === 2, `versions: ${JSON.stringify(versions)}`)
+    const versions = (await fling('versions', name)) as {
+      versions: { id: string; publishedBy?: string }[]
+    }
+    check(
+      versions.versions.length === 2 &&
+        versions.versions.every(v => v.publishedBy === opts.session.email),
+      `versions: ${JSON.stringify(versions)}`
+    )
+    step('versions record who published them')
     await fling('rollback', name, v1Id)
     await eventually('rollback served', siteUrl, r => r.text.includes(`v1 ${nonce}`), {
       timeoutMs: propagationMs,

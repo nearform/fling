@@ -300,6 +300,8 @@ export interface VersionRecord {
   /** settings requested with the deploy, applied when it goes live */
   spa?: boolean
   visibility?: Visibility
+  /** who published it: the email of whoever made it live (absent on versions published before it was recorded) */
+  publishedBy?: string
   createdAt: string
 }
 

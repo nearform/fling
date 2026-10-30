@@ -26,6 +26,11 @@
  * that has never been live, checked before the name is claimed; omitted → the instance's default
  * (`initialAccess`). It never changes a site that has been live. When the site first goes live
  * restricted to an audience, the audience hears it was shared with them.
+ *
+ * Who published (`VersionRecord.publishedBy`): the user who makes a version live. A pending
+ * version records whoever staged it, and finalizing records whoever finalized it. A version is
+ * content-addressed, so an `unchanged` or `repointed` deploy creates nothing and the version keeps
+ * the publisher it was first published by.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -296,6 +301,7 @@ async function prepare(
     totalBytes: files.reduce((n, f) => n + f.size, 0),
     spa: req.spa,
     visibility: req.visibility,
+    publishedBy: user.email,
     createdAt: now,
   }
   await blobs.putJson(manifestKey(site.id, versionId), { files } satisfies Manifest)
@@ -319,7 +325,7 @@ async function goLive(
       files: [...files],
       generatedIndex,
     } satisfies StoredManifest)
-    await deps.store.putVersion(site, { ...version, status: 'complete' })
+    await deps.store.putVersion(site, { ...version, status: 'complete', publishedBy: user.email })
   }
   site.currentVersionId = version.id
   site.archived = false

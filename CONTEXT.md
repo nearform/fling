@@ -7,8 +7,9 @@ Every site is in the instance's **site directory** (`SITES/SITE#<name>` in
 the site and listed to admins alone.
 
 **Version** — one immutable set of files, identified by a hash of its manifest (path + sha256 of
-every file). `pending` until it passes publication, then `complete`. Rollback only ever points a
-site at a complete version.
+every file). `pending` until it passes publication, then `complete`. It records who published it
+(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`). Rollback only
+ever points a site at a complete version.
 
 **Manifest** — the list of files in a version: path, sha256, size, content type.
 

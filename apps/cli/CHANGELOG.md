@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Who published.** Each version records who published it. `fling versions` shows a BY column,
+  `fling info` a Published by line for the current version, and `fling_info` names the publisher
+  of each version. Versions published before a Fling recorded it show `-`.
+
 - **Access levels.** A site is open to only you, teams, specific people, everyone signed in or
   anyone. `fling deploy --access only_me|members|groups|people|public` (with `--add <emails>` and
   `--group <slugs>`) chooses it for a new site; without it a new site gets the Fling's default,

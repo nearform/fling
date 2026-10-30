@@ -299,7 +299,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       .slice(0, 10)
       .map(
         v =>
-          `- ${v.id}${v.id === site.currentVersionId ? ' (current)' : ''}: ${v.fileCount} files, ${v.createdAt}`
+          `- ${v.id}${v.id === site.currentVersionId ? ' (current)' : ''}: ${v.fileCount} files, ${v.createdAt}${v.publishedBy ? `, by ${v.publishedBy}` : ''}`
       )
       .join('\n')
     return {

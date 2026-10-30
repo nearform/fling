@@ -182,7 +182,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 |---|---|
 | `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
 | `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
-| `fling info <name>` / `fling versions <name>` | details and version history |
+| `fling info <name>` / `fling versions <name>` | details and version history, with who published each version |
 | `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
 | `fling rollback <name> <versionId>` | serve an earlier version |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |

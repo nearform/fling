@@ -58,7 +58,10 @@ everyone signed in, and `pnpm cli deploy <folder> --access members` does so for 
 profiles: the audience gets in through a site pass, anyone else sees the 404 page. Groups work the
 same way (`pnpm cli groups create team --add b@example.test`, then `pnpm cli access <site> --group
 team`). Signed in as the other address, `pnpm cli ls --shared` (or the Sites page's Shared with
-me tab) lists what was shared with it. To try a real provider, set `OIDC_ISSUER`,
+me tab) lists what was shared with it. Owners and publishers work the same way: `pnpm cli
+publishers <site> --add b@example.test` lets the other address deploy the site and roll it back
+(the site page shows it the read-only Owners and publishers section, and no Access or danger zone),
+and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. To try a real provider, set `OIDC_ISSUER`,
 `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client.
 

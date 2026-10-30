@@ -3,6 +3,7 @@ import type {
   CommentAnchor,
   CreateGroupRequest,
   GroupDetail,
+  SiteRoleInput,
   Visibility,
 } from '@fling/shared'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -130,6 +131,17 @@ export function useSiteActions(name: string) {
       name,
       (audience: { emails: string[]; groups: string[] }) => api.updateSite(name, { audience }),
       'Audience updated',
+      false
+    ),
+    /**
+     * The whole new owners or publishers (`siteRoles` capability): addresses and groups by slug.
+     * Refused addresses, unknown groups and `last_owner` are the caller's to show.
+     */
+    setRoles: useSiteMutation(
+      name,
+      (change: { owners?: SiteRoleInput; publishers?: SiteRoleInput }) =>
+        api.updateSite(name, change),
+      'Owners and publishers updated',
       false
     ),
     share: useSiteMutation(name, () => api.share(name)),

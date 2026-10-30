@@ -18,8 +18,11 @@ publishers and its share link, archive and delete it (`policy.ts`). A site alway
 person as an owner (400 `last_owner`), so it carries on when its creator is away or leaves; a group
 alone never counts. Only members hold a role (400 `email_not_allowed`): a **Guest** never does, even
 through a group. At most 20 addresses and 5 groups. Set with `PATCH /api/sites/<name> { owners }`
-(the whole list, groups by slug), which only owners (and admins from their browser session) may.
-Every owner hears of a new comment thread, the members of owner groups included. In a listing
+(the whole list, groups by slug), which only owners (and admins from their browser session) may;
+`fling owners`, `fling_set_owners` and the site page's Owners and publishers section
+(`apps/web/src/components/site/SiteTeam.tsx`, which warns that naming a group trusts whoever
+manages it), all behind the `siteRoles` capability. Someone made an owner hears of it
+(`site.owner_added`, group members included). Every owner hears of a new comment thread, the members of owner groups included. In a listing
 (admin All sites, Shared with me, the audit log) a site's `owner` is its first person owner.
 
 **Publisher** — someone who publishes a site without owning it: a person or a group its publishers
@@ -27,9 +30,14 @@ name (`SiteRecord.publishers`; at most 50 addresses and 10 groups, `PATCH { publ
 Publishers deploy, roll back, and read the site, its versions, its owners, publishers and audience;
 they get no share link (`shareUrl: null`) and change nothing else. A deploy of theirs that would
 change the site's `visibility`, `spa` or a never-live site's `access` is a 400 `owner_only`
-(`apps/api/src/publication.ts`), and a version they make live keeps the site's settings. Someone
+(`apps/api/src/publication.ts`), and a version they make live keeps the site's settings; nor may
+they restore an archived site by publishing to it (also `owner_only`). Someone
 named in both lists is an owner (the server takes them out of the publishers). The caller's role on
-a site is `Site.role` (`owner`, `publisher` or `admin`).
+a site is `Site.role` (`owner`, `publisher` or `admin`): `fling ls` shows it as ROLE, `fling info`
+as You, and the web marks a publisher's sites with a Publisher badge. Set with `fling publishers`,
+`fling_set_publishers` and the site page's Owners and publishers section, which a publisher sees
+read-only, without the Access section, the share link or the danger zone. Someone made a publisher
+hears of it (`site.publisher_added`).
 
 **Creator** — who first deployed a site (`SiteRecord.email`). It never changes and grants nothing by
 itself: the creator is an owner only while the owners name them. It keys the name claim, the
@@ -69,8 +77,8 @@ Function makes itself carry the header; the files S3 serves keep the browser's d
 (`strict-origin-when-cross-origin`, which sends the origin cross-site).
 
 **Site page** — `/sites/<name>` on the app origin (`apps/web/src/pages/Site.tsx`): everything about
-one of your sites (overview, access, versions, archive and delete), in sections under
-`components/site/`. The site list links each row to it.
+one of your sites (overview, access, owners and publishers, versions, archive and delete), in
+sections under `components/site/`; the lists of people and groups share `components/PeoplePicker.tsx`. The site list links each row to it.
 
 **Site order** — how site lists are sorted, the same in every client: `sortSites`
 (`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or

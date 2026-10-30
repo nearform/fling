@@ -134,6 +134,8 @@ describe('MCP server', () => {
       'fling_rollback',
       'fling_servers',
       'fling_set_access',
+      'fling_set_owners',
+      'fling_set_publishers',
       'fling_set_visibility',
       'fling_share',
       'fling_whoami',

@@ -164,6 +164,50 @@ const siteSharedViaGroupSection = (
   }
 }
 
+/** What each role lets its holders do, for the role emails. */
+const ROLE_WORDS = {
+  'site.owner_added': {
+    role: 'an owner',
+    does: 'You can publish it, change who can open it and its settings, its owners and publishers, and delete it.',
+    doesMany:
+      'You can publish them, change who can open them and their settings, their owners and publishers, and delete them.',
+  },
+  'site.publisher_added': {
+    role: 'a publisher',
+    does: 'You can publish new versions of it and roll it back.',
+    doesMany: 'You can publish new versions of them and roll them back.',
+  },
+} as const
+
+const roleAdded = <K extends 'site.owner_added' | 'site.publisher_added'>(
+  items: DeliveryItem<K>[],
+  ctx: TemplateContext
+): Section => {
+  const key = (items[0] as DeliveryItem<K>).key
+  const words = ROLE_WORDS[key]
+  const who = actorsPhrase(items.map(i => i.actor))
+  const sites = [...new Map(items.map(i => [i.details.site.name, i])).values()]
+  if (sites.length === 1) {
+    const { site, group } = (sites[0] as DeliveryItem<K>).details
+    const via = group ? ` through ${group.name}, which you are in` : ''
+    return {
+      subject: `You are now ${words.role} of ${site.name}`,
+      lead: `${who} made you ${words.role} of ${site.name}${via} on ${ctx.instance}.`,
+      lines: [words.does],
+      action: { label: `Open ${site.name}`, url: site.url },
+      why: `you were made ${words.role} of a site on ${ctx.instance}`,
+    }
+  }
+  return {
+    subject: `You are now ${words.role} of ${plural(sites.length, 'site')}`,
+    lead: `${who} made you ${words.role} of ${plural(sites.length, 'site')} on ${ctx.instance}:`,
+    links: siteLinks(sites.map(i => i.details.site)),
+    lines: [...moreLine(sites.length, 'sites'), words.doesMany],
+    action: { label: `Open ${ctx.instance}`, url: ctx.appOrigin },
+    why: `you were made ${words.role} of sites on ${ctx.instance}`,
+  }
+}
+
 const groupMemberAdded = (
   items: DeliveryItem<'group.member_added'>[],
   ctx: TemplateContext
@@ -271,6 +315,8 @@ const commentReply = (items: DeliveryItem<'comment.reply'>[], ctx: TemplateConte
 export const TEMPLATES: Templates = {
   'site.shared': { email: siteShared },
   'site.shared_via_group': { email: siteSharedViaGroup },
+  'site.owner_added': { email: roleAdded },
+  'site.publisher_added': { email: roleAdded },
   'group.member_added': { email: groupMemberAdded },
   'comment.created': { email: commentCreated },
   'comment.reply': { email: commentReply },

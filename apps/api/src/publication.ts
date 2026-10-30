@@ -32,6 +32,8 @@
  * never-live site's `access` need `site.visibility` (and `site.audience` for `access`); a publisher
  * asking for one gets 400 `owner_only` before anything is stored. The settings a pending version
  * carries are applied when it goes live only as far as whoever makes it live may change them.
+ * Unarchiving is the owners' (`site.archive`): a publisher's deploy to an archived site, or making
+ * one of its versions live, is 400 `owner_only` (`checkRestore`).
  *
  * Who published (`VersionRecord.publishedBy`): the user who makes a version live. A pending
  * version records whoever staged it, and finalizing records whoever finalized it. A version is
@@ -278,6 +280,22 @@ async function checkDeployChanges(deps: Deps, actor: Actor, site: SiteRecord, ac
   for (const action of actions) await auditAdmin(deps, actor, site, action)
 }
 
+/**
+ * Making a version of an archived site live restores it, which is the owners' call (`site.archive`):
+ * a publisher gets 400 `owner_only`, and an admin restoring it only as one is audited.
+ */
+async function checkRestore(deps: Deps, actor: Actor, site: SiteRecord) {
+  if (!site.archived) return
+  if (!can(actor, 'site.archive', site)) {
+    throw new ApiError(
+      400,
+      'owner_only',
+      `"${site.name}" is archived: only its owners restore it. Ask an owner to unarchive it first`
+    )
+  }
+  await auditAdmin(deps, actor, site, 'site.archive')
+}
+
 /** The settings a version carries that `actor` may apply to the site as it goes live. */
 function settingsFor(actor: Actor, site: SiteRecord, version: VersionRecord) {
   return {
@@ -322,6 +340,7 @@ async function prepare(
   if (existing) {
     const asked = req.access === undefined ? null : access
     await checkDeployChanges(deps, actor, existing, deployChanges(existing, req, asked))
+    await checkRestore(deps, actor, existing)
   }
   if (existing && access && req.access !== undefined) {
     const before = existing.audience
@@ -467,6 +486,7 @@ export async function publish(
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.deploy')
   const version = await store.getVersion(site, versionId)
   if (!version) throw notFound(`No deploy ${versionId} for "${name}"`)
+  await checkRestore(deps, actor, site)
   if (version.status === 'complete') return goLive(deps, user, actor, site, version, [], acting)
 
   const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))

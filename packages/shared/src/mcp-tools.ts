@@ -31,6 +31,7 @@ import {
 } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
 import { CellChangeSchema } from './notifications.ts'
+import { OWNER_EMAILS_MAX, PUBLISHER_EMAILS_MAX, PUBLISHER_GROUPS_MAX } from './site-roles.ts'
 import { SITE_SORTS } from './site-sort.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -189,6 +190,15 @@ const sitePath = z
 
 const emails = z.array(z.string().min(3).max(254)).max(AUDIENCE_EMAILS_MAX)
 const groupSlugs = z.array(z.string().min(1).max(100)).max(AUDIENCE_GROUPS_MAX)
+/** An edit to a site's owners or publishers, as fling_set_audience edits its audience. */
+const roleChange = {
+  add: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
+  remove: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
+  set: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
+  addGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
+  removeGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
+  setGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
+}
 const groupSlug = z.string().min(1).max(100).describe('The group\'s slug, e.g. "design"')
 const members = z.array(z.string().min(3).max(254)).max(GROUP_MEMBERS_MAX)
 const groupName = z.string().min(1).max(GROUP_NAME_MAX)
@@ -476,6 +486,55 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { idempotentHint: true, openWorldHint: false },
     }),
 
+    setOwners: tool({
+      name: 'fling_set_owners',
+      title: "Set a site's owners",
+      description:
+        'Change who owns a site: people and groups who may do everything the user can with it (publish, roll back, ' +
+        'change its access and settings, its owners and publishers, archive and delete it). Only owners change ' +
+        'it, and only when the user asks. `add` and `remove` change the addresses and `set` replaces them; ' +
+        '`addGroups`, `removeGroups` and `setGroups` do the same for groups, by slug (fling_groups). Only members ' +
+        `of ${w.name} may be owners, never guests; a site keeps at least one person (address) as an owner, and ` +
+        `has at most ${OWNER_EMAILS_MAX} addresses. Naming a group trusts whoever manages it. fling_info shows ` +
+        'the owners and publishers.',
+      inputSchema: {
+        name: siteName,
+        add: roleChange.add.describe('Addresses to make owners'),
+        remove: roleChange.remove.describe('Addresses to take out of the owners'),
+        set: roleChange.set.describe('Replace the owner addresses with exactly these'),
+        addGroups: roleChange.addGroups.describe('Groups (slugs) to make owners'),
+        removeGroups: roleChange.removeGroups.describe('Groups (slugs) to take out'),
+        setGroups: roleChange.setGroups.describe(
+          'Replace the owner groups with exactly these slugs'
+        ),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
+    setPublishers: tool({
+      name: 'fling_set_publishers',
+      title: "Set a site's publishers",
+      description:
+        'Change who publishes a site without owning it: people and groups who may deploy new versions and roll ' +
+        "back, but not change its access or settings, add owners or delete it. Only the site's owners change it, " +
+        'and only when the user asks. `add` and `remove` change the addresses and `set` replaces them; ' +
+        '`addGroups`, `removeGroups` and `setGroups` do the same for groups, by slug (fling_groups). Only members ' +
+        `of ${w.name} may publish, never guests. Someone who is also an owner stays an owner. fling_info shows ` +
+        'the owners and publishers.',
+      inputSchema: {
+        name: siteName,
+        add: roleChange.add.describe('Addresses to make publishers'),
+        remove: roleChange.remove.describe('Addresses to take out of the publishers'),
+        set: roleChange.set.describe('Replace the publisher addresses with exactly these'),
+        addGroups: roleChange.addGroups.describe('Groups (slugs) to make publishers'),
+        removeGroups: roleChange.removeGroups.describe('Groups (slugs) to take out'),
+        setGroups: roleChange.setGroups.describe(
+          'Replace the publisher groups with exactly these slugs'
+        ),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
     groups: tool({
       name: 'fling_groups',
       title: 'List groups',
@@ -729,8 +788,8 @@ export const mcpRemoteInstructions = (
 
 /** What the servers say about notifications, when the instance has them. */
 export const NOTIFICATIONS_NOTE = (w: McpWording) =>
-  `${w.name} emails people when a site is shared with them, they are added to a group, or someone comments on ` +
-  'their site or replies in their thread. fling_notifications shows what the user hears about; change it with ' +
+  `${w.name} emails people when a site is shared with them, they are made an owner or publisher of one, they are ` +
+  'added to a group, or someone comments on their site or replies in their thread. fling_notifications shows what the user hears about; change it with ' +
   'fling_notifications_set only when they ask.'
 
 /** What the servers say about comments, when the instance has them. */

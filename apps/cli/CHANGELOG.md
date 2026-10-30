@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Owners and publishers.** `fling owners <name>` and `fling publishers <name>` show who owns and
+  who publishes a site and, with `--add`, `--remove`, `--set <emails>`, `--group` and
+  `--remove-group <slugs>`, change one list. Owners are equal; publishers publish and roll back,
+  and change nothing else. `fling ls` has a ROLE column (owner, publisher or admin) and `fling
+  info` shows Owners, Publishers and You. The MCP tools `fling_set_owners` and
+  `fling_set_publishers` take the same changes as `fling_set_audience`, and `fling_info` and
+  `fling_list` say the user's role. On a Fling without the `siteRoles` capability the commands say
+  so and change nothing.
+
 - **Who published.** Each version records who published it. `fling versions` shows a BY column,
   `fling info` a Published by line for the current version, and `fling_info` names the publisher
   of each version. Versions published before a Fling recorded it show `-`.

@@ -106,6 +106,8 @@ export const CORE_CAPABILITIES = {
   groups: true,
   /** the five access levels (access.ts), `only_me` among them, set with `access` */
   accessLevels: true,
+  /** a site's owners and publishers, people and groups (site-roles.ts), set with `owners`/`publishers` */
+  siteRoles: true,
 } as const
 
 /** The access level the instance gives a new site when its first deploy names none. */

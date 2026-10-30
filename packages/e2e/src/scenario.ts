@@ -14,7 +14,10 @@
  *   they get in through the site pass, an outsider finds nothing, the share link still serves) →
  *   group (the member makes one the owner can see and use but not change; the owner names it in
  *   the audience; the outsider, once in it, gets in, and once out is refused; deleting it leaves
- *   the site to its owner) → invitations (where on, with the dev mailbox: an outsider shared with
+ *   the site to its owner) → owners and publishers (the member, made a publisher, deploys, lists
+ *   the site as its publisher, is refused its access and owners and rolls back; the last person
+ *   owner can't be removed; the member is made an owner and taken out; a group's member publishes
+ *   through the group) → invitations (where on, with the dev mailbox: an outsider shared with
  *   signs in by the emailed link, sees the site through the pass and comments, finds members-only
  *   sites missing and may not deploy, mint a key or make a group; revoked, refused; an admin's
  *   member invitation signs another outsider in, who deploys, and once revoked finds their site
@@ -24,8 +27,9 @@
  * Notifications ride along where their causes happen: the settings answer wherever the instance
  * has email, and where the dev drain exists (`POST /dev/notify/drain`, local runs only) the
  * scenario drains the outbox and reads, as each recipient, what was sent to them: the comment and
- * reply (a burst folded into one email), the share, the group add and the group share, nothing for
- * the actor, and nothing after an opt-out.
+ * reply (a burst folded into one email), the share, the group add and the group share, a new
+ * publisher and owner (directly and through a group), nothing for the actor, and nothing after an
+ * opt-out.
  *
  * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
  * to reach the edge location the check lands on. New sites must not need it: the CLI's readiness
@@ -625,6 +629,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('groups: not on this instance (skipped)')
+    }
+
+    // Owners and publishers: the member publishes the owner's site, then co-owns it for a while.
+    if (meta.capabilities.siteRoles === true) {
+      await rolesStep({
+        appOrigin,
+        name,
+        nonce,
+        work,
+        groups: meta.capabilities.groups === true,
+        fling,
+        flingAs,
+        opts,
+        step,
+        mail,
+        instance: meta.name,
+      })
+    } else {
+      step('owners and publishers: not on this instance (skipped)')
     }
 
     // Invitations: an outsider shared with signs in by the emailed link and reviews as a guest;
@@ -1763,6 +1786,202 @@ async function groupStep(ctx: {
     // However the step ended, the group goes (already gone: 404).
     const gone = await as(maker, 'DELETE', path)
     check([204, 404].includes(gone.status), `member deletes group ${slug}: ${gone.status}`)
+  }
+}
+
+/**
+ * Owners and publishers, through the CLI: the owner makes the member a publisher, who deploys,
+ * finds the site in `fling ls` as its publisher, is refused its access, and rolls back; the owner
+ * can't remove the last person owner; the member is made an owner and taken out again; a group's
+ * member publishes through the group (with a third user). Mail where the dev drain is. Everything
+ * is put back: the roles, the version served and the group.
+ */
+async function rolesStep(ctx: {
+  appOrigin: string
+  name: string
+  nonce: string
+  work: string
+  groups: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
+  opts: ScenarioOptions
+  step: (line: string) => void
+  mail: Mailbox | null
+  instance: string
+}) {
+  const { appOrigin, name, fling, opts, step, mail } = ctx
+  const owner = opts.session
+  const member = opts.member
+  if (!member) {
+    step('owners and publishers: needs a second user (skipped)')
+    return
+  }
+  const asMember = ctx.flingAs(member)
+  type Roles = {
+    role?: string
+    owners: { emails: { email: string }[]; groups: { slug: string }[] }
+    publishers: { emails: { email: string }[]; groups: { slug: string }[] }
+  }
+  const emailsOf = (list: Roles['owners']) => list.emails.map(e => e.email)
+  const refused = async (what: string, run: Promise<unknown>, want: RegExp) => {
+    const err = await run.then(
+      () => null,
+      (e: Error) => e
+    )
+    check(err && want.test(err.message), `${what}: want a refusal matching ${want}, got ${err}`)
+  }
+  const servedBefore = ((await fling('info', name)) as { currentVersionId: string })
+    .currentVersionId
+  if (mail) {
+    await mail.take(member)
+    await mail.take(owner)
+  }
+  const groupSlug = `e2e-${ctx.nonce}-pub`
+  const publisherByGroup = opts.outsider
+  let groupMade = false
+  try {
+    // A publisher deploys, and lists the site as theirs to publish.
+    const added = (await fling('publishers', name, '--add', member.email)) as Roles
+    check(
+      emailsOf(added.publishers).includes(member.email) && added.role === 'owner',
+      `fling publishers --add: ${JSON.stringify(added)}`
+    )
+    if (mail) {
+      oneEmail(await mail.take(member), ['site.publisher_added'], ctx.instance, 'the new publisher')
+      noEmail(await mail.take(owner), 'the owner who added them')
+    }
+    const dir = siteDir(ctx.work, 'roles', {
+      'index.html': page('roles', `published by the member ${ctx.nonce}`),
+    })
+    const deployed = (await asMember('deploy', dir, '--name', name)) as {
+      status: string
+      site: CliSite & { role?: string }
+    }
+    check(
+      deployed.status === 'live' && deployed.site.role === 'publisher',
+      `the publisher deploys: ${JSON.stringify(deployed)}`
+    )
+    const versions = (await asMember('versions', name)) as {
+      versions: { id: string; publishedBy?: string }[]
+    }
+    check(
+      versions.versions.find(v => v.id === deployed.site.currentVersionId)?.publishedBy ===
+        member.email,
+      `versions after the publisher's deploy: ${JSON.stringify(versions)}`
+    )
+    const listed = (await asMember('ls')) as { sites: { name: string; role?: string }[] }
+    check(
+      listed.sites.some(s => s.name === name && s.role === 'publisher'),
+      `the publisher's fling ls: ${JSON.stringify(listed.sites)}`
+    )
+    step(`${member.email} is a publisher of ${name}: deploys it, and fling ls lists it as theirs`)
+
+    await refused(
+      "the publisher's fling access",
+      asMember('access', name, '--members'),
+      /No site named/
+    )
+    await refused(
+      "the publisher's fling owners --add",
+      asMember('owners', name, '--add', member.email),
+      /No site named/
+    )
+    const rolled = (await asMember('rollback', name, servedBefore)) as CliSite
+    check(
+      rolled.currentVersionId === servedBefore,
+      `the publisher rolls back: ${JSON.stringify(rolled)}`
+    )
+    step('the publisher may not change its access or owners, and rolls it back')
+
+    await refused(
+      'removing the last person owner',
+      fling('owners', name, '--remove', owner.email),
+      /at least one person as an owner/
+    )
+    const coOwned = (await fling('owners', name, '--add', member.email)) as Roles
+    check(
+      emailsOf(coOwned.owners).includes(member.email) &&
+        !emailsOf(coOwned.publishers).includes(member.email),
+      `fling owners --add (a publisher becomes an owner only): ${JSON.stringify(coOwned)}`
+    )
+    const asOwner = (await asMember('info', name)) as { role?: string; owners?: Roles['owners'] }
+    check(asOwner.role === 'owner', `the co-owner's fling info: ${JSON.stringify(asOwner)}`)
+    if (mail) {
+      oneEmail(await mail.take(member), ['site.owner_added'], ctx.instance, 'the new owner')
+    }
+    const back = (await fling('owners', name, '--remove', member.email)) as Roles
+    check(
+      !emailsOf(back.owners).includes(member.email) && emailsOf(back.owners).includes(owner.email),
+      `fling owners --remove: ${JSON.stringify(back)}`
+    )
+    const gone = (await asMember('ls')) as { sites: { name: string }[] }
+    check(
+      !gone.sites.some(s => s.name === name),
+      `out of the owners, the member's fling ls: ${JSON.stringify(gone.sites)}`
+    )
+    step(
+      `the last person owner stays (last_owner); ${member.email} made an owner${mail ? ' (told by email)' : ''}, then taken out`
+    )
+
+    // A group's member publishes through the group.
+    if (ctx.groups && publisherByGroup) {
+      const made = await fetch(`${appOrigin}/api/groups`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${owner.apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          slug: groupSlug,
+          name: `E2E publishers ${ctx.nonce}`,
+          members: [publisherByGroup.email],
+        }),
+      })
+      check(made.status === 201, `owner creates group ${groupSlug}: ${made.status}`)
+      groupMade = true
+      if (mail) await mail.take(publisherByGroup)
+      await fling('publishers', name, '--group', groupSlug)
+      if (mail) {
+        oneEmail(
+          await mail.take(publisherByGroup),
+          ['site.publisher_added'],
+          ctx.instance,
+          'a publisher through a group'
+        )
+      }
+      const viaGroup = (await ctx.flingAs(publisherByGroup)('deploy', dir, '--name', name)) as {
+        status: string
+        site: CliSite & { role?: string }
+      }
+      check(
+        ['live', 'repointed'].includes(viaGroup.status) && viaGroup.site.role === 'publisher',
+        `the group's member deploys: ${JSON.stringify(viaGroup)}`
+      )
+      step(`${publisherByGroup.email} publishes ${name} through the group ${groupSlug}`)
+    } else {
+      step(
+        'owners and publishers: a publisher through a group needs groups and a third user (skipped)'
+      )
+    }
+  } finally {
+    // Put back what the step changed: the roles, the version served and the group.
+    const reset = await fetch(`${appOrigin}/api/sites/${name}`, {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${owner.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        owners: { emails: [owner.email], groups: [] },
+        publishers: { emails: [], groups: [] },
+      }),
+    })
+    check(reset.status === 200, `the owner resets the roles: ${reset.status}`)
+    await fling('rollback', name, servedBefore)
+    if (groupMade) {
+      const res = await fetch(`${appOrigin}/api/groups/${groupSlug}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${owner.apiKey}` },
+      })
+      check([204, 404].includes(res.status), `owner deletes group ${groupSlug}: ${res.status}`)
+    }
   }
 }
 

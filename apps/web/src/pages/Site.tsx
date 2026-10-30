@@ -1,9 +1,11 @@
 /**
- * One site, everything about it: the overview, who can open it (Access), its files and versions,
- * and archive or delete (Danger zone). An unknown site, or one that isn't yours, is the 404 page,
- * as the API answers both the same way; an admin opens anyone's, and is told whose it is and that
- * what they change is on the record. Archived sites are offline, so Access waits until they are
- * unarchived.
+ * One site, everything about it: the overview, who can open it (Access), who owns and publishes it
+ * (Owners and publishers), its files and versions, and archive or delete (Danger zone). An unknown
+ * site, or one you hold no role on, is the 404 page, as the API answers both the same way; an
+ * admin opens anyone's (`site.role` is `admin`), and is told whose it is and that what they change
+ * is on the record. A publisher sees the overview, the owners and publishers (read-only) and the
+ * versions, to roll back: not Access, the share link or the danger zone. Archived sites are
+ * offline, so Access waits until they are unarchived.
  */
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams } from 'react-router-dom'
@@ -14,6 +16,7 @@ import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
 import { SiteOverview } from '../components/site/SiteOverview'
+import { SiteTeam } from '../components/site/SiteTeam'
 import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
 import { useMe, useSiteDetail } from '../hooks/queries'
@@ -52,7 +55,11 @@ export default function Site() {
 
   const site = detail.data
   const reviewable = instance?.capabilities.comments === true && !site.archived
-  const othersSite = me != null && site.owner !== undefined && site.owner !== me.email
+  // Servers before site roles report no role: the site is someone else's when its owner isn't you.
+  const othersSite = site.role
+    ? site.role === 'admin'
+    : me != null && site.owner !== undefined && site.owner !== me.email
+  const publisher = site.role === 'publisher'
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -83,9 +90,12 @@ export default function Site() {
         </div>
       )}
       <SiteOverview site={site} />
-      {!site.archived && <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />}
+      {!site.archived && !publisher && (
+        <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />
+      )}
+      {instance?.capabilities.siteRoles === true && <SiteTeam site={site} />}
       <SiteVersions site={site} />
-      <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />
+      {!publisher && <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />}
     </div>
   )
 }

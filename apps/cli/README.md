@@ -188,6 +188,8 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
 | `fling visibility <name> private\|public` | require sign-in, or not (private again: the access it had) |
 | `fling access <name> [--only-me \| --members \| --public] [--add <emails>] [--remove <emails>] [--group <slugs>] [--remove-group <slugs>] [--clear]` | who can open a site: only you, listed people and groups, everyone signed in, or anyone |
+| `fling owners <name> [--add <emails>] [--remove <emails>] [--set <emails>] [--group <slugs>] [--remove-group <slugs>]` | who owns a site, or change it |
+| `fling publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …]` | who publishes a site without owning it, or change it |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
@@ -238,6 +240,32 @@ are groups). A share link opens a site only you can see as well: it is your choi
 you are in, with their owner and how they reached you. With `--json`, each is `{ name, url,
 reviewUrl?, owner, via: { direct, groups }, createdAt, updatedAt }`. Your own sites, and private
 sites open to everyone signed in, aren't listed.
+
+### Owners and publishers
+
+A site's **owners** are equal: each can publish it, roll it back, change who can open it and its
+settings, its owners and publishers, archive and delete it. Its **publishers** can publish and roll
+back, and nothing else. Both are people and groups, and only people who can sign in to your Fling
+as members (never guests) can hold either:
+
+```sh
+fling owners my-app                                   # who owns and publishes it, and your role
+fling owners my-app --add cat@example.com             # Cat owns it too
+fling owners my-app --remove you@example.com          # hand it over (someone else must own it)
+fling publishers my-app --add bob@example.com --group design
+fling publishers my-app --remove-group design
+fling publishers my-app --set bob@example.com         # exactly these addresses (groups stay)
+```
+
+A site always keeps at least one person as an owner, so `--remove` of the last one is refused
+(`last_owner`); a group alone never counts. Someone in both lists is an owner. Naming a group
+trusts whoever manages it: anyone they add owns or publishes the site too. People you add are told
+by email where your Fling sends it. `fling ls` shows your ROLE on each site (owner, publisher, or
+admin for an admin's view), and `fling info` its Owners, Publishers and You. As a publisher,
+`fling deploy` publishes new content, but can't change the site's access or settings (`--access`,
+`--public`, `--spa` that differ: `owner_only`) or bring an archived site back. With `--json`, the
+commands print `{ name, role, owners, publishers }`, each list `{ emails: [{ email, known, guest?
+}], groups: [{ slug, name, size }] }`.
 
 ### Groups
 
@@ -357,7 +385,8 @@ The MCP tools:
   `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, and
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,
   and `addGroups`, `removeGroups`, `setGroups` for groups) when it can limit sites to listed
-  people, and the group tools (`fling_groups`, `fling_group_show`, `fling_group_create`,
+  people, `fling_set_owners` and `fling_set_publishers` (the same changes, to a site's owners or
+  publishers) where it has site roles, and the group tools (`fling_groups`, `fling_group_show`, `fling_group_create`,
   `fling_group_members`, `fling_group_rename`, `fling_group_delete`) when it has groups, and
   `fling_notifications` and `fling_notifications_set` (`muted`, and `cells` of
   `{ event, channel, value: on|off|default }`) when it has notifications.

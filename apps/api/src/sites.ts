@@ -99,7 +99,7 @@ import {
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
-import { actingOf, notifyAudienceChange } from './notifications/notify.ts'
+import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
 import {
   type Action,
   type Actor,
@@ -896,6 +896,7 @@ export async function updateSite(
   const [first = 'site.settings', ...rest] = actions
   const site = await requireSite(deps, user, name, first, ...rest)
   const roles = patch.owners !== undefined || patch.publishers !== undefined
+  const rolesBefore = { owners: site.owners, publishers: site.publishers }
   if (roles) await applyRoles(deps, site, patch)
   applySettings(site, patch)
   let before: SiteAudience | undefined
@@ -910,6 +911,7 @@ export async function updateSite(
   // The invitations first: the share's email, sent later, goes only to people with standing.
   if (before) await inviteAdded(deps, inviter, site, before)
   if (before) await notifyAudienceChange(deps, user.email, site, before, actingOf(principal))
+  if (roles) await notifyRoleChange(deps, user.email, site, rolesBefore, actingOf(principal))
   // The caller may have just changed their own role.
   const after = await siteActor(deps, user, site)
   return {

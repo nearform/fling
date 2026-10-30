@@ -33,6 +33,7 @@ import {
   runList,
   runListShared,
   runRemove,
+  runRoles,
   runRollback,
   runShare,
   runVersions,
@@ -337,6 +338,46 @@ program
       ) => runAccess(ctx, name, opts)
     )
   )
+for (const [which, does] of [
+  [
+    'owners',
+    'own it: publish, change its access and settings, its owners and publishers, delete it',
+  ],
+  [
+    'publishers',
+    "publish it and roll it back, but can't change its access or settings or delete it",
+  ],
+] as const) {
+  program
+    .command(`${which} <name>`)
+    .helpGroup('Sites:')
+    .description(
+      `show who ${which === 'owners' ? 'owns' : 'publishes'} a site, or change it (${which} ${does})`
+    )
+    .option('--add <emails...>', `add these addresses (members of this Fling only)`)
+    .option('--remove <emails...>', 'take these addresses out')
+    .option('--set <emails...>', `make these addresses the whole list (groups stay)`)
+    .option(
+      '--group <slugs...>',
+      'add these groups (see `fling groups`); whoever manages a group decides who is in it'
+    )
+    .option('--remove-group <slugs...>', 'take these groups out')
+    .action(
+      action(
+        (
+          ctx,
+          name: string,
+          opts: {
+            add?: string[]
+            remove?: string[]
+            set?: string[]
+            group?: string[]
+            removeGroup?: string[]
+          }
+        ) => runRoles(ctx, which, name, opts)
+      )
+    )
+}
 program
   .command('archive <name>')
   .helpGroup('Sites:')

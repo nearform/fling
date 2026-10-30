@@ -13,6 +13,7 @@ import {
   CommentSchema,
   type CreateGroupRequest,
   editAudienceInput,
+  editRoleInput,
   type GroupDetail,
   GroupDetailSchema,
   GroupListSchema,
@@ -34,6 +35,7 @@ import {
   type SiteDetail,
   SiteDetailSchema,
   SiteListSchema,
+  type SiteRoleMembers,
   SiteSchema,
   type SiteSort,
   type SiteWithAudience,
@@ -252,6 +254,68 @@ export function audiencesEnabled(
 ): boolean {
   if (!instance) return false
   return instance.capabilities.audiences ?? true
+}
+
+// --- owners and publishers ---
+
+/** Which of a site's roles a command edits: its owners or its publishers. */
+export type RoleList = 'owners' | 'publishers'
+
+/**
+ * Whether the instance knows site owners and publishers, by its stored metadata: its `siteRoles`
+ * capability. A stored copy from before the flag: no, so callers refresh it first
+ * (`loadInstanceWith`).
+ */
+export function siteRolesEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  return instance?.capabilities.siteRoles === true
+}
+
+/** A site with its owners and publishers, as GET and PATCH report them. */
+export type SiteWithRoles = SiteWithAudience & {
+  owners: SiteRoleMembers
+  publishers: SiteRoleMembers
+}
+
+const noRoles = () =>
+  new CliError('This Fling does not support site owners and publishers', {
+    hint: 'Ask its operator to update it.',
+  })
+
+const withRoles = <T extends SiteWithAudience>(site: T): T & SiteWithRoles => {
+  if (!site.owners) throw noRoles()
+  return {
+    ...site,
+    owners: site.owners,
+    publishers: site.publishers ?? { emails: [], groups: [] },
+  }
+}
+
+/** The site with its owners and publishers; a server without site roles fails. */
+export async function getRoles(
+  client: ApiClient,
+  name: string
+): Promise<SiteDetail & SiteWithRoles> {
+  return withRoles(await getSite(client, name))
+}
+
+/**
+ * Change a site's owners or publishers (addresses and groups, as `editRoleInput`): PATCH the whole
+ * new list. Returns the site with both lists.
+ */
+export async function setRoles(
+  client: ApiClient,
+  name: string,
+  which: RoleList,
+  change: AudienceChange
+): Promise<SiteWithRoles> {
+  const current = await getRoles(client, name)
+  const site = await client.request('PATCH', sitePath(name), {
+    schema: SiteWithAudienceSchema,
+    body: { [which]: editRoleInput(current[which], change) },
+  })
+  return withRoles(site)
 }
 
 // --- groups ---

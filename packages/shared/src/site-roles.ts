@@ -68,13 +68,16 @@ export const editRoleInput = (current: SiteRoleMembers, change: AudienceChange) 
   editAudienceInput(current, change)
 
 /** `a@x.test, the group design (Design team, 4 people)`, or `nobody`. */
-function whoHolds(members: SiteRoleMembers | undefined): string {
+export function whoHolds(members: SiteRoleMembers | undefined): string {
   const parts = [
     ...(members?.emails ?? []).map(e => (e.guest ? `${e.email} (guest)` : e.email)),
     ...(members?.groups ?? []).map(g => `the group ${groupLabel(g)}`),
   ]
   return parts.length ? parts.join(', ') : 'nobody'
 }
+
+/** `an owner`, `a publisher`, `an admin`: the caller's role, as part of a sentence. */
+export const roleLabel = (role: SiteRole) => (role === 'publisher' ? 'a publisher' : `an ${role}`)
 
 /**
  * Who owns and who publishes the site, and the caller's role, for the CLI and both MCP servers.
@@ -86,6 +89,6 @@ export function describeRoles(site: {
   publishers?: SiteRoleMembers
 }): string {
   if (!site.owners) return ''
-  const you = site.role ? ` You are ${site.role === 'admin' ? 'an admin' : `a ${site.role}`}.` : ''
+  const you = site.role ? ` You are ${roleLabel(site.role)}.` : ''
   return `Owners: ${whoHolds(site.owners)}. Publishers: ${whoHolds(site.publishers)}.${you}`
 }

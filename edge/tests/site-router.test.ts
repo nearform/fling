@@ -12,6 +12,7 @@ import {
   verifySitePass,
 } from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { buildReadableSiteRouter } from '../build.mjs'
 import {
   type CloudFrontRequest,
   type CloudFrontResponse,
@@ -550,11 +551,17 @@ describe('deployable source', () => {
     expect(Buffer.byteLength(renderSiteRouter({ appOrigin: APP }))).toBeLessThan(10 * 1024)
   })
 
+  it('is minified from the readable bundle, which keeps its whitespace and names', () => {
+    const readable = buildReadableSiteRouter()
+    expect(readable).toMatch(/^async function handler\(event\)/m)
+    expect(Buffer.byteLength(SITE_ROUTER_SOURCE)).toBeLessThan(Buffer.byteLength(readable))
+  })
+
   it('only imports cloudfront and crypto, exports nothing and has both placeholders', () => {
     const imports = SITE_ROUTER_SOURCE.match(/^import .*$/gm)
     expect(imports).toEqual(['import cf from "cloudfront";', 'import crypto from "crypto";'])
     expect(SITE_ROUTER_SOURCE).not.toMatch(/^export\b/m)
-    expect(SITE_ROUTER_SOURCE).toMatch(/^async function handler\(event\)/m)
+    expect(SITE_ROUTER_SOURCE).toMatch(/(^|[;}])async function handler\(/m)
     expect(SITE_ROUTER_SOURCE).not.toMatch(/\brequire\(/)
     const rendered = renderSiteRouter({ appOrigin: APP })
     expect(rendered).toContain(`"${APP}"`)

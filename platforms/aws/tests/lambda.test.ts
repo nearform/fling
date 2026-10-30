@@ -1,13 +1,16 @@
 /**
  * The Lambda's migrate event against DynamoDB Local (skipped without it, see services.ts): what
- * deploy.yml invokes after updating the code. And the notify tick's time budget.
+ * deploy.yml invokes after updating the code. The notify tick's time budget, and the edge key
+ * sync each cold start runs beside its first request.
  */
 
 import { DRAIN_BUDGET_MS } from '@fling/api/notifications'
+import { MemoryRouteTable } from '@fling/api/route-table/memory'
 import { legacyItems } from '@fling/conformance'
+import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext } from 'hono/aws-lambda'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { handler, notifyBudget } from '../src/lambda.ts'
+import { handler, notifyBudget, syncEdgeKey } from '../src/lambda.ts'
 import { DynamoTable } from '../src/table/dynamo.ts'
 import { DYNAMODB_ENDPOINT, dynamoTable } from './services.ts'
 
@@ -67,5 +70,26 @@ describe('{"fling":"notify"}', () => {
     expect(notifyBudget(15 * 60_000)).toBe(DRAIN_BUDGET_MS)
     expect(notifyBudget(12_000)).toBe(7_000)
     expect(notifyBudget(1_000)).toBe(0)
+  })
+})
+
+describe('syncEdgeKey', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('puts the key when the edge holds another or none, and only then', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const routes = new MemoryRouteTable()
+    const put = vi.spyOn(routes, 'put')
+
+    await syncEdgeKey(routes, 'k1')
+    expect(await routes.get(SITE_HMAC_KVS_KEY)).toBe('k1')
+    await syncEdgeKey(routes, 'k1')
+    expect(put).toHaveBeenCalledTimes(1)
+    await syncEdgeKey(routes, 'k2')
+    expect(await routes.get(SITE_HMAC_KVS_KEY)).toBe('k2')
+    expect(put).toHaveBeenCalledTimes(2)
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('"msg":"edge key","changed":false'))
   })
 })

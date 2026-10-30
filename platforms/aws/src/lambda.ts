@@ -1,7 +1,10 @@
 /**
  * Lambda entry (function URL behind CloudFront). Deps are built once per cold start: config from
- * env, secrets from SSM, and the KVS `cfg:site-hmac` key is brought in line with the SSM
- * site-hmac-key so the edge verifies the same `fling_site` cookies we mint.
+ * env and secrets from SSM, timed in one `cold start` log line. The KVS `cfg:site-hmac` key is
+ * brought in line with the SSM site-hmac-key so the edge verifies the same `fling_site` cookies we
+ * mint. That runs beside the first request, not before it: the KVS endpoint is global (us-east-1,
+ * SigV4A) and slow from a cold function, and the key differs only after the SSM key is rotated.
+ * A failed sync is retried on the next invocation; the notify tick waits for it.
  *
  * API Gateway WebSocket events (the live rooms' `$connect`, `$default`, `$disconnect`, infra/live.tf)
  * go to live.ts with the same deps.
@@ -26,6 +29,7 @@ import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
 import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
 import { sweepRevocations } from '@fling/api/revocations'
+import type { RouteTable } from '@fling/api/route-table'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
@@ -54,16 +58,28 @@ export function instanceFileEnv(url = new URL('./instance.json', import.meta.url
 
 const runtimeEnv = (): Env => ({ ...instanceFileEnv(), ...process.env })
 
+const info = (msg: string, fields: Record<string, unknown>) =>
+  console.log(JSON.stringify({ level: 'info', msg, ...fields }))
+
 async function init() {
+  const start = Date.now()
   const env = runtimeEnv()
   const base = loadBaseConfig(env)
   const secrets = base.ssmPrefix ? await loadSecretsFromSsm(base.ssmPrefix) : secretsFromEnv(env)
+  const secretsMs = Date.now() - start
   const config: Config = { ...base, secrets }
   const { deps, live } = buildAwsDeps(config)
-  if ((await deps.routeTable.get(SITE_HMAC_KVS_KEY)) !== secrets.siteHmacKey) {
-    await deps.routeTable.put(SITE_HMAC_KVS_KEY, secrets.siteHmacKey)
-  }
-  return { http: handle(createApp(deps)), deps, live }
+  const http = handle(createApp(deps))
+  info('cold start', { secretsMs, appMs: Date.now() - start - secretsMs })
+  return { http, deps, live, siteHmacKey: secrets.siteHmacKey }
+}
+
+/** Puts the SSM site-hmac-key in the KVS when the edge holds another (or none). */
+export async function syncEdgeKey(routeTable: RouteTable, siteHmacKey: string) {
+  const start = Date.now()
+  const changed = (await routeTable.get(SITE_HMAC_KVS_KEY)) !== siteHmacKey
+  if (changed) await routeTable.put(SITE_HMAC_KVS_KEY, siteHmacKey)
+  info('edge key', { changed, ms: Date.now() - start })
 }
 
 export interface MigrateEvent {
@@ -118,6 +134,7 @@ export async function migrate(event: MigrateEvent, context: LambdaContext): Prom
 }
 
 let ready: ReturnType<typeof init> | undefined
+let edgeKeySynced: Promise<void> | undefined
 
 export const handler = async (
   event: LambdaEvent | MigrateEvent | NotifyEvent | LiveEvent,
@@ -128,8 +145,13 @@ export const handler = async (
     ready = undefined // retry the cold start on the next invocation
     throw err
   })
-  const { http, deps, live } = await ready
+  const { http, deps, live, siteHmacKey } = await ready
+  edgeKeySynced ??= syncEdgeKey(deps.routeTable, siteHmacKey).catch(err => {
+    edgeKeySynced = undefined
+    console.warn(JSON.stringify({ level: 'warn', msg: 'edge key sync failed', err: String(err) }))
+  })
   if (isNotify(event)) {
+    await edgeKeySynced
     const result: DrainResult = await drain(deps, {
       deadline: Date.now() + notifyBudget(context.getRemainingTimeInMillis()),
     })

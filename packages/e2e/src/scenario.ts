@@ -3,8 +3,9 @@
  * to `appOrigin` only as a user would: the real CLI (apps/cli, run from source) for deploys and site
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
- *   metadata → whoami → deploy v1 (`--access public`) → view → robots.txt → 404 / trailing-slash →
- *   deploy v2 (keeps its access) → view → versions (who published) → rollback to v1 → open to
+ *   metadata → whoami → deploy v1 (`--access public`) → view → robots.txt → the version served
+ *   (`/_fling-version`) → 404 / trailing-slash → deploy v2 (keeps its access) → view, and the
+ *   version served follows → versions (who published) → rollback to v1 → open to
  *   members: anonymous redirect to sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
  *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
@@ -464,6 +465,16 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `robots.txt: ${robots.status} ${robots.text.slice(0, 80)}`
     )
     step('robots.txt on the site host disallows everything')
+    // Which version the host serves, as the preview shell asks before it draws a thumbnail: an
+    // answer the edge makes itself, so its header reaches the browser on every platform.
+    const servedNow = await get(`${siteUrl}_fling-version`)
+    check(
+      servedNow.status === 204 &&
+        servedNow.headers.get('x-fling-version') === v1Id &&
+        servedNow.headers.get('cache-control') === 'no-store',
+      `/_fling-version: ${servedNow.status}, x-fling-version ${servedNow.headers.get('x-fling-version')} (current ${v1Id}), cache-control ${servedNow.headers.get('cache-control')}`
+    )
+    step('/_fling-version says the current version')
 
     const css = await get(`${siteUrl}style.css`)
     check(css.status === 200 && css.text.includes('rebeccapurple'), `style.css: ${css.status}`)
@@ -483,12 +494,20 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     // A re-deploy keeps the site's access: v2 is served to anyone, as v1 was.
     const second = (await fling('deploy', v2, '--name', name, ...(levels ? [] : ['--public']))) as {
       status: string
+      site: CliSite
     }
     check(second.status === 'live', `second deploy: ${JSON.stringify(second)}`)
     await eventually('v2 served', siteUrl, r => r.text.includes(`v2 ${nonce}`), {
       timeoutMs: propagationMs,
     })
-    step('deployed v2')
+    const v2Id = second.site.currentVersionId
+    await eventually(
+      '/_fling-version says v2',
+      `${siteUrl}_fling-version`,
+      r => r.status === 204 && !!v2Id && r.headers.get('x-fling-version') === v2Id,
+      { timeoutMs: propagationMs }
+    )
+    step('deployed v2, and /_fling-version says so')
 
     const versions = (await fling('versions', name)) as {
       versions: { id: string; publishedBy?: string }[]

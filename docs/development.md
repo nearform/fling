@@ -49,7 +49,8 @@ review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
 say `noindex` and `no-referrer` in meta tags, since share hosts serve them too. The site page's
 preview is the review shell in preview mode (`?mode=preview`), so it needs the same build. Open a
 site's page signed in as its owner and the preview draws its thumbnail and uploads it (the request
-is `PUT /api/sites/<name>/thumbnail` in the browser's network panel); the Sites page then shows it,
+is `PUT /api/sites/<name>/thumbnail` in the browser's network panel, after a `HEAD /_fling-version`
+on the site's host that says the current version); the Sites page then shows it,
 as rows or in the grid. Drawing happens in the browser only, so the e2e scenario uploads a made-up
 PNG instead. Every sites host's
 `/robots.txt` is `apps/web/sites-robots.txt`, served as is.

@@ -48,7 +48,8 @@ version's file, a sign-in redirect or the 404 page.
 Sites are not indexed and share links do not leak their address: `/robots.txt` on every sites host
 is Fling's `Disallow: /` (`_fling/robots.txt` from the assets), in place of any the site has, and
 the Worker adds the decision's headers to every sites-host response: `X-Robots-Tag: noindex`, and
-`Referrer-Policy: no-referrer` on a share host. A page can still set its own
+`Referrer-Policy: no-referrer` on a share host (and `X-Fling-Version`, the version served, on a
+site's files; `/_fling-version` answers with it on every platform). A page can still set its own
 `<meta name="referrer">`, which the browser obeys over the header. On AWS the files S3 serves get
 neither header (see
 [Indexing and share-link referrers](../aws/DEPLOY.md#indexing-and-share-link-referrers)).

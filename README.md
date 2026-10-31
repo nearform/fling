@@ -98,7 +98,8 @@ in a frame beside its comments, threads per page that can be replied to, resolve
 **Previews and thumbnails.** A site's page in the web UI shows its home page live, as a desktop
 browser sees it, scaled down; private and restricted sites included. When an owner or publisher
 opens that page and the site's thumbnail is missing or of an older version, their browser draws
-the home page as a small PNG and keeps it as the site's thumbnail. The site lists show each site's
+the home page as a small PNG and keeps it as the site's thumbnail, once the site's address serves
+that version (just after a publish it can take up to a minute). The site lists show each site's
 thumbnail (a faded logo until it has one), as rows or, with the List / Grid switch, as a grid of
 cards; the choice is kept per browser. The `thumbnails` capability turns this on in every client.
 

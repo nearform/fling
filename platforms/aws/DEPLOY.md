@@ -542,6 +542,10 @@ sent on as a Referer. What the site router can do on its own, at viewer-request:
   405, the `/_fling-pass` redirects) say `X-Robots-Tag: noindex` on every sites host, and
   `Referrer-Policy: no-referrer` on a share host.
 - The 404 page and the review shell say `noindex` and `no-referrer` in meta tags, on every host.
+- `/_fling-version` answers 204 with `X-Fling-Version: <version id>`, the version the host serves
+  at that moment, after the same access checks as the site's pages (the preview shell asks it
+  before it draws a thumbnail). The router answers it itself, so the header reaches the browser
+  without any Terraform; the files S3 serves do not carry it.
 
 Known limits: a viewer-request function never sees the response, so the files S3 serves get
 neither header. On a site-name host, `robots.txt` alone keeps them out of search engines. On a

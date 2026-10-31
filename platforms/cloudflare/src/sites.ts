@@ -7,8 +7,9 @@
  * The review shell (`_fling/review.html`) comes from the assets the same way, revalidated on every
  * use and with no header that would stop the app from framing it. `/robots.txt` on every sites
  * host is Fling's `Disallow: /` (`_fling/robots.txt` from the assets), whatever the site has. Every
- * response carries the decision's headers: `X-Robots-Tag: noindex`, and on a share host
- * `Referrer-Policy: no-referrer`, so its address never leaks as a Referer.
+ * response carries the decision's headers: `X-Robots-Tag: noindex`, on a share host
+ * `Referrer-Policy: no-referrer`, so its address never leaks as a Referer, and on a site's files
+ * `X-Fling-Version`, the version served.
  */
 import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'

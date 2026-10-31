@@ -207,6 +207,7 @@ export function PeoplePicker({
         problem={problem}
         hint={hint}
         label={`Add ${what} by email`}
+        membersOnly
       />
       <GroupEditor
         target={editor}

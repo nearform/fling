@@ -70,7 +70,7 @@ Fling runs on several clouds and is not tied to any one instance. Every change k
 - **Describe what is, not what was.** Comments, docs and test names state the current behaviour and
   why. No "previously", "used to", "no longer", "the old X", phase numbers or who asked for it:
   history belongs in git and PR descriptions. Exceptions: migration headers (the data they
-  rewrite) and upgrade notes in `apps/cli/CHANGELOG.md`.
+  rewrite) and the entries and upgrade notes in `CHANGELOG.md`.
 - Match the surrounding code. File headers explain the module's job and constraints; inline
   comments explain why, never what.
 - Use CONTEXT.md's terms. When you add a concept, add it there: a bold term, a short definition and
@@ -78,17 +78,20 @@ Fling runs on several clouds and is not tied to any one instance. Every change k
 - Prose is British English (behaviour, colour), plain and direct. Formatting is Biome's
   (`pnpm lint:fix`).
 - When behaviour changes, update its docs in the same change: README, CONTEXT.md,
-  `docs/development.md`, the deploy guides, `apps/cli/README.md`, the plugin's `SKILL.md`.
+  `docs/development.md`, the deploy guides, `apps/cli/README.md`, the plugin's `SKILL.md`, and a
+  `CHANGELOG.md` bullet under Unreleased.
 
 ## Shipping
 
 - `main` is protected. Branch, open a PR, wait for the **Gate** check, then
   `gh pr merge --rebase` (rebase, not squash: commits are kept). Afterwards, rebase local `main` onto
   `origin/main`.
-- **Merging to `main` deploys the AWS production instance** (`deploy.yml` runs after CI). Merge only
-  when the user says so.
-- Cloudflare deploys and CLI releases are run by hand: `deploy-cloudflare.yml`, and a `cli-v*` tag
-  for `release-cli.yml`.
+- Merging to `main` deploys nothing, but merge only when the user says so. Every PR that changes
+  behaviour adds a bullet under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md).
+- **A release deploys production and publishes the CLI**: a version bump PR (`pnpm release <x.y.z>`)
+  and then a `v<x.y.z>` tag on main, which runs `release-cli.yml` and then `deploy.yml`. Cutting
+  one needs the user's go-ahead each time. Cloudflare is deployed by hand from the same tag
+  (`deploy-cloudflare.yml`). See [Releasing](docs/development.md#releasing).
 - Anything live (deploys, terraform apply, data migrations on a real table, cloud console or CLI
   changes, GitHub variables or secrets) needs the user's go-ahead each time.
 - Never print, commit or paste secrets. Pass them by file or environment variable.

@@ -43,7 +43,7 @@ DynamoDB $TABLE, SSM parameters $SSM_PREFIX*
 | Who | Owns |
 | --- | --- |
 | Terraform ([`infra`](infra), from your root module) | Buckets, table, distributions, DNS, certificate, roles, the function's configuration and environment, which secrets exist |
-| This repo, `deploy.yml` | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` and `_fling/review.html` in the sites bucket, the site router's code |
+| This repo, `deploy.yml` (on each release) | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` and `_fling/review.html` in the sites bucket, the site router's code |
 | The API at runtime | Table items, KeyValueStore keys, site files under `sites/`, chunked MCP upload staging under `uploads/` |
 
 ## Infrastructure: the Terraform module
@@ -367,8 +367,9 @@ adding someone lets them in within 10 seconds; nothing else needs configuring.
    `release-cli.yml`, and finally set **Publishing access → Require two-factor authentication and
    disallow tokens**. Every dependency is public, so installs need no token either.
 
-6. **First deploy.** Push to `main`, or run the Deploy workflow by hand. Until then the API answers
-   503, the UI bucket is empty and the site router passes requests straight through.
+6. **First deploy.** Run the Deploy workflow by hand from `main` with the latest release tag as
+   `ref` (e.g. `v0.7.0`); after that each release deploys itself. Until then the API answers 503,
+   the UI bucket is empty and the site router passes requests straight through.
 
 7. **Why Fling? (optional).** Signed in as an admin, publish the repository's `why/` page as a public
    site: `fling deploy why --name why-fling --access public`. Once it is live, the Get started page
@@ -376,8 +377,10 @@ adding someone lets them in within 10 seconds; nothing else needs configuring.
 
 ## How a deploy ships
 
-Every push to `main` runs `ci.yml` (`pnpm gate`). When it passes, `deploy.yml` builds the same commit
-and, with the deploy role over OIDC:
+Merging to `main` deploys nothing: a release does ([Releasing](../../docs/development.md#releasing)).
+Pushing a `v<version>` tag runs the Release workflow (`release-cli.yml`: checks, `pnpm gate`, the
+CLI to npm, the GitHub Release). When it succeeds, `deploy.yml` builds the tagged commit and, with
+the deploy role over OIDC:
 
 1. Uploads `platforms/aws/dist/lambda.zip` (the `apps/api` core bundled with the AWS adapters by
    `pnpm --filter @fling/platform-aws build`, with `INSTANCE` written into it as `instance.json`) to
@@ -385,7 +388,8 @@ and, with the deploy role over OIDC:
    Then runs the pending [data migrations](#data-migrations): it invokes the function with
    `{"fling":"migrate"}` until the report says `done`. A failing migration stops the deploy here
    (the API keeps working); missing permissions only warn. Then a smoke test: `/.well-known/fling`
-   on `APP_ORIGIN` must answer from the new code for this instance before the UI is touched.
+   on `APP_ORIGIN` must answer from the new code for this instance, with the release being deployed
+   as `release`, before the UI is touched.
 2. Syncs `apps/web/dist` to the UI bucket: `assets/` first (hashed, cached for a year, never deleted,
    so open tabs keep working), then the other files, then `index.html` (`no-cache`) last.
    It also uploads the Claude Desktop extension, built by `pnpm --filter ./apps/cli build:mcpb`
@@ -608,8 +612,9 @@ can set its own `<meta name="referrer">`, which the browser obeys over the heade
 
 ## Rollback
 
-Run the **Deploy** workflow by hand (Actions, Deploy, Run workflow) with `ref` set to an older commit
-SHA of `main`. It rebuilds and redeploys that commit: API, UI, error page and site router together.
+Run the **Deploy** workflow by hand from `main` (Actions, Deploy, Run workflow) with `ref` set to an
+older release tag, e.g. `v0.7.0`. It rebuilds and redeploys that release: API, UI, error page and
+site router together. The same with the current tag redeploys it.
 Old UI assets are still in the bucket, so nothing breaks while it runs.
 
 Table items and KeyValueStore keys are not rolled back. Keep the data model backwards compatible, or
@@ -769,17 +774,20 @@ puts it there alongside its first request, and logs `edge key` when done.
 - **No AWS keys in GitHub.** The deploy job assumes the app's deploy role over OIDC. The role trusts
   only this repository's `production` environment, and that environment only accepts deployments from
   `main` (a deployment branch policy).
-- **Deploys only run code from `main`.** They run after CI passes on a push to `main`, or by hand with
-  a `ref` that must be on `main` (checked with `git merge-base --is-ancestor`). Pull request runs,
-  including forks', never get the role or any secret.
+- **Deploys only run releases on `main`.** They run after the Release workflow succeeds on a
+  `v<version>` tag, or by hand with a release tag as `ref`; either way the tagged commit must be on
+  `main` (checked with `git merge-base --is-ancestor`) and carry that version. The deploy job runs
+  on `main` (a `workflow_run` run executes on the default branch; a hand run is started from it),
+  so the environment's branch policy holds, and checks out the release's commit. Pull request
+  runs, including forks', never get the role or any secret.
 - **The deploy role can't read app secrets.** It can update the Lambda code, the UI bucket,
   `_fling/*` in the sites bucket and the CloudFront functions, invalidate caches, and invoke the
   function (to run data migrations; the function does nothing else for a non-HTTP event). The
   sign-in client secret and the signing keys live in SSM, readable only by the Lambda's own role.
 - **Logs are public.** They show resource names and the role ARN, which are identifiers, not
   credentials. Never `echo` anything secret in a workflow.
-- Anyone who can push to `main` can deploy. Protect `main` (require pull requests) to tighten
-  this.
+- Anyone who can push a tag can deploy a commit of `main`. Protect `main` (require pull requests),
+  and protect `v*` tags (a tag ruleset) to tighten this.
 
 ## Costs
 

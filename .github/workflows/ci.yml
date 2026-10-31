@@ -12,8 +12,9 @@ name: CI
 # with them, the AWS adapters must behave like the core's memory/fs ones. The tests create their
 # own table and bucket. To run them locally, see platforms/aws/tests/services.ts.
 #
-# deploy.yml runs after this workflow succeeds on main. release-cli.yml calls it (workflow_call)
-# before publishing. Every dependency is public, so no npm token is needed.
+# The Release workflow (release-cli.yml) calls it (workflow_call) on the tagged commit before
+# publishing; a successful release then deploys. Every dependency is public, so no npm token is
+# needed.
 on:
   pull_request:
   push:

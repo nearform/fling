@@ -494,3 +494,10 @@ makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shel
 Worker, D1, R2, Workers KV with D1 behind it). Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
+
+**Release** — one version of all of Fling (server, web UI, CLI, MCP servers, Claude Desktop
+extension, plugin), `x.y.z` in semver, tagged `v<x.y.z>` on `main` and described by its section of
+`CHANGELOG.md`. Not to be confused with a site's **Version**. `pnpm release` (`scripts/release.mjs`)
+cuts one; its tag publishes the CLI and the GitHub Release and deploys AWS
+(`.github/workflows/release-cli.yml`, then `deploy.yml`). A server publishes the release it runs as
+`release` in `/.well-known/fling` (`apps/api/src/instance.ts`, from the root `package.json`).

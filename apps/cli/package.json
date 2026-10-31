@@ -9,8 +9,7 @@
   },
   "files": [
     "dist/cli.js",
-    "README.md",
-    "CHANGELOG.md"
+    "README.md"
   ],
   "engines": {
     "node": ">=22"

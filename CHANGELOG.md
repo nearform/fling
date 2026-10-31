@@ -1,5 +1,16 @@
 # Changelog
 
+Every user-visible change to Fling, in any part of it (the server, the web UI, the CLI, the MCP
+servers, the Claude Desktop extension and the plugin), with upgrade notes where a change asks
+something of you. One version covers them all: a release is tagged `v<version>` and published as a
+GitHub Release with its section below as the notes ([Releasing](docs/development.md#releasing)).
+
+Every pull request that changes behaviour adds a bullet under `## Unreleased`: a bold lead naming
+the change, then what it does, in plain British English. Upgrade notes start with "Upgrade note:"
+or "Upgrading:". `pnpm release <version>` moves the Unreleased bullets under the new version.
+
+Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
+
 ## Unreleased
 
 - **Two sign-in providers.** A Fling can offer a Google client and another OpenID Connect issuer
@@ -9,6 +20,13 @@
   instance with `OIDC_ISSUER` that still has the `google-client-id` and `google-client-secret`
   parameters now offers Google too; delete them if it shouldn't. Without `OIDC_DISPLAY_NAME`, an
   issuer Fling doesn't know is labelled "Single sign-on" rather than its host name.
+
+- **One version for all of Fling.** The server, the web UI, the CLI, the MCP servers, the Claude
+  Desktop extension and the plugin are released together under one version, continuing the CLI's
+  numbering, with this changelog for all of them. Each release is a GitHub Release with its notes
+  and the extension attached. A server says which release it runs as `release` in
+  `/.well-known/fling`. The npm package no longer ships a copy of the changelog; its README links
+  here.
 
 - **Path publish.** `fling deploy <dir> --name <site> --path <folder>` publishes the folder into
   that folder of the site (`<site>/30-10-26/`) and keeps the rest. When someone else published the

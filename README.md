@@ -162,8 +162,9 @@ pnpm gate                      # lint, terraform, typecheck, test, build, e2e: w
 ```
 
 See [docs/development.md](docs/development.md) for the Cloudflare local runtime, the e2e scenario,
-and how to add a feature, a data migration, a config value or a platform. Terms are defined in
-[CONTEXT.md](CONTEXT.md).
+and how to add a feature, a data migration, a config value or a platform, and how to release.
+Terms are defined in [CONTEXT.md](CONTEXT.md), and what each release changed in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Deploy
 

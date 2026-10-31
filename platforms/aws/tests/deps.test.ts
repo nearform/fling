@@ -29,7 +29,7 @@ describe('buildAwsDeps', () => {
     expect(deps.store).toBeInstanceOf(Records)
     expect(deps.blobs).toBeInstanceOf(S3Blobs)
     expect(deps.routeTable).toBeInstanceOf(CloudFrontRouteTable)
-    expect(deps.identity?.issuer).toBe('https://idp.example.test')
+    expect(deps.identities?.[0]?.issuer).toBe('https://idp.example.test')
     expect(live).toBeNull()
   })
 

@@ -25,10 +25,15 @@ interface Grant {
   claims: Record<string, unknown>
 }
 
-/** Changes to the next ID token: claims (`undefined` removes one), or a key the JWKS lacks. */
+/**
+ * Changes to the next token response: ID token claims (`undefined` removes one), a key the JWKS
+ * lacks, or a 400 with this body instead of tokens (`refuse`, as Cognito answers when its own
+ * access check turns someone away).
+ */
 export interface Tamper {
   claims?: Record<string, unknown>
   rogueKey?: boolean
+  refuse?: Record<string, unknown>
 }
 
 let counter = 0
@@ -152,6 +157,7 @@ export function testIdp(
     }
     const t = tamper
     tamper = undefined
+    if (t?.refuse) return c.json(t.refuse, 400)
     const now = Math.floor(Date.now() / 1000)
     const claims: Record<string, unknown> = {
       iss: issuer,

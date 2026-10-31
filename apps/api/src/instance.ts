@@ -10,13 +10,13 @@ import {
   type InstanceAuth,
   type InstanceMetadata,
 } from '@fling/shared'
-import { oidcSettings } from './auth/oidc.ts'
+import { signInProviders } from './auth/oidc.ts'
 import type { Config } from './config.ts'
 
 /**
- * The sign-in method people see (the instance's OIDC issuer, or dev-login in local dev) and who it
- * lets in. Dev login applies the same email policy, so it publishes the same domains: clients
- * describe and complete addresses alike on every instance.
+ * The sign-in methods people see (the instance's OIDC providers, or dev-login in local dev) and who
+ * they let in. Every provider, and dev login, applies the same email policy, so they publish the
+ * same domains: clients describe and complete addresses alike on every instance.
  */
 function authInfo(config: Config): InstanceAuth {
   const allowed = {
@@ -24,9 +24,16 @@ function authInfo(config: Config): InstanceAuth {
     // Only that there are invited addresses: the metadata is public, the addresses are not.
     ...(config.allowedEmails.length > 0 && { invitedEmails: true }),
   }
-  const oidc = oidcSettings(config)
-  if (oidc) {
-    return { kind: 'oidc', issuer: oidc.issuer, displayName: oidc.displayName, ...allowed }
+  const providers = signInProviders(config)
+  const [only] = providers
+  if (only) {
+    return {
+      kind: 'oidc',
+      displayName: providers.map(p => p.displayName).join(' or '),
+      ...(providers.length === 1 && { issuer: only.issuer }),
+      providers: providers.map(p => ({ id: p.id, displayName: p.displayName, issuer: p.issuer })),
+      ...allowed,
+    }
   }
   return { kind: 'dev', displayName: 'Dev login', ...allowed }
 }

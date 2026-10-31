@@ -39,7 +39,9 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 **Instances.** Each deployment of Fling (an *instance*) has its own name, domains, sign-in and look,
 which it publishes at `/.well-known/fling`. The CLI, the MCP servers and the web UI read it from
 there, so none of them is tied to one instance. People sign in through the instance's OpenID
-Connect provider (Google, Microsoft Entra ID, Okta, Auth0, …), limited to its email domains. A new
+Connect provider (Google, Microsoft Entra ID, Okta, Auth0, Cognito, …), or either of two side by
+side (a Google client and another issuer, a button each), limited to its email domains whichever
+they use. A new
 site is visible only to its owner unless they choose otherwise (an instance can open new sites to
 everyone signed in instead, `SITE_DEFAULT_ACCESS`); share links open a site to anyone with the
 link. No site is

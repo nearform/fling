@@ -1,7 +1,8 @@
 /**
- * Who someone is (the `IdentityProvider` seam: one per instance, generic OIDC in oidc.ts) and who
- * may sign in (`admitIdentity`, the email policy). The provider proves an identity; the policy,
- * kept apart from it, decides whether that identity gets in.
+ * Who someone is (the `IdentityProvider` seam: an instance's sign-in providers, each generic OIDC
+ * in oidc.ts) and who may sign in (`admitIdentity`, the email policy). A provider proves an
+ * identity; the policy, kept apart from it and the same for every provider, decides whether that
+ * identity gets in. People are keyed by email, so one person is one user whichever way they sign in.
  */
 
 import type { Standing } from './standing.ts'
@@ -27,13 +28,34 @@ export interface Identity {
   hd?: string
 }
 
+/**
+ * The issuer refused this person itself, after they signed in there (an access rule of its own,
+ * such as a Cognito Lambda trigger): the login page says they have no access, not that sign-in
+ * failed.
+ */
+export class SignInRefused extends Error {
+  constructor(message = 'the issuer refused this sign-in') {
+    super(message)
+    this.name = 'SignInRefused'
+  }
+}
+
 export interface IdentityProvider {
+  /** Which of the instance's providers: `google` or `oidc` (`/auth/login?provider=<id>`). */
+  readonly id: string
   readonly issuer: string
   /** "Sign in with <displayName>". */
   readonly displayName: string
+  /** The path on the app origin the issuer redirects back to, e.g. `/auth/callback`. */
+  readonly callbackPath: string
+  /** OIDC_ASSUME_EMAIL_VERIFIED, for this provider: a missing `email_verified` counts as verified. */
+  readonly assumeEmailVerified: boolean
   /** Where to send the browser to sign in. */
   authorizationUrl(request: SignInRequest): Promise<URL>
-  /** The callback's query (code, state, …) → the verified identity; throws on any failure. */
+  /**
+   * The callback's query (code, state, …) → the verified identity; throws on any failure,
+   * `SignInRefused` when the issuer turned the person away.
+   */
   exchange(callback: URLSearchParams, request: SignInRequest): Promise<Identity>
 }
 

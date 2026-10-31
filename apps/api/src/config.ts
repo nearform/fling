@@ -2,7 +2,7 @@
  * Configuration: one zod schema over the env object (rocketpod pattern). Plain vars come from the
  * Lambda environment; secrets come from SSM (`SSM_PREFIX`, loaded once per cold start in
  * platforms/aws/src/secrets.ts) or, when that is unset (dev/tests), from the same-named env vars.
- * Sign-in (`OIDC_*`) is resolved from both in auth/oidc.ts.
+ * Sign-in (`OIDC_*` and the Google client) is resolved from both in auth/oidc.ts.
  */
 import {
   DEFAULT_ACCESS_LEVELS,
@@ -230,12 +230,12 @@ export const DEV_EMAIL_DOMAINS = ['example.test']
 export const DEV_ADMIN_EMAILS = ['admin@example.test']
 
 export interface Secrets {
-  /** The OIDC client's secret (`OIDC_CLIENT_SECRET`; SSM `oidc-client-secret`). */
+  /** The OIDC_ISSUER client's secret (`OIDC_CLIENT_SECRET`; SSM `oidc-client-secret`). */
   oidcClientSecret?: string
   /**
-   * Deprecated: the Google OAuth client from before generic OIDC (`GOOGLE_CLIENT_ID/SECRET`; SSM
-   * `google-client-id/secret`). Used, as the issuer https://accounts.google.com, only when
-   * OIDC_ISSUER is unset.
+   * A Google OAuth client (`GOOGLE_CLIENT_ID/SECRET`; SSM `google-client-id/secret`): the `google`
+   * sign-in provider, the issuer https://accounts.google.com on `/auth/google/callback`, offered
+   * beside OIDC_ISSUER's when both are set.
    */
   googleClientId?: string
   googleClientSecret?: string
@@ -268,12 +268,12 @@ export function secretSettings(
   }))
 }
 
-/** The identity provider from env (`OIDC_*`); the client secret is in Secrets. */
+/** The `oidc` sign-in provider from env (`OIDC_*`); the client secret is in Secrets. */
 export interface OidcConfig {
-  /** Exactly the issuer's `iss` (e.g. https://accounts.google.com); unset → legacy/dev. */
+  /** Exactly the issuer's `iss` (e.g. https://accounts.google.com); unset → no `oidc` provider. */
   issuer?: string
   clientId?: string
-  /** What the sign-in button says ("Sign in with …"); default derived from the issuer. */
+  /** What its sign-in button says ("Sign in with …"); default derived from the issuer. */
   displayName?: string
   /** Default `openid email profile`. */
   scopes?: string[]

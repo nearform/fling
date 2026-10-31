@@ -100,7 +100,7 @@ resources with the providers' `default_tags`.
 | `github_oidc_provider_arn` | looked up | The account's IAM OIDC provider for `token.actions.githubusercontent.com` (one per account, so the module never creates it; create it once if you have none) |
 | `instance` | `{}` | The [instance configuration](#instance-configuration), passed through as `INSTANCE` in the `deploy` output |
 | `environment` | `{}` | Extra or overriding function environment variables. The module sets `APP_ENV=production`, `APP_ORIGIN`, `SITES_DOMAIN`, `SITE_SCHEME`, `SITE_COOKIE_DOMAIN`, and the drivers from `hostname`, `LIVE_URL` from the WebSocket stage, and always `TABLE_NAME`, `SITES_BUCKET`, `KVS_ARN`, `SSM_PREFIX` |
-| `manual_secrets` | `["oidc-client-secret"]` | SSM parameters created as `unset`, for you to fill (see [Secrets](#secrets)) |
+| `manual_secrets` | `["oidc-client-secret"]` | SSM parameters created as `unset`, for you to fill (see [Secrets](#secrets)). With a Google client, list `google-client-id` and `google-client-secret` too (and keep `oidc-client-secret` if you also set `OIDC_ISSUER`) |
 | `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
 | `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
@@ -174,11 +174,11 @@ Values reach the function two ways, and the function's own environment wins:
 | `ALLOWED_EMAIL_DOMAINS` | **yes**, unless `ALLOWED_EMAILS` is set (production refuses to start with neither; the deploy checks `INSTANCE` has one) | Comma-separated email domains that may sign in, e.g. `example.test`. A verified email whose domain matches one is admitted (and Google's `hd` claim, when present, must match its domain). |
 | `ALLOWED_EMAILS` | **yes**, unless `ALLOWED_EMAIL_DOMAINS` is set | Comma-separated email addresses that may sign in whatever their domain, e.g. `you@gmail.com` for a personal instance. Each must still be verified. The addresses are never published: the public metadata only says there are invited accounts. With it set, Google's sign-in page gets no `hd` hint. |
 | `ADMIN_EMAILS` | no (none) | Comma-separated email addresses of the instance's admins, who get **Admin** in the web UI: every user, and impersonation (acting as a user for up to 60 minutes, from a browser session only, audited); the mail page; and the instance's settings. Admins sign in like anyone else, so each must be admitted by `ALLOWED_EMAILS` or `ALLOWED_EMAIL_DOMAINS` (the function refuses to start otherwise); they get no other rights over anyone's sites. Checked on every request; never published. |
-| `OIDC_ISSUER` | **yes**, with the next one (see [Sign-in](#sign-in-openid-connect)) | The OpenID Connect issuer, exactly as its tokens' `iss`, e.g. `https://accounts.google.com`. Must be `https`. |
+| `OIDC_ISSUER` | **yes**, with the next one, unless the instance has a [Google client](#a-google-client) (see [Sign-in](#sign-in-openid-connect)) | The OpenID Connect issuer, exactly as its tokens' `iss`, e.g. `https://accounts.google.com`. Must be `https`. |
 | `OIDC_CLIENT_ID` | with `OIDC_ISSUER` | The client (application) id registered with the issuer. Its secret is the SSM parameter `oidc-client-secret`. |
-| `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else the issuer's host) | What the button says: "Sign in with …". |
-| `OIDC_SCOPES` | no (`openid email profile`) | Space- or comma-separated scopes; must include `openid` and give an `email` claim. |
-| `OIDC_ASSUME_EMAIL_VERIFIED` | no (`false`) | `true` treats an ID token *without* `email_verified` as verified. See [Sign-in](#sign-in-openid-connect). |
+| `OIDC_DISPLAY_NAME` | no (derived: Google, Microsoft, Okta, Auth0, else "Single sign-on") | What the `OIDC_ISSUER` button says: "Sign in with …". |
+| `OIDC_SCOPES` | no (`openid email profile`) | Space- or comma-separated scopes for `OIDC_ISSUER`; must include `openid` and give an `email` claim. |
+| `OIDC_ASSUME_EMAIL_VERIFIED` | no (`false`) | `true` treats an ID token from `OIDC_ISSUER` *without* `email_verified` as verified. See [Sign-in](#sign-in-openid-connect). |
 | `LIVE` | no (on) | `false` turns review mode's live rooms off (who else is looking, their pointers, comments appearing without a refresh). They also need comments on and `LIVE_URL`. |
 | `LIVE_URL` | set by the platform | Where review pages open the live room's WebSocket, a `wss://` URL. The module sets it to the WebSocket API's stage (`live_url` output; [live.tf](infra/live.tf)); on Cloudflare the deploy sets `wss://<app host>/api/live`. Advertised only as the `live` capability, never published itself. |
 | `MAIL_DRIVER` | no (none: no email) | Which mailer sends notification emails: `ses` (AWS) or `cloudflare` (Cloudflare), set by the platform from its mail settings. `file` (local dev, `.fling-dev/mail/`) and `memory` (tests, the e2e) are refused in production. With it, the `notifications` and `email` capabilities are on. |
@@ -228,12 +228,24 @@ Example `INSTANCE` object:
 
 ## Sign-in (OpenID Connect)
 
-An instance signs people in with one OpenID Connect provider: the authorization code flow with
-PKCE, `state` and `nonce`, endpoints from the issuer's discovery document
-(`$OIDC_ISSUER/.well-known/openid-configuration`), and an ID token whose signature (the issuer's
-JWKS; rotated keys are picked up), issuer, audience, expiry and nonce are checked. Then the email
-policy: the ID token's `email` must be verified (`email_verified: true`) and either listed in
-`ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS`.
+An instance signs people in with OpenID Connect, through one or both of two providers:
+
+- **`OIDC_ISSUER`**: any OpenID Connect issuer, on the redirect URI
+  `https://$APP_DOMAIN/auth/callback`;
+- **a Google client**: a Google OAuth client from the SSM parameters `google-client-id` and
+  `google-client-secret`, read as the issuer `https://accounts.google.com` on the redirect URI
+  `https://$APP_DOMAIN/auth/google/callback`.
+
+With one, the login page has one button and `/auth/login` goes straight to its issuer. With both
+(see [Two providers](#two-providers)), it has a button for each, Google first. Either way it is the
+authorization code flow with PKCE, `state` and `nonce`, endpoints from the issuer's discovery
+document (`<issuer>/.well-known/openid-configuration`), and an ID token whose signature (the
+issuer's JWKS; rotated keys are picked up), issuer, audience, expiry and nonce are checked. Then the
+email policy, the same for both: the ID token's `email` must be verified (`email_verified: true`)
+and either listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS`. People are known by
+email, so someone who signs in with each provider is one user with the same sites.
+
+### An OpenID Connect issuer
 
 On the provider, register a confidential **web** client with:
 
@@ -242,8 +254,8 @@ On the provider, register a confidential **web** client with:
 - the scopes `openid email profile`,
 - its client secret stored as `${SSM_PREFIX}oidc-client-secret` (SecureString).
 
-Then set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`. Examples (`example.test` stands for your
-domain):
+Then set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`, and `OIDC_DISPLAY_NAME` for what its
+button says. Examples (`example.test` stands for your domain):
 
 | Provider | `OIDC_ISSUER` | Notes |
 | --- | --- | --- |
@@ -251,21 +263,57 @@ domain):
 | Microsoft Entra ID | `https://login.microsoftonline.com/<tenant id>/v2.0` | App registrations, a Web platform with the redirect URI, a client secret, and the optional `email` claim on the ID token. Use your tenant's issuer, never `common` or `organizations`. Entra sends no `email_verified`: set `OIDC_ASSUME_EMAIL_VERIFIED=true` only if your tenant's admins control every account's email. |
 | Okta | `https://example-test.okta.com` (or `…/oauth2/default` for a custom authorization server) | An OIDC Web Application with the sign-in redirect URI; assign the people who may use it. |
 | Auth0 | `https://example-test.eu.auth0.com/` (with the trailing slash, as Auth0's `iss` has it) | A Regular Web Application with the callback URL. |
+| Amazon Cognito | `https://cognito-idp.<region>.amazonaws.com/<user pool id>` | An app client with a client secret, the callback URL, the authorization code grant and the scopes `openid email profile`. The pool must set `email_verified` for the people it lets in. A Lambda trigger that turns someone away fails the token exchange (`UserLambdaValidationException`), and Fling's login page then says they don't have access. Fling signs out locally; it never calls the pool's logout. |
 
 **Why `email_verified` is required.** Fling knows people by email, so an unverified address could
 claim someone else's sites. An ID token with `email_verified: false` is always refused. One with
 no `email_verified` at all is refused too, unless `OIDC_ASSUME_EMAIL_VERIFIED=true` says this
-issuer only hands out addresses its admins control (a single-tenant Entra ID, for example).
+issuer only hands out addresses its admins control (a single-tenant Entra ID, for example). It
+applies to `OIDC_ISSUER` only: Google always says.
 
-**Before generic OIDC** an instance signed in with Google from the SSM parameters
-`google-client-id` and `google-client-secret`, on the redirect URI
-`https://$APP_DOMAIN/auth/google/callback`. That still works unchanged: with no `OIDC_ISSUER`, those
-parameters are read as `OIDC_ISSUER=https://accounts.google.com` on the old callback (the function
-logs a deprecation warning at cold start), and `/auth/google` and `/auth/google/callback` stay as
-aliases of `/auth/login` and `/auth/callback`. To move to the new settings: add
-`https://$APP_DOMAIN/auth/callback` to the Google client's redirect URIs, put the secret at
-`${SSM_PREFIX}oidc-client-secret`, set `OIDC_ISSUER` and `OIDC_CLIENT_ID` in `INSTANCE`, deploy, and
-then delete the two `google-client-*` parameters.
+### A Google client
+
+A Google OAuth client of type Web application (Google Cloud console, APIs & Services, Credentials)
+that allows the redirect URI `https://$APP_DOMAIN/auth/google/callback`. Put its id and secret in
+SSM, and list both in the module's `manual_secrets`:
+
+```bash
+aws ssm put-parameter --region "$AWS_REGION" --overwrite --type SecureString \
+  --name "${SSM_PREFIX}google-client-id" --value "file://google-client-id.txt"
+aws ssm put-parameter --region "$AWS_REGION" --overwrite --type SecureString \
+  --name "${SSM_PREFIX}google-client-secret" --value "file://google-client-secret.txt"
+```
+
+It asks for `openid email profile`, asks Google to show the account picker, and with one allowed
+domain hints it (`hd`). `OIDC_*` settings don't apply to it. `/auth/google` starts its sign-in.
+Setting `OIDC_ISSUER=https://accounts.google.com` makes Google the `OIDC_ISSUER` provider instead,
+on `/auth/callback`; the Google client is then not offered as well.
+
+### Two providers
+
+Set up both: the Google client, and `OIDC_ISSUER` with its client. For example, Google for most
+people beside a company's own issuer (`example.test` stands for your domain):
+
+```hcl
+  manual_secrets = ["google-client-id", "google-client-secret", "oidc-client-secret"]
+
+  instance = {
+    ALLOWED_EMAIL_DOMAINS = "example.test"
+    OIDC_ISSUER           = "https://sso.example.test"
+    OIDC_CLIENT_ID        = "fling"
+    OIDC_DISPLAY_NAME     = "Example SSO"
+    # ...
+  }
+```
+
+Each provider keeps its own redirect URI, so neither client changes: Google's allows
+`/auth/google/callback` and the issuer's `/auth/callback`. A sign-in started with one provider is
+finished only on that provider's callback. `/.well-known/fling` lists both (`auth.providers`), and
+the login page shows a button for each. Anything that sends someone to sign in without choosing (a
+private site, `fling login`, the MCP connector) lands on the login page to choose, then goes on to
+where it was going. To add an issuer to an instance that signs in with Google: apply with
+`oidc-client-secret` added to `manual_secrets`, fill it, then set the `OIDC_*` values in `INSTANCE`
+and deploy. To drop one, remove its settings (and its SSM parameters) and deploy.
 
 **Restricted sites.** A private site with an audience is let in by a site pass, not the
 `fling_site` cookie: the API checks the audience at sign-in, then the site router sets a host-only
@@ -285,7 +333,8 @@ adding someone lets them in within 10 seconds; nothing else needs configuring.
 
 2. **Sign-in client.** Register a web client with your OpenID Connect provider (see
    [Sign-in](#sign-in-openid-connect)) and store its secret in the SSM SecureString parameter
-   `${SSM_PREFIX}oidc-client-secret` (the module created it as `unset`):
+   `${SSM_PREFIX}oidc-client-secret` (the module created it as `unset`). For a
+   [Google client](#a-google-client), or both, see there:
 
    ```bash
    aws ssm put-parameter --region "$AWS_REGION" --overwrite --type SecureString \
@@ -705,8 +754,8 @@ Admin → Settings lists each one under its environment name (`OIDC_CLIENT_SECRE
 
 | Parameter | Source |
 | --- | --- |
-| `oidc-client-secret` | Your OpenID Connect client's secret, put there by hand (One-time setup, step 2) |
-| `google-client-id`, `google-client-secret` | Deprecated: read only when `OIDC_ISSUER` is unset, as the Google issuer (see [Sign-in](#sign-in-openid-connect)) |
+| `oidc-client-secret` | The `OIDC_ISSUER` client's secret, put there by hand (One-time setup, step 2) |
+| `google-client-id`, `google-client-secret` | A Google client's id and secret, put there by hand (see [A Google client](#a-google-client)) |
 | `session-secret`, `site-hmac-key` | Generated by Terraform, never in its state |
 | `origin-verify-secret` | Generated by Terraform. CloudFront also sends it to the function URL as `X-Origin-Verify` |
 

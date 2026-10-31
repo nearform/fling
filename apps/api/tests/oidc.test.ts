@@ -1,10 +1,10 @@
 import { SITE_COOKIE_NAME, verifySiteCookie } from '@fling/shared/site-cookie'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GOOGLE_ISSUER, oidcSettings } from '../src/auth/oidc.ts'
+import { GOOGLE_ISSUER, identityProvidersFor, signInProviders } from '../src/auth/oidc.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
 import { instanceMetadata } from '../src/instance.ts'
 import { APP_ORIGIN, cookiesOf, type Env, json, setup, testConfig } from './helpers.ts'
-import { type Tamper, testIdp } from './idp.ts'
+import { IDP_ISSUER, type Tamper, type TestIdp, testIdp } from './idp.ts'
 
 const SESSION = '__Host-fling_session'
 
@@ -22,11 +22,14 @@ async function signIn(
     start?: string
     tamper?: Tamper
     editCallback?: (q: URLSearchParams) => void
+    /** Come back to this path instead of the redirect URI's. */
+    callbackPath?: string
   } = {}
 ) {
   const ret = opts.ret ?? 'https://hello.fling.test/page'
+  const begin = opts.start ?? '/auth/login'
   const start = await e.app.request(
-    `${opts.start ?? '/auth/login'}?return=${encodeURIComponent(ret)}`
+    `${begin}${begin.includes('?') ? '&' : '?'}return=${encodeURIComponent(ret)}`
   )
   expect(start.status).toBe(302)
   const location = start.headers.get('location') as string
@@ -38,7 +41,7 @@ async function signIn(
   back.searchParams.set('code', code)
   back.searchParams.set('state', auth.get('state') as string)
   opts.editCallback?.(back.searchParams)
-  return e.app.request(`${back.pathname}${back.search}`, {
+  return e.app.request(`${opts.callbackPath ?? back.pathname}${back.search}`, {
     headers: { cookie: `fling_oauth=${flow}` },
   })
 }
@@ -142,6 +145,22 @@ describe('OIDC sign-in', () => {
     expect(errorOf(denied)).toBe('/login?error=oauth_failed')
   })
 
+  it('says the issuer refused someone its own access check turned away (Cognito)', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const refuse = {
+      error: 'invalid_request',
+      error_description: 'UserLambdaValidationException: PreTokenGeneration failed',
+    }
+    const res = await signIn(env, { tamper: { refuse } })
+    expect(errorOf(res)).toBe('/login?error=access_denied')
+    expect(cookiesOf(res)[SESSION]).toBeUndefined()
+    // Not an OAuth error body at all: still a refusal.
+    const bare = { __type: 'UserLambdaValidationException', message: 'no' }
+    expect(errorOf(await signIn(env, { tamper: { refuse: bare } }))).toBe(
+      '/login?error=access_denied'
+    )
+  })
+
   it('authenticates with client_secret_post when offered, else client_secret_basic', async () => {
     expect((await signIn(env)).headers.get('location')).toBe('https://hello.fling.test/page')
     expect(env.idp.lastClientAuth).toBe('post')
@@ -223,45 +242,46 @@ describe('OIDC sign-in', () => {
   })
 })
 
-describe('legacy Google config', () => {
-  const legacy = () => {
-    const config = testConfig()
-    return {
-      oidc: { assumeEmailVerified: false },
-      secrets: {
-        ...config.secrets,
-        oidcClientSecret: undefined,
-        googleClientId: GOOGLE_CLIENT_ID,
-        googleClientSecret: 'google-secret',
-      },
-    }
+/** The Google client's config: GOOGLE_CLIENT_ID/SECRET, with or without OIDC_ISSUER. */
+const googleClient = (withOidc = false) => {
+  const config = testConfig()
+  return {
+    oidc: withOidc ? config.oidc : { assumeEmailVerified: false },
+    secrets: {
+      ...config.secrets,
+      ...(withOidc ? {} : { oidcClientSecret: undefined }),
+      googleClientId: GOOGLE_CLIENT_ID,
+      googleClientSecret: 'google-secret',
+    },
   }
+}
 
-  it('maps the old Google secrets to accounts.google.com on the old callback', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const e = setup(legacy(), googleIdp())
-    expect(oidcSettings(e.config)).toMatchObject({
-      issuer: GOOGLE_ISSUER,
-      clientId: GOOGLE_CLIENT_ID,
-      clientSecret: 'google-secret',
-      displayName: 'Google',
-      redirectUri: `${APP_ORIGIN}/auth/google/callback`,
-      authParams: { prompt: 'select_account', hd: 'example.test' },
-      legacy: true,
-    })
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('deprecated sign-in config'))
+describe('Google client', () => {
+  it('reads GOOGLE_CLIENT_ID/SECRET as accounts.google.com on /auth/google/callback', () => {
+    const e = setup(googleClient(), googleIdp())
+    expect(signInProviders(e.config)).toEqual([
+      expect.objectContaining({
+        id: 'google',
+        issuer: GOOGLE_ISSUER,
+        clientId: GOOGLE_CLIENT_ID,
+        clientSecret: 'google-secret',
+        displayName: 'Google',
+        redirectUri: `${APP_ORIGIN}/auth/google/callback`,
+        authParams: { prompt: 'select_account', hd: 'example.test' },
+      }),
+    ])
     expect(instanceMetadata(e.config).auth).toEqual({
       kind: 'oidc',
       issuer: GOOGLE_ISSUER,
       displayName: 'Google',
+      providers: [{ id: 'google', displayName: 'Google', issuer: GOOGLE_ISSUER }],
       emailDomains: ['example.test'],
     })
   })
 
   it("drops Google's hd hint when it would turn away an invited address", () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const params = (overrides: Partial<Config>) =>
-      oidcSettings(setup({ ...legacy(), ...overrides }, googleIdp()).config)?.authParams
+      signInProviders(setup({ ...googleClient(), ...overrides }, googleIdp()).config)[0]?.authParams
     expect(params({})).toEqual({ prompt: 'select_account', hd: 'example.test' })
     expect(params({ allowedEmails: ['me@gmail.test'] })).toEqual({ prompt: 'select_account' })
     expect(params({ allowedEmailDomains: [], allowedEmails: ['me@gmail.test'] })).toEqual({
@@ -272,11 +292,10 @@ describe('legacy Google config', () => {
     })
   })
 
-  it('signs in through the legacy /auth/google routes', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const e = setup(legacy(), googleIdp())
+  it.each(['/auth/google', '/auth/login'])('signs in alone, started at %s', async start => {
+    const e = setup(googleClient(), googleIdp())
     e.idp.claims.hd = 'example.test'
-    const res = await signIn(e, { start: '/auth/google' })
+    const res = await signIn(e, { start })
     expect(e.idp.lastAuthorization?.get('redirect_uri')).toBe(`${APP_ORIGIN}/auth/google/callback`)
     expect(e.idp.lastAuthorization?.get('prompt')).toBe('select_account')
     expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
@@ -285,17 +304,120 @@ describe('legacy Google config', () => {
     expect(e.idp.lastClientAuth).toBe('post')
   })
 
-  it('the generic callback serves the generic config; OIDC_* wins over the old secrets', () => {
+  it('is not offered twice when OIDC_ISSUER is Google itself', () => {
     const config = testConfig()
-    const both = {
+    const cfg = {
       ...config,
+      oidc: { ...config.oidc, issuer: GOOGLE_ISSUER },
       secrets: { ...config.secrets, googleClientId: 'g', googleClientSecret: 'g' },
     }
-    expect(oidcSettings(both)).toMatchObject({
-      issuer: 'https://idp.example.test',
-      redirectUri: `${APP_ORIGIN}/auth/callback`,
-      legacy: false,
+    expect(signInProviders(cfg).map(p => [p.id, p.redirectUri])).toEqual([
+      ['oidc', `${APP_ORIGIN}/auth/callback`],
+    ])
+  })
+})
+
+describe('two sign-in providers', () => {
+  /** Google's client and OIDC_ISSUER together, each with its own in-process IdP. */
+  function dual() {
+    const google = googleIdp()
+    const oidc = testIdp()
+    const e = setup(googleClient(true), oidc)
+    const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString())
+      return (url.origin === new URL(GOOGLE_ISSUER).origin ? google : oidc).fetch(input, init)
+    }) as typeof globalThis.fetch
+    e.deps.identities = identityProvidersFor(e.config, { fetch, jwksCooldownMs: 0 })
+    return { e, google, oidc }
+  }
+  /** Sign in with one of them: the env's `idp` is the one that approves. */
+  const as = (e: Env, idp: TestIdp): Env => ({ ...e, idp })
+
+  it('offers both, Google first, in the metadata', () => {
+    const { e } = dual()
+    expect(instanceMetadata(e.config).auth).toEqual({
+      kind: 'oidc',
+      displayName: 'Google or Single sign-on',
+      providers: [
+        { id: 'google', displayName: 'Google', issuer: GOOGLE_ISSUER },
+        { id: 'oidc', displayName: 'Single sign-on', issuer: IDP_ISSUER },
+      ],
+      emailDomains: ['example.test'],
     })
+  })
+
+  it('without a provider, sends the browser to the login page to choose', async () => {
+    const { e } = dual()
+    const ret = 'https://hello.fling.test/page'
+    const res = await e.app.request(`/auth/login?return=${encodeURIComponent(ret)}`)
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(`/login?return=${encodeURIComponent(ret)}`)
+    expect(cookiesOf(res).fling_oauth).toBeUndefined()
+    const unknown = await e.app.request(
+      `/auth/login?provider=nope&return=${encodeURIComponent(ret)}`
+    )
+    expect(unknown.headers.get('location')).toBe(`/login?return=${encodeURIComponent(ret)}`)
+  })
+
+  it.each([
+    ['google', '/auth/google/callback'],
+    ['oidc', '/auth/callback'],
+  ])('signs in with %s on its own callback', async (provider, path) => {
+    const { e, google, oidc } = dual()
+    const idp = provider === 'google' ? google : oidc
+    const res = await signIn(as(e, idp), { start: `/auth/login?provider=${provider}` })
+    expect(idp.lastAuthorization?.get('redirect_uri')).toBe(`${APP_ORIGIN}${path}`)
+    expect(res.headers.get('location')).toBe('https://hello.fling.test/page')
+    expect(cookiesOf(res)[SESSION]).toBeDefined()
+  })
+
+  it('is one user whichever provider they sign in with', async () => {
+    const { e, google, oidc } = dual()
+    await signIn(as(e, google), { start: '/auth/google' })
+    google.claims.name = 'Alice G'
+    oidc.claims.sub = 'another-sub'
+    await signIn(as(e, oidc), { start: '/auth/login?provider=oidc' })
+    const { users } = await e.store.listUsers({ prefix: 'alice@', limit: 10 })
+    expect(users.map(u => u.email)).toEqual(['alice@example.test'])
+  })
+
+  it("refuses a flow on the other provider's callback", async () => {
+    const { e, oidc } = dual()
+    const res = await signIn(as(e, oidc), {
+      start: '/auth/login?provider=oidc',
+      callbackPath: '/auth/google/callback',
+    })
+    expect(errorOf(res)).toBe('/login?error=oauth_state_mismatch')
+    expect(oidc.hits.token).toBe(0)
+  })
+
+  it('applies the same email policy to both', async () => {
+    const { e, google, oidc } = dual()
+    const outsider = { claims: { email: 'eve@elsewhere.test' } }
+    for (const [idp, start] of [
+      [google, '/auth/google'],
+      [oidc, '/auth/login?provider=oidc'],
+    ] as const) {
+      const res = await signIn(as(e, idp), { start, tamper: outsider })
+      expect(errorOf(res)).toBe('/login?error=domain_not_allowed')
+    }
+    const unverified = await signIn(as(e, oidc), {
+      start: '/auth/login?provider=oidc',
+      tamper: { claims: { email_verified: undefined } },
+    })
+    expect(errorOf(unverified)).toBe('/login?error=email_unverified')
+  })
+
+  it('sends the CLI login to the login page, then back to /auth/cli with either', async () => {
+    const { e, oidc } = dual()
+    const cli = '/auth/cli?redirect_uri=http%3A%2F%2F127.0.0.1%3A5000%2Fcallback&state=s1'
+    const first = await e.app.request(cli)
+    const choose = new URL(first.headers.get('location') as string, APP_ORIGIN)
+    expect(choose.pathname).toBe('/login')
+    const ret = choose.searchParams.get('return') as string
+    expect(ret).toMatch(/^https:\/\/fling\.test\/auth\/cli\?/)
+    const res = await signIn(as(e, oidc), { start: '/auth/login?provider=oidc', ret })
+    expect(res.headers.get('location')).toBe(ret)
   })
 })
 
@@ -314,13 +436,13 @@ describe('sign-in config', () => {
       ...loadBaseConfig({ ...base, OIDC_CLIENT_ID: 'c', ...env }),
       secrets: { ...secrets, oidcClientSecret: 'x' },
     })
-    const name = (issuer: string) => oidcSettings(cfg({ OIDC_ISSUER: issuer }))?.displayName
+    const name = (issuer: string) => signInProviders(cfg({ OIDC_ISSUER: issuer }))[0]?.displayName
     expect(name(GOOGLE_ISSUER)).toBe('Google')
     expect(name('https://login.microsoftonline.com/0000-tenant/v2.0')).toBe('Microsoft')
     expect(name('https://example-test.okta.com')).toBe('Okta')
     expect(name('https://example-test.eu.auth0.com/')).toBe('Auth0')
-    expect(name('https://sso.example.test/realms/staff')).toBe('sso.example.test')
-    const custom = oidcSettings(
+    expect(name('https://sso.example.test/realms/staff')).toBe('Single sign-on')
+    const [custom] = signInProviders(
       cfg({
         OIDC_ISSUER: 'https://sso.example.test',
         OIDC_DISPLAY_NAME: 'Example SSO',
@@ -341,8 +463,8 @@ describe('sign-in config', () => {
       ...loadBaseConfig({ ...base, OIDC_ISSUER: 'https://sso.example.test', OIDC_CLIENT_ID: 'c' }),
       secrets,
     }
-    expect(() => oidcSettings(noSecret)).toThrow(/OIDC_CLIENT_SECRET/)
-    expect(() => oidcSettings({ ...loadBaseConfig(base), secrets })).toThrow(/not configured/)
-    expect(oidcSettings({ ...loadBaseConfig({}), secrets })).toBeNull() // dev: dev-login
+    expect(() => signInProviders(noSecret)).toThrow(/OIDC_CLIENT_SECRET/)
+    expect(() => signInProviders({ ...loadBaseConfig(base), secrets })).toThrow(/not configured/)
+    expect(signInProviders({ ...loadBaseConfig({}), secrets })).toEqual([]) // dev: dev-login
   })
 })

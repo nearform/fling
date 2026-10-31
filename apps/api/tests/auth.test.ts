@@ -161,12 +161,12 @@ describe('/auth/login, logout, cli', () => {
 
   it('without an issuer, sign-in is the dev form in dev and 404 otherwise', async () => {
     const dev = setup({ devLogin: true, secureCookies: false })
-    dev.deps.identity = null
+    dev.deps.identities = []
     const res = await dev.app.request('/auth/login?return=/sites')
     expect(res.headers.get('location')).toBe(
       `/auth/dev-login?return=${encodeURIComponent(`${APP_ORIGIN}/sites`)}`
     )
-    env.deps.identity = null
+    env.deps.identities = []
     expect((await env.app.request('/auth/login')).status).toBe(404)
     expect((await env.app.request('/auth/callback?code=x&state=y')).status).toBe(404)
   })

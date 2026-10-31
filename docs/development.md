@@ -71,7 +71,9 @@ and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. `pnpm cli
 --name <site> --path 30-10-26` publishes the folder at `http://<site>.fling.lvh.me:47102/30-10-26/`
 and keeps the rest of the site; `pnpm cli versions <site>` shows the PATH it went to. To try a real provider, set `OIDC_ISSUER`,
 `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
-`http://fling.lvh.me:47100/auth/callback` on that client.
+`http://fling.lvh.me:47100/auth/callback` on that client. For a Google client, set
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and allow
+`http://fling.lvh.me:47100/auth/google/callback`; with both, the login page offers each.
 
 **Live rooms locally.** Review mode's realtime runs on both runtimes. The Node dev server keeps
 the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets itself at

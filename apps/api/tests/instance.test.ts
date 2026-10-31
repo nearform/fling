@@ -32,7 +32,10 @@ describe('GET /.well-known/fling', () => {
       auth: {
         kind: 'oidc',
         issuer: 'https://idp.example.test',
-        displayName: 'idp.example.test',
+        displayName: 'Single sign-on',
+        providers: [
+          { id: 'oidc', displayName: 'Single sign-on', issuer: 'https://idp.example.test' },
+        ],
         emailDomains: ['example.test'],
       },
       brand: { colors: {} },
@@ -94,7 +97,10 @@ describe('GET /.well-known/fling', () => {
     expect(JSON.parse(text).auth).toEqual({
       kind: 'oidc',
       issuer: 'https://idp.example.test',
-      displayName: 'idp.example.test',
+      displayName: 'Single sign-on',
+      providers: [
+        { id: 'oidc', displayName: 'Single sign-on', issuer: 'https://idp.example.test' },
+      ],
       emailDomains: ['example.test'],
       invitedEmails: true,
     })

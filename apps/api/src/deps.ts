@@ -6,7 +6,7 @@
  */
 import { join } from 'node:path'
 import type { IdentityProvider } from './auth/identity.ts'
-import { identityProviderFor } from './auth/oidc.ts'
+import { identityProvidersFor } from './auth/oidc.ts'
 import { FsBlobs } from './blobs/fs.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
@@ -26,7 +26,8 @@ export interface Adapters {
   store?: Store
   blobs?: Blobs
   routeTable?: RouteTable
-  identity?: IdentityProvider | null
+  /** The sign-in providers; default: those config names. */
+  identities?: IdentityProvider[]
   /** the live rooms' hub; without one (or with live rooms off) publishing does nothing */
   live?: LiveHub
   /** the cloud's mailer, for the `ses` and `cloudflare` mail drivers */
@@ -56,7 +57,7 @@ export function buildDeps(
   const routeTable: RouteTable =
     opts.routeTable ??
     (config.kvsDriver === 'memory' ? new MemoryRouteTable() : missing(config.kvsDriver))
-  const identity = opts.identity !== undefined ? opts.identity : identityProviderFor(config)
+  const identities = opts.identities ?? identityProvidersFor(config)
   const live = config.live ? (opts.live ?? noLiveHub) : noLiveHub
   const mailer = mailerFor(config, opts)
   return {
@@ -64,7 +65,7 @@ export function buildDeps(
     store,
     blobs,
     routeTable,
-    identity,
+    identities,
     live,
     ...(mailer ? { mailer } : {}),
     clock: systemClock,

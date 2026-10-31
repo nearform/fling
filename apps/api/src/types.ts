@@ -17,8 +17,11 @@ export interface Deps {
   blobs: Blobs
   routeTable: RouteTable
   clock: Clock
-  /** The instance's sign-in (generic OIDC, from config); null/absent → none (dev-login only). */
-  identity?: IdentityProvider | null
+  /**
+   * The instance's sign-in providers (generic OIDC, from config), in the order the login page
+   * offers them; empty or absent → none (dev-login only).
+   */
+  identities?: IdentityProvider[]
   /**
    * The live rooms' hub (live.ts): what the core publishes to a site's room through. Absent: an
    * instance without live rooms, where publishing does nothing.

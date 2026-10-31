@@ -135,7 +135,8 @@ variable "manual_secrets" {
   description = <<-EOT
     SSM SecureString parameters under the prefix that someone fills by hand or by script
     (aws ssm put-parameter --overwrite). Terraform creates them with the value "unset" and never looks
-    at the value again. oidc-client-secret is the sign-in client's secret.
+    at the value again. oidc-client-secret is the OIDC_ISSUER client's secret; a Google client's id
+    and secret are google-client-id and google-client-secret (either client, or both).
   EOT
   type        = list(string)
   default     = ["oidc-client-secret"]

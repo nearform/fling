@@ -5,7 +5,8 @@
 # - generated_secrets: 40 random characters, generated in memory (ephemeral) and written with a
 #   write-only attribute. Bump secrets_version to regenerate them.
 # - manual_secrets: created with the value "unset". Someone writes the real value with
-#   `aws ssm put-parameter --overwrite` (oidc-client-secret: the sign-in client's secret). Terraform
+#   `aws ssm put-parameter --overwrite` (oidc-client-secret: the OIDC_ISSUER client's secret;
+#   google-client-id and google-client-secret: a Google client's). Terraform
 #   never reads it back, so that is not drift.
 # - origin-verify-secret: CloudFront sends it to the function URL as the X-Origin-Verify header, so
 #   Terraform must know it, and it is in state through the distribution anyway. It only proves a

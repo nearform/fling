@@ -1,7 +1,8 @@
 /**
  * What the Worker gets from wrangler.jsonc: the bindings, the instance's configuration as plain
  * vars (the same env-style keys @fling/api/config reads on every platform) and its secrets
- * (`SESSION_SECRET`, `SITE_HMAC_KEY`, `OIDC_CLIENT_SECRET`; `wrangler secret put`).
+ * (`SESSION_SECRET`, `SITE_HMAC_KEY`, `OIDC_CLIENT_SECRET`, and `GOOGLE_CLIENT_ID` and
+ * `GOOGLE_CLIENT_SECRET` for a Google client; `wrangler secret put`).
  */
 import type {
   D1Database,

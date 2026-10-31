@@ -1,6 +1,15 @@
 /**
- * Generic OpenID Connect sign-in, one issuer per instance (`OIDC_ISSUER`, `OIDC_CLIENT_ID`,
- * `OIDC_CLIENT_SECRET`): the authorization code flow with PKCE, `state` and `nonce`.
+ * Generic OpenID Connect sign-in: the authorization code flow with PKCE, `state` and `nonce`. An
+ * instance has up to two providers, each a client of one issuer, and offers every one configured:
+ *
+ * - `google`: a Google OAuth client (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`), the issuer
+ *   https://accounts.google.com, on `/auth/google/callback`;
+ * - `oidc`: any issuer (`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, labelled
+ *   `OIDC_DISPLAY_NAME`), on `/auth/callback`.
+ *
+ * Each has its own callback, so a response can only be taken by the provider it was sent to.
+ * `OIDC_ISSUER=https://accounts.google.com` makes Google the `oidc` provider, and then the Google
+ * client is not offered as well.
  *
  * - oauth4webapi does the protocol: discovery (`<issuer>/.well-known/openid-configuration`, cached
  *   for an hour), the authorization response, the token request and the ID token's claims (`iss`,
@@ -10,38 +19,46 @@
  *   over TLS, which OIDC deems enough, but a misrouted or spoofed endpoint shouldn't mint users.
  *
  * Both are Web Crypto + fetch only, so this runs unchanged on Node and on Workers.
- *
- * An instance still configured the pre-OIDC way (Google client id/secret, no OIDC_ISSUER) maps to
- * the issuer https://accounts.google.com with its old callback path (see `oidcSettings`).
  */
 import { createRemoteJWKSet, customFetch, type JWTPayload, jwtVerify } from 'jose'
 import * as oauth from 'oauth4webapi'
 import type { Config } from '../config.ts'
-import type { Identity, IdentityProvider, SignInRequest } from './identity.ts'
+import {
+  type Identity,
+  type IdentityProvider,
+  SignInRefused,
+  type SignInRequest,
+} from './identity.ts'
 
 export const GOOGLE_ISSUER = 'https://accounts.google.com'
-/** The callback the IdP redirects to: `<appOrigin>/auth/callback`. */
+/** The `oidc` provider's callback: `<appOrigin>/auth/callback`. */
 export const CALLBACK_PATH = '/auth/callback'
-/** The pre-OIDC Google callback, still registered on existing Google clients. */
-export const LEGACY_GOOGLE_CALLBACK_PATH = '/auth/google/callback'
+/** The `google` provider's callback, the one Google OAuth clients for Fling allow. */
+export const GOOGLE_CALLBACK_PATH = '/auth/google/callback'
 export const DEFAULT_SCOPES = ['openid', 'email', 'profile']
+/** What the `oidc` button says when OIDC_DISPLAY_NAME is unset and the issuer is not a known one. */
+export const DEFAULT_OIDC_DISPLAY_NAME = 'Single sign-on'
 /** Seconds of clock skew allowed on `exp` / `iat` / `nbf`. */
 export const CLOCK_TOLERANCE_S = 60
 const MAX_ID_TOKEN_AGE_S = 60 * 60
 const DISCOVERY_TTL_MS = 60 * 60 * 1000
 
-/** Everything the provider needs, resolved from config and secrets. */
+export type SignInProviderId = 'google' | 'oidc'
+
+/** Everything a provider needs, resolved from config and secrets. */
 export interface OidcSettings {
+  id: SignInProviderId
   issuer: string
   clientId: string
   clientSecret: string
   displayName: string
   scopes: string[]
+  /** The path the issuer redirects back to; `redirectUri` is it on the app origin. */
+  callbackPath: string
   redirectUri: string
   /** Extra authorization request parameters (e.g. Google's `prompt=select_account`). */
   authParams: Record<string, string>
-  /** Configured the pre-OIDC way (Google secrets, no OIDC_ISSUER). */
-  legacy: boolean
+  assumeEmailVerified: boolean
 }
 
 /** What a few well-known issuers are called, and what their sign-in page wants. */
@@ -65,49 +82,56 @@ function issuerDefaults(
   }
   if (/\.okta(preview)?\.com$/.test(host)) return { displayName: 'Okta', authParams: {} }
   if (/\.auth0\.com$/.test(host)) return { displayName: 'Auth0', authParams: {} }
-  return { displayName: host, authParams: {} }
+  return { displayName: DEFAULT_OIDC_DISPLAY_NAME, authParams: {} }
 }
 
 /**
- * The instance's identity provider settings, or null when none is configured (dev uses
- * dev-login; production refuses to start). OIDC_* wins; otherwise the deprecated Google secrets
- * map to https://accounts.google.com on the callback their OAuth client already allows.
+ * The instance's sign-in providers, `google` before `oidc`; none in dev without either (dev uses
+ * dev-login), and production refuses to start with none. OIDC_DISPLAY_NAME, OIDC_SCOPES and
+ * OIDC_ASSUME_EMAIL_VERIFIED belong to the `oidc` provider; the Google client always asks for
+ * `openid email profile`, and Google always says whether an email is verified.
  */
-export function oidcSettings(config: Config): OidcSettings | null {
+export function signInProviders(config: Config): OidcSettings[] {
   const { oidc, secrets, appOrigin } = config
-  let base: Pick<OidcSettings, 'issuer' | 'clientId' | 'clientSecret' | 'redirectUri' | 'legacy'>
+  const providers: OidcSettings[] = []
+  const oidcIsGoogle = oidc.issuer === GOOGLE_ISSUER
+  if (secrets.googleClientId && secrets.googleClientSecret && !oidcIsGoogle) {
+    providers.push({
+      id: 'google',
+      issuer: GOOGLE_ISSUER,
+      clientId: secrets.googleClientId,
+      clientSecret: secrets.googleClientSecret,
+      callbackPath: GOOGLE_CALLBACK_PATH,
+      redirectUri: `${appOrigin}${GOOGLE_CALLBACK_PATH}`,
+      scopes: DEFAULT_SCOPES,
+      assumeEmailVerified: false,
+      ...issuerDefaults(GOOGLE_ISSUER, config),
+    })
+  }
   if (oidc.issuer && oidc.clientId) {
     if (!secrets.oidcClientSecret) {
       throw new Error('OIDC_ISSUER is set but OIDC_CLIENT_SECRET (oidc-client-secret) is missing')
     }
-    base = {
+    const defaults = issuerDefaults(oidc.issuer, config)
+    providers.push({
+      id: 'oidc',
       issuer: oidc.issuer,
       clientId: oidc.clientId,
       clientSecret: secrets.oidcClientSecret,
+      callbackPath: CALLBACK_PATH,
       redirectUri: `${appOrigin}${CALLBACK_PATH}`,
-      legacy: false,
-    }
-  } else if (secrets.googleClientId && secrets.googleClientSecret) {
-    base = {
-      issuer: GOOGLE_ISSUER,
-      clientId: secrets.googleClientId,
-      clientSecret: secrets.googleClientSecret,
-      redirectUri: `${appOrigin}${LEGACY_GOOGLE_CALLBACK_PATH}`,
-      legacy: true,
-    }
-  } else {
-    if (config.appEnv === 'production') {
-      throw new Error('Sign-in is not configured: set OIDC_ISSUER, OIDC_CLIENT_ID and the secret')
-    }
-    return null
+      displayName: oidc.displayName ?? defaults.displayName,
+      scopes: oidc.scopes?.length ? oidc.scopes : DEFAULT_SCOPES,
+      authParams: defaults.authParams,
+      assumeEmailVerified: oidc.assumeEmailVerified,
+    })
   }
-  const defaults = issuerDefaults(base.issuer, config)
-  return {
-    ...base,
-    displayName: oidc.displayName ?? defaults.displayName,
-    scopes: oidc.scopes?.length ? oidc.scopes : DEFAULT_SCOPES,
-    authParams: defaults.authParams,
+  if (providers.length === 0 && config.appEnv === 'production') {
+    throw new Error(
+      'Sign-in is not configured: set OIDC_ISSUER, OIDC_CLIENT_ID and the secret, or the Google client'
+    )
   }
+  return providers
 }
 
 export interface OidcOptions {
@@ -174,8 +198,11 @@ export function oidcProvider(settings: OidcSettings, opts: OidcOptions = {}): Id
   }
 
   return {
+    id: settings.id,
     issuer: settings.issuer,
     displayName: settings.displayName,
+    callbackPath: settings.callbackPath,
+    assumeEmailVerified: settings.assumeEmailVerified,
 
     async authorizationUrl(request: SignInRequest) {
       const { as } = await server()
@@ -207,6 +234,8 @@ export function oidcProvider(settings: OidcSettings, opts: OidcOptions = {}): Id
         request.codeVerifier,
         http
       )
+      if (await refusedByIssuer(res))
+        throw new SignInRefused(`${settings.issuer} refused the sign-in`)
       const tokens = await oauth.processAuthorizationCodeResponse(as, client, res, {
         expectedNonce: request.nonce,
         requireIdToken: true,
@@ -221,6 +250,20 @@ export function oidcProvider(settings: OidcSettings, opts: OidcOptions = {}): Id
       return identityOf(payload)
     },
   }
+}
+
+/**
+ * Whether the token endpoint turned the person away rather than the request: an issuer that runs
+ * its own access check when it mints tokens fails the exchange. Cognito does so with a 400 naming
+ * `UserLambdaValidationException` (its pre token generation trigger said no).
+ */
+async function refusedByIssuer(res: Response): Promise<boolean> {
+  if (res.status !== 400) return false
+  const body = await res
+    .clone()
+    .text()
+    .catch(() => '')
+  return body.includes('UserLambdaValidationException')
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined)
@@ -244,19 +287,7 @@ function identityOf(claims: JWTPayload): Identity {
   }
 }
 
-/** The configured provider (null: none, dev-login only); warns once about legacy config. */
-export function identityProviderFor(config: Config, opts?: OidcOptions): IdentityProvider | null {
-  const settings = oidcSettings(config)
-  if (!settings) return null
-  if (settings.legacy) {
-    console.warn(
-      JSON.stringify({
-        level: 'warn',
-        msg:
-          'deprecated sign-in config: google-client-id/secret without OIDC_ISSUER is read as ' +
-          `OIDC_ISSUER=${GOOGLE_ISSUER} on ${LEGACY_GOOGLE_CALLBACK_PATH}; see platforms/aws/DEPLOY.md`,
-      })
-    )
-  }
-  return oidcProvider(settings, opts)
+/** The instance's providers, ready to sign in with (none: dev-login only). */
+export function identityProvidersFor(config: Config, opts?: OidcOptions): IdentityProvider[] {
+  return signInProviders(config).map(settings => oidcProvider(settings, opts))
 }

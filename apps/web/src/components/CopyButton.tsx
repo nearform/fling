@@ -3,14 +3,19 @@ import { useEffect, useState } from 'react'
 import { copyText } from '../lib/clipboard'
 import { showToast } from '../lib/toast'
 
-/** Copies `text`; the icon flips to a tick for a moment. */
+/**
+ * Copies `text`; the icon flips to a tick for a moment. `label` is its accessible name and, unless
+ * `tooltip` says something shorter, its tooltip.
+ */
 export function CopyButton({
   text,
   label = 'Copy',
+  tooltip,
   className = 'btn btn-ghost btn-xs btn-square',
 }: {
   text: string
   label?: string
+  tooltip?: string
   className?: string
 }) {
   const [copied, setCopied] = useState(false)
@@ -31,7 +36,13 @@ export function CopyButton({
   }
 
   return (
-    <button type="button" className={className} onClick={copy} title={label} aria-label={label}>
+    <button
+      type="button"
+      className={className}
+      onClick={copy}
+      title={tooltip ?? label}
+      aria-label={label}
+    >
       {copied ? (
         <CheckIcon className="h-4 w-4 text-success" />
       ) : (

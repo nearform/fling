@@ -1140,11 +1140,61 @@
     translate: 0 1px;
   }
 
-  /* The site lists' grid view: thumbnail-led cards, as many columns as the width holds. */
+  /* The site lists' List / Grid switch (SitesLayoutToggle): one box with the sort select's edge and
+     corners, clipped so both ends are rounded whatever comes first in the fieldset (its legend);
+     the chosen option takes the primary tint. */
+  .layout-toggle {
+    display: inline-flex;
+    height: 2rem;
+    border: 1px solid color-mix(in oklab, var(--color-base-content) 20%, transparent);
+    border-radius: var(--radius-field);
+    overflow: clip;
+    background: var(--color-base-100);
+  }
+
+  .layout-toggle > label {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 2rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 120ms,
+      color 120ms;
+  }
+
+  .layout-toggle > label + label {
+    border-inline-start: 1px solid color-mix(in oklab, var(--color-base-content) 20%, transparent);
+  }
+
+  .layout-toggle > label:hover {
+    background: color-mix(in oklch, var(--text-primary) 6%, transparent);
+    color: var(--text-primary);
+  }
+
+  .layout-toggle > label:has(:checked) {
+    background: var(--tone-primary-surface);
+    color: var(--text-primary);
+  }
+
+  .layout-toggle > label:has(:focus-visible) {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+
+  /* The site lists' grid view: small thumbnail-led cards, as many columns as the width holds
+     (two on a phone, five or six on a wide screen). */
   .site-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
-    gap: var(--space-3);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 11rem), 1fr));
+    gap: var(--space-2);
+  }
+
+  @media (width < 30rem) {
+    .site-grid {
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+    }
   }
 
   .site-tile {
@@ -1165,12 +1215,71 @@
     display: flex;
     flex: 1;
     flex-direction: column;
-    gap: var(--space-2);
-    padding: var(--space-3);
+    gap: var(--space-1);
+    min-width: 0;
+    padding: var(--space-2);
+  }
+
+  /* One short muted line: when, who, or how; the badges as icons at its end. */
+  .site-tile-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+  }
+
+  .site-tile-meta > .truncate {
+    min-width: 0;
+  }
+
+  .site-tile-badges {
+    display: inline-flex;
+    flex-shrink: 0;
+    gap: 0.125rem;
+    margin-inline-start: auto;
   }
 
   .site-tile-links {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-2);
+    min-width: 0;
     margin-block-start: auto;
+    padding-block-start: var(--space-1);
+  }
+
+  /* A grid card's actions: quiet icon buttons, muted until hovered or focused, above the card's
+     link (CardLink) while the row around them is not, so a click between them opens the card. */
+  .site-tile-action {
+    position: relative;
+    z-index: 10;
+    display: inline-grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 0;
+    border-radius: var(--radius-field);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 120ms,
+      color 120ms;
+  }
+
+  .site-tile-action:hover,
+  .site-tile-action:focus-visible {
+    background: color-mix(in oklch, var(--text-primary) 8%, transparent);
+    color: var(--text-primary);
+  }
+
+  .site-tile-action:focus-visible {
+    outline-offset: 0;
+    border-radius: var(--radius-field);
   }
 
   @media (hover: hover) and (pointer: fine) {

@@ -3,24 +3,22 @@
  * thumbnails, then its name (and when it was updated), the two links people share (Review, when
  * the instance has comments, and View, each with a copy button), then its badges on the right.
  * One line on wide screens, with the links in the same place on every row; on narrow ones it
- * stacks (name, badges, links) so the name keeps its room. As a card (`layout` grid): the
- * thumbnail on top, then the name, when it was updated with the badges beside it, and the links. Either way
+ * stacks (name, badges, links) so the name keeps its room. As a card (`layout` grid), small so
+ * many fit a row: the thumbnail on top, then the name on one line, when it was updated with the
+ * badges as icons beside it, and the links as icon buttons (their names in tooltips). Either way
  * the whole of it opens the site page, where everything else is managed: the name is the link,
  * stretched over it, and the buttons sit above it. Archived sites are offline, so their URL is
  * plain text and they can't be reviewed.
  */
 import type { Site } from '@fling/shared'
 import { ChevronRightIcon } from '@heroicons/react/24/outline'
-import { Link } from 'react-router-dom'
 import { useInstance } from '../hooks/instance'
 import { displayUrl, fullDate, timeAgo } from '../lib/format'
 import { type SitesLayout, siteHref } from '../lib/sites'
+import { CardLink } from './CardLink'
 import { ReviewButton, ViewSiteButton } from './SiteButtons'
 import { SiteThumbnail } from './SiteThumbnail'
 import { SiteBadges } from './site/badges'
-
-const stretched =
-  'site-tile-link after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-[var(--focus-ring,currentColor)]'
 
 export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: SitesLayout }) {
   const instance = useInstance()
@@ -28,15 +26,17 @@ export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: Sites
   const reviewable = instance?.capabilities.comments === true && !site.archived
   const thumbs = instance?.capabilities.thumbnails === true
 
+  const grid = layout === 'grid'
   const name = (
-    <h2 className="text-base font-semibold leading-tight [overflow-wrap:anywhere]">
-      <Link
-        to={siteHref(site.name)}
-        className={stretched}
-        title={`Manage ${site.name}: access, versions, archive and delete`}
-      >
-        {site.name}
-      </Link>
+    <h2
+      className={
+        grid
+          ? 'truncate text-sm font-semibold leading-tight'
+          : 'text-base font-semibold leading-tight [overflow-wrap:anywhere]'
+      }
+    >
+      {/* Yours, or one you publish: its site page. */}
+      <CardLink name={site.name} target={{ kind: 'site-page', to: siteHref(site.name) }} />
     </h2>
   )
   const updated = (
@@ -46,30 +46,32 @@ export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: Sites
   )
   const links = (
     <>
-      {reviewable && <ReviewButton name={site.name} />}
+      {reviewable && <ReviewButton name={site.name} compact={grid} />}
       {site.archived ? (
-        <span className="truncate text-sm text-muted">{displayUrl(site.url)}</span>
+        <span className="min-w-0 truncate text-sm text-muted" title={site.url}>
+          {displayUrl(site.url)}
+        </span>
       ) : (
-        <ViewSiteButton name={site.name} url={site.url} />
+        <ViewSiteButton name={site.name} url={site.url} compact={grid} />
       )}
     </>
   )
 
-  if (layout === 'grid') {
+  if (grid) {
     return (
       <article className="surface-panel site-tile">
         <SiteThumbnail name={site.name} thumbnail={site.thumbnail} />
         <div className="site-tile-body">
-          <div className="min-w-0">
-            {name}
-            <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-secondary">
-              <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
-              <SiteBadges site={site} />
-            </div>
+          {name}
+          <div className="site-tile-meta">
+            <span className="truncate" title={fullDate(site.updatedAt)}>
+              {timeAgo(site.updatedAt)}
+            </span>
+            <span className="site-tile-badges relative z-10">
+              <SiteBadges site={site} compact />
+            </span>
           </div>
-          <div className="site-tile-links relative z-10 flex min-w-0 flex-wrap items-center gap-2">
-            {links}
-          </div>
+          <div className="site-tile-links">{links}</div>
         </div>
       </article>
     )

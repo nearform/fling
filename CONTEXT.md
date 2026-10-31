@@ -121,7 +121,7 @@ site's `updatedAt` alone. `GET /api/sites/<name>/thumbnail` serves it to whoever
 cached for good at the address the listings give (`?v=<when it was taken>`, `thumbnailUrl`) and
 revalidated by its ETag otherwise. Archiving keeps it; deleting the site deletes it. Every site list
 (yours, Shared with me, All sites) shows it, or the instance's logo mark faded while there is none,
-as rows or as a grid of cards (the List / Grid switch, kept per browser). The `thumbnails`
+as rows or as a grid of small cards (the List / Grid switch, kept per browser). The `thumbnails`
 capability.
 
 **Site order** — how site lists are sorted, the same in every client: `sortSites`

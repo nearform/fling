@@ -1,7 +1,8 @@
 /**
  * The site lists' layout switch: List or Grid, a radio group drawn as a segmented control. Native
  * radios, so arrow keys move between them and screen readers announce a group of two; the labels
- * are icons with their names for screen readers and in a tooltip.
+ * are icons with their names for screen readers and in a tooltip. Drawn as one box like the sort
+ * select beside it (`.layout-toggle` in theme.css), the chosen option tinted.
  */
 import { ListBulletIcon, Squares2X2Icon } from '@heroicons/react/24/outline'
 import { SITES_LAYOUTS, type SitesLayout } from '../lib/sites'
@@ -19,16 +20,12 @@ export function SitesLayoutToggle({
   onChange: (layout: SitesLayout) => void
 }) {
   return (
-    <fieldset className="join shrink-0">
+    <fieldset className="layout-toggle shrink-0">
       <legend className="sr-only">Show sites as</legend>
       {SITES_LAYOUTS.map(layout => {
         const { label, Icon } = OPTIONS[layout]
         return (
-          <label
-            key={layout}
-            title={label}
-            className="btn btn-sm btn-square join-item relative has-[:checked]:btn-active has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--focus-ring)]"
-          >
+          <label key={layout} title={label}>
             <input
               type="radio"
               name="sites-layout"

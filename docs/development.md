@@ -134,13 +134,14 @@ A feature is written once in the core and must work on every platform:
 4. **Capability.** If an instance may switch the feature off, add a config switch and a flag in
    `/.well-known/fling` (`apps/api/src/instance.ts`). Clients check the flag, never the platform.
 5. **Clients.** The web UI goes in `apps/web/src/pages`. The CLI commands and the local MCP tools go
-   in `apps/cli`; update its README and CHANGELOG under Unreleased, and the plugin's `SKILL.md` if
-   agents should use the feature.
+   in `apps/cli`; update its README, and the plugin's `SKILL.md` if agents should use the feature.
 6. **Platforms.** If the feature needs a new port operation, extend the conformance suite first,
    then every adapter: memory, DynamoDB/S3 and D1/R2/KV.
 7. **Proof.** Add API tests, add a step to the e2e scenario, and run `pnpm gate`.
 8. **Docs.** Update CONTEXT.md for new terms, the README for user-visible behaviour, and the AWS deploy
-   guide's Instance configuration table for new configuration.
+   guide's Instance configuration table for new configuration. Add a bullet under `## Unreleased`
+   in the root [CHANGELOG.md](../CHANGELOG.md), with an upgrade note if it asks anything of users
+   or operators.
 
 ## Adding a data migration
 
@@ -191,24 +192,67 @@ Differences between platforms are capability flags, never `if (platform === …)
 ## Shipping
 
 - `main` is protected. Open a PR, wait for the **Gate** check, then rebase-merge
-  (`gh pr merge --rebase`).
-- A merge to `main` deploys the AWS production instance (`deploy.yml` runs after CI passes). That
-  deploy covers the API, data migrations, the smoke check, the UI, the 404 page, the review shell,
-  the sites' robots.txt and the site router.
-- The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow, or
-  locally with `pnpm --filter @fling/platform-cloudflare run deploy`. It ends with the e2e smoke
-  test.
-- To roll back, run either deploy workflow with an older `ref` from `main`. Data is never rolled
-  back, which is why migrations use expand/contract.
+  (`gh pr merge --rebase`). Every PR that changes behaviour adds its bullet under `## Unreleased`
+  in [CHANGELOG.md](../CHANGELOG.md).
+- Merging deploys nothing. A release does: its tag publishes the CLI and deploys the AWS production
+  instance (see [Releasing](#releasing)). That deploy covers the API, data migrations, the smoke
+  check, the UI, the 404 page, the review shell, the sites' robots.txt and the site router.
+- The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow with the
+  release tag as `ref`, or locally with `pnpm --filter @fling/platform-cloudflare run deploy` from
+  a checkout of the tag. It ends with the e2e smoke test.
+- To roll back, run either deploy workflow with an older release tag. Data is never rolled back,
+  which is why migrations use expand/contract.
 
-### Releasing the CLI
+## Releasing
 
-Bump `apps/cli/package.json`, move the CHANGELOG's Unreleased entries under the new version, merge,
-then tag that commit:
+A release is one version of all of Fling: the server on every platform, the web UI, the CLI and
+its local MCP server, the Claude Desktop extension and the plugin. It is a commit on `main` whose
+version files and CHANGELOG say `x.y.z`, tagged `vx.y.z`. The version is in the root
+`package.json`, `apps/cli/package.json`, `apps/cli/mcpb/manifest.json` and
+`plugin/.claude-plugin/plugin.json` (the list is `VERSION_FILES` in `scripts/release.mjs`); the
+other workspace packages are private and keep their own. A server says which release it runs as
+`release` in `/.well-known/fling`. Up to 0.6.0, releases were the CLI's alone (`cli-v*` tags).
 
-```sh
-git tag -a cli-v0.3.0 -m "CLI 0.3.0" && git push origin cli-v0.3.0
-```
+1. On a branch, cut it:
 
-`release-cli.yml` checks that the tag matches the version, runs the gate, and publishes to npm
-through trusted publishing (OIDC: no stored token, provenance added automatically).
+   ```sh
+   pnpm release 0.7.0            # --dry-run shows what it would write
+   ```
+
+   It refuses a version that isn't `x.y.z` or isn't greater than the current one, and an empty
+   Unreleased section. It sets the version in every version file and moves the Unreleased bullets
+   under `## 0.7.0 (<date>)`, leaving Unreleased empty.
+2. Commit, open a PR, wait for the **Gate** check and merge it (`gh pr merge --rebase`).
+3. Tag the release commit on `main` and push the tag:
+
+   ```sh
+   git fetch origin
+   git tag -a v0.7.0 -m "Fling 0.7.0" <release commit> && git push origin v0.7.0
+   ```
+
+The tag starts the **Release** workflow (`.github/workflows/release-cli.yml`):
+
+1. it checks that the tag matches every version file and that the commit is on `main`;
+2. it runs the gate (`ci.yml`) on that commit;
+3. it publishes the CLI to npm through trusted publishing (OIDC: no stored token, provenance added
+   automatically);
+4. it creates the GitHub Release `v0.7.0`, with the version's CHANGELOG section as its notes and
+   the Claude Desktop extension (`fling.mcpb`) attached.
+
+When the Release workflow succeeds, **Deploy** (`deploy.yml`) deploys that commit to the AWS
+production instance; its smoke test checks that `/.well-known/fling` answers with the new
+`release`. Deploy Cloudflare by hand from the same tag (**Deploy (Cloudflare)**, `ref` `v0.7.0`).
+
+**Redeploy or roll back.** Run **Deploy** by hand from `main` (Actions → Deploy → Run workflow)
+with a release tag as `ref`: the current tag redeploys, an older one rolls back. Do the same with
+**Deploy (Cloudflare)**. A rollback ships older code onto newer data, so check the CHANGELOG's
+upgrade notes for the releases in between.
+
+**Choosing the version.** Fling follows semver for the product as a whole:
+
+- **minor** (`0.7.0` → `0.8.0`) for features;
+- **patch** (`0.7.0` → `0.7.1`) for fixes only;
+- a change that breaks older CLIs, extensions or plugins against a newer server, or a data contract
+  (stored records, the metadata, an API response clients rely on), is called out in the release's
+  CHANGELOG entry with an upgrade note saying what to do. Before 1.0 it goes out in a minor
+  release.

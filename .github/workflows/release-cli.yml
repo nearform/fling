@@ -1,31 +1,68 @@
-name: Release CLI
+name: Release
 
-# Publishes the CLI, @nearform/fling, to public npm when a `cli-v<version>` tag is pushed:
+# Releases Fling when a `v<version>` tag is pushed: one version for the server, the web UI, the CLI,
+# the MCP servers, the Claude Desktop extension and the plugin (docs/development.md, Releasing).
 #
-#   # bump apps/cli/package.json, merge, then on that commit:
-#   git tag cli-v0.3.0 && git push origin cli-v0.3.0
+#   pnpm release 0.7.0   # on a branch: sets the version files and cuts the CHANGELOG; PR, merge
+#   git tag -a v0.7.0 -m "Fling 0.7.0" <the release commit on main> && git push origin v0.7.0
 #
-# The tag must match apps/cli/package.json's version. The gate (ci.yml) runs on the tagged commit
-# first. `pnpm pack` writes the tarball (it rewrites any workspace: ranges), `npm publish` uploads it.
+# Jobs, each after the one before:
+#   1. check: the tag matches every version file (scripts/release.mjs --check) and the tagged commit
+#      is on main;
+#   2. the gate (ci.yml) on the tagged commit;
+#   3. publish the CLI, @nearform/fling, to public npm: `pnpm pack` writes the tarball (it rewrites
+#      any workspace: ranges), `npm publish` uploads it;
+#   4. the GitHub Release v<version>, its notes that version's CHANGELOG.md section, with the
+#      Claude Desktop extension (fling.mcpb, not tied to any Fling) attached.
+# When it succeeds, deploy.yml deploys the same commit to AWS. Cloudflare is deployed by hand.
 #
-# Publishing uses npm trusted publishing (OIDC): no npm token is stored in GitHub. On npmjs.com,
-# @nearform/fling → Settings → Trusted publishing trusts GitHub Actions, nearform/fling,
-# workflow `release-cli.yml`. npm exchanges this job's OIDC token for a short-lived publish
-# credential and adds provenance automatically (public repo + public package). Needs npm >= 11.5.1.
+# The file keeps the name release-cli.yml because npm trusted publishing names it: on npmjs.com,
+# @nearform/fling → Settings → Trusted publishing trusts GitHub Actions, nearform/fling, workflow
+# `release-cli.yml`. Renaming the file stops publishing until that setting is changed to match.
+# Publishing uses OIDC: no npm token is stored in GitHub. npm exchanges the publish job's OIDC token
+# for a short-lived publish credential and adds provenance automatically (public repo + public
+# package). Needs npm >= 11.5.1.
 on:
   push:
-    tags: ['cli-v*']
+    tags: ['v*']
 
 concurrency:
-  group: release-cli-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  check:
+    name: Check the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: The tag matches every version file
+        run: node scripts/release.mjs --check "$GITHUB_REF_NAME"
+
+      # A release is code that is on main: a tag can be pushed on any commit, a pull request's too.
+      - name: The tagged commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+            { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main; tag a commit of main"; exit 1; }
+
+      - name: The CHANGELOG has the release's notes
+        run: node scripts/release.mjs --notes "$GITHUB_REF_NAME" > /dev/null
+
   ci:
     name: CI
+    needs: check
     uses: ./.github/workflows/ci.yml
 
   publish:
@@ -38,14 +75,6 @@ jobs:
       id-token: write # npm trusted publishing (OIDC) + provenance
     steps:
       - uses: actions/checkout@v7
-
-      - name: Check the tag matches the package version
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#cli-v}"
-          version="$(jq -er .version apps/cli/package.json)"
-          [ "$tag" = "$version" ] || {
-            echo "::error::tag $GITHUB_REF_NAME does not match apps/cli/package.json version $version"; exit 1; }
 
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
@@ -76,3 +105,35 @@ jobs:
 
       - name: Publish
         run: npm publish "${{ steps.pack.outputs.tarball }}" --access public
+
+  github-release:
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the release
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Without FLING_MCPB_SERVER_URL: the extension adds no Fling of its own; `fling login` (or the
+      # fling_login tool) signs in to one. Each Fling serves a copy that adds itself.
+      - name: Build the Claude Desktop extension
+        run: pnpm --filter ./apps/cli build:mcpb
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/release.mjs --notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Fling $version" \
+            --notes-file "$RUNNER_TEMP/notes.md" apps/cli/dist/fling.mcpb

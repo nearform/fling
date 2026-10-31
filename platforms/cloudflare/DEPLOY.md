@@ -135,7 +135,7 @@ neither header (see
      Custom Domain's record), Zone Read. If wrangler reports another missing permission, add it;
    - secret `FLING_E2E_API_KEY` after the first deploy (see [Smoke test](#smoke-test)).
 8. **Deploy**: run the **Deploy (Cloudflare)** workflow (Actions → Deploy (Cloudflare) → Run
-   workflow), or from a checkout of main:
+   workflow) with the latest release tag as `ref` (e.g. `v0.7.0`), or from a checkout of that tag:
 
    ```bash
    pnpm install && pnpm --filter "@fling/web..." build
@@ -250,6 +250,8 @@ pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --config dist/wrangler.jsonc
 
 ## How a deploy ships
 
+Cloudflare is deployed by hand, from a release tag: after each release (which deploys AWS by
+itself, [Releasing](../../docs/development.md#releasing)), run the workflow with the new tag.
 `scripts/deploy.mjs`, in this order, so nothing is served that points at something missing:
 
 1. renders `dist/wrangler.jsonc` from the template and `CF_DEPLOY_CONFIG`, and builds the Claude
@@ -267,7 +269,8 @@ pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --config dist/wrangler.jsonc
    UI bucket, the previous release's hashed files go with it: a tab left open across a deploy may
    need a reload to load a lazy chunk;
 5. runs Fling's data migrations (below);
-6. waits until `https://$APP_HOST/.well-known/fling` answers for this instance;
+6. waits until `https://$APP_HOST/.well-known/fling` answers for this instance, with the root
+   `package.json`'s version as `release`;
 7. runs the smoke test.
 
 The web UI: `index.html` (and every client-side route) is `no-cache`, `/assets/*` (content-hashed)
@@ -344,7 +347,7 @@ above when it was the last person and the site opens to every member again).
 
 ## Rollback
 
-Run the workflow with an earlier commit of main as `ref`. The Worker, its assets and its config go
+Run the workflow with an earlier release tag as `ref`. The Worker, its assets and its config go
 back; D1 schema and data migrations don't (they are forward-only and written so older code keeps
 working), and neither does site content. `wrangler rollback` also works for the code alone.
 Rolling back to a release from before audiences opens restricted sites to every signed-in member

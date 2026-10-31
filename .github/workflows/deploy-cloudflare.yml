@@ -1,8 +1,9 @@
 name: Deploy (Cloudflare)
 
 # Deploys Fling to Cloudflare: one Worker with its D1 database, R2 bucket and KV namespace, set up
-# once with platforms/cloudflare/scripts/setup.mjs. By hand only (workflow_dispatch) for now; to
-# roll back, run it with an earlier commit of main.
+# once with platforms/cloudflare/scripts/setup.mjs. By hand only (workflow_dispatch), with a release
+# tag as `ref`: after each release, the tag the Release workflow deployed to AWS; to roll back, an
+# earlier release tag.
 #
 # Everything instance-specific is one repository variable, CF_DEPLOY_CONFIG (the JSON setup.mjs
 # writes: account, Worker, zone, hostnames, resource ids and an INSTANCE object of the instance's
@@ -19,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit SHA (or ref) to deploy. Empty = the tip of the selected branch. Rollback = an older SHA of main.'
+        description: 'The release tag to deploy, e.g. v0.7.0. An older tag rolls back. Empty = the tip of the selected branch.'
         type: string
         required: false
 

@@ -10,12 +10,17 @@
 // ignored. Messages carry `fling: 'review'` so other postMessage traffic is told apart.
 //
 // In preview mode (`previewShellUrl`: the site page's live preview, thumbnails.ts) the shell frames
-// the home page and does nothing but load it, and, when the page asks (`capture`), draw it as a
-// thumbnail and send it back (`captured`, or `captureFailed`). The page only uses `ready` and those.
+// the home page and does nothing but load it, and, when the page asks (`capture`, naming the
+// site's current version), draw it as a thumbnail and send it back with the version it shows
+// (`captured`), or say why not (`captureFailed`; `stale` while the sites host still serves another
+// version). The page only uses `ready` and those.
 
 import { z } from 'zod'
 import { COMMENT_PATH_MAX, CommentAnchorSchema } from './comments.ts'
 import { REVIEW_SHELL } from './route-keys.ts'
+
+/** `captureFailed`'s reason when the sites host still serves another version than the one asked. */
+export const CAPTURE_STALE = 'stale'
 
 /** Where the shell serves itself on every site host. */
 export const REVIEW_SHELL_PATH = REVIEW_SHELL
@@ -59,9 +64,14 @@ export const ShellMessageSchema = z.discriminatedUnion('type', [
   /** a link or form to another origin, stopped: the frame stays on the site */
   z.object({ ...tag, type: z.literal('blocked'), href: z.string().max(2048) }),
   z.object({ ...tag, type: z.literal('escape') }),
-  /** preview mode: the thumbnail the page asked for, a PNG of the frame's viewport */
-  z.object({ ...tag, type: z.literal('captured'), png: z.instanceof(Blob) }),
-  /** preview mode: no thumbnail could be drawn */
+  /** preview mode: the thumbnail the page asked for, a PNG of the frame's viewport of `versionId` */
+  z.object({
+    ...tag,
+    type: z.literal('captured'),
+    png: z.instanceof(Blob),
+    versionId: z.string().max(100),
+  }),
+  /** preview mode: no thumbnail could be drawn (CAPTURE_STALE: the host serves another version) */
   z.object({ ...tag, type: z.literal('captureFailed'), reason: z.string().max(300) }),
 ])
 export type ShellMessage = z.infer<typeof ShellMessageSchema>
@@ -77,8 +87,11 @@ export const PageMessageSchema = z.discriminatedUnion('type', [
   /** scroll the pin into view and draw attention to it */
   z.object({ ...tag, type: z.literal('focusPin'), id: z.string() }),
   z.object({ ...tag, type: z.literal('cursors'), cursors: z.array(BridgeCursorSchema) }),
-  /** preview mode: once the page has loaded and settled, draw it as a thumbnail (`captured`) */
-  z.object({ ...tag, type: z.literal('capture') }),
+  /**
+   * preview mode: once the page has loaded and settled, draw it as a thumbnail (`captured`), only
+   * if the sites host serves `versionId` (the site's current version, as the API says)
+   */
+  z.object({ ...tag, type: z.literal('capture'), versionId: z.string().max(100) }),
 ])
 export type PageMessage = z.infer<typeof PageMessageSchema>
 

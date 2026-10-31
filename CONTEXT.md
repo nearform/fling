@@ -108,8 +108,13 @@ files (`thumbnailKey`, `apps/api/src/blobs/types.ts`) and recorded on the site a
 taken of and when (`SiteRecord.thumbnail`; listings carry when, as `thumbnailAt`). Browsers take
 them: when an owner or publisher opens the site page and the thumbnail is missing or of another
 version than the current one (`wantsThumbnail`), the preview asks the shell to draw the settled
-home page (`apps/web/src/preview-capture.ts`, with modern-screenshot, in the shell's bundle only)
-and uploads it with `PUT /api/sites/<name>/thumbnail?version=<id>` (`site.thumbnail` in
+home page of the current version (`apps/web/src/preview-capture.ts`, with modern-screenshot, in the
+shell's bundle only). The shell draws only a page it knows to be of that version: the sites host
+says which version it serves at `/_fling-version` (`SITE_VERSION_PATH`, header `x-fling-version`),
+and the shell asks before and after loading the page (`apps/web/src/lib/preview-version.ts`). Just
+after a publish the edge can still serve the previous version for up to about a minute; the shell
+then draws nothing (`captureFailed`, `stale`) and the next view by an owner or publisher retries.
+The page uploads it, as the version the shell says it shows, with `PUT /api/sites/<name>/thumbnail?version=<id>` (`site.thumbnail` in
 `policy.ts`: owners, publishers, and admins from their browser session). The server takes a PNG of a
 thumbnail's size for the current version only (409 `version_changed` otherwise) and leaves the
 site's `updatedAt` alone. `GET /api/sites/<name>/thumbnail` serves it to whoever may `site.view`,

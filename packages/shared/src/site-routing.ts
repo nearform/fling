@@ -5,14 +5,24 @@
 // and turn the decision into their runtime's response.
 //
 //   `<name>.<sitesDomain>`, `s--<token>.<sitesDomain>` → route table `site:<name>` / `share:<token>`
-//   → rewrite to `/sites/<id>/<v><path>`, or to MISSING_KEY (unknown host, archived site, dotfile,
-//     site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
+//   → rewrite to `/sites/<id>/<v><path>` (saying `x-fling-version: <v>`), or to MISSING_KEY
+//     (unknown host, archived site, dotfile, site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
 //     and `/robots.txt` on any host is ROBOTS_TXT
 //   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie, or a member's the revocation list stops; restricted site, or members-level site to a guest's `fling_site`,
 //     without a valid `fling_pass` naming it), 301 to add a trailing slash (extensionless path,
-//     not an SPA).
+//     not an SPA), 204 to SITE_VERSION_PATH (`/_fling-version`) with `x-fling-version: <v>`.
 //   → either way, with the headers every response on that host carries (siteResponseHeaders).
+//
+// The version a host serves comes from the route table, which reaches the edge eventually (KV on
+// Cloudflare, the KeyValueStore on AWS): for a while after a publish a host can serve the previous
+// version while the API reports the new one. Whoever needs to know which version a page is of
+// (the preview shell, before it draws a Thumbnail) asks `/_fling-version`, which passes the same
+// access checks as the site's pages and answers with the version they get. It is an answer rather
+// than a header on the pages because only the Worker adds a rewrite's headers to what it serves:
+// on AWS (and the local dev server, which runs the CloudFront Function) a page carries none of
+// them. A rewrite still says `x-fling-version` (a page, or the 404 page for a file the version
+// lacks), for the runtimes that pass it on.
 //
 // Sites are not indexed: every sites host answers `/robots.txt` with Fling's own `Disallow: /`
 // (ROBOTS_TXT, so a site's own robots.txt is never served), and responses say `X-Robots-Tag:
@@ -67,6 +77,8 @@ import {
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
   SITE_PASS_TTL_SECONDS,
+  SITE_VERSION_HEADER,
+  SITE_VERSION_PATH,
   shareKvsKey,
   siteKvsKey,
 } from './route-keys.ts'
@@ -462,6 +474,12 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     }
   }
 
+  if (uri === SITE_VERSION_PATH) {
+    const headers: Record<string, string> = { 'cache-control': 'no-store' }
+    headers[SITE_VERSION_HEADER] = site.v
+    return { action: 'respond', status: 204, statusDescription: 'No Content', headers: headers }
+  }
+
   let path = uri
   if (path.endsWith('/')) {
     path += 'index.html'
@@ -469,7 +487,9 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     if (!site.spa) return redirect(301, `${uri}/${req.query}`, false)
     path = '/index.html'
   }
-  return rewrite(`/sites/${site.id}/${site.v}${path}`)
+  const served = rewrite(`/sites/${site.id}/${site.v}${path}`)
+  served.headers[SITE_VERSION_HEADER] = site.v
+  return served
 }
 
 /**

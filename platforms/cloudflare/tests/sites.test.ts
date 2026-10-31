@@ -1,7 +1,8 @@
 /**
  * The Worker's sites host beyond the e2e: the route table's KV-miss fallback, and serving files
  * from R2 the way the AWS sites distribution does (stored headers, ETag revalidation, ranges, HEAD,
- * the 404 page, the review shell), robots.txt and the headers every sites host adds. R2, KV and D1 are Miniflare's (tests/miniflare.ts).
+ * the 404 page, the review shell), robots.txt, the headers every sites host adds and the version it
+ * serves. R2, KV and D1 are Miniflare's (tests/miniflare.ts).
  */
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { routeTableConformance } from '@fling/conformance'
@@ -222,6 +223,24 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     ]) {
       expect(res.headers.get('referrer-policy')).toBeNull()
       expect(res.headers.get('x-robots-tag')).toBe('noindex')
+    }
+  })
+
+  it('says which version it serves: on the files, and at /_fling-version', async () => {
+    const file = await req('pub.sites.example.test')
+    expect(file.headers.get('x-fling-version')).toBe('V1')
+    const probe = await req('pub.sites.example.test', '/_fling-version', { method: 'HEAD' })
+    expect(probe.status).toBe(204)
+    expect(probe.headers.get('x-fling-version')).toBe('V1')
+    expect(probe.headers.get('cache-control')).toBe('no-store')
+    const shared = await req(SHARE, '/_fling-version')
+    expect(shared.headers.get('x-fling-version')).toBe('V1')
+    for (const res of [
+      await req('nope.sites.example.test', '/_fling-version'),
+      await req('pub.sites.example.test', '/_fling/review.html?path=%2F'),
+      await req('priv.sites.example.test', '/_fling-version'), // to sign in
+    ]) {
+      expect(res.headers.get('x-fling-version')).toBeNull()
     }
   })
 

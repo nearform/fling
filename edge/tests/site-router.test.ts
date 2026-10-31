@@ -475,6 +475,26 @@ describe('path rewriting', () => {
   })
 })
 
+describe('the version a host serves', () => {
+  it('answers /_fling-version with the version as a response, so its header reaches the browser', async () => {
+    for (const [args, v] of [
+      [{ host: PUBLIC, path: '/_fling-version' }, 'V2'],
+      [{ host: PUBLIC, path: '/_fling-version', method: 'HEAD' }, 'V2'],
+      [{ host: PRIVATE, path: '/_fling-version', cookieHeader: validCookie() }, 'V1'],
+      [{ host: SHARE, path: '/_fling-version' }, 'V1'],
+    ] as const) {
+      const res = await asResponse(args)
+      expect(res.statusCode).toBe(204)
+      expect(res.headers?.['x-fling-version']?.value).toBe(v)
+      expect(res.headers?.['cache-control']?.value).toBe('no-store')
+    }
+    // Same checks as the site's pages: without a cookie, to sign in, saying nothing.
+    const held = await asResponse({ host: PRIVATE, path: '/_fling-version' })
+    expect(held.statusCode).toBe(302)
+    expect(held.headers?.['x-fling-version']).toBeUndefined()
+  })
+})
+
 describe('indexing and the referrer policy', () => {
   it("rewrites /robots.txt to Fling's on every host, the site's own included", async () => {
     for (const host of [PUBLIC, PRIVATE, SHARE, 'nope.fling.example.test']) {

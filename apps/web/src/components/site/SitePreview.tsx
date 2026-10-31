@@ -7,9 +7,11 @@
  * so private and restricted sites load as they do in review mode (the app's sign-in cookie is on
  * the shared parent domain, and a restricted site's pass is set within the frame). When the viewer
  * owns or publishes the site and its thumbnail is missing or of another version
- * (`wantsThumbnail`), the page asks the shell to draw one once the home page has settled
- * (`capture`), and keeps what comes back (`captured`) as the thumbnail of the version it asked
- * about. The faded logo mark shows until the frame has loaded.
+ * (`wantsThumbnail`), the page asks the shell to draw one of the current version once the home
+ * page has settled (`capture`), and keeps what comes back (`captured`) as the thumbnail of the
+ * version the shell says it shows. While the sites host still serves an older version the shell
+ * draws nothing (`captureFailed`, `stale`) and the page leaves it: the next view retries. The
+ * faded logo mark shows until the frame has loaded.
  */
 import {
   pageMessage,
@@ -40,7 +42,10 @@ export function SitePreview({ site }: { site: SiteDetail }) {
       const version = latest.current.wanted
       if (!version || askedFor.current === version) return
       askedFor.current = version
-      frame.current?.contentWindow?.postMessage(pageMessage({ type: 'capture' }), siteOrigin)
+      frame.current?.contentWindow?.postMessage(
+        pageMessage({ type: 'capture', versionId: version }),
+        siteOrigin
+      )
     }
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== siteOrigin || e.source !== frame.current?.contentWindow) return
@@ -49,7 +54,7 @@ export function SitePreview({ site }: { site: SiteDetail }) {
       const m = parsed.data
       if (m.type === 'ready') ask()
       else if (m.type === 'captured' && askedFor.current) {
-        latest.current.save({ versionId: askedFor.current, png: m.png })
+        latest.current.save({ versionId: m.versionId, png: m.png })
       } else if (m.type === 'captureFailed') {
         console.info(`No thumbnail of ${site.name}: ${m.reason}`)
       }
@@ -62,7 +67,10 @@ export function SitePreview({ site }: { site: SiteDetail }) {
   useEffect(() => {
     if (!loaded || !wanted || askedFor.current === wanted) return
     askedFor.current = wanted
-    frame.current?.contentWindow?.postMessage(pageMessage({ type: 'capture' }), siteOrigin)
+    frame.current?.contentWindow?.postMessage(
+      pageMessage({ type: 'capture', versionId: wanted }),
+      siteOrigin
+    )
   }, [loaded, wanted, siteOrigin])
 
   return (

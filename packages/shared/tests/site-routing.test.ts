@@ -10,6 +10,7 @@ import {
   ROBOTS_TXT,
   revokedKvsKey,
   SITE_HMAC_KVS_KEY,
+  SITE_VERSION_PATH,
 } from '../src/route-keys.ts'
 import {
   revocationMac,
@@ -44,6 +45,8 @@ const routes = new Map([
 ])
 const SHARE = `s--${'t'.repeat(20)}.sites.example.test`
 const NOINDEX = { 'x-robots-tag': 'noindex' }
+/** A version rewrite's headers: the host's, and the version it serves. */
+const served = (v: string) => ({ ...NOINDEX, 'x-fling-version': v })
 
 function ctx(lookups: string[] = [], revocations = new Map<string, string>()) {
   return {
@@ -95,7 +98,7 @@ describe('routeSiteRequest', () => {
     expect(await routeSiteRequest(req({ uri: '/a/' }), ctx())).toEqual({
       action: 'rewrite',
       uri: '/sites/S1/V1/a/index.html',
-      headers: NOINDEX,
+      headers: served('V1'),
     })
   })
 
@@ -122,7 +125,7 @@ describe('routeSiteRequest', () => {
     const cookie = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
     expect(
       await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
-    ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: NOINDEX })
+    ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: served('V2') })
   })
 
   it("sends a guest's cookie on a members-level site through the site pass, and serves them public ones", async () => {
@@ -158,7 +161,7 @@ describe('routeSiteRequest', () => {
     )
     expect(
       await routeSiteRequest(req({ host: 'pub.sites.example.test', uri: '/', cookie }), ctx())
-    ).toEqual({ action: 'rewrite', uri: '/sites/S1/V1/index.html', headers: NOINDEX })
+    ).toEqual({ action: 'rewrite', uri: '/sites/S1/V1/index.html', headers: served('V1') })
     expect(validSiteCookie(cookie, KEY, NOW, ctx().hmac)).toBe(true)
     expect(siteCookieOf(cookie, KEY, NOW, ctx().hmac)).toBe('guest')
   })
@@ -220,6 +223,55 @@ describe('routeSiteRequest', () => {
   it('answers 405 to anything but GET and HEAD', async () => {
     const d = await routeSiteRequest(req({ method: 'PUT' }), ctx())
     expect(d).toMatchObject({ action: 'respond', status: 405, headers: { allow: 'GET, HEAD' } })
+  })
+})
+
+describe('the version a host serves', () => {
+  const VERSION = 'x-fling-version'
+
+  it('answers /_fling-version with the version, uncached, once the access checks pass', async () => {
+    const cookie = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
+    for (const [r, v] of [
+      [req({ uri: SITE_VERSION_PATH }), 'V1'],
+      [req({ uri: SITE_VERSION_PATH, method: 'HEAD' }), 'V1'],
+      [req({ host: 'priv.sites.example.test', uri: SITE_VERSION_PATH, cookie }), 'V2'],
+      [req({ host: SHARE, uri: SITE_VERSION_PATH }), 'V2'],
+    ] as const) {
+      expect(await routeSiteRequest(r, ctx())).toMatchObject({
+        action: 'respond',
+        status: 204,
+        headers: { [VERSION]: v, 'cache-control': 'no-store', ...NOINDEX },
+      })
+    }
+    // A private site without a cookie: to sign in, as for its pages.
+    const held = await routeSiteRequest(
+      req({ host: 'priv.sites.example.test', uri: SITE_VERSION_PATH }),
+      ctx()
+    )
+    expect(held).toMatchObject({ action: 'respond', status: 302 })
+    expect(held.headers[VERSION]).toBeUndefined()
+  })
+
+  it('says the version on every rewrite to it, a file the version lacks included', async () => {
+    for (const uri of ['/', '/a.html', '/no/such/file.css']) {
+      const d = await routeSiteRequest(req({ uri }), ctx())
+      expect(d).toMatchObject({ action: 'rewrite', headers: { [VERSION]: 'V1' } })
+    }
+  })
+
+  it('says no version where none is served: unknown hosts, Fling pages, redirects, 405', async () => {
+    for (const r of [
+      req({ host: 'nope.sites.example.test' }),
+      req({ host: 'a--b.sites.example.test', uri: SITE_VERSION_PATH }),
+      req({ uri: '/.env' }),
+      req({ uri: NOT_FOUND_PAGE }),
+      req({ uri: REVIEW_SHELL }),
+      req({ uri: '/robots.txt' }),
+      req({ uri: '/docs' }),
+      req({ method: 'POST' }),
+    ]) {
+      expect((await routeSiteRequest(r, ctx())).headers[VERSION]).toBeUndefined()
+    }
   })
 })
 

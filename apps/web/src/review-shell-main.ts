@@ -20,8 +20,10 @@
  *
  * In preview mode (`?mode=preview`, `previewShellUrl`: the site page's live preview) it does none
  * of that: it frames the home page with its scrollbar hidden, keeps the frame on the site, and when
- * the page asks (`capture`) draws a thumbnail of it (preview-capture.ts, loaded only then) and
- * sends it back (`captured`, or `captureFailed`).
+ * the page asks (`capture`, naming the site's current version) draws a thumbnail of it
+ * (preview-capture.ts, loaded only then) and sends it back (`captured`, or `captureFailed`). It
+ * only draws a page it knows to be of that version (lib/preview-version.ts): while the sites host
+ * still serves an older one, it says `stale` and draws nothing.
  *
  * It trusts only messages from the app origin its `fling-app-origin` meta names, and talks only to
  * that origin. It holds no data: everything it draws, the page sends. Opened on its own (not in a
@@ -31,12 +33,14 @@ import { normalizeCommentPath } from '@fling/shared/comments'
 import {
   type BridgeCursor,
   type BridgePin,
+  CAPTURE_STALE,
   isPreviewMode,
   PageMessageSchema,
   shellMessage,
 } from '@fling/shared/review-bridge'
 import { LIVE_CURSOR_INTERVAL_MS } from '@fling/shared/review-live'
 import { notFoundAppOrigin } from './lib/app-origin'
+import { frameAt, type Loaded, loadAtVersion, servedVersion } from './lib/preview-version'
 import {
   anchorFor,
   type Box,
@@ -379,7 +383,8 @@ frame.addEventListener('load', () => {
   if (preview) {
     // A picture of the page, not a window onto it: no scrollbar.
     win.document.documentElement.style.scrollbarWidth = 'none'
-    settled(win)
+    loadedNext?.(win)
+    loadedNext = null
     return
   }
   attach(win)
@@ -388,16 +393,32 @@ frame.addEventListener('load', () => {
 
 // --- preview mode: a thumbnail ------------------------------------------------------------------
 
-let settled: (win: Window) => void = () => {}
-const firstLoad = new Promise<Window>(resolve => {
-  settled = resolve
-})
+let loadedNext: ((win: Window) => void) | null = null
 
-async function capture() {
+/** Load the home page in the frame; the window once it has loaded. */
+function loadHome(): Promise<Window> {
+  return new Promise<Window>(resolve => {
+    loadedNext = resolve
+    frame.src = start
+  })
+}
+
+/** The frame's latest load of the home page, with the version it shows when that is known. */
+let current: Promise<Loaded<Window>> | null = null
+const reloadHome = () => {
+  current = loadAtVersion(servedVersion, loadHome)
+  return current
+}
+
+async function capture(versionId: string) {
   try {
-    const win = await firstLoad
+    const at = await frameAt(versionId, await (current ?? reloadHome()), servedVersion, reloadHome)
+    if (!('win' in at)) {
+      post({ type: 'captureFailed', reason: CAPTURE_STALE })
+      return
+    }
     const { captureThumbnail } = await import('./preview-capture')
-    post({ type: 'captured', png: await captureThumbnail(win) })
+    post({ type: 'captured', png: await captureThumbnail(at.win), versionId })
   } catch (err) {
     post({ type: 'captureFailed', reason: String((err as Error)?.message ?? err).slice(0, 300) })
   }
@@ -679,13 +700,16 @@ window.addEventListener('message', e => {
       scheduleDraw()
       break
     case 'capture':
-      if (preview) void capture()
+      if (preview) void capture(m.versionId)
       break
   }
 })
 
 if (window.parent === window) {
   window.location.replace(start)
+} else if (preview) {
+  void reloadHome()
+  post({ type: 'ready' })
 } else {
   frame.src = start
   post({ type: 'ready' })

@@ -28,6 +28,15 @@ export const ROBOTS_TXT = '/_fling/robots.txt'
  * on AWS that path is served from the bucket without the site router (the error page's behaviour).
  */
 export const SITE_PASS_PATH = '/_fling-pass'
+/**
+ * Where a sites host says which version of the site it serves now: a 204 with SITE_VERSION_HEADER
+ * (site-routing.ts), after the same access checks as the site's pages. An answer, not a rewrite, so
+ * the header reaches the browser on every runtime (a CloudFront viewer-request function cannot add
+ * headers to what S3 serves). Not under `/_fling/`, for the same reason as SITE_PASS_PATH.
+ */
+export const SITE_VERSION_PATH = '/_fling-version'
+/** The version a sites host serves (`x-fling-version: <versionId>`). */
+export const SITE_VERSION_HEADER = 'x-fling-version'
 /** The site pass cookie (host-only, on a restricted site's host). */
 export const SITE_PASS_COOKIE_NAME = 'fling_pass'
 /** How long a site pass lasts: the most a removed viewer keeps seeing the site. */

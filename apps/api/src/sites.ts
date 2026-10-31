@@ -30,6 +30,10 @@
  * A user's sites (`listSites`) are those they hold a role on: the sites they created while they
  * still do, and those their role items and their groups' role items name. Deleting a group takes
  * it out of every site's roles.
+ *
+ * Thumbnails (`putThumbnail`, `siteThumbnail`; thumbnails.ts in shared): a PNG of the home page
+ * that an owner's or publisher's browser takes of the current version, kept beside the site's
+ * files and read by whoever may view the site.
  */
 import {
   type AccessLevel,
@@ -75,6 +79,8 @@ import {
   siteUrl,
   slugify,
   sortSites,
+  type Thumbnail,
+  thumbnailProblem,
   type VersionFiles,
   type Visibility,
   WHY_SITE_NAME,
@@ -87,7 +93,7 @@ import {
 } from '@fling/shared/site-cookie'
 import { audit } from './audit.ts'
 import { admittedByConfig, asRequestUser } from './auth/standing.ts'
-import { manifestKey } from './blobs/types.ts'
+import { manifestKey, thumbnailKey } from './blobs/types.ts'
 import {
   checkAddresses,
   checkMembers,
@@ -122,6 +128,7 @@ import {
   type SiteRoleList,
   type User,
 } from './store/types.ts'
+import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
@@ -186,6 +193,7 @@ export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
     audienceSize: site.audience.emails.length + site.audience.groups.length,
     audienceGroups: site.audience.groups.length,
     ...(role ? { role } : {}),
+    ...(site.thumbnail ? { thumbnail: site.thumbnail } : {}),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
   }
@@ -816,6 +824,7 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
       ...(comments ? { reviewUrl: reviewUrl(appOrigin, listing.name) } : {}),
       owner: listing.owner,
       via: { direct, groups: groups.flatMap(id => slugs.get(id) ?? []) },
+      ...(listing.thumbnailAt ? { thumbnail: { updatedAt: listing.thumbnailAt } } : {}),
       createdAt: listing.createdAt,
       updatedAt: listing.updatedAt,
     }))
@@ -968,6 +977,54 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
   site.archived = archived
   await save(deps, site)
   return toSite(deps, actor, site)
+}
+
+/**
+ * PUT /api/sites/:name/thumbnail: a PNG of the home page (`thumbnailProblem`: at most 200 KB, of a
+ * thumbnail's size), taken of `versionId`. Kept only while that version is current (409
+ * `version_changed` otherwise: the browser that took it gave the site page an older version than
+ * is live now, and the next look takes another). The site's `updatedAt` stays: a new picture is
+ * not a change to the site.
+ */
+export async function putThumbnail(
+  deps: Deps,
+  user: User,
+  name: string,
+  versionId: string,
+  bytes: Uint8Array
+): Promise<Thumbnail> {
+  const site = await requireSite(deps, user, name, 'site.thumbnail')
+  const problem = thumbnailProblem(bytes)
+  if (problem) {
+    throw new ApiError(problem.code === 'too_large' ? 413 : 400, problem.code, problem.message)
+  }
+  const changed = () =>
+    conflict(`Version ${versionId} is not the current version of "${name}"`, 'version_changed')
+  if (site.archived || site.currentVersionId !== versionId) throw changed()
+  await deps.blobs.put(thumbnailKey(site.id), bytes, {
+    contentType: 'image/png',
+    cacheControl: 'private, no-cache',
+  })
+  const thumbnail = { versionId, updatedAt: deps.clock.now().toISOString() }
+  try {
+    await deps.store.putSite({ ...site, thumbnail }, { ifCurrentVersion: versionId })
+  } catch (err) {
+    if (err instanceof ConditionFailed) throw changed()
+    throw err
+  }
+  return thumbnail
+}
+
+/** GET /api/sites/:name/thumbnail: the thumbnail, for whoever may view the site; 404 without one. */
+export async function siteThumbnail(
+  deps: Deps,
+  user: User,
+  name: string
+): Promise<{ bytes: Uint8Array; thumbnail: Thumbnail }> {
+  const site = await requireSite(deps, user, name, 'site.view')
+  const bytes = site.thumbnail ? await deps.blobs.get(thumbnailKey(site.id)) : null
+  if (!site.thumbnail || !bytes) throw notFound(`"${name}" has no thumbnail`)
+  return { bytes, thumbnail: site.thumbnail }
 }
 
 /**

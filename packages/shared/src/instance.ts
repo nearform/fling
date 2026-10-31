@@ -110,6 +110,11 @@ export const CORE_CAPABILITIES = {
   siteRoles: true,
   /** a deploy can replace one folder of a site and keep the rest (`DeployRequest.path`) */
   pathPublish: true,
+  /**
+   * a live preview of each site's home page on its site page, and a thumbnail of it in the site
+   * lists, taken by its owners' and publishers' browsers (thumbnails.ts)
+   */
+  thumbnails: true,
 } as const
 
 /** The access level the instance gives a new site when its first deploy names none. */

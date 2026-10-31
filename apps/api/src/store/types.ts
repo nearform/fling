@@ -197,6 +197,12 @@ export interface SiteRecord {
   owners: SiteRoleList
   /** v3; older records read as none */
   publishers: SiteRoleList
+  /**
+   * Its home page's thumbnail (`thumbnailKey`, blobs/types.ts): the version it was taken of and
+   * when. Absent until an owner's or publisher's browser takes one (thumbnails.ts in shared).
+   * Writing it leaves `updatedAt` alone: a new picture is not a change to the site.
+   */
+  thumbnail?: { versionId: string; updatedAt: string }
   createdAt: string
   updatedAt: string
 }
@@ -230,6 +236,8 @@ export interface SharedListing {
   archived: boolean
   live: boolean
   restricted: boolean
+  /** when its thumbnail was taken; absent while it has none */
+  thumbnailAt?: string
 }
 
 /** What Shared with me shows of a site, as its index items carry it. */
@@ -243,6 +251,7 @@ export function listingOf(site: SiteRecord): SharedListing {
     archived: site.archived,
     live: site.currentVersionId !== null,
     restricted: isRestricted(site),
+    ...(site.thumbnail ? { thumbnailAt: site.thumbnail.updatedAt } : {}),
   }
 }
 

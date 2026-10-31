@@ -27,6 +27,7 @@ import {
   SiteSchema,
   SiteWithAudienceSchema,
   splitEmails,
+  ThumbnailSchema,
   UpdateCommentRequestSchema,
   UpdateGroupRequestSchema,
   UpdateSiteRequestSchema,
@@ -39,7 +40,7 @@ import { meOf } from '../admin.ts'
 import { principalOf, requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
 import * as groups from '../groups.ts'
-import { ApiError, forbidden, notFound } from '../lib/errors.ts'
+import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
 import type { Acting } from '../notifications/notify.ts'
@@ -286,6 +287,45 @@ apiRoutes.post('/sites/:name/unarchive', async c => {
 apiRoutes.delete('/sites/:name', async c => {
   await sites.deleteSite(c.get('deps'), c.get('user'), c.req.param('name'))
   return c.body(null, 204)
+})
+
+// --- thumbnails (the `thumbnails` capability): a PNG of the home page, the body itself ---
+
+apiRoutes.put('/sites/:name/thumbnail', async c => {
+  const versionId = c.req.query('version')
+  if (!versionId) throw badRequest('Name the version the thumbnail was taken of: ?version=<id>')
+  const bytes = new Uint8Array(await c.req.arrayBuffer())
+  const thumbnail = await sites.putThumbnail(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    versionId,
+    bytes
+  )
+  return c.json(ThumbnailSchema.parse(thumbnail))
+})
+
+/**
+ * The thumbnail, revalidated by its ETag (when it was taken). Asked for as the listings link it
+ * (`?v=<when it was taken>`, `thumbnailUrl`), it is that picture for good, so the browser keeps it.
+ */
+apiRoutes.get('/sites/:name/thumbnail', async c => {
+  const { bytes, thumbnail } = await sites.siteThumbnail(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name')
+  )
+  const etag = `"${thumbnail.updatedAt}"`
+  const headers = {
+    ETag: etag,
+    'Cache-Control':
+      c.req.query('v') === thumbnail.updatedAt
+        ? 'private, max-age=31536000, immutable'
+        : 'private, no-cache',
+    'X-Content-Type-Options': 'nosniff',
+  }
+  if (c.req.header('if-none-match') === etag) return c.body(null, 304, headers)
+  return c.body(new Uint8Array(bytes), 200, { ...headers, 'Content-Type': 'image/png' })
 })
 
 // --- comments (review mode). Policy decides per site: members of the instance take part too. ---

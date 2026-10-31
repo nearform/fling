@@ -113,6 +113,7 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'site.publishers': changes,
   'site.archive': changes,
   'site.delete': changes,
+  'site.thumbnail': rollsBack,
   'share.read': ownerReads,
   'share.create': changes,
   'share.revoke': changes,

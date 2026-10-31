@@ -151,6 +151,8 @@ export const accessOf = (site: AccessFields): Access =>
  *   site.publishers  PATCH { publishers }
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete
+ *   site.thumbnail   PUT …/thumbnail: the home page's thumbnail, taken by the browser of an owner
+ *                    or publisher who opens the site page (reading it is site.view)
  *   share.read       fling_share returning the existing link
  *   share.create     POST …/share (create or rotate), fling_share (refresh)
  *   share.revoke     DELETE …/share, fling_share (revoke)
@@ -186,6 +188,7 @@ export const ACTIONS = [
   'site.publishers',
   'site.archive',
   'site.delete',
+  'site.thumbnail',
   'share.read',
   'share.create',
   'share.revoke',
@@ -233,6 +236,7 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'site.publishers': ownerOrAdminSession,
   'site.archive': ownerOrAdminSession,
   'site.delete': ownerOrAdminSession,
+  'site.thumbnail': role => role === 'publisher' || ownerOrAdminSession(role),
   'share.read': ownerOrAdmin,
   'share.create': ownerOrAdminSession,
   'share.revoke': ownerOrAdminSession,
@@ -297,6 +301,7 @@ export const SITE_CHANGES: ReadonlySet<Action> = new Set<Action>([
   'site.publishers',
   'site.archive',
   'site.delete',
+  'site.thumbnail',
   'share.create',
   'share.revoke',
   'comment.delete',

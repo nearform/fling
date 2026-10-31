@@ -1,8 +1,9 @@
 /**
  * Secrets from SSM SecureString parameters under `SSM_PREFIX` (e.g. `/example/fling/`):
- * oidc-client-secret, session-secret, site-hmac-key, origin-verify-secret, and the deprecated
- * google-client-id + google-client-secret (read as the Google issuer when OIDC_ISSUER is unset;
- * see @fling/api auth/oidc.ts). Loaded once per cold start with GetParametersByPath(WithDecryption).
+ * oidc-client-secret (the OIDC_ISSUER client's), google-client-id + google-client-secret (the
+ * Google client), session-secret, site-hmac-key and origin-verify-secret. An instance signs in with
+ * either client or both (see @fling/api auth/oidc.ts), so it needs at least one. Loaded once per
+ * cold start with GetParametersByPath(WithDecryption).
  */
 import { GetParametersByPathCommand, SSMClient } from '@aws-sdk/client-ssm'
 import type { Secrets } from '@fling/api/config'

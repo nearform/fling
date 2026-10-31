@@ -33,7 +33,8 @@ fling setup https://fling.example.com   # your Fling's address; later runs can l
 This does everything a new machine needs:
 
 1. **Signs you in.** The CLI reads the server's `/.well-known/fling` (its name, where its sites
-   live, how people sign in) and remembers it. Your browser opens for sign-in and an API key is
+   live, how people sign in) and remembers it. Your browser opens for sign-in (on a Fling with two
+   sign-in providers, its login page, to choose one) and an API key is
    stored in `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
    The server becomes your current one; logins to other Flings are kept.
 2. **Adds Fling to Claude Code.** If `claude` is on your PATH, setup installs the Fling plugin

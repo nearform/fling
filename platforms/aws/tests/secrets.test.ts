@@ -25,12 +25,29 @@ describe('loadSecretsFromSsm', () => {
     expect(secrets).toMatchObject({ oidcClientSecret: 'oidc', sessionSecret: 's'.repeat(40) })
   })
 
-  it('still reads the deprecated Google client (production as it was)', async () => {
+  it('reads the Google client', async () => {
     const secrets = await loadSecretsFromSsm(
       '/example/fling/',
       fakeSsm({ ...core, 'google-client-id': 'gid', 'google-client-secret': 'gsecret' })
     )
     expect(secrets).toMatchObject({ googleClientId: 'gid', googleClientSecret: 'gsecret' })
+  })
+
+  it('reads both clients, for an instance that offers both', async () => {
+    const secrets = await loadSecretsFromSsm(
+      '/example/fling/',
+      fakeSsm({
+        ...core,
+        'oidc-client-secret': 'oidc',
+        'google-client-id': 'gid',
+        'google-client-secret': 'gsecret',
+      })
+    )
+    expect(secrets).toMatchObject({
+      oidcClientSecret: 'oidc',
+      googleClientId: 'gid',
+      googleClientSecret: 'gsecret',
+    })
   })
 
   it('refuses to start without a sign-in client secret', async () => {

@@ -49,3 +49,30 @@ describe('sign-in links on the login page', () => {
     expect(opensLinkForm(null)).toBe(false)
   })
 })
+
+describe('two sign-in providers', () => {
+  const both = {
+    ...instance(['example.test']),
+    auth: {
+      kind: 'oidc',
+      displayName: 'Google or Example SSO',
+      providers: [
+        { id: 'google', displayName: 'Google', issuer: 'https://accounts.google.com' },
+        { id: 'oidc', displayName: 'Example SSO', issuer: 'https://sso.example.test' },
+      ],
+      emailDomains: ['example.test'],
+    },
+  } satisfies InstanceMetadata
+
+  it('names no provider in an error, since either could have been used', () => {
+    expect(loginErrorMessage('oauth_failed', both)).toBe('Sign-in failed. Please try again.')
+    expect(loginErrorMessage('email_unverified', both)).toBe('Your account email is not verified.')
+    expect(loginErrorMessage('oauth_failed', instance([]))).toBe(
+      'Google sign-in failed. Please try again.'
+    )
+  })
+
+  it('says when the issuer itself refused someone', () => {
+    expect(loginErrorMessage('access_denied', both)).toBe("You don't have access to Acme Fling.")
+  })
+})

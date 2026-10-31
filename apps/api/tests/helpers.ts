@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ManifestFile } from '@fling/shared'
 import { createApp } from '../src/app.ts'
 import { mintApiKey } from '../src/auth/api-keys.ts'
-import { identityProviderFor } from '../src/auth/oidc.ts'
+import { identityProvidersFor } from '../src/auth/oidc.ts'
 import { signSession } from '../src/auth/session.ts'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { type Config, loadBaseConfig } from '../src/config.ts'
@@ -45,7 +45,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 
 /**
  * An app on memory adapters, signing in through an in-process OIDC provider (`idp`; pass one to
- * act as another issuer, e.g. Google for the legacy config).
+ * act as another issuer, e.g. Google for its client).
  */
 export function setup(overrides: Partial<Config> = {}, idp: TestIdp = testIdp()) {
   const config = testConfig(overrides)
@@ -66,7 +66,7 @@ export function setup(overrides: Partial<Config> = {}, idp: TestIdp = testIdp())
     blobs,
     routeTable,
     clock,
-    identity: identityProviderFor(config, { fetch: idp.fetch, jwksCooldownMs: 0 }),
+    identities: identityProvidersFor(config, { fetch: idp.fetch, jwksCooldownMs: 0 }),
   }
   const app = createApp(deps)
   return {

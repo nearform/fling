@@ -348,6 +348,7 @@ export function requestSignInLink(email: string, returnTo: string): Promise<void
 }
 
 /** Full-page redirect into the instance's sign-in; the API sends the browser back to `returnTo`. */
-export function loginUrl(returnTo: string): string {
-  return `/auth/login?return=${encodeURIComponent(returnTo)}`
+export function loginUrl(returnTo: string, provider?: string): string {
+  const q = new URLSearchParams({ ...(provider && { provider }), return: returnTo })
+  return `/auth/login?${q.toString()}`
 }

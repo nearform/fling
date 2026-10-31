@@ -1,4 +1,9 @@
-import { allowedAccountsPhrase, type InstanceMetadata, SIGN_IN_LINK_MINUTES } from '@fling/shared'
+import {
+  allowedAccountsPhrase,
+  type InstanceMetadata,
+  SIGN_IN_LINK_MINUTES,
+  signInChoices,
+} from '@fling/shared'
 import { EnvelopeIcon } from '@heroicons/react/24/outline'
 import { type FormEvent, useState } from 'react'
 import { AuthCard } from '../components/AuthCard'
@@ -39,7 +44,9 @@ export function opensLinkForm(code: string | null): boolean {
 /** The message for a failed sign-in: the API redirects to /login?error=<code>. */
 export function loginErrorMessage(code: string, instance: InstanceMetadata | null): string {
   const name = instance?.name ?? DEFAULT_INSTANCE_NAME
-  const provider = instance?.auth.displayName
+  // Named only when there is one way in: with two, the page can't tell which one was used.
+  const choices = instance ? signInChoices(instance.auth) : []
+  const provider = choices.length === 1 ? choices[0]?.displayName : undefined
   const accounts = instance ? allowedAccountsPhrase(instance.auth) : null
   const invites = instance?.capabilities.invites === true
   switch (code) {
@@ -57,6 +64,8 @@ export function loginErrorMessage(code: string, instance: InstanceMetadata | nul
       return 'That sign-in link has been used already. Ask for a new one below.'
     case 'not_invited':
       return `That address no longer has an invitation to ${name}.`
+    case 'access_denied':
+      return `You don't have access to ${name}.`
     case 'email_unverified':
       return provider
         ? `Your ${provider} account email is not verified.`
@@ -68,9 +77,13 @@ export function loginErrorMessage(code: string, instance: InstanceMetadata | nul
   }
 }
 
-/** Where to come back to after signing in: from the /login page itself, the app's home. */
+/**
+ * Where to come back to after signing in: on the /login page itself, its `return` (where the API
+ * sent the browser from to choose a provider, which checks it again) or the app's home.
+ */
 function returnTo(): string {
-  return window.location.pathname === '/login' ? `${window.location.origin}/` : window.location.href
+  if (window.location.pathname !== '/login') return window.location.href
+  return new URLSearchParams(window.location.search).get('return') ?? `${window.location.origin}/`
 }
 
 /**
@@ -149,7 +162,10 @@ function EmailLink({ name, open: startOpen }: { name: string; open: boolean }) {
   )
 }
 
-/** Sign in with the instance's method; the API sends the browser back to this page. */
+/**
+ * Sign in with one of the instance's providers, a button each; the API sends the browser back to
+ * this page on an error.
+ */
 export default function Login() {
   const instance = useInstance()
   const name = instance?.name ?? DEFAULT_INSTANCE_NAME
@@ -158,7 +174,8 @@ export default function Login() {
   const params = new URLSearchParams(window.location.search)
   const errorCode = params.get('error')
   const error = errorCode ? loginErrorMessage(errorCode, instance) : null
-  const signIn = () => window.location.assign(loginUrl(returnTo()))
+  const choices = instance ? signInChoices(instance.auth) : [{ displayName: '' }]
+  const signIn = (provider?: string) => window.location.assign(loginUrl(returnTo(), provider))
 
   return (
     <AuthCard backdrop={<ThreadBackground />}>
@@ -172,14 +189,19 @@ export default function Login() {
           {error}
         </div>
       )}
-      <button
-        type="button"
-        className="btn btn-outline w-full justify-start gap-3 font-normal"
-        onClick={signIn}
-      >
-        {instance?.auth.issuer === GOOGLE_ISSUER && <GoogleIcon className="w-5 h-5" />}
-        Sign in{instance ? ` with ${instance.auth.displayName}` : ''}
-      </button>
+      <div className="space-y-2">
+        {choices.map(choice => (
+          <button
+            key={choice.id ?? 'default'}
+            type="button"
+            className="btn btn-outline w-full justify-start gap-3 font-normal"
+            onClick={() => signIn(choice.id)}
+          >
+            {choice.issuer === GOOGLE_ISSUER && <GoogleIcon className="w-5 h-5" />}
+            Sign in{choice.displayName ? ` with ${choice.displayName}` : ''}
+          </button>
+        ))}
+      </div>
       {accounts && (
         <p className="mt-2 text-xs text-muted">
           {accounts.charAt(0).toUpperCase() + accounts.slice(1)} only.

@@ -24,20 +24,47 @@ export const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
 const color = z.string().regex(HEX_COLOR_RE)
 
 /**
- * How people sign in. `kind` names the method: `oidc` (the instance's OpenID Connect `issuer`) or
- * `dev` (local dev login); clients show `displayName` ("Sign in with …") and must tolerate kinds
- * they don't know. A verified email gets in if its domain is in `emailDomains`, or if it is one of
- * the instance's invited addresses (`invitedEmails`: there are some; the addresses themselves are
- * never published).
+ * One way to sign in to an instance: an OpenID Connect issuer. A browser starts it at
+ * `/auth/login?provider=<id>&return=<url>`.
+ */
+export const SignInProviderSchema = z.looseObject({
+  /** `google` or `oidc` today; clients pass it back as is. */
+  id: z.string().min(1),
+  /** "Sign in with <displayName>". */
+  displayName: z.string().min(1),
+  issuer: z.string().optional(),
+})
+export type SignInProvider = z.infer<typeof SignInProviderSchema>
+
+/**
+ * How people sign in. `kind` names the method: `oidc` (OpenID Connect) or `dev` (local dev login);
+ * clients must tolerate kinds they don't know. `providers` lists the sign-in providers in the
+ * order to offer them, one button each; `displayName` names them all for copy ("your Google or
+ * Example SSO account"), and `issuer` is there when there is exactly one. A verified email gets in
+ * if its domain is in `emailDomains`, or if it is one of the instance's invited addresses
+ * (`invitedEmails`: there are some; the addresses themselves are never published). The policy is
+ * the same whichever provider someone signs in with.
  */
 export const InstanceAuthSchema = z.looseObject({
   kind: z.string().min(1),
   displayName: z.string().min(1),
   issuer: z.string().optional(),
+  providers: z.array(SignInProviderSchema).optional(),
   emailDomains: z.array(z.string()).default([]),
   invitedEmails: z.boolean().optional(),
 })
 export type InstanceAuth = z.infer<typeof InstanceAuthSchema>
+
+/**
+ * The buttons a login page shows: each provider, or, from a server that lists none, the one method
+ * it names (no `id`: `/auth/login` starts it without one).
+ */
+export function signInChoices(
+  auth: Pick<InstanceAuth, 'kind' | 'displayName' | 'issuer' | 'providers'>
+): { id?: string; displayName: string; issuer?: string }[] {
+  if (auth.providers?.length) return auth.providers
+  return [{ displayName: auth.displayName, ...(auth.issuer && { issuer: auth.issuer }) }]
+}
 
 /**
  * The colours a deployment may set; the web derives every shade from these. `primary` backs

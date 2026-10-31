@@ -1,13 +1,16 @@
 /**
- * `/auth/*`: sign-in with the instance's OpenID Connect issuer (auth/oidc.ts). `/auth/login`
- * starts it (or, already signed in, refreshes `fling_site` and goes straight back: the edge sends
- * private-site visitors here) and the issuer returns to `/auth/callback`. Going back to a
- * restricted site takes a site pass, so every way back from signing in goes through
- * `signedInReturn` (sites.ts), which asks policy. State, nonce, the PKCE
- * verifier and the return URL travel in a short-lived `fling_oauth` cookie. `/auth/google` and
- * `/auth/google/callback` are the pre-OIDC paths, kept because existing Google OAuth clients
- * allow only that callback. Also logout, the CLI loopback login and the dev-only login. Every way
- * in admits by standing (auth/standing.ts): the email policy, an admin, or a live invitation.
+ * `/auth/*`: sign-in with the instance's OpenID Connect providers (auth/oidc.ts).
+ * `/auth/login?provider=<id>` starts it with that provider (or, already signed in, refreshes
+ * `fling_site` and goes straight back: the edge sends private-site visitors here). Without a
+ * provider it starts with the only one, or, when there are two, sends the browser to the login page
+ * (`/login?return=`) to choose. Each provider's issuer returns to its own callback:
+ * `/auth/google/callback` for the Google client, `/auth/callback` for `OIDC_ISSUER`. Going back to
+ * a restricted site takes a site pass, so every way back from signing in goes through
+ * `signedInReturn` (sites.ts), which asks policy. The provider, state, nonce, the PKCE verifier and
+ * the return URL travel in a short-lived `fling_oauth` cookie, and a callback takes only a flow
+ * that its own provider started. `/auth/google` starts Google's sign-in. Also logout, the CLI
+ * loopback login and the dev-only login. Every way in, by any provider, admits by standing
+ * (auth/standing.ts): the email policy, an admin, or a live invitation.
  * Someone invited from outside the policy can also sign in by an emailed link (`/auth/link`,
  * auth/sign-in-link.ts).
  */
@@ -18,8 +21,15 @@ import { base64url } from 'jose'
 import * as oauth from 'oauth4webapi'
 import { mintApiKey } from '../auth/api-keys.ts'
 import { cliKeyName, validateCliRedirectUri } from '../auth/cli.ts'
-import { admitIdentity, type Identity, type SignInRequest } from '../auth/identity.ts'
+import {
+  admitIdentity,
+  type Identity,
+  type IdentityProvider,
+  SignInRefused,
+  type SignInRequest,
+} from '../auth/identity.ts'
 import { resolveSession, sessionPrincipal } from '../auth/middleware.ts'
+import { CALLBACK_PATH, GOOGLE_CALLBACK_PATH } from '../auth/oidc.ts'
 import { safeReturnUrl } from '../auth/return-url.ts'
 import { endSession, setSiteCookie, startSession } from '../auth/session.ts'
 import {
@@ -40,6 +50,8 @@ const FLOW_COOKIE = 'fling_oauth'
 
 interface SignInFlow extends SignInRequest {
   ret: string
+  /** The provider that started it (`IdentityProvider.id`). */
+  provider?: string
 }
 
 const encodeFlow = (flow: SignInFlow) => base64url.encode(JSON.stringify(flow))
@@ -56,7 +68,8 @@ function decodeFlow(value: string | undefined): SignInFlow | null {
       return null
     }
     const ret = typeof f.ret === 'string' ? f.ret : '/'
-    return { state: f.state, nonce: f.nonce, codeVerifier: f.codeVerifier, ret }
+    const provider = typeof f.provider === 'string' ? f.provider : undefined
+    return { state: f.state, nonce: f.nonce, codeVerifier: f.codeVerifier, ret, provider }
   } catch {
     return null
   }
@@ -91,13 +104,23 @@ async function upsertUser(c: Context<AppEnv>, email: string, name: string, pictu
   )
 }
 
-/** Send the browser to the issuer (or, in local dev without one, to the dev-login form). */
-async function beginSignIn(c: Context<AppEnv>, ret: string) {
-  const { config, identity } = c.get('deps')
-  if (!identity) {
+/** The provider named `id`, else the only one there is; null when the person has to choose. */
+function providerFor(identities: IdentityProvider[], id: string | undefined) {
+  return identities.find(p => p.id === id) ?? (identities.length === 1 ? identities[0] : null)
+}
+
+/**
+ * Send the browser to the provider's issuer: the one named, or the only one. With two and none
+ * named, to the login page to choose; in local dev without any, to the dev-login form.
+ */
+async function beginSignIn(c: Context<AppEnv>, ret: string, providerId?: string) {
+  const { config, identities = [] } = c.get('deps')
+  if (identities.length === 0) {
     if (config.devLogin) return c.redirect(`/auth/dev-login?return=${encodeURIComponent(ret)}`, 302)
     throw notFound('Sign-in is not configured')
   }
+  const identity = providerFor(identities, providerId)
+  if (!identity) return c.redirect(`/login?return=${encodeURIComponent(ret)}`, 302)
   const request: SignInRequest = {
     state: oauth.generateRandomState(),
     nonce: oauth.generateRandomNonce(),
@@ -110,7 +133,7 @@ async function beginSignIn(c: Context<AppEnv>, ret: string) {
     warn('oidc discovery failed', err)
     return loginError(c, 'oauth_failed')
   }
-  setCookie(c, FLOW_COOKIE, encodeFlow({ ...request, ret }), {
+  setCookie(c, FLOW_COOKIE, encodeFlow({ ...request, ret, provider: identity.id }), {
     path: '/auth',
     httpOnly: true,
     secure: config.secureCookies,
@@ -122,19 +145,23 @@ async function beginSignIn(c: Context<AppEnv>, ret: string) {
 
 export const authRoutes = new Hono<AppEnv>()
 
-/** Signed in → refresh `fling_site` and go back; else sign in first. */
-async function login(c: Context<AppEnv>) {
+/** Signed in → refresh `fling_site` and go back; else sign in first, with `provider` if named. */
+async function login(c: Context<AppEnv>, provider = c.req.query('provider')) {
   const ret = returnOf(c)
   const session = await resolveSession(c)
-  if (!session) return beginSignIn(c, ret)
+  if (!session) return beginSignIn(c, ret, provider)
   setSiteCookie(c, session.user)
   return c.redirect(await signedInReturn(c.get('deps'), session.user, ret), 302)
 }
 
-/** The issuer's redirect back: check the flow, verify the identity, apply the email policy. */
-async function callback(c: Context<AppEnv>) {
-  const { config, identity } = c.get('deps')
-  if (!identity) throw notFound('Sign-in is not configured')
+/**
+ * An issuer's redirect back to `path`: check the flow, verify the identity with the provider that
+ * started it, apply the email policy. With two providers, a flow is taken only on its own
+ * provider's callback, so one issuer's response never reaches the other's token endpoint.
+ */
+async function callback(c: Context<AppEnv>, path: string) {
+  const { config, identities = [] } = c.get('deps')
+  if (identities.length === 0) throw notFound('Sign-in is not configured')
   const flow = decodeFlow(getCookie(c, FLOW_COOKIE))
   deleteCookie(c, FLOW_COOKIE, { path: '/auth', secure: config.secureCookies })
   const query = new URL(c.req.url).searchParams
@@ -143,13 +170,17 @@ async function callback(c: Context<AppEnv>) {
   if (!flow || !query.get('code') || !state || state !== flow.state) {
     return loginError(c, 'oauth_state_mismatch')
   }
+  const identity = providerFor(identities, flow.provider)
+  if (!identity || (identities.length > 1 && identity.callbackPath !== path)) {
+    return loginError(c, 'oauth_state_mismatch')
+  }
 
   let who: Identity
   try {
     who = await identity.exchange(query, flow)
   } catch (err) {
     warn('oidc exchange failed', err)
-    return loginError(c, 'oauth_failed')
+    return loginError(c, err instanceof SignInRefused ? 'access_denied' : 'oauth_failed')
   }
   const email = who.email?.trim().toLowerCase()
   const standing = email ? await standingOf(c.get('deps'), email) : 'none'
@@ -158,7 +189,7 @@ async function callback(c: Context<AppEnv>) {
     {
       allowedDomains: config.allowedEmailDomains,
       allowedEmails: config.allowedEmails,
-      assumeEmailVerified: config.oidc.assumeEmailVerified,
+      assumeEmailVerified: identity.assumeEmailVerified,
     },
     standing
   )
@@ -170,11 +201,10 @@ async function callback(c: Context<AppEnv>) {
   return c.redirect(await signedInReturn(c.get('deps'), user, safeReturnUrl(flow.ret, config)), 302)
 }
 
-authRoutes.get('/login', login)
-authRoutes.get('/callback', callback)
-// The pre-OIDC paths: old links, and the callback existing Google OAuth clients allow.
-authRoutes.get('/google', login)
-authRoutes.get('/google/callback', callback)
+authRoutes.get('/login', c => login(c))
+authRoutes.get('/callback', c => callback(c, CALLBACK_PATH))
+authRoutes.get('/google', c => login(c, 'google'))
+authRoutes.get('/google/callback', c => callback(c, GOOGLE_CALLBACK_PATH))
 
 authRoutes.post('/logout', c => {
   const origin = c.req.header('origin')

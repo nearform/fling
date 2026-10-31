@@ -211,15 +211,22 @@ minutes, and someone added gets in within 10 seconds. A guest's `fling_site` on 
 goes the same way: `/auth/login` refreshes the cookie and asks policy, so a guest gets the deny
 handoff, and someone who has become a member since their cookie was set goes straight back.
 
-**Sign-in** — one OpenID Connect issuer per instance (`OIDC_ISSUER`), behind the
-`IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. The
-**email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from it, decides who gets in: a
-verified email listed in `ALLOWED_EMAILS` or on a domain in `ALLOWED_EMAIL_DOMAINS` (production
-needs at least one; the public metadata names the domains, never the addresses), or one with
-**standing** from an invitation. Someone invited from outside the policy, who usually can't sign in
-at the issuer, signs in with a **sign-in link** instead: with the `invites` capability the login
-page offers the issuer first and, below it, "Email me a sign-in link". A user is their email; the
-issuer's `sub` is not stored.
+**Sign-in** — OpenID Connect, through an instance's **sign-in providers**, each behind the
+`IdentityProvider` interface (`apps/api/src/auth/oidc.ts`), which proves who someone is. There are
+up to two: `google`, a Google OAuth client (`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, on
+`/auth/google/callback`), and `oidc`, any issuer (`OIDC_ISSUER`, labelled `OIDC_DISPLAY_NAME`, on
+`/auth/callback`). The metadata lists them (`auth.providers`) and the login page shows a button for
+each; `/auth/login?provider=<id>` starts one, and without a choice between two the browser goes to
+the login page to choose. A sign-in is finished only on the callback of the provider that started
+it. The **email policy** (`admitIdentity`, `auth/identity.ts`), kept apart from the providers and
+the same for all of them, decides who gets in: a verified email listed in `ALLOWED_EMAILS` or on a
+domain in `ALLOWED_EMAIL_DOMAINS` (production needs at least one; the public metadata names the
+domains, never the addresses), or one with **standing** from an invitation. An issuer may also turn
+someone away itself (`SignInRefused`), and the login page then says they have no access. Someone
+invited from outside the policy, who usually can't sign in at an issuer, signs in with a **sign-in
+link** instead: with the `invites` capability the login page offers the providers first and, below
+them, "Email me a sign-in link". A user is their email, whichever provider they use; the issuer's
+`sub` is not stored.
 
 **Standing** — whether someone may be signed in, and as what (`standingOf`,
 `apps/api/src/auth/standing.ts`): `member` when the email policy admits them, they are an admin

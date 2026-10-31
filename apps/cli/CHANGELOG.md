@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Two sign-in providers.** A Fling can offer a Google client and another OpenID Connect issuer
+  side by side, listed in its metadata (`auth.providers`). On one, `fling login` (and
+  `fling_login`) opens the Fling's login page with a button for each, and comes back with a key
+  whichever is used. A Fling with one provider signs in as before. Upgrade note for operators: an
+  instance with `OIDC_ISSUER` that still has the `google-client-id` and `google-client-secret`
+  parameters now offers Google too; delete them if it shouldn't. Without `OIDC_DISPLAY_NAME`, an
+  issuer Fling doesn't know is labelled "Single sign-on" rather than its host name.
+
 - **Path publish.** `fling deploy <dir> --name <site> --path <folder>` publishes the folder into
   that folder of the site (`<site>/30-10-26/`) and keeps the rest. When someone else published the
   site meanwhile it deploys once more on top of theirs. `fling versions` has a PATH column and

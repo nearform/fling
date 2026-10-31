@@ -9,7 +9,12 @@ import {
   slugify,
   userSlugFromEmail,
 } from '../src/hosts.ts'
-import { allowedAccountsPhrase, InstanceAuthSchema, privateAudience } from '../src/instance.ts'
+import {
+  allowedAccountsPhrase,
+  InstanceAuthSchema,
+  privateAudience,
+  signInChoices,
+} from '../src/instance.ts'
 import { isValidSitePath } from '../src/manifest.ts'
 import { signSiteCookie, verifySiteCookie } from '../src/site-cookie.ts'
 import { computeVersionId } from '../src/version-id.ts'
@@ -116,6 +121,31 @@ describe('cacheControlFor', () => {
       expect([p, isHashedFileName(p)]).toEqual([p, false])
       expect(cacheControlFor(p)).toBe('public, max-age=0, must-revalidate, s-maxage=31536000')
     }
+  })
+})
+
+describe('sign-in choices', () => {
+  it('offers each provider the metadata lists, in order', () => {
+    const providers = [
+      { id: 'google', displayName: 'Google', issuer: 'https://accounts.google.com' },
+      { id: 'oidc', displayName: 'Example SSO', issuer: 'https://sso.example.test' },
+    ]
+    const auth = InstanceAuthSchema.parse({
+      kind: 'oidc',
+      displayName: 'Google or Example SSO',
+      providers,
+    })
+    expect(signInChoices(auth)).toEqual(providers)
+  })
+
+  it('offers the one method a server without a providers list names', () => {
+    const issuer = 'https://sso.example.test'
+    expect(signInChoices({ kind: 'oidc', displayName: 'Example SSO', issuer })).toEqual([
+      { displayName: 'Example SSO', issuer },
+    ])
+    expect(signInChoices({ kind: 'dev', displayName: 'Dev login' })).toEqual([
+      { displayName: 'Dev login' },
+    ])
   })
 })
 

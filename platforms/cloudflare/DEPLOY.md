@@ -229,7 +229,7 @@ them, so it needs [Email](#email): the deploy refuses `INVITES` on without `MAIL
 ## Sign-in (OpenID Connect)
 
 Exactly as on AWS ([Sign-in](../aws/DEPLOY.md#sign-in-openid-connect): Google, Entra ID, Okta,
-Auth0), except where the secret lives. Register a confidential web client with the redirect URI
+Auth0, Cognito, or a Google client and an issuer side by side), except where the secrets live. Register a confidential web client with the redirect URI
 `https://$APP_HOST/auth/callback` and scopes `openid email profile`, set `OIDC_ISSUER` and
 `OIDC_CLIENT_ID` in `INSTANCE` (setup's `--oidc-issuer`/`--oidc-client-id`), and put the client
 secret on the Worker:
@@ -237,6 +237,15 @@ secret on the Worker:
 ```bash
 cd platforms/cloudflare
 pnpm exec wrangler secret put OIDC_CLIENT_SECRET --config dist/wrangler.jsonc
+```
+
+A [Google client](../aws/DEPLOY.md#a-google-client), on its own or beside `OIDC_ISSUER`
+([Two providers](../aws/DEPLOY.md#two-providers)), allows the redirect URI
+`https://$APP_HOST/auth/google/callback`, and its id and secret are Worker secrets too:
+
+```bash
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID --config dist/wrangler.jsonc
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET --config dist/wrangler.jsonc
 ```
 
 ## How a deploy ships

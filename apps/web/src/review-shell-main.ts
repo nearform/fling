@@ -18,6 +18,11 @@
  *   decides whether it becomes the new comment's pin);
  * - this reviewer's pointer, as an anchor, and other reviewers' pointers, drawn like pins.
  *
+ * In preview mode (`?mode=preview`, `previewShellUrl`: the site page's live preview) it does none
+ * of that: it frames the home page with its scrollbar hidden, keeps the frame on the site, and when
+ * the page asks (`capture`) draws a thumbnail of it (preview-capture.ts, loaded only then) and
+ * sends it back (`captured`, or `captureFailed`).
+ *
  * It trusts only messages from the app origin its `fling-app-origin` meta names, and talks only to
  * that origin. It holds no data: everything it draws, the page sends. Opened on its own (not in a
  * frame) it goes to the page it was asked to frame.
@@ -26,6 +31,7 @@ import { normalizeCommentPath } from '@fling/shared/comments'
 import {
   type BridgeCursor,
   type BridgePin,
+  isPreviewMode,
   PageMessageSchema,
   shellMessage,
 } from '@fling/shared/review-bridge'
@@ -49,6 +55,7 @@ const appOrigin = notFoundAppOrigin(
   window.location
 )
 const start = framedPath(new URLSearchParams(window.location.search).get('path'), origin)
+const preview = isPreviewMode(window.location.search)
 
 const frame = document.getElementById('site') as HTMLIFrameElement
 const overlay = document.getElementById('overlay') as HTMLDivElement
@@ -369,9 +376,32 @@ frame.addEventListener('load', () => {
     return
   }
   undone = 0
+  if (preview) {
+    // A picture of the page, not a window onto it: no scrollbar.
+    win.document.documentElement.style.scrollbarWidth = 'none'
+    settled(win)
+    return
+  }
   attach(win)
   report()
 })
+
+// --- preview mode: a thumbnail ------------------------------------------------------------------
+
+let settled: (win: Window) => void = () => {}
+const firstLoad = new Promise<Window>(resolve => {
+  settled = resolve
+})
+
+async function capture() {
+  try {
+    const win = await firstLoad
+    const { captureThumbnail } = await import('./preview-capture')
+    post({ type: 'captured', png: await captureThumbnail(win) })
+  } catch (err) {
+    post({ type: 'captureFailed', reason: String((err as Error)?.message ?? err).slice(0, 300) })
+  }
+}
 
 // --- pins and cursors ---------------------------------------------------------------------------
 
@@ -647,6 +677,9 @@ window.addEventListener('message', e => {
     case 'cursors':
       cursors = m.cursors
       scheduleDraw()
+      break
+    case 'capture':
+      if (preview) void capture()
       break
   }
 })

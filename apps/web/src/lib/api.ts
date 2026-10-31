@@ -61,6 +61,8 @@ import {
   SiteDetailSchema,
   SiteListSchema,
   type SiteRoleInput,
+  type Thumbnail,
+  ThumbnailSchema,
   type VersionFiles,
   VersionFilesSchema,
   type Visibility,
@@ -111,10 +113,12 @@ async function readJson(res: Response): Promise<unknown> {
 export async function request<T>(
   path: string,
   parser: Parser<T>,
-  init: { method?: string; body?: unknown } = {}
+  /** `body` is sent as JSON; `blob` as it is, with its own type */
+  init: { method?: string; body?: unknown; blob?: Blob } = {}
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (init.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (init.blob) headers['Content-Type'] = init.blob.type || 'application/octet-stream'
 
   let res: Response
   try {
@@ -122,7 +126,7 @@ export async function request<T>(
       method: init.method ?? 'GET',
       headers,
       credentials: 'same-origin',
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.blob ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
     })
   } catch {
     throw new ApiError(0, 'network_error', 'Could not reach Fling. Check your connection.')
@@ -187,6 +191,12 @@ export const api = {
   /** The files in one version of a site, sorted by path. */
   versionFiles: (name: string, versionId: string): Promise<VersionFiles> =>
     request(`${site(name)}/versions/${encodeURIComponent(versionId)}/files`, VersionFilesSchema),
+  /** Keep a thumbnail of the home page, a PNG taken of `versionId` (`thumbnails` capability). */
+  putThumbnail: (name: string, versionId: string, png: Blob): Promise<Thumbnail> =>
+    request(`${site(name)}/thumbnail?version=${encodeURIComponent(versionId)}`, ThumbnailSchema, {
+      method: 'PUT',
+      blob: png,
+    }),
   updateSite: (
     name: string,
     body: {

@@ -9,6 +9,10 @@
  * (`?view=all`): every site on the instance from the site directory, fetched whole (up to the
  * server's ceiling, with a note when it stops short) and searched and ordered the same way, each
  * an `AdminSiteCard` (the listing only).
+ *
+ * With the `thumbnails` capability every tab shows each site's thumbnail, and the header's
+ * List / Grid switch lays them out as rows or as thumbnail-led cards in as many columns as the
+ * width holds; the choice is kept per browser. The lists use the page's whole width.
  */
 import {
   type AdminSite,
@@ -19,19 +23,27 @@ import {
   sortSites,
 } from '@fling/shared'
 import { ShieldCheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { useMemo } from 'react'
+import { type ReactNode, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminSiteCard } from '../components/AdminSiteCard'
 import { SharedSiteCard } from '../components/SharedSiteCard'
 import { SiteCard } from '../components/SiteCard'
 import { SiteSearch } from '../components/SiteSearch'
+import { SitesLayoutToggle } from '../components/SitesLayoutToggle'
 import { useInstance } from '../hooks/instance'
 import { useAdminSites, useMe, useSharedSites, useSites } from '../hooks/queries'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { countLabel, filterSites } from '../lib/search'
-import { chooseSiteSort, parseSiteSort, SITE_SORT_LABELS, sitesViewOf } from '../lib/sites'
+import {
+  chooseSiteSort,
+  parseSiteSort,
+  SITE_SORT_LABELS,
+  type SitesLayout,
+  sitesLayoutOf,
+  sitesViewOf,
+} from '../lib/sites'
 import { QuickStart } from './GetStarted'
 
 /** "Good morning" by the reader's local clock. */
@@ -53,6 +65,8 @@ function SitesHeader({
   onQueryChange,
   sort,
   onSortChange,
+  layout,
+  onLayoutChange,
 }: {
   title: string
   count: string
@@ -60,6 +74,9 @@ function SitesHeader({
   onQueryChange: (q: string) => void
   sort: SiteSort
   onSortChange: (sort: SiteSort) => void
+  /** absent without the `thumbnails` capability: rows only */
+  layout?: SitesLayout
+  onLayoutChange: (layout: SitesLayout) => void
 }) {
   const { data: me } = useMe()
   const firstName = me?.name?.split(/\s+/)[0]
@@ -92,21 +109,29 @@ function SitesHeader({
             </option>
           ))}
         </select>
+        {layout && <SitesLayoutToggle value={layout} onChange={onLayoutChange} />}
       </div>
     </header>
   )
 }
 
-/** The Shared tab's body: loading, an error, nothing shared, nothing matching, or the rows. */
+/** The sites of any tab, as rows or as a grid of cards. */
+function SiteItems({ layout, children }: { layout: SitesLayout; children: ReactNode }) {
+  return <ul className={layout === 'grid' ? 'site-grid' : 'space-y-2'}>{children}</ul>
+}
+
+/** The Shared tab's body: loading, an error, nothing shared, nothing matching, or the sites. */
 function SharedList({
   list,
   shown,
   query,
+  layout,
   onClear,
 }: {
   list: ReturnType<typeof useSharedSites>
   shown: SharedSite[]
   query: string
+  layout: SitesLayout
   onClear: () => void
 }) {
   if (list.isPending) return <Loading />
@@ -130,28 +155,30 @@ function SharedList({
   }
   if (shown.length === 0) return <NoMatch query={query} label="shared " onClear={onClear} />
   return (
-    <ul className="space-y-2">
+    <SiteItems layout={layout}>
       {shown.map(site => (
         <li key={site.name}>
-          <SharedSiteCard site={site} />
+          <SharedSiteCard site={site} layout={layout} />
         </li>
       ))}
-    </ul>
+    </SiteItems>
   )
 }
 
-/** All sites' body (admins): loading, an error, nothing, nothing matching, or the rows. */
+/** All sites' body (admins): loading, an error, nothing, nothing matching, or the sites. */
 function AllSitesList({
   list,
   shown,
   query,
   me,
+  layout,
   onClear,
 }: {
   list: ReturnType<typeof useAdminSites>
   shown: AdminSite[]
   query: string
   me: string
+  layout: SitesLayout
   onClear: () => void
 }) {
   if (list.isPending) return <Loading />
@@ -175,13 +202,13 @@ function AllSitesList({
   if (shown.length === 0) return <NoMatch query={query} label="" onClear={onClear} />
   return (
     <div className="space-y-3">
-      <ul className="space-y-2">
+      <SiteItems layout={layout}>
         {shown.map(site => (
           <li key={site.name}>
-            <AdminSiteCard site={site} mine={site.owner === me} />
+            <AdminSiteCard site={site} mine={site.owner === me} layout={layout} />
           </li>
         ))}
-      </ul>
+      </SiteItems>
       {list.data.truncated && (
         <p className="text-center text-sm text-secondary">
           The list stops at {list.data.sites.length.toLocaleString()} sites, the most it shows.
@@ -236,6 +263,9 @@ export default function Sites() {
     DEFAULT_SITE_SORT
   )
   const sort = chooseSiteSort(params.get('sort'), savedSort)
+  const thumbnails = useInstance()?.capabilities.thumbnails === true
+  const [savedLayout, setLayout] = useLocalStoragePreference<string>('sitesLayout', 'list')
+  const layout = sitesLayoutOf(savedLayout, thumbnails)
   const active = useSites(false, !guest)
   const list = useSites(archived, !guest)
   const sharedList = useSharedSites(sharing)
@@ -271,7 +301,7 @@ export default function Sites() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4">
+    <div className="space-y-4">
       <SitesHeader
         title={all ? 'All sites' : shared ? 'Shared with you' : 'Your sites'}
         count={
@@ -297,6 +327,8 @@ export default function Sites() {
         onQueryChange={setQuery}
         sort={sort}
         onSortChange={setSort}
+        {...(thumbnails && { layout })}
+        onLayoutChange={setLayout}
       />
 
       {!guest && (
@@ -356,6 +388,7 @@ export default function Sites() {
           shown={allShown}
           query={query}
           me={me?.email ?? ''}
+          layout={layout}
           onClear={() => setQuery('')}
         />
       ) : shared ? (
@@ -363,6 +396,7 @@ export default function Sites() {
           list={sharedList}
           shown={sharedShown}
           query={query}
+          layout={layout}
           onClear={() => setQuery('')}
         />
       ) : list.isPending ? (
@@ -391,13 +425,13 @@ export default function Sites() {
       ) : shown.length === 0 ? (
         <NoMatch query={query} label={archived ? 'archived ' : ''} onClear={() => setQuery('')} />
       ) : (
-        <ul className="space-y-2">
+        <SiteItems layout={layout}>
           {shown.map(site => (
             <li key={site.name}>
-              <SiteCard site={site} />
+              <SiteCard site={site} layout={layout} />
             </li>
           ))}
-        </ul>
+        </SiteItems>
       )}
     </div>
   )

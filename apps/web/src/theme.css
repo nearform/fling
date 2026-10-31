@@ -1006,3 +1006,176 @@
     opacity: 1;
   }
 }
+
+/* Thumbnails and the live preview (`thumbnails` capability). A thumbnail sits on a 16:10 tile,
+   the preview's shape; without one the tile shows the instance's logo mark, faded. The site page's
+   preview is the home page at a desktop viewport (1280 × 800, PREVIEW_VIEWPORT), scaled to the
+   tile's width: `tan(atan2(100cqi, 1280px))` is the ratio of the two lengths as a number. */
+@layer components {
+  .site-thumb {
+    display: grid;
+    aspect-ratio: 16 / 10;
+    overflow: clip;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-control);
+    background: var(--surface-inset);
+  }
+
+  .site-thumb > img {
+    inline-size: 100%;
+    block-size: 100%;
+    object-fit: cover;
+    object-position: top;
+  }
+
+  .site-thumb-placeholder {
+    display: grid;
+    place-items: center;
+    inline-size: 100%;
+    block-size: 100%;
+    container-type: size;
+    background: var(--surface-inset);
+  }
+
+  .site-thumb-placeholder .site-thumb-mark {
+    inline-size: 34cqmin;
+    block-size: 34cqmin;
+    opacity: 0.3;
+    filter: grayscale(0.7);
+  }
+
+  /* The overview's facts, with the preview beside them while both fit, below them when not. */
+  .site-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    align-items: start;
+    gap: var(--space-4);
+  }
+
+  .site-preview {
+    position: relative;
+    display: grid;
+    grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+    margin: 0;
+    aspect-ratio: 16 / 10;
+    overflow: clip;
+    container-type: inline-size;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-control);
+    background: var(--surface-inset);
+  }
+
+  .site-preview > * {
+    grid-area: 1 / 1;
+  }
+
+  .site-preview-viewport {
+    align-self: start;
+    justify-self: start;
+    inline-size: 1280px;
+    block-size: 800px;
+    transform-origin: 0 0;
+    scale: tan(atan2(100cqi, 1280px));
+    opacity: 0;
+  }
+
+  .site-preview[data-loaded] .site-preview-viewport {
+    opacity: 1;
+  }
+
+  .site-preview[data-loaded] > .site-thumb-placeholder {
+    visibility: hidden;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .site-preview-viewport {
+      transition: opacity 300ms ease-out;
+    }
+  }
+
+  .site-preview iframe {
+    display: block;
+    inline-size: 100%;
+    block-size: 100%;
+    border: 0;
+    background: oklch(1 0 none);
+    pointer-events: none;
+  }
+
+  /* The whole preview opens the site; its corner shows that on hover and focus. */
+  .site-preview-open {
+    z-index: 1;
+    display: grid;
+    place-items: start end;
+    padding: var(--space-2);
+    border-radius: inherit;
+  }
+
+  .site-preview-open:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
+  }
+
+  .site-preview-open-icon {
+    inline-size: 1.75rem;
+    block-size: 1.75rem;
+    padding: 0.375rem;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-control);
+    background: var(--surface-panel);
+    opacity: 0;
+  }
+
+  .site-preview-open:focus-visible .site-preview-open-icon {
+    opacity: 1;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .site-preview-open:hover .site-preview-open-icon {
+      opacity: 1;
+    }
+  }
+
+  .site-preview-open:active .site-preview-open-icon {
+    translate: 0 1px;
+  }
+
+  /* The site lists' grid view: thumbnail-led cards, as many columns as the width holds. */
+  .site-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+    gap: var(--space-3);
+  }
+
+  .site-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: clip;
+  }
+
+  .site-tile > .site-thumb {
+    border: 0;
+    border-block-end: 1px solid var(--border-subtle);
+    border-radius: 0;
+  }
+
+  .site-tile-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+
+  .site-tile-links {
+    margin-block-start: auto;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .site-tile:has(.site-tile-link):hover {
+      border-color: var(--border-control);
+    }
+  }
+}

@@ -43,3 +43,16 @@ export function sitesViewOf(
   if (param === 'all' && reader.admin) return 'all'
   return 'active'
 }
+
+/**
+ * How the site lists lay sites out (`thumbnails` capability): one row each, or thumbnail-led cards
+ * in a grid. The reader's choice is kept per browser; without the capability it is always rows.
+ */
+export type SitesLayout = 'list' | 'grid'
+
+export const SITES_LAYOUTS: readonly SitesLayout[] = ['list', 'grid']
+
+/** A stored value as a layout: the list unless it says grid, and the list without thumbnails. */
+export function sitesLayoutOf(saved: string | null | undefined, thumbnails: boolean): SitesLayout {
+  return thumbnails && saved === 'grid' ? 'grid' : 'list'
+}

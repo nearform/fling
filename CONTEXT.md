@@ -94,6 +94,30 @@ Function makes itself carry the header; the files S3 serves keep the browser's d
 **Site page** — `/sites/<name>` on the app origin (`apps/web/src/pages/Site.tsx`): everything about
 one of your sites (overview, access, owners and publishers, versions, archive and delete), in
 sections under `components/site/`; the lists of people and groups share `components/PeoplePicker.tsx`. The site list links each row to it.
+Its overview shows the site's **preview** while it is live.
+
+**Preview** — the home page of a live site as a desktop browser shows it (1280 × 800,
+`PREVIEW_VIEWPORT` in `packages/shared/src/thumbnails.ts`), scaled down to a tile in the site
+page's overview with CSS, loaded when it comes into view, and out of reach of the pointer, the
+keyboard and screen readers (a link over it opens the site; `components/site/SitePreview.tsx`). Its
+frame holds the review shell in **preview mode** (`previewShellUrl`), so it loads private and
+restricted sites as review mode does. The `thumbnails` capability.
+
+**Thumbnail** — a small PNG of a site's home page (at most 480 × 300 and 200 KB), kept beside its
+files (`thumbnailKey`, `apps/api/src/blobs/types.ts`) and recorded on the site as the version it was
+taken of and when (`SiteRecord.thumbnail`; listings carry when, as `thumbnailAt`). Browsers take
+them: when an owner or publisher opens the site page and the thumbnail is missing or of another
+version than the current one (`wantsThumbnail`), the preview asks the shell to draw the settled
+home page (`apps/web/src/preview-capture.ts`, with modern-screenshot, in the shell's bundle only)
+and uploads it with `PUT /api/sites/<name>/thumbnail?version=<id>` (`site.thumbnail` in
+`policy.ts`: owners, publishers, and admins from their browser session). The server takes a PNG of a
+thumbnail's size for the current version only (409 `version_changed` otherwise) and leaves the
+site's `updatedAt` alone. `GET /api/sites/<name>/thumbnail` serves it to whoever may `site.view`,
+cached for good at the address the listings give (`?v=<when it was taken>`, `thumbnailUrl`) and
+revalidated by its ETag otherwise. Archiving keeps it; deleting the site deletes it. Every site list
+(yours, Shared with me, All sites) shows it, or the instance's logo mark faded while there is none,
+as rows or as a grid of cards (the List / Grid switch, kept per browser). The `thumbnails`
+capability.
 
 **Site order** — how site lists are sorted, the same in every client: `sortSites`
 (`packages/shared/src/site-sort.ts`), last updated first by default, or created (newest first) or
@@ -338,7 +362,8 @@ reviewer selects as an anchor with its quote (the review page pins the new comme
 pin was placed), and draws pins (the selected one with its area)
 and other reviewers' pointers. It talks to the review page over the **review bridge**
 (`packages/shared/src/review-bridge.ts`), postMessage with each side accepting only the other's
-origin; the shell holds no data.
+origin; the shell holds no data. In **preview mode** (`?mode=preview`, the site page's
+**Preview**) it only frames the home page and, when the page asks, draws it as a **Thumbnail**.
 
 **Anchor** — where a pin points (`CommentAnchorSchema`, `packages/shared/src/comments.ts`):
 viewport percentages (`x`, `y`, always present, the last resort), and when the shell made it, a

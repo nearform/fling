@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseSiteSort, parseSiteSort, siteHref } from '../src/lib/sites'
+import { chooseSiteSort, parseSiteSort, siteHref, sitesLayoutOf } from '../src/lib/sites'
 
 describe('site page and list order', () => {
   it("links to a site's page by name", () => {
@@ -13,5 +13,18 @@ describe('site page and list order', () => {
     expect(chooseSiteSort(null, null)).toBe('updated')
     expect(chooseSiteSort(null, 'nonsense')).toBe('updated')
     expect(parseSiteSort(undefined)).toBe('updated')
+  })
+})
+
+describe('site list layout', () => {
+  it('keeps the grid when the reader chose it and the instance has thumbnails', () => {
+    expect(sitesLayoutOf('grid', true)).toBe('grid')
+    expect(sitesLayoutOf('list', true)).toBe('list')
+  })
+
+  it('is the list otherwise', () => {
+    expect(sitesLayoutOf(null, true)).toBe('list')
+    expect(sitesLayoutOf('tiles', true)).toBe('list')
+    expect(sitesLayoutOf('grid', false)).toBe('list')
   })
 })

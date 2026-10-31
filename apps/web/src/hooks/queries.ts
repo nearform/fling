@@ -105,6 +105,23 @@ function useSiteMutation<TVars, TResult>(
   })
 }
 
+/**
+ * Keep a thumbnail the site page's preview took (`thumbnails` capability). Quiet either way: nobody
+ * asked for it, and a refusal (another version went live meanwhile) is put right next time.
+ */
+export function useSaveThumbnail(name: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ versionId, png }: { versionId: string; png: Blob }) =>
+      api.putThumbnail(name, versionId, png),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
+      queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminSites })
+    },
+  })
+}
+
 export function useSiteActions(name: string) {
   return {
     setVisibility: useSiteMutation(

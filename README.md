@@ -95,6 +95,13 @@ in a frame beside its comments, threads per page that can be replied to, resolve
 - An instance turns comments off with `COMMENTS=false`; its metadata then lacks the `comments`
   capability and every client hides them.
 
+**Previews and thumbnails.** A site's page in the web UI shows its home page live, as a desktop
+browser sees it, scaled down; private and restricted sites included. When an owner or publisher
+opens that page and the site's thumbnail is missing or of an older version, their browser draws
+the home page as a small PNG and keeps it as the site's thumbnail. The site lists show each site's
+thumbnail (a faded logo until it has one), as rows or, with the List / Grid switch, as a grid of
+cards; the choice is kept per browser. The `thumbnails` capability turns this on in every client.
+
 **Live review.** Everyone with a site's review page open is in that site's room. New comments,
 replies and resolutions appear without a refresh, each reviewer's pointer moves on the others'
 screens with their name, and a row of avatars (profile picture or initials) shows who is there,

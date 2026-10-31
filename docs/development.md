@@ -46,7 +46,12 @@ Delete either folder to start over.
 review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
 `vite.review-shell.config.ts`), served on every site host by both runtimes. Run
 `pnpm --filter @fling/web build` before trying them locally, and again after changing them. Both
-say `noindex` and `no-referrer` in meta tags, since share hosts serve them too. Every sites host's
+say `noindex` and `no-referrer` in meta tags, since share hosts serve them too. The site page's
+preview is the review shell in preview mode (`?mode=preview`), so it needs the same build. Open a
+site's page signed in as its owner and the preview draws its thumbnail and uploads it (the request
+is `PUT /api/sites/<name>/thumbnail` in the browser's network panel); the Sites page then shows it,
+as rows or in the grid. Drawing happens in the browser only, so the e2e scenario uploads a made-up
+PNG instead. Every sites host's
 `/robots.txt` is `apps/web/sites-robots.txt`, served as is.
 
 **Signing in.** Local dev uses a dev login form: any `@example.test` address gets in, and

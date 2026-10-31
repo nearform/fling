@@ -1,6 +1,6 @@
 {
   "name": "fling",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "private": true,
   "license": "MIT",
   "description": "Fling \u2014 throw a folder of static files at a Fling server and get a link back",
@@ -14,12 +14,13 @@
     "lint": "biome check . --diagnostic-level=error && node scripts/check-names.mjs",
     "lint:fix": "biome check --write .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && node --test 'scripts/*.test.mjs'",
     "build": "pnpm -r build",
     "infra": "node scripts/check-terraform.mjs",
     "gate": "pnpm lint && pnpm infra && pnpm typecheck && pnpm test && pnpm build && pnpm e2e",
     "cli": "tsx apps/cli/src/cli.ts",
-    "e2e": "pnpm --filter @fling/e2e e2e"
+    "e2e": "pnpm --filter @fling/e2e e2e",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",

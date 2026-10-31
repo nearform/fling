@@ -12,7 +12,8 @@ link.
 
 > **Upgrading from 0.2?** The CLI no longer has a built-in server. If you were logged in with 0.2
 > it carries on with the server you logged in to. Otherwise (or on a new machine) run
-> `fling login <url>` once with your Fling's address. See [CHANGELOG.md](CHANGELOG.md).
+> `fling login <url>` once with your Fling's address. See the
+> [changelog](https://github.com/nearform/fling/blob/main/CHANGELOG.md).
 
 ## Install
 

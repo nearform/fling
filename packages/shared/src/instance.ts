@@ -111,6 +111,11 @@ export const InstanceMetadataSchema = z.looseObject({
    * Missing (older servers) or unknown: `members` (`defaultAccessOf`).
    */
   defaultAccess: DefaultAccessLevelSchema.optional().catch(undefined),
+  /**
+   * The Fling release the server runs, e.g. `0.7.0` (the root package.json's version, built in).
+   * Missing on servers built before releases were stamped.
+   */
+  release: z.string().min(1).optional().catch(undefined),
 })
 export type InstanceMetadata = z.infer<typeof InstanceMetadataSchema>
 

@@ -10,7 +10,8 @@
  * arrows move, Tab fills in the highlighted one, Enter adds it, Escape closes). With none published there is no completion.
  *
  * With outside invitations on, it says that someone from outside is invited as a reviewer
- * (`outsideInviteNote`).
+ * (`outsideInviteNote`), except where only members may be added (`membersOnly`: a site's owners
+ * and publishers).
  */
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, useRef, useState } from 'react'
 import { useInstance } from '../hooks/instance'
@@ -34,6 +35,7 @@ export function EmailAdder({
   problem,
   hint,
   label = 'Add people by email',
+  membersOnly = false,
 }: {
   id: string
   draft: string
@@ -43,10 +45,11 @@ export function EmailAdder({
   problem: string | null
   hint?: ReactNode
   label?: string
+  membersOnly?: boolean
 }) {
   const instance = useInstance()
   const domains = instance?.auth.emailDomains ?? NO_DOMAINS
-  const outside = outsideInviteNote(instance)
+  const outside = membersOnly ? null : outsideInviteNote(instance)
   const [closed, setClosed] = useState(false)
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)

@@ -1,5 +1,6 @@
 import { CORE_CAPABILITIES, INSTANCE_METADATA_PATH, InstanceMetadataSchema } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
+import rootPackage from '../../../package.json'
 import { loadBaseConfig } from '../src/config.ts'
 import { instanceMetadata } from '../src/instance.ts'
 import { setup, testConfig } from './helpers.ts'
@@ -42,6 +43,8 @@ describe('GET /.well-known/fling', () => {
       capabilities: expect.objectContaining({ ...CORE_CAPABILITIES, comments: true }),
       installCommand: expect.stringMatching(/^npm install -g \S+$/),
       defaultAccess: 'only_me',
+      // The release this build is: the root package.json's version, which `pnpm release` sets.
+      release: rootPackage.version,
     })
   })
 

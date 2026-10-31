@@ -10,6 +10,9 @@ import {
   type InstanceAuth,
   type InstanceMetadata,
 } from '@fling/shared'
+// The release this build is: `pnpm release` sets the root package.json's version, and each
+// platform's bundler (esbuild on AWS, wrangler on Cloudflare) inlines it at build time.
+import rootPackage from '../../../package.json'
 import { signInProviders } from './auth/oidc.ts'
 import type { Config } from './config.ts'
 
@@ -70,5 +73,6 @@ export function instanceMetadata(config: Config): InstanceMetadata {
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,
+    release: rootPackage.version,
   }
 }

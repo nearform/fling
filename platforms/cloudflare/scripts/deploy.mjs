@@ -8,7 +8,8 @@
 //   3. the D1 schema: `wrangler d1 migrations apply --remote` (additive, before the code);
 //   4. the Worker, its assets included: `wrangler deploy`;
 //   5. Fling's data migrations (migrate.ts --remote), after the code, as on AWS;
-//   6. the app origin's /.well-known/fling answers for this instance;
+//   6. the app origin's /.well-known/fling answers for this instance, from this release (`release`,
+//      the root package.json's version, built in);
 //   7. the smoke test (packages/e2e) when FLING_E2E_API_KEY is set, else a warning.
 //
 //   CF_DEPLOY_CONFIG='{…}' CLOUDFLARE_API_TOKEN=… node scripts/deploy.mjs [--skip-smoke]
@@ -79,6 +80,7 @@ run('Run the data migrations', bin('tsx'), [
 ])
 
 console.log('\n▸ Check the instance answers')
+const release = JSON.parse(readFileSync(join(ROOT, '..', '..', 'package.json'), 'utf8')).version
 let answered = false
 for (let attempt = 0; attempt < 20 && !answered; attempt++) {
   try {
@@ -86,16 +88,20 @@ for (let attempt = 0; attempt < 20 && !answered; attempt++) {
       headers: { 'cache-control': 'no-cache' },
     })
     const meta = res.ok ? await res.json() : null
-    answered = meta?.appOrigin === appOrigin
+    answered = meta?.appOrigin === appOrigin && meta?.release === release
     if (answered)
-      console.log(JSON.stringify({ name: meta.name, appOrigin, sitesDomain: meta.sitesDomain }))
+      console.log(
+        JSON.stringify({ name: meta.name, appOrigin, sitesDomain: meta.sitesDomain, release })
+      )
   } catch {
     // DNS or the certificate may still be settling on a first deploy
   }
   if (!answered) await new Promise(r => setTimeout(r, 6000))
 }
 if (!answered) {
-  console.error(`deploy: ${appOrigin}/.well-known/fling did not answer for this instance`)
+  console.error(
+    `deploy: ${appOrigin}/.well-known/fling did not answer for this instance and release ${release}`
+  )
   process.exit(1)
 }
 

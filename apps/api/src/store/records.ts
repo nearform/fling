@@ -428,6 +428,7 @@ const LISTING_FIELDS = Object.keys({
   archived: true,
   live: true,
   restricted: true,
+  thumbnailAt: true,
 } satisfies Record<keyof SharedListing, true>) as (keyof SharedListing)[]
 
 const sameListing = (a: SharedListing, b: SharedListing) =>

@@ -139,6 +139,7 @@ export async function listSites(
       access: s.access,
       archived: s.archived,
       live: s.live,
+      ...(s.thumbnailAt ? { thumbnail: { updatedAt: s.thumbnailAt } } : {}),
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     })),

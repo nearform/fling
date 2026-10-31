@@ -8,6 +8,10 @@
 // Each side accepts a message only from the other's origin (the shell: the app origin its meta
 // names; the page: the site URL's origin) and parses it with these schemas; anything else is
 // ignored. Messages carry `fling: 'review'` so other postMessage traffic is told apart.
+//
+// In preview mode (`previewShellUrl`: the site page's live preview, thumbnails.ts) the shell frames
+// the home page and does nothing but load it, and, when the page asks (`capture`), draw it as a
+// thumbnail and send it back (`captured`, or `captureFailed`). The page only uses `ready` and those.
 
 import { z } from 'zod'
 import { COMMENT_PATH_MAX, CommentAnchorSchema } from './comments.ts'
@@ -55,6 +59,10 @@ export const ShellMessageSchema = z.discriminatedUnion('type', [
   /** a link or form to another origin, stopped: the frame stays on the site */
   z.object({ ...tag, type: z.literal('blocked'), href: z.string().max(2048) }),
   z.object({ ...tag, type: z.literal('escape') }),
+  /** preview mode: the thumbnail the page asked for, a PNG of the frame's viewport */
+  z.object({ ...tag, type: z.literal('captured'), png: z.instanceof(Blob) }),
+  /** preview mode: no thumbnail could be drawn */
+  z.object({ ...tag, type: z.literal('captureFailed'), reason: z.string().max(300) }),
 ])
 export type ShellMessage = z.infer<typeof ShellMessageSchema>
 
@@ -69,6 +77,8 @@ export const PageMessageSchema = z.discriminatedUnion('type', [
   /** scroll the pin into view and draw attention to it */
   z.object({ ...tag, type: z.literal('focusPin'), id: z.string() }),
   z.object({ ...tag, type: z.literal('cursors'), cursors: z.array(BridgeCursorSchema) }),
+  /** preview mode: once the page has loaded and settled, draw it as a thumbnail (`captured`) */
+  z.object({ ...tag, type: z.literal('capture') }),
 ])
 export type PageMessage = z.infer<typeof PageMessageSchema>
 
@@ -88,3 +98,17 @@ export function reviewShellUrl(siteUrl: string, path = '/'): string {
   url.searchParams.set('path', path.startsWith('/') ? path : `/${path}`)
   return url.toString()
 }
+
+/**
+ * The shell in preview mode on a site: it frames the home page for the site page's live preview,
+ * and draws thumbnails of it (thumbnails.ts).
+ */
+export function previewShellUrl(siteUrl: string): string {
+  const url = new URL(reviewShellUrl(siteUrl, '/'))
+  url.searchParams.set('mode', 'preview')
+  return url.toString()
+}
+
+/** Whether the shell's address asks for preview mode. */
+export const isPreviewMode = (search: string) =>
+  new URLSearchParams(search).get('mode') === 'preview'

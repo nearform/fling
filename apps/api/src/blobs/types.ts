@@ -46,5 +46,11 @@ export interface Blobs {
 export const manifestKey = (siteId: string, versionId: string) =>
   `sites/${siteId}/_manifests/${versionId}.json`
 
+/**
+ * A site's thumbnail (a PNG of its home page; `SiteRecord.thumbnail`): under the site prefix, so
+ * deleting the site deletes it, and outside every version, so the edge never serves it.
+ */
+export const thumbnailKey = (siteId: string) => `sites/${siteId}/_thumbnail.png`
+
 /** Staging area for chunked MCP uploads (never routed by the edge; deleted on finish). */
 export const uploadPrefix = (uploadId: string) => `uploads/${uploadId}/`

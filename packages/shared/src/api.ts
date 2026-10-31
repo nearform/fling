@@ -9,6 +9,7 @@ import {
   SiteRoleMembersSchema,
   SiteRoleSchema,
 } from './site-roles.ts'
+import { ThumbnailSchema, ThumbnailStampSchema } from './thumbnails.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
 // `__Host-fling_session` cookie (web UI) or `Authorization: Bearer <api key>` (CLI/MCP).
@@ -50,6 +51,8 @@ export const SiteSchema = z.object({
   audienceGroups: z.number().default(0),
   /** the caller's role on it (site-roles.ts); servers before site roles omit it */
   role: SiteRoleSchema.optional(),
+  /** its home page's thumbnail, when it has one (`thumbnails` capability; thumbnails.ts) */
+  thumbnail: ThumbnailSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -108,6 +111,8 @@ export const SharedSiteSchema = z.object({
   owner: z.string(),
   /** how the caller is in the audience: by address, and through which of their groups (slugs) */
   via: z.object({ direct: z.boolean(), groups: z.array(z.string()) }),
+  /** when its thumbnail was taken, when it has one (`thumbnails` capability) */
+  thumbnail: ThumbnailStampSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -320,6 +325,8 @@ export const AdminSiteSchema = z.object({
   archived: z.boolean(),
   /** it has a current version */
   live: z.boolean(),
+  /** when its thumbnail was taken, when it has one (`thumbnails` capability) */
+  thumbnail: ThumbnailStampSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

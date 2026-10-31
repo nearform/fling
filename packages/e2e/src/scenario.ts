@@ -21,7 +21,9 @@
  *   signs in by the emailed link, sees the site through the pass and comments, finds members-only
  *   sites missing and may not deploy, mint a key or make a group; revoked, refused; an admin's
  *   member invitation signs another outsider in, who deploys, and once revoked finds their site
- *   cookie sent to sign in by the revocation list) → conditional-write race (concurrent
+ *   cookie sent to sign in by the revocation list) → thumbnails (the owner keeps a PNG of the
+ *   current version; the publisher replaces it and reads it; an outsider is refused until the
+ *   audience names them; another version is a 409) → conditional-write race (concurrent
  *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
@@ -39,6 +41,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { crc32, deflateSync } from 'node:zlib'
 import {
   defaultAccessOf,
   type InstanceMetadata,
@@ -667,6 +670,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('path publish: not on this instance (skipped)')
+    }
+
+    // Thumbnails: owners and publishers keep a PNG of the home page; whoever views the site reads it.
+    if (meta.capabilities.thumbnails === true) {
+      await thumbnailStep({
+        appOrigin,
+        name: `e2e-${nonce}-thumb`,
+        work: work,
+        nonce,
+        levels,
+        roles: meta.capabilities.siteRoles === true,
+        audiences: meta.capabilities.audiences === true,
+        fling,
+        made,
+        opts,
+        step,
+      })
+    } else {
+      step('thumbnails: not on this instance (skipped)')
     }
 
     // Invitations: an outsider shared with signs in by the emailed link and reviews as a guest;
@@ -2010,6 +2032,129 @@ async function rolesStep(ctx: {
  * page while `/` and the other files still serve the first version; versions show where and by
  * whom; rolling back removes the folder's new page.
  */
+/** A grey PNG of `width` × `height`: a stand-in for the thumbnail a browser draws. */
+function greyPng(width: number, height: number): Uint8Array<ArrayBuffer> {
+  const chunk = (type: string, data: Buffer) => {
+    const out = Buffer.alloc(12 + data.length)
+    out.writeUInt32BE(data.length, 0)
+    out.write(type, 4, 'latin1')
+    data.copy(out, 8)
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
+    return out
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header.set([8, 0, 0, 0, 0], 8)
+  const rows = Buffer.alloc((width + 1) * height, 0x99)
+  for (let y = 0; y < height; y++) rows[y * (width + 1)] = 0
+  return Uint8Array.from(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', header),
+      chunk('IDAT', deflateSync(rows)),
+      chunk('IEND', Buffer.alloc(0)),
+    ])
+  )
+}
+
+/**
+ * Thumbnails over HTTP (a real browser draws them; here the PNG is made up): the owner keeps one
+ * of the current version, the site reports it, its publisher replaces it and reads it back, someone
+ * the site leaves out is refused (404) until its audience names them, and a thumbnail of a version
+ * that is no longer current is a 409.
+ */
+async function thumbnailStep(ctx: {
+  appOrigin: string
+  name: string
+  work: string
+  nonce: string
+  levels: boolean
+  roles: boolean
+  audiences: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+}) {
+  const { appOrigin, name, fling, step } = ctx
+  const thumbnail = (session: Session, method: 'GET' | 'PUT', version?: string) =>
+    fetch(
+      `${appOrigin}/api/sites/${name}/thumbnail${version ? `?version=${version}` : ''}`,
+      method === 'PUT'
+        ? {
+            method,
+            headers: { authorization: `Bearer ${session.apiKey}`, 'content-type': 'image/png' },
+            body: greyPng(480, 300),
+          }
+        : { headers: { authorization: `Bearer ${session.apiKey}` } }
+    )
+  const dir = siteDir(ctx.work, 'thumb', { 'index.html': page('thumb', `thumb ${ctx.nonce}`) })
+  const first = (await fling(
+    'deploy',
+    dir,
+    '--name',
+    name,
+    ...(ctx.levels ? ['--access', 'only_me'] : [])
+  )) as { site: CliSite }
+  ctx.made.push(name)
+  const v1 = first.site.currentVersionId
+  check(v1, `thumbnails: no current version for ${name}`)
+
+  const put = await thumbnail(ctx.opts.session, 'PUT', v1)
+  const putBody = await put.text()
+  check(put.status === 200, `thumbnail PUT as the owner: ${put.status} ${putBody}`)
+  const kept = JSON.parse(putBody) as { versionId: string; updatedAt: string }
+  const site = (await (
+    await fetch(`${appOrigin}/api/sites/${name}`, {
+      headers: { authorization: `Bearer ${ctx.opts.session.apiKey}` },
+    })
+  ).json()) as { thumbnail?: { versionId: string; updatedAt: string } }
+  check(
+    kept.versionId === v1 && site.thumbnail?.updatedAt === kept.updatedAt,
+    `thumbnail: kept ${JSON.stringify(kept)}, the site says ${JSON.stringify(site.thumbnail)}`
+  )
+  const own = await thumbnail(ctx.opts.session, 'GET')
+  check(
+    own.status === 200 && own.headers.get('content-type') === 'image/png',
+    `thumbnail GET as the owner: ${own.status} ${own.headers.get('content-type')}`
+  )
+  step(`the owner kept a thumbnail of ${name}'s current version`)
+
+  const { member, outsider } = ctx.opts
+  if (ctx.roles && member) {
+    await fling('publishers', name, '--add', member.email)
+    const asPublisher = await thumbnail(member, 'PUT', v1)
+    check(asPublisher.status === 200, `thumbnail PUT as a publisher: ${asPublisher.status}`)
+    const read = await thumbnail(member, 'GET')
+    check(read.status === 200, `thumbnail GET as a publisher: ${read.status}`)
+    step('its publisher replaced the thumbnail and read it back')
+  } else {
+    step('thumbnails: no second user or no site roles, so the publisher checks are skipped')
+  }
+
+  if (outsider && ctx.levels && ctx.audiences) {
+    const refused = await thumbnail(outsider, 'GET')
+    check(refused.status === 404, `thumbnail GET by someone left out: ${refused.status}`)
+    const notTheirs = await thumbnail(outsider, 'PUT', v1)
+    check(notTheirs.status === 404, `thumbnail PUT by someone left out: ${notTheirs.status}`)
+    await fling('access', name, '--add', outsider.email)
+    const viewer = await thumbnail(outsider, 'GET')
+    check(viewer.status === 200, `thumbnail GET by the audience: ${viewer.status}`)
+    step('someone the site leaves out gets a 404; once in its audience, they read the thumbnail')
+  } else {
+    step('thumbnails: no outsider, so the refusal checks are skipped')
+  }
+
+  const v2Dir = siteDir(ctx.work, 'thumb-v2', {
+    'index.html': page('thumb', `thumb v2 ${ctx.nonce}`),
+  })
+  await fling('deploy', v2Dir, '--name', name)
+  const stale = await thumbnail(ctx.opts.session, 'PUT', v1)
+  check(stale.status === 409, `thumbnail of a version no longer current: ${stale.status}`)
+  step('a thumbnail of a version that is no longer current is a 409')
+}
+
 async function pathPublishStep(ctx: {
   name: string
   nonce: string

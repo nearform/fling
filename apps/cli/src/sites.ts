@@ -282,6 +282,16 @@ export function pathPublishEnabled(
   return instance?.capabilities.pathPublish === true
 }
 
+/**
+ * Whether the instance can be pulled from and published to on a base (`pull`). Without it a server
+ * has no pull route, and would ignore `base` and replace the whole site, so clients refuse instead.
+ */
+export function pullEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  return instance?.capabilities.pull === true
+}
+
 /** A site with its owners and publishers, as GET and PATCH report them. */
 export type SiteWithRoles = SiteWithAudience & {
   owners: SiteRoleMembers

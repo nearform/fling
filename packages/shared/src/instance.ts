@@ -143,6 +143,12 @@ export const CORE_CAPABILITIES = {
   /** a deploy can replace one folder of a site and keep the rest (`DeployRequest.path`) */
   pathPublish: true,
   /**
+   * whoever can see a site signed in may download its files (`GET /api/sites/:name/pull`,
+   * `fling pull`, `fling_read_files`), and a deploy can build on the version pulled, sending only
+   * what changed (`DeployRequest.base`)
+   */
+  pull: true,
+  /**
    * a live preview of each site's home page on its site page, and a thumbnail of it in the site
    * lists, taken by its owners' and publishers' browsers (thumbnails.ts)
    */

@@ -24,12 +24,19 @@
  * capability (an older server would ignore `path` and replace the whole site). A generated listing
  * is the folder's own index.html.
  *
+ * A folder pulled with `fling pull` (its site link, `.fling-site.json`; pull.ts) deploys to the
+ * site and the Fling it was pulled from, on the version pulled: only what changed is uploaded, the
+ * summary says what changed against the pull, and the link then names the new version. If someone
+ * published the site since, it stops (`base_changed`) rather than replace their work; `--force`
+ * publishes the folder without a base, over whatever is live. `--name` naming another site, a
+ * `--path`, or `--server`/FLING_URL naming another Fling deploy it as a plain folder instead.
+ *
  * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
  * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
  */
 
 import { stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import {
   ACCESS_LABELS,
   type AccessLevel,
@@ -51,8 +58,8 @@ import {
 import chalk from 'chalk'
 import type { ApiClient } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
-import { deploy, resolveSiteName } from '../deploy.ts'
-import { CliError } from '../errors.ts'
+import { BaseChangedError, deploy, resolveSiteName } from '../deploy.ts'
+import { CliError, EXIT_NOT_LOGGED_IN } from '../errors.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
 import { loadInstance, loadInstanceWith } from '../instance.ts'
 import {
@@ -63,12 +70,22 @@ import {
   NO_INDEX_WARNING,
   withHtmlListing,
 } from '../manifest.ts'
+import {
+  describeChanges,
+  type LinkChanges,
+  linkAfter,
+  onLink,
+  readSiteLink,
+  type SiteLink,
+  writeSiteLink,
+} from '../pull.ts'
 import { waitWithSpinner } from '../ready.ts'
 import {
   accessLevelsEnabled,
   checkName,
   commentsEnabled,
   pathPublishEnabled,
+  pullEnabled,
   type SitesBase,
   sitesBaseOf,
   siteUrlFor,
@@ -92,6 +109,8 @@ export interface DeployCommandOptions {
   listHtml?: boolean
   /** a path publish: the folder of the site to publish into */
   path?: string
+  /** a pulled folder: publish without a base, over whatever is live */
+  force?: boolean
 }
 
 export type NoIndexChoice = 'list' | 'fling'
@@ -132,13 +151,29 @@ export async function runDeploy(
   input: string | undefined,
   opts: DeployCommandOptions
 ): Promise<void> {
+  const path = resolve(input ?? '.')
+  const found = await stat(path).catch(() => null)
+  if (!found)
+    throw new CliError(`No such file or folder: ${input ?? '.'}`, {
+      hint: `Give the path to a folder, .html, .zip or other file, e.g. \`${ctx.binName} deploy ./dist\`.`,
+    })
+  const linked = found.isDirectory() ? await linkedTo(ctx, await readSiteLink(path), opts) : null
+  if (linked) ctx = linked.ctx
+  const link = linked?.link ?? null
   const client = requireClient(ctx)
   const ask = ctx.interactive && !opts.yes
   const choice = accessChoice(opts, ctx.binName)
   const folder = publishFolder(ctx, opts)
   // Where the site will be served and who can see it: from the instance stored at login.
-  // (Asked for an access level or a path: fetched again if the stored copy predates them.)
-  const needs = folder !== undefined ? 'pathPublish' : choice.access ? 'accessLevels' : null
+  // (Asked for an access level, a path or a base: fetched again if the stored copy predates them.)
+  const needs =
+    folder !== undefined
+      ? 'pathPublish'
+      : link && !opts.force
+        ? 'pull'
+        : choice.access
+          ? 'accessLevels'
+          : null
   const instance = needs
     ? await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, needs)
     : await loadInstance(ctx.store, ctx.config, ctx.fetch)
@@ -148,24 +183,64 @@ export async function runDeploy(
       hint: 'Leave out --path to publish the whole site, or ask its operator to update it.',
     })
   }
+  if (link && !opts.force && !pullEnabled(instance)) {
+    throw new CliError(`${instance?.name ?? 'This Fling'} can't publish on a pulled version yet`, {
+      hint: 'Deploy with --force to replace the whole site with the folder, or ask its operator to update it.',
+    })
+  }
   if (choice.access && instance && !accessLevelsEnabled(instance)) {
     throw new CliError(`${instance.name} can't take --access yet`, {
       hint: `Leave it out, then use \`${ctx.binName} access\` or \`${ctx.binName} visibility\`.`,
     })
   }
 
-  const path = resolve(input ?? '.')
-  if (!(await stat(path).catch(() => null)))
-    throw new CliError(`No such file or folder: ${input ?? '.'}`, {
-      hint: `Give the path to a folder, .html, .zip or other file, e.g. \`${ctx.binName} deploy ./dist\`.`,
-    })
   const prepared = await prepareInput(path)
   try {
     const { access: _asked, path: _path, ...rest } = opts
-    await deployPrepared(ctx, client, instance, base, prepared, { ...rest, ...choice, folder }, ask)
+    await deployPrepared(
+      ctx,
+      client,
+      instance,
+      base,
+      prepared,
+      { ...rest, ...choice, folder, link },
+      ask
+    )
   } finally {
     await prepared.cleanup()
   }
+}
+
+/**
+ * The folder's site link and the context to deploy it in (the Fling it was pulled from), when the
+ * deploy builds on it; null to deploy it as a plain folder.
+ */
+async function linkedTo(
+  ctx: CommandContext,
+  link: SiteLink | null,
+  opts: DeployCommandOptions
+): Promise<{ link: SiteLink; ctx: CommandContext } | null> {
+  if (!link) return null
+  const plain = (why: string) => {
+    ctx.log.info(`The folder was pulled from ${link.name} on ${link.server}; ${why}`)
+    return null
+  }
+  if (opts.name !== undefined && opts.name !== link.name) {
+    return plain(`deploying it to ${opts.name} as a plain folder.`)
+  }
+  if (opts.path !== undefined) return plain('--path deploys it as a plain folder.')
+  if (ctx.config.serverUrl === link.server) return { link, ctx }
+  if (ctx.config.serverUrlSource === 'flag' || ctx.config.serverUrlSource === 'env') {
+    return plain(`deploying it to ${ctx.config.serverUrl} as a plain folder.`)
+  }
+  const config = await ctx.store.resolve({ serverUrl: link.server })
+  if (!config.apiKey) {
+    throw new CliError(`Not signed in to ${link.server}, where the folder was pulled from`, {
+      exitCode: EXIT_NOT_LOGGED_IN,
+      hint: `Run \`${ctx.binName} login ${link.server}\` first.`,
+    })
+  }
+  return { link, ctx: { ...ctx, config } }
 }
 
 /** `--path`, normalised; it needs `--name`. */
@@ -192,20 +267,28 @@ async function deployPrepared(
   base: SitesBase | null,
   prepared: PreparedInput,
   opts: Omit<DeployCommandOptions, 'access' | 'path'> &
-    ReturnType<typeof accessChoice> & { folder?: string },
+    ReturnType<typeof accessChoice> & { folder?: string; link: SiteLink | null },
   ask: boolean
 ): Promise<void> {
-  const { folder } = opts
+  const { link } = opts
+  // Where the folder lands in the site: a path publish's folder, or the folder a pull was of.
+  const folder = opts.folder ?? link?.path
   const inFolder = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
   let local = await buildManifest(prepared.dir)
   local.skipped.dotfiles.unshift(...prepared.skippedDotfiles)
   // Never flung, whatever the flags: say so, so nobody wonders where .env went.
   for (const line of describeSkipped(local.skipped)) ctx.log.info(line)
-  let name =
-    opts.name !== undefined ? resolveSiteName(prepared.dir, opts.name) : prepared.defaultName
-  if (opts.name === undefined && ask) name = await confirmSiteName(ctx, client, name, base)
+  let name = link
+    ? link.name
+    : opts.name !== undefined
+      ? resolveSiteName(prepared.dir, opts.name)
+      : prepared.defaultName
+  if (!link && opts.name === undefined && ask) {
+    name = await confirmSiteName(ctx, client, name, base)
+  }
 
-  if (!hasRootIndex(local)) {
+  // A pulled site is published as it is: no listing page is added to it.
+  if (!link && !hasRootIndex(local)) {
     const pages = htmlPages(local).length
     const root = base ? siteUrlFor(name, base) + (folder ? `${folder}/` : '') : 'the site root'
     const warning = `No index.html ${folder ? `in ${folder}/` : 'at the root'} — ${root} will show a 404.`
@@ -225,6 +308,8 @@ async function deployPrepared(
     } else ctx.log.warn(warning)
   }
 
+  const onBase = link && !opts.force ? onLink(link, local) : null
+  const changes: LinkChanges | null = link ? onLink(link, local).changes : null
   let progressShown = false
   const result = await deploy(
     { client, fetch: ctx.fetch },
@@ -232,7 +317,15 @@ async function deployPrepared(
       dir: prepared.dir,
       name,
       manifest: local,
-      path: folder,
+      path: opts.folder,
+      ...(onBase
+        ? {
+            base: onBase.base,
+            ...(onBase.partial
+              ? { partial: true, remove: onBase.remove, within: onBase.within }
+              : {}),
+          }
+        : {}),
       spa: opts.spa ? true : undefined,
       public: opts.public,
       access: opts.access,
@@ -245,12 +338,31 @@ async function deployPrepared(
         )
       },
     }
-  ).finally(() => {
-    if (progressShown) ctx.progress(null)
-  })
+  )
+    .catch((error: unknown) => {
+      if (!(error instanceof BaseChangedError)) throw error
+      const dir = relative(process.cwd(), prepared.dir) || '.'
+      throw new BaseChangedError(
+        error.siteName,
+        error.base,
+        `Pull it again into another folder (\`${ctx.binName} pull ${name} ${dir}-latest\`), redo your changes there and deploy that; or \`${ctx.binName} deploy ${dir} --force\` to replace what they published with this folder.`
+      )
+    })
+    .finally(() => {
+      if (progressShown) ctx.progress(null)
+    })
+  // A pulled folder now stands for the version it made current.
+  if (link) {
+    await writeSiteLink(
+      prepared.dir,
+      linkAfter({ ...link, server: client.serverUrl }, result.versionId, local)
+    )
+  }
 
   for (const warning of result.warnings) if (warning !== NO_INDEX_WARNING) ctx.log.warn(warning)
-  const summary = `${result.fileCount} files, ${formatBytes(result.totalBytes)}`
+  const summary = changes
+    ? `${describeChanges(changes)} since ${link?.versionId}`
+    : `${result.fileCount} files, ${formatBytes(result.totalBytes)}`
   if (result.status === 'unchanged') ctx.log.info(`Unchanged ${chalk.dim(`(${summary})`)}`)
   else if (result.status === 'repointed')
     ctx.log.success(`Restored version ${result.versionId} ${chalk.dim(`(${summary})`)}`)
@@ -306,6 +418,7 @@ async function deployPrepared(
     status: result.status,
     site: result.site,
     ...(folder ? { path: folder, url } : {}),
+    ...(changes && link ? { base: opts.force ? null : link.versionId, changes } : {}),
     access: level,
     ...(result.first ? { created: true } : {}),
     ...(review ? { reviewUrl: review } : {}),

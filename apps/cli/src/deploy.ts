@@ -6,6 +6,11 @@
  * site: every file is sent as `<path>/<file>` and the server keeps the rest of the site. When
  * someone else publishes the site meanwhile, the server answers 409 `base_changed`; the whole
  * deploy then runs once more, on top of what they published.
+ *
+ * With `base` (a folder pulled with `fling pull`, pull.ts; the `pull` capability) the deploy builds
+ * on the version pulled: the server uploads only what it doesn't have and refuses with 409
+ * `base_changed` if the site has moved on. That is never retried: only the user knows how their
+ * changes and the newer version go together (`BaseChangedError`).
  */
 import { readFile } from 'node:fs/promises'
 import {
@@ -65,6 +70,26 @@ async function nameTakenError(client: ApiClient, name: string, body: unknown) {
   return new NameTakenError(name, suggestions)
 }
 
+/** The site moved on since the version a deploy builds on (`base`): someone published since. */
+export class BaseChangedError extends CliError {
+  readonly code = 'base_changed'
+  constructor(
+    readonly siteName: string,
+    readonly base: string,
+    hint?: string
+  ) {
+    super(
+      `${siteName} has changed since you pulled it (version ${base}): someone published it since`,
+      {
+        hint:
+          hint ??
+          'Pull it again into another folder, redo your changes there and deploy that, or deploy with --force to replace what they published.',
+      }
+    )
+    this.name = 'BaseChangedError'
+  }
+}
+
 export const UPLOAD_CONCURRENCY = 8
 export const UPLOAD_RETRIES = 3
 
@@ -99,6 +124,13 @@ export interface DeployOptions {
   audience?: AudienceInput
   /** A path publish: the folder of the site (normalised, `normalizePublishPath`) to replace. */
   path?: string
+  /** Publish on this version (it must still be current): what a pulled folder deploys on. */
+  base?: string
+  /** With `base`: the files are only part of the site, and `remove` the site paths to delete. */
+  partial?: boolean
+  remove?: string[]
+  /** With `partial`: the folder is this folder of the site (a pull of one folder). */
+  within?: string
   /** A manifest already built from `dir` (so the caller can inspect it before deploying). */
   manifest?: LocalManifest
   onProgress?: (event: {
@@ -155,8 +187,11 @@ async function deployOnce(
   name: string,
   local: LocalManifest
 ): Promise<DeployResult> {
+  const onBaseChanged = (error: unknown) =>
+    opts.base !== undefined && baseChanged(error) ? new BaseChangedError(name, opts.base) : error
   const folder = opts.path
-  const sitePath = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
+  const prefix = folder ?? opts.within
+  const sitePath = (file: string) => (prefix === undefined ? file : `${prefix}/${file}`)
   const base = {
     name,
     fileCount: local.files.length,
@@ -172,6 +207,12 @@ async function deployOnce(
       body: {
         manifest: { files: manifest.files.map(f => ({ ...f, path: sitePath(f.path) })) },
         ...(folder === undefined ? {} : { path: folder }),
+        ...(opts.base === undefined
+          ? {}
+          : {
+              base: opts.base,
+              ...(opts.partial ? { partial: true, remove: opts.remove ?? [] } : {}),
+            }),
         ...(opts.spa !== undefined ? { spa: opts.spa } : {}),
         ...(opts.public ? { visibility: 'public' as const } : {}),
         ...(opts.access ? { access: opts.access } : {}),
@@ -181,7 +222,7 @@ async function deployOnce(
     .catch(async (error: unknown) => {
       if (error instanceof CliApiError && error.status === 409 && error.code === 'name_taken')
         throw await nameTakenError(deps.client, name, error.body)
-      throw error
+      throw onBaseChanged(error)
     })
   if (res.status !== 'upload') {
     return {
@@ -212,11 +253,13 @@ async function deployOnce(
     opts.onProgress?.({ uploaded: done, total: uploads.length, bytes, totalBytes })
   })
 
-  const fin = await deps.client.request(
-    'POST',
-    `${path}/${encodeURIComponent(res.versionId)}/finalize`,
-    { schema: FinalizeResponseSchema }
-  )
+  const fin = await deps.client
+    .request('POST', `${path}/${encodeURIComponent(res.versionId)}/finalize`, {
+      schema: FinalizeResponseSchema,
+    })
+    .catch((error: unknown) => {
+      throw onBaseChanged(error)
+    })
   return {
     ...base,
     status: 'live',

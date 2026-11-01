@@ -12,6 +12,10 @@
  * With `path` (a path publish, publication.ts) the files are the folder's, given relative to it:
  * the listing page, if asked for, is the folder's own index.html, and every path is prefixed with
  * the folder before publishBytes, which carries the rest of the site forward.
+ *
+ * With `base` (a version fling_read_files returned) the files are only those changed or added,
+ * `remove` names the ones to delete, and publishBytes keeps the rest of that version (the partial
+ * form of a publish on a base). The site already has its pages, so there is no listing decision.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -55,6 +59,10 @@ export interface PublishOptions extends AccessOptions {
   principal: Principal
   /** a path publish: the folder (as the agent wrote it) the files go to */
   path?: string
+  /** a partial publish on this version: the files are those changed or added */
+  base?: string
+  /** with `base`: the site's files to delete */
+  remove?: readonly string[]
   spa?: boolean
   visibility?: Visibility
   /** no root index.html: true → generate a listing page; false → publish anyway; undefined → ask */
@@ -78,6 +86,8 @@ export type PublishOutcome =
       paths: string[]
       /** a path publish: the folder (normalised) */
       path?: string
+      /** a publish on a base: the version it built on */
+      base?: string
     }
 
 const tooLarge = (message: string) => new ApiError(413, 'too_large', message)
@@ -132,7 +142,17 @@ export async function publishFiles(
   input: InlineFile[],
   opts: PublishOptions
 ): Promise<PublishOutcome> {
-  if (input.length === 0) throw badRequest('No files to publish', 'no_files')
+  const { base } = opts
+  const remove = base === undefined ? [] : [...new Set((opts.remove ?? []).map(normalizePath))]
+  if (base !== undefined && opts.path !== undefined) {
+    throw badRequest('Pass `base` or `path`, not both', 'bad_request')
+  }
+  if (opts.remove?.length && base === undefined) {
+    throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
+  }
+  if (input.length === 0 && remove.length === 0) {
+    throw badRequest('No files to publish', 'no_files')
+  }
   const folder = opts.path === undefined ? undefined : normalizeFolder(opts.path)
   const root = folder === undefined ? 'at the root' : `in /${folder}/`
   const url = folder === undefined ? 'the site URL' : `/${folder}/`
@@ -144,7 +164,8 @@ export async function publishFiles(
   }
   const warnings: string[] = []
   let generatedIndex = false
-  if (!files.has('index.html')) {
+  // On a base the site keeps the pages it has: no listing to decide on.
+  if (base === undefined && !files.has('index.html')) {
     const htmlPages = [...files.keys()].filter(isHtmlPath).sort()
     if (htmlPages.length === 0) {
       warnings.push(
@@ -163,7 +184,7 @@ export async function publishFiles(
       warnings.push(`No index.html ${root}: ${url} will 404; the pages work at their own paths.`)
     }
   }
-  if (opts.spa && !files.has('index.html')) {
+  if (base === undefined && opts.spa && !files.has('index.html')) {
     warnings.push('spa is on but there is no index.html to fall back to.')
   }
 
@@ -176,6 +197,7 @@ export async function publishFiles(
     {
       principal: opts.principal,
       path: folder,
+      ...(base === undefined ? {} : { base, remove }),
       spa: opts.spa,
       visibility: opts.visibility,
       access: opts.access,
@@ -191,6 +213,7 @@ export async function publishFiles(
     warnings,
     paths: [...files.keys()].map(sitePath),
     ...(folder === undefined ? {} : { path: folder }),
+    ...(base === undefined ? {} : { base }),
   }
 }
 
@@ -204,9 +227,22 @@ export async function beginUpload(
   deps: Deps,
   user: User,
   name: string,
-  opts: { spa?: boolean; visibility?: Visibility; path?: string } & AccessOptions
+  opts: {
+    spa?: boolean
+    visibility?: Visibility
+    path?: string
+    base?: string
+    remove?: readonly string[]
+  } & AccessOptions
 ): Promise<UploadRecord> {
   const path = opts.path === undefined ? undefined : normalizeFolder(opts.path)
+  if (opts.base !== undefined && path !== undefined) {
+    throw badRequest('Pass `base` or `path`, not both', 'bad_request')
+  }
+  if (opts.remove?.length && opts.base === undefined) {
+    throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
+  }
+  const remove = opts.remove?.length ? [...new Set(opts.remove.map(normalizePath))] : undefined
   // Fail early on a bad or taken name, before anything is uploaded.
   const check = await sites.checkName(deps, user, name)
   if (check.status === 'invalid') {
@@ -228,6 +264,8 @@ export async function beginUpload(
     spa: opts.spa,
     visibility: opts.visibility,
     ...(path === undefined ? {} : { path }),
+    ...(opts.base === undefined ? {} : { base: opts.base }),
+    ...(remove ? { remove } : {}),
     ...(opts.access ? { access: opts.access } : {}),
     ...(opts.audience ? { audience: opts.audience } : {}),
     createdAt: now.toISOString(),
@@ -294,7 +332,7 @@ export async function finishUpload(
 ): Promise<PublishOutcome> {
   const upload = await requireUpload(deps, user, uploadId)
   const records = await deps.store.listUploadFiles(upload.id)
-  if (records.length === 0) {
+  if (records.length === 0 && !upload.remove?.length) {
     throw badRequest('Nothing uploaded yet: send files with fling_upload_file first', 'no_files')
   }
   let total = 0
@@ -321,6 +359,7 @@ export async function finishUpload(
   const outcome = await publishFiles(deps, user, upload.name, files, {
     principal: opts.principal,
     path: upload.path,
+    ...(upload.base === undefined ? {} : { base: upload.base, remove: upload.remove }),
     spa: upload.spa,
     visibility: upload.visibility,
     access: upload.access,

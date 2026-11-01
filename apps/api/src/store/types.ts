@@ -469,6 +469,10 @@ export interface UploadRecord {
   visibility?: Visibility
   /** a path publish: the folder the files go to (normalised; `DeployRequest.path`) */
   path?: string
+  /** a partial publish on this version (`DeployRequest.base`): the files are those changed */
+  base?: string
+  /** with `base`: the site's files to delete (normalised) */
+  remove?: string[]
   /** who can open the site, if the upload creates it (`DeployRequest`) */
   access?: AccessLevel
   audience?: { emails: string[]; groups: string[] }

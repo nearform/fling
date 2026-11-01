@@ -13,6 +13,7 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describeReadFiles,
   describeRoles,
   describeSharedSite,
   describeSiteAccess,
@@ -60,6 +61,7 @@ import {
   publishFiles,
   uploadFile,
 } from './publish.ts'
+import { readFiles } from './read-files.ts'
 
 export const SERVER_VERSION = '0.1.0'
 
@@ -172,7 +174,9 @@ async function publishResult(
       ? 'Unchanged — this exact content is already live'
       : status === 'repointed'
         ? `Restored previously published version ${outcome.versionId}`
-        : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}${outcome.path === undefined ? '' : ` to /${outcome.path}/ (the rest of the site kept as it was)`}`
+        : outcome.base !== undefined
+          ? `Published ${outcome.fileCount} changed or added file${outcome.fileCount === 1 ? '' : 's'} on version ${outcome.base} (the rest of the site kept as it was) as version ${outcome.versionId}`
+          : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}${outcome.path === undefined ? '' : ` to /${outcome.path}/ (the rest of the site kept as it was)`}`
   const extra = outcome.generatedIndex ? ' (with a generated index.html listing the pages)' : ''
   const warnings = outcome.warnings.length ? `\nWarnings:\n- ${outcome.warnings.join('\n- ')}` : ''
   const privacy = accessAfterPublish(deps, site, outcome.first === true, asked)
@@ -330,6 +334,27 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     }
   })
 
+  registerSiteTool(mcpTools.readFiles, async args => {
+    const read = await readFiles(deps, user, args.name, {
+      versionId: args.versionId,
+      path: args.path,
+      paths: args.paths,
+      cursor: args.cursor,
+    })
+    const data = {
+      name: read.name,
+      versionId: read.versionId,
+      files: read.files,
+      missing: read.missing,
+      ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}),
+    }
+    // The contents go in the text too: some clients show the model only the text.
+    return {
+      text: `${describeReadFiles(read.name, read)}\n\n${JSON.stringify(data)}`,
+      data,
+    }
+  })
+
   registerSiteTool(mcpTools.checkName, async args => {
     const check = await sites.checkName(deps, user, args.name)
     const url =
@@ -365,6 +390,8 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     const outcome = await publishFiles(deps, user, args.name, files, {
       principal,
       path: args.path,
+      base: args.base,
+      remove: args.remove,
       spa: args.spa,
       ...accessOf(args),
       listHtml: args.listHtml,
@@ -376,6 +403,8 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     const upload = await beginUpload(deps, user, args.name, {
       spa: args.spa,
       path: args.path,
+      base: args.base,
+      remove: args.remove,
       ...accessOf(args),
     })
     return {

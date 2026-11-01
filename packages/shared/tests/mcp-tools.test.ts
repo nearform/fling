@@ -102,7 +102,11 @@ describe('mcp tool catalogue', () => {
     expect(
       schema.safeParse({ name: 'a', files: [{ path: 'index.html', content: 'x' }] }).success
     ).toBe(true)
-    expect(schema.safeParse({ name: 'a', files: [] }).success).toBe(false)
+    // No files is a publish on a base that only removes; the servers refuse it otherwise.
+    expect(
+      schema.safeParse({ name: 'a', files: [], base: 'v1', remove: ['old.html'] }).success
+    ).toBe(true)
+    expect(schema.safeParse({ name: 'a' }).success).toBe(false)
     expect(
       schema.safeParse({
         name: 'a',

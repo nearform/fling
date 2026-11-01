@@ -1,10 +1,13 @@
 /**
  * Pull (`GET /api/sites/:name/pull`): who may pull which version, what it answers (paths, hashes,
- * signed URLs whose bytes are the version's), and `path`.
+ * signed URLs whose bytes are the version's), and `path`; and the remote MCP's side of it,
+ * fling_read_files, then fling_publish and fling_upload_* with `base` and `remove`.
  */
 import { createHash } from 'node:crypto'
+import { MCP_READ_MAX_BYTES } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
+import { callTool, connect } from './oauth-helpers.ts'
 
 const ALICE = 'alice@example.test'
 const BOB = 'bob@example.test'
@@ -130,5 +133,123 @@ describe('pull', () => {
     const swapped = new URL(a?.url as string)
     swapped.search = new URL(b?.url as string).search
     expect((await env.app.request(swapped.toString())).status).toBe(403)
+  })
+})
+
+describe('the remote MCP tools', () => {
+  it('fling_read_files returns the contents and the base; fling_publish on it changes only what is sent', async () => {
+    const { env, alice, current } = await world()
+    const png = new Uint8Array([137, 80, 78, 71, 0, 1, 2])
+    // A binary file, so the read returns it as base64.
+    const bin = await api(env, alice.key, 'POST', '/api/sites/team/deploys', {
+      base: current,
+      partial: true,
+      manifest: {
+        files: [
+          {
+            path: 'img/a.png',
+            sha256: createHash('sha256').update(png).digest('hex'),
+            size: png.length,
+            contentType: 'image/png',
+          },
+        ],
+      },
+    })
+    const staged = await json(bin)
+    for (const u of staged.uploads) {
+      await env.app.request(u.url, { method: 'PUT', headers: u.headers, body: png })
+    }
+    await api(env, alice.key, 'POST', `/api/sites/team/deploys/${staged.versionId}/finalize`)
+
+    // Bob, a viewer, may read.
+    const viewer = await connect(env, BOB)
+    const read = await callTool(env, viewer.accessToken, 'fling_read_files', { name: 'team' })
+    expect(read.isError).toBeFalsy()
+    const data = read.structuredContent
+    expect(data.versionId).toBe(staged.versionId)
+    const byPath = Object.fromEntries(
+      data.files.map((f: { path: string }) => [f.path, f])
+    ) as Record<string, { encoding: string; content: string }>
+    expect(byPath['index.html']).toMatchObject({ encoding: 'utf8', content: '<h1>v1</h1>' })
+    expect(byPath['img/a.png']?.encoding).toBe('base64')
+    expect([...Buffer.from(byPath['img/a.png']?.content ?? '', 'base64')]).toEqual([...png])
+    expect(read.content[0]?.text).toContain(`base "${staged.versionId}"`)
+    const some = await callTool(env, viewer.accessToken, 'fling_read_files', {
+      name: 'team',
+      paths: ['about.html', 'nope.html'],
+    })
+    expect(some.structuredContent.files.map((f: { path: string }) => f.path)).toEqual([
+      'about.html',
+    ])
+    expect(some.structuredContent.missing).toEqual(['nope.html'])
+    // …but not publish.
+    const refused = await callTool(env, viewer.accessToken, 'fling_publish', {
+      name: 'team',
+      base: data.versionId,
+      files: [{ path: 'index.html', content: '<h1>bob</h1>' }],
+    })
+    expect(refused.isError).toBe(true)
+
+    const owner = await connect(env, ALICE)
+    const pub = await callTool(env, owner.accessToken, 'fling_publish', {
+      name: 'team',
+      base: data.versionId,
+      files: [{ path: 'index.html', content: '<h1>v2</h1>' }],
+      remove: ['about.html'],
+    })
+    expect(pub.isError).toBeFalsy()
+    expect(pub.content[0]?.text).toContain(`on version ${data.versionId}`)
+    const after = await json(await pull(env, alice.key))
+    expect(after.files.map((f: { path: string }) => f.path)).toEqual([
+      '30-10-26/index.html',
+      'img/a.png',
+      'index.html',
+      'new.html',
+    ])
+
+    // The same base again is stale.
+    const stale = await callTool(env, owner.accessToken, 'fling_publish', {
+      name: 'team',
+      base: data.versionId,
+      files: [{ path: 'new.html', content: '<h1>again</h1>' }],
+    })
+    expect(stale.isError).toBe(true)
+    expect(stale.content[0]?.text).toContain('base_changed')
+
+    // Chunked: removing alone, on the new base.
+    const begun = await callTool(env, owner.accessToken, 'fling_upload_begin', {
+      name: 'team',
+      base: pub.structuredContent.versionId,
+      remove: ['new.html'],
+    })
+    expect(begun.isError).toBeFalsy()
+    const done = await callTool(env, owner.accessToken, 'fling_upload_finish', {
+      uploadId: begun.structuredContent.uploadId,
+    })
+    expect(done.isError).toBeFalsy()
+    expect((await json(await pull(env, alice.key))).files).toHaveLength(3)
+  })
+
+  it('fling_read_files pages by size, with a cursor', async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    const big = 'x'.repeat(MCP_READ_MAX_BYTES / 2 + 1)
+    await deploy(env, alice.key, 'team', [
+      file('a.html', big),
+      file('b.html', big),
+      file('c.html', 'c'),
+    ])
+    const { accessToken } = await connect(env, ALICE)
+    const first = await callTool(env, accessToken, 'fling_read_files', { name: 'team' })
+    expect(first.structuredContent.files.map((f: { path: string }) => f.path)).toEqual(['a.html'])
+    const next = await callTool(env, accessToken, 'fling_read_files', {
+      name: 'team',
+      cursor: first.structuredContent.nextCursor,
+    })
+    expect(next.structuredContent.files.map((f: { path: string }) => f.path)).toEqual([
+      'b.html',
+      'c.html',
+    ])
+    expect(next.structuredContent.nextCursor).toBeUndefined()
   })
 })

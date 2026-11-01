@@ -12,14 +12,16 @@
  * instructions are written when the server starts: with one Fling they name it (its stored
  * `/.well-known/fling`), with none they stay generic, and with several they list them by host.
  * Local extras: fling_deploy (a file, zip or folder on this computer, found by name in Downloads
- * etc. — see locate.ts / inputs.ts), fling_find_files, fling_servers and fling_login. Never relies
- * on Claude's sandbox paths or network.
+ * etc. — see locate.ts / inputs.ts), fling_pull (a site's files into a folder here, by default
+ * ~/Documents/Claude/fling/<name>, which fling_deploy then publishes on the version pulled; pull.ts),
+ * fling_find_files, fling_servers and fling_login. Never relies on Claude's sandbox paths or
+ * network.
  *
  * stdout carries only the MCP protocol: nothing here logs, and errors become tool results.
  */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve as resolvePath } from 'node:path'
 import {
   ACCESS_NOTE,
   type AccessLevel,
@@ -31,14 +33,17 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describeReadFiles,
   describeRoles,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
+  encodeForAgent,
   type InstanceMetadata,
   isSecretPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
+  MCP_READ_MAX_BYTES,
   type McpToolDef,
   type McpWording,
   mcpToolsFor,
@@ -49,6 +54,8 @@ import {
   needsAudience,
   normalizePublishPath,
   PATH_PUBLISH_NOTE,
+  PullResponseSchema,
+  pageOfFiles,
   privateAudience,
   reviewUrl,
   shareForFeedback,
@@ -68,7 +75,7 @@ import {
   systemLocateOptions,
 } from './config.ts'
 import type { OpenLike } from './context.ts'
-import { deploy, NameTakenError, resolveSiteName } from './deploy.ts'
+import { BaseChangedError, deploy, NameTakenError, resolveSiteName } from './deploy.ts'
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
 import { loadInstance, loadInstanceWith } from './instance.ts'
@@ -102,6 +109,15 @@ import {
   serverToolNote,
 } from './mcp-servers.ts'
 import { NPX_COMMAND, VERSION } from './package-info.ts'
+import {
+  describeChanges,
+  linkAfter,
+  onLink,
+  pullSite,
+  readSiteLink,
+  type SiteLink,
+  writeSiteLink,
+} from './pull.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import {
   accessLevelsEnabled,
@@ -125,6 +141,7 @@ import {
   listSites,
   notificationsEnabled,
   pathPublishEnabled,
+  pullEnabled,
   renameGroup,
   resolveComment,
   rollback,
@@ -185,6 +202,9 @@ export const mcpLocalInstructions = (
       'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
     'A file or folder the user has on this computer (a downloaded .html, a .zip, a build folder): call fling_deploy with its path, or just its file name (e.g. "Pitch Deck.html") — ' +
       'it is looked up in Downloads, Desktop, Documents/Claude and Claude Desktop output folders. Use fling_find_files to see recent candidates when unsure which file the user means.',
+    'To change a site that is already published, start from what is live: fling_pull downloads its files into a folder on this computer; edit them there, then fling_deploy that folder publishes on the version pulled, sending only what changed. ' +
+      'If it says base_changed, someone published in between: pull again into another folder and redo the changes, rather than force over their work. ' +
+      '(fling_read_files and fling_publish with `base` do the same inline, for content you edit in this conversation.)',
     'Confirm the site name with the user before publishing (fling_check_name shows whether it is free and, for a path, the generated name). Names are global, first come first served; when one is taken, offer the suggestions.',
     'When there is no index.html but there are HTML pages, fling_deploy and fling_publish do not publish: ask the user whether to generate an index page listing the pages (`listHtml: true`) or publish without one (`listHtml: false`, the root URL 404s), then retry.',
     NEVER_PUBLISHED,
@@ -331,6 +351,29 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     return folder
   }
 
+  /**
+   * Refuse to pull from, or publish on a base to, a Fling without it (its metadata fetched again
+   * when the stored copy predates it): an older server would ignore `base` and replace the site.
+   */
+  async function requirePull(target: Target) {
+    const instance = await loadInstanceWith(store, target.config, fetchImpl, 'pull')
+    if (!pullEnabled(instance)) {
+      throw new CliError(
+        `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)}) can't pull sites or publish on a pulled version yet`
+      )
+    }
+  }
+
+  /** The Fling a pulled folder came from (its site link), to deploy it there; else undefined. */
+  async function linkedServer(path: string): Promise<string | undefined> {
+    try {
+      const located = await resolveInput(path, locate)
+      return located.isDirectory ? (await readSiteLink(located.path))?.server : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
   async function run(
     tool: string,
@@ -366,11 +409,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       retryWith: string
       /** Dotfiles already left out (from a zip or the inline files). */
       skippedDotfiles?: string[]
+      /** A pulled folder's site link: publish on the version pulled, and update it after. */
+      link?: SiteLink | null
+      /** With `link`: publish without a base, over whatever is live. */
+      force?: boolean
+      /** The files are only those changed or added on this version; `remove` those to delete. */
+      base?: string
+      remove?: string[]
     }
   ): Promise<DeployOutcome> {
     if (opts.access) await requireAccessLevels(t)
+    const link = opts.link ?? null
+    if ((link && !opts.force) || opts.base !== undefined) await requirePull(t)
+    if (opts.base !== undefined && opts.folder !== undefined) {
+      throw new CliError('Pass `base` or `path`, not both')
+    }
     const folder = opts.folder === undefined ? undefined : await publishFolder(t, opts.folder)
-    const inFolder = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
+    // Where the files land in the site: a path publish's folder, or the folder a pull was of.
+    const shownFolder = folder ?? link?.path
+    const inFolder = (file: string) => (shownFolder === undefined ? file : `${shownFolder}/${file}`)
     const top = folder === undefined ? 'at the root' : `in /${folder}/`
     let local = await buildManifest(dir)
     local.skipped.dotfiles.unshift(...(opts.skippedDotfiles ?? []))
@@ -378,7 +435,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       .map(l => `\n${l}.`)
       .join('')
     let generatedIndex = false
-    if (!hasRootIndex(local)) {
+    // A pulled site, or part of one, is published as it is: no listing page is added to it.
+    const asItIs = link !== null || opts.base !== undefined
+    if (!asItIs && !hasRootIndex(local)) {
       const pages = htmlPages(local).map(f => f.path)
       if (pages.length > 0 && opts.listHtml === undefined) {
         const shown = pages.slice(0, 20)
@@ -401,6 +460,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         generatedIndex = true
       }
     }
+    const onBase = link && !opts.force ? onLink(link, local) : null
+    const changes = link ? onLink(link, local).changes : null
     const result = await deploy(
       { client: t.client, fetch: fetchImpl },
       {
@@ -408,6 +469,16 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         name: opts.name,
         manifest: local,
         path: folder,
+        ...(onBase
+          ? {
+              base: onBase.base,
+              ...(onBase.partial
+                ? { partial: true, remove: onBase.remove, within: onBase.within }
+                : {}),
+            }
+          : opts.base !== undefined
+            ? { base: opts.base, partial: true, remove: opts.remove ?? [] }
+            : {}),
         spa: opts.spa,
         ...(opts.access
           ? {
@@ -419,6 +490,14 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           : { public: opts.public }),
       }
     ).catch((error: unknown) => {
+      if (error instanceof BaseChangedError) {
+        throw new CliError(
+          `Not published: ${error.message}. ` +
+            (link
+              ? `Pull it again with fling_pull into another folder, redo the changes there and deploy that; or call ${opts.retryWith} again with \`force: true\` to replace what they published, only if the user says so.`
+              : 'Read the files again with fling_read_files and redo the changes on the new version.')
+        )
+      }
       if (!(error instanceof NameTakenError)) throw error
       const how = opts.nameGiven ? '' : ` (generated from ${opts.nameFrom ?? 'the folder'})`
       const pick = error.suggestions.length
@@ -429,12 +508,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           `Ask the user which name to use (one of these or their own), then call ${opts.retryWith} again with \`name\`.`
       )
     })
+    if (link) await writeSiteLink(dir, linkAfter(link, result.versionId, local))
     const what =
       result.status === 'unchanged'
         ? 'Unchanged — already live'
         : result.status === 'repointed'
           ? `Restored version ${result.versionId}`
-          : `Deployed ${result.fileCount} files${folder === undefined ? '' : ` to /${folder}/ (the rest of the site kept as it was)`} (uploaded ${result.uploaded})`
+          : changes && link
+            ? `Deployed ${describeChanges(changes)} since version ${link.versionId}${link.path === undefined ? '' : ` in /${link.path}/`} (uploaded ${result.uploaded})`
+            : opts.base !== undefined
+              ? `Published ${result.fileCount} changed or added file${result.fileCount === 1 ? '' : 's'} on version ${opts.base} (the rest of the site kept as it was)`
+              : `Deployed ${result.fileCount} files${folder === undefined ? '' : ` to /${folder}/ (the rest of the site kept as it was)`} (uploaded ${result.uploaded})`
     const warnings = result.warnings.length ? `\nWarnings:\n- ${result.warnings.join('\n- ')}` : ''
     const edge =
       result.status === 'unchanged'
@@ -443,7 +527,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             result.url,
             local.files.map(f => inFolder(f.path))
           )
-    const url = folder === undefined ? result.url : new URL(`${folder}/`, result.url).href
+    const url = shownFolder === undefined ? result.url : new URL(`${shownFolder}/`, result.url).href
     const instance = await t.instance()
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
@@ -473,7 +557,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         nameGenerated: !opts.nameGiven,
         versionId: result.versionId,
         site: result.site,
-        ...(folder === undefined ? {} : { path: folder, url }),
+        ...(shownFolder === undefined ? {} : { path: shownFolder, url }),
+        ...(changes && link ? { base: opts.force ? null : link.versionId, changes } : {}),
         ...(result.first ? { created: true } : {}),
         ...(review ? { reviewUrl: review } : {}),
         generatedIndex,
@@ -515,6 +600,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'page listing them (`listHtml: true`) or deploy without one (`listHtml: false`), then retry. ' +
         `Re-deploying identical content is a no-op. ${ACCESS_NOTE(wording)} ` +
         `${PATH_PUBLISH_NOTE.replace('With `path`', 'With `sitePath`')} ` +
+        'A folder made by fling_pull publishes to the site and Fling it was pulled from, on the version pulled: ' +
+        'only what changed is sent, and if someone published the site since, it stops (base_changed) rather than ' +
+        'replace their work; `force: true` replaces it anyway (only when the user says so). ' +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
@@ -543,12 +631,18 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         groups,
         public: isPublic,
         listHtml,
+        force: z
+          .boolean()
+          .optional()
+          .describe(
+            'A folder made by fling_pull: publish it without a base, replacing whatever is live even if someone published since. Only when the user says so'
+          ),
         server: serverArg,
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    args =>
-      run('fling_deploy', args.server, async t => {
+    async args =>
+      run('fling_deploy', args.server ?? (await linkedServer(args.path)), async t => {
         const located = await resolveInput(args.path, locate)
         if (args.sitePath !== undefined && args.name === undefined) {
           throw new CliError(
@@ -557,13 +651,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         }
         const prepared = await prepareInput(located.path)
         try {
-          const name =
-            args.name !== undefined
+          // A pulled folder builds on its pull, unless the call names another site, path or Fling.
+          const found = prepared.kind === 'folder' ? await readSiteLink(prepared.dir) : null
+          const link =
+            found &&
+            (args.name === undefined || args.name === found.name) &&
+            args.sitePath === undefined &&
+            found.server === t.url
+              ? found
+              : null
+          const name = link
+            ? link.name
+            : args.name !== undefined
               ? resolveSiteName(prepared.dir, args.name)
               : prepared.defaultName
           const outcome = await deployFolder(t, prepared.dir, {
+            link,
+            force: args.force,
             name,
-            nameGiven: args.name !== undefined,
+            nameGiven: args.name !== undefined || link !== null,
             nameFrom: prepared.kind === 'folder' ? 'the folder' : 'the file name',
             spa: args.spa,
             public: args.public,
@@ -595,6 +701,113 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           await prepared.cleanup()
         }
       })
+  )
+
+  server.registerTool(
+    'fling_pull',
+    {
+      title: "Download a site's files to change them",
+      description:
+        "Download a site's files into a folder on this computer, to change some or all of them and publish again: " +
+        `by default ~/Documents/Claude/fling/<name>. Then edit the files there and call fling_deploy with the folder: it publishes on the version pulled, sending only what changed. Anyone who can open the site may pull it; publishing needs an owner or publisher. \`path\` pulls one folder of the site (its files at the top of the folder); deploying it keeps the rest of the site. ` +
+        'If the folder is not empty it stops, unless `force` (it then writes over what is there). When fling_deploy ' +
+        'says base_changed, someone published in between: pull again into another folder and redo the changes there.' +
+        note,
+      inputSchema: {
+        name: z.string().min(1).max(200).describe('Site name'),
+        dir: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'Folder to write the files to (absolute, or relative to the working directory). Default ~/Documents/Claude/fling/<name>'
+          ),
+        versionId: z
+          .string()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            'Another version than the live one (owners and publishers; ids from fling_info)'
+          ),
+        path: z
+          .string()
+          .min(1)
+          .max(1024)
+          .optional()
+          .describe('Only this folder of the site, e.g. "30-10-26"'),
+        force: z.boolean().optional().describe('Write into the folder even if it is not empty'),
+        server: serverArg,
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    args =>
+      run('fling_pull', args.server, async t => {
+        await requirePull(t)
+        const path = args.path === undefined ? undefined : normalizePublishPath(args.path)
+        if (path === null) {
+          throw new CliError(
+            `Invalid path "${args.path}": use a folder of the site, like "30-10-26" (no dotfiles)`
+          )
+        }
+        const dir =
+          args.dir === undefined
+            ? join(locate.home, 'Documents', 'Claude', 'fling', args.name)
+            : resolvePath(cwd, args.dir)
+        const pulled = await pullSite(
+          { client: t.client, fetch: fetchImpl },
+          {
+            name: args.name,
+            dir,
+            ...(args.versionId ? { versionId: args.versionId } : {}),
+            ...(path === undefined ? {} : { path }),
+            force: args.force,
+          }
+        )
+        return {
+          summary:
+            `Pulled ${pulled.fileCount} file(s) of ${pulled.name}${path ? ` /${path}/` : ''} (version ${pulled.versionId}, ${formatBytes(pulled.totalBytes)}) into ${pulled.dir}. ` +
+            `Edit the files there, then call fling_deploy with path "${pulled.dir}": it publishes on version ${pulled.versionId}.`,
+          data: pulled,
+        }
+      })
+  )
+
+  server.registerTool(mcpTools.readFiles.name, serverTool(mcpTools.readFiles), args =>
+    run(mcpTools.readFiles.name, args.server, async t => {
+      await requirePull(t)
+      const path = args.path === undefined ? undefined : normalizePublishPath(args.path)
+      if (path === null) throw new CliError(`Invalid path "${args.path}"`)
+      const pulled = await t.client.request(
+        'GET',
+        `/api/sites/${encodeURIComponent(args.name)}/pull`,
+        { schema: PullResponseSchema, query: { version: args.versionId, path } }
+      )
+      const { page, tooLarge, missing, nextCursor } = pageOfFiles(pulled.files, {
+        paths: args.paths,
+        cursor: args.cursor,
+        budget: MCP_READ_MAX_BYTES,
+      })
+      const read = await Promise.all(
+        page.map(async ({ url, ...f }) => {
+          const res = await fetchImpl(url)
+          if (!res.ok) throw new CliError(`Could not read ${f.path}: HTTP ${res.status}`)
+          return { ...f, ...encodeForAgent(f.path, new Uint8Array(await res.arrayBuffer())) }
+        })
+      )
+      const files = [
+        ...read,
+        ...tooLarge.map(({ url: _url, ...f }) => ({ ...f, tooLarge: true as const })),
+      ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      const result = {
+        name: args.name,
+        versionId: pulled.versionId,
+        files,
+        missing,
+        ...(nextCursor ? { nextCursor } : {}),
+      }
+      return { summary: describeReadFiles(args.name, result), data: result }
+    })
   )
 
   server.registerTool(
@@ -658,6 +871,11 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     args =>
       run(publishDef.name, args.server, async t => {
         const name = resolveSiteName('.', args.name)
+        if (args.remove?.length && args.base === undefined) {
+          throw new CliError('`remove` needs `base`: the versionId fling_read_files returned')
+        }
+        if (args.files.length === 0 && !args.remove?.length)
+          throw new CliError('No files to publish')
         const tmp = await mkdtemp(join(tmpdir(), 'fling-publish-'))
         try {
           const { skippedDotfiles } = await writeInlineFiles(tmp, args.files)
@@ -672,6 +890,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             groups: args.groups,
             listHtml: args.listHtml,
             folder: args.path,
+            ...(args.base === undefined ? {} : { base: args.base, remove: args.remove }),
             retryWith: 'fling_publish',
           })
         } finally {

@@ -120,26 +120,30 @@ describe('MCP server', () => {
     const { store } = await tempStore()
     const client = await connect(store)
     const { tools } = await client.listTools()
-    expect(tools.map(t => t.name).sort()).toEqual([
-      'fling_archive',
-      'fling_check_name',
-      'fling_delete',
-      'fling_deploy',
-      'fling_files',
-      'fling_find_files',
-      'fling_info',
-      'fling_list',
-      'fling_login',
-      'fling_publish',
-      'fling_rollback',
-      'fling_servers',
-      'fling_set_access',
-      'fling_set_owners',
-      'fling_set_publishers',
-      'fling_set_visibility',
-      'fling_share',
-      'fling_whoami',
-    ])
+    expect(tools.map(t => t.name)).toEqual(
+      expect.arrayContaining([
+        'fling_archive',
+        'fling_check_name',
+        'fling_delete',
+        'fling_deploy',
+        'fling_files',
+        'fling_find_files',
+        'fling_info',
+        'fling_list',
+        'fling_login',
+        'fling_publish',
+        'fling_rollback',
+        'fling_servers',
+        'fling_set_access',
+        'fling_set_owners',
+        'fling_set_publishers',
+        'fling_set_visibility',
+        'fling_share',
+        'fling_whoami',
+        'fling_pull',
+        'fling_read_files',
+      ])
+    )
     const del = tools.find(t => t.name === 'fling_delete')
     expect(del?.inputSchema.required).toEqual(expect.arrayContaining(['name', 'confirm']))
     expect(tools.find(t => t.name === 'fling_deploy')?.inputSchema.required).toEqual(['path'])

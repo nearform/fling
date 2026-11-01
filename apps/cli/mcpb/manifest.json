@@ -39,6 +39,14 @@
       "description": "Publish a file, zip or folder from this computer, found by name in Downloads and other folders"
     },
     {
+      "name": "fling_pull",
+      "description": "Download a site's files into a folder on this computer, to change them and deploy again"
+    },
+    {
+      "name": "fling_read_files",
+      "description": "Read a site's files inline, to change some and publish them with fling_publish"
+    },
+    {
       "name": "fling_find_files",
       "description": "List recent HTML files, zips and site folders on this computer"
     },

@@ -24,6 +24,7 @@ import {
   runNotificationsSent,
   runNotificationsSet,
 } from './commands/notifications.ts'
+import { runPull } from './commands/pull.ts'
 import { runSetup } from './commands/setup.ts'
 import {
   runAccess,
@@ -169,6 +170,10 @@ program
   )
   .option('--list-html', 'no index.html at the root: generate one listing the HTML pages')
   .option('--no-list-html', 'no index.html at the root: fling anyway (the root will 404)')
+  .option(
+    '--force',
+    'a pulled folder: publish it without a base, replacing whatever is live (even if someone published since you pulled)'
+  )
   .action(
     action(
       (
@@ -184,8 +189,32 @@ program
           yes?: boolean
           listHtml?: boolean
           path?: string
+          force?: boolean
         }
       ) => runDeploy(ctx, path, opts)
+    )
+  )
+
+program
+  .command('pull <name> [dir]')
+  .helpGroup('Deploy:')
+  .description(
+    "download a site's files into dir (default: ./<name>) to change them; `deploy` in that folder publishes on the version pulled"
+  )
+  .option(
+    '--version-id <id>',
+    'another version than the live one (owners and publishers; ids from `versions`)'
+  )
+  .option('--path <folder>', 'only this folder of the site (e.g. 30-10-26), at the top of dir')
+  .option('--force', 'write into dir even if it is not empty')
+  .action(
+    action(
+      (
+        ctx,
+        name: string,
+        dir: string | undefined,
+        opts: { versionId?: string; path?: string; force?: boolean }
+      ) => runPull(ctx, name, dir, opts)
     )
   )
 

@@ -31,6 +31,7 @@ import {
 } from './instance.ts'
 import { MAX_FILES } from './limits.ts'
 import { CellChangeSchema } from './notifications.ts'
+import { MCP_READ_MAX_BYTES } from './read-files.ts'
 import { OWNER_EMAILS_MAX, PUBLISHER_EMAILS_MAX, PUBLISHER_GROUPS_MAX } from './site-roles.ts'
 import { SITE_SORTS } from './site-sort.ts'
 
@@ -187,6 +188,29 @@ export const PATH_PUBLISH_NOTE =
   "file of the site stays as it is. Use it to add one report, release note or week's page to a shared site " +
   'without republishing the rest; rolling back removes it again.'
 
+/** Changing an existing site from what is live (pull.ts in apps/api; the `pull` capability). */
+export const PULL_NOTE =
+  'To change a site that is already published (fix a typo, update a page, add one), start from what is live, not ' +
+  'from scratch: read its files with fling_read_files, then call fling_publish with `base` (the `versionId` it ' +
+  'returned) and only the files you changed or added, plus `remove` for files to delete; every other file stays as ' +
+  'it is. If someone published the site in between, it fails with base_changed: read the files again and redo the ' +
+  'changes, rather than publishing without `base` over theirs.'
+
+const base = z
+  .string()
+  .min(1)
+  .max(100)
+  .optional()
+  .describe(
+    'The versionId fling_read_files returned: publish only what changed on top of it. `files` then holds only the files you changed or added, and every other file of the site is kept. Fails with base_changed if the site has changed since. Not with `path`'
+  )
+
+const remove = z
+  .array(z.string().min(1).max(1024))
+  .max(MAX_FILES)
+  .optional()
+  .describe('With `base`: the paths of the files to delete from the site')
+
 const publishPath = z
   .string()
   .min(1)
@@ -326,6 +350,43 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 
+    readFiles: tool({
+      name: 'fling_read_files',
+      title: "Read a site's files",
+      description:
+        "Read the files of a site's current version (or `versionId`), with their content inline (text as utf8, " +
+        `anything else base64), to change some of them and publish again. Returns up to ${MCP_READ_MAX_BYTES / 1024 / 1024} MB ` +
+        'a call, in path order: when there is more, pass the returned `cursor` for the next files, or name the ' +
+        'files you need in `paths` (fling_files lists them). It returns the `versionId` to pass to fling_publish as ' +
+        `\`base\`. Anyone who can open the site may read it; publishing needs an owner or publisher. ${PULL_NOTE}`,
+      inputSchema: {
+        name: siteName,
+        paths: z
+          .array(z.string().min(1).max(1024))
+          .max(MAX_FILES)
+          .optional()
+          .describe('Only these files (site paths, e.g. "index.html"); omit for all of them'),
+        path: z
+          .string()
+          .min(1)
+          .max(1024)
+          .optional()
+          .describe('Only the files under this folder of the site, e.g. "30-10-26"'),
+        cursor: z
+          .string()
+          .max(20)
+          .optional()
+          .describe('From the previous call, for the next files'),
+        versionId: z
+          .string()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe('Version id (from fling_info); omit for the version being served'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
     checkName: tool({
       name: 'fling_check_name',
       title: 'Check a site name',
@@ -345,7 +406,8 @@ export function mcpToolsFor(w: McpWording) {
         `\`files\` (whole site, up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB decoded in total; bigger sites: ` +
         `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
         'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too), ' +
-        `unless \`path\` is given; publishing identical content again is a no-op. ${PATH_PUBLISH_NOTE} ` +
+        `unless \`path\` or \`base\` is given; publishing identical content again is a no-op. ${PATH_PUBLISH_NOTE} ` +
+        `${PULL_NOTE} ` +
         `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
         'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
         'the site has.',
@@ -359,10 +421,13 @@ export function mcpToolsFor(w: McpWording) {
               encoding,
             })
           )
-          .min(1)
           .max(MAX_FILES)
-          .describe('Every file of the site (with `path`: of that folder)'),
+          .describe(
+            'Every file of the site (with `path`: of that folder; with `base`: only those changed or added)'
+          ),
         path: publishPath,
+        base,
+        remove,
         spa,
         access,
         emails: accessEmails,
@@ -380,10 +445,13 @@ export function mcpToolsFor(w: McpWording) {
         `Start publishing a site too big for one fling_publish call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, ` +
         'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
         `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
-        `${NAME_REQUIRED} ${VISIBILITY} ${PATH_PUBLISH_NOTE}`,
+        `${NAME_REQUIRED} ${VISIBILITY} ${PATH_PUBLISH_NOTE} With \`base\` (from fling_read_files), send only ` +
+        'the files you changed or added, and `remove` the ones to delete: every other file of the site is kept.',
       inputSchema: {
         name: siteName,
         path: publishPath,
+        base,
+        remove,
         spa,
         access,
         emails: accessEmails,
@@ -422,7 +490,7 @@ export function mcpToolsFor(w: McpWording) {
       title: 'Finish a chunked upload',
       description:
         'Publish everything sent with fling_upload_file as the new version of the site and return its URL. The site ' +
-        `becomes exactly the uploaded files. ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
+        `becomes exactly the uploaded files (with \`path\` or \`base\`, plus the rest of the site). ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
         'again with `listHtml`. The result includes `warnings`.',
       inputSchema: {
         uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
@@ -791,6 +859,7 @@ export const mcpRemoteInstructions = (
     'If a site has HTML pages but no root index.html, fling_publish / fling_upload_finish stop and ask: check with ' +
       'the user whether to generate an index.html listing the pages (`listHtml: true`) or publish without one ' +
       '(`listHtml: false`, the root URL will 404), then retry.',
+    PULL_NOTE,
     NEVER_PUBLISHED,
     `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
       '`append` for big files) and fling_upload_finish.',

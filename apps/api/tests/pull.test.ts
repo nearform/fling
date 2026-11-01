@@ -1,7 +1,8 @@
 /**
  * Pull (`GET /api/sites/:name/pull`): who may pull which version, what it answers (paths, hashes,
- * signed URLs whose bytes are the version's), and `path`; and the remote MCP's side of it,
- * fling_read_files, then fling_publish and fling_upload_* with `base` and `remove`.
+ * signed URLs whose bytes are the version's), `path`, and the site's `canPull`; and the remote
+ * MCP's side of it, fling_read_files, then fling_publish and fling_upload_* with `base` and
+ * `remove`.
  */
 import { createHash } from 'node:crypto'
 import { MCP_READ_MAX_BYTES } from '@fling/shared'
@@ -125,6 +126,27 @@ describe('pull', () => {
     const never = await api(env, alice.key, 'GET', '/api/sites/draft/pull')
     expect(never.status).toBe(404)
     expect((await json(never)).error.message).toBe('"draft" is not live')
+  })
+
+  it('the site says whether the caller may pull it, as the pull route decides', async () => {
+    const { env, alice, bob } = await world()
+    const agrees = async (key: string, name = 'team') => {
+      const site = await api(env, key, 'GET', `/api/sites/${name}`)
+      if (site.status !== 200) return
+      const pulled = await api(env, key, 'GET', `/api/sites/${name}/pull`)
+      expect((await json(site)).canPull).toBe(pulled.status === 200)
+    }
+    await agrees(bob.key)
+    await agrees(alice.key)
+    await api(env, alice.key, 'POST', '/api/sites/team/archive')
+    await agrees(bob.key)
+    await agrees(alice.key)
+    await api(env, alice.key, 'POST', '/api/sites/draft/deploys', {
+      manifest: { files: v1.map(f => f.meta) },
+    })
+    await agrees(alice.key, 'draft')
+    expect((await json(await api(env, alice.key, 'GET', '/api/sites/team'))).canPull).toBe(true)
+    expect((await json(await api(env, alice.key, 'GET', '/api/sites/draft'))).canPull).toBe(false)
   })
 
   it('each URL is signed for its own file', async () => {

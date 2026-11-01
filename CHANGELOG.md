@@ -35,6 +35,16 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
   `fling_upload_begin`) and `sitePath` on `fling_deploy`. On a Fling without the `pathPublish`
   capability they refuse instead of replacing the whole site.
 
+- **Pull.** `fling pull <name> [dir]` downloads a site's files into a folder, for anyone signed in
+  who can open the site (`--version-id` for another version, for owners and publishers; `--path`
+  for one folder). `fling deploy` of that folder publishes on the version pulled and uploads only
+  what changed; if someone published the site since, it stops and says so rather than overwrite
+  their work (`--force` publishes anyway). The MCP tools gain `fling_pull` (local),
+  `fling_read_files` (both servers, for agents that can't download) and `base` and `remove` on
+  `fling_publish`, so an agent can change one file of a site without sending the rest. The site
+  page shows the `fling pull` command to those who may pull. On a Fling without the `pull`
+  capability the commands say so.
+
 - **Owners and publishers.** `fling owners <name>` and `fling publishers <name>` show who owns and
   who publishes a site and, with `--add`, `--remove`, `--set <emails>`, `--group` and
   `--remove-group <slugs>`, change one list. Owners are equal; publishers publish and roll back,

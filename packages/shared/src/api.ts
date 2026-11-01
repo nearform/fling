@@ -52,6 +52,8 @@ export const SiteSchema = z.object({
   audienceGroups: z.number().default(0),
   /** the caller's role on it (site-roles.ts); servers before site roles omit it */
   role: SiteRoleSchema.optional(),
+  /** the caller may pull its current version (`pull` capability; servers without it omit it) */
+  canPull: z.boolean().optional(),
   /** its home page's thumbnail, when it has one (`thumbnails` capability; thumbnails.ts) */
   thumbnail: ThumbnailSchema.optional(),
   createdAt: z.string(),

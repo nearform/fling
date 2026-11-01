@@ -69,7 +69,11 @@ publishers <site> --add b@example.test` lets the other address deploy the site a
 (the site page shows it the read-only Owners and publishers section, and no Access or danger zone),
 and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. `pnpm cli deploy <folder>
 --name <site> --path 30-10-26` publishes the folder at `http://<site>.fling.lvh.me:47102/30-10-26/`
-and keeps the rest of the site; `pnpm cli versions <site>` shows the PATH it went to. To try a real provider, set `OIDC_ISSUER`,
+and keeps the rest of the site; `pnpm cli versions <site>` shows the PATH it went to. `pnpm cli
+pull <site> /tmp/<site>` downloads a site (the signed links point at `/dev-download` on the API, or
+`/blob-download` on the Worker); change a file there and `pnpm cli deploy /tmp/<site>` publishes it
+on the version pulled, while a second pulled copy deployed after it is refused with
+`base_changed`. To try a real provider, set `OIDC_ISSUER`,
 `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` before `pnpm dev`, and allow the redirect URI
 `http://fling.lvh.me:47100/auth/callback` on that client. For a Google client, set
 `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` and allow

@@ -83,6 +83,14 @@ site, each by whichever owner or publisher wrote it, is the use it is for. If so
 the site meanwhile, the deploy runs again on top of theirs; rolling back removes the folder. The
 rest of the site is copied into the new version, up to 1,000 files.
 
+**Pull.** Anyone signed in who can open a site can download it to change it: `fling pull changelog`
+writes its files to `./changelog`, and `fling deploy changelog` publishes the folder on the version
+pulled, uploading only what changed. If someone else published the site since, the deploy stops
+rather than overwrite their work: pull again and redo the change, or `--force` to replace theirs.
+Agents do the same with `fling_pull`, or read the files inline with `fling_read_files` and publish
+only the files they change (`base` on `fling_publish`). The site page shows the command to whoever
+may pull.
+
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site
 in a frame beside its comments, threads per page that can be replied to, resolved and deleted.
 - The frame follows the site's own navigation (single-page apps included) and stays on the site:

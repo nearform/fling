@@ -1,7 +1,8 @@
 /**
  * The site page's overview: where the site is served, its review page (when the instance has
  * comments), the version being served, whether it is a single-page app and when it was created
- * and last updated; beside them, while the site is live and the instance has the `thumbnails`
+ * and last updated; for those who may pull it (`pull` capability, `site.canPull`), the command that
+ * downloads its files to change them and deploy again; beside them, while the site is live and the instance has the `thumbnails`
  * capability, a live preview of its home page (SitePreview), which goes below them when the
  * section is too narrow for both.
  */
@@ -10,7 +11,7 @@ import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
 import { useInstance } from '../../hooks/instance'
 import { displayUrl, formatBytes, fullDate, shortVersion, timeAgo } from '../../lib/format'
-import { CopyButton } from '../CopyButton'
+import { CommandLine, CopyButton } from '../CopyButton'
 import { ReviewButton } from '../SiteButtons'
 import { SitePreview } from './SitePreview'
 import { SiteSection } from './SiteSection'
@@ -21,6 +22,7 @@ export function SiteOverview({ site }: { site: SiteDetail }) {
   const current = site.versions.find(v => v.id === site.currentVersionId)
   const previewed =
     instance?.capabilities.thumbnails === true && !site.archived && site.currentVersionId !== null
+  const pullable = instance?.capabilities.pull === true && site.canPull === true
 
   return (
     <SiteSection title="Overview">
@@ -79,6 +81,11 @@ export function SiteOverview({ site }: { site: SiteDetail }) {
           <Row label="Updated">
             <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
           </Row>
+          {pullable && (
+            <Row label="Edit locally">
+              <CommandLine command={`fling pull ${site.name}`} />
+            </Row>
+          )}
         </dl>
         {previewed && <SitePreview site={site} />}
       </div>

@@ -8,9 +8,10 @@ the site and listed to admins alone.
 
 **Version** — one immutable set of files, identified by a hash of its manifest (path + sha256 of
 every file). `pending` until it passes publication, then `complete`. It records who published it
-(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`) and, for a path
-publish, the folder it replaced (`path`) and its **base** (`base`). Rollback only ever points a
-site at a complete version.
+(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`) and, for a
+layered publish (a path publish, or a publish on a pulled version), its **base** (`base`) and, for
+a path publish, the folder it replaced (`path`). Rollback only ever points a site at a complete
+version.
 
 **Path publish** — a deploy that replaces one folder of a site (`DeployRequest.path`, e.g.
 `30-10-26`, spelled as in `packages/shared/src/publish-path.ts`) and keeps the rest. The edge serves
@@ -24,6 +25,30 @@ it is a plain publish of the folder. Rolling back to the base removes it. `fling
 --name <site> --path <folder>`, `path` on `fling_publish` and `fling_upload_begin`, `sitePath` on
 the local `fling_deploy`, all behind the `pathPublish` capability; publishers may path-publish
 like any other deploy.
+
+**Base** — the version a layered publish builds on (`DeployRequest.base`, or the current version
+for a path publish; `layerFor` in `apps/api/src/publication.ts`). The new version is the files sent
+plus the base's other files, copied forward with `Blobs.copy`; a sent file the base already has
+byte for byte is kept rather than uploaded. A complete publish on a base (the whole folder) leaves
+out the base's files the client did not send; a partial one (`partial`) keeps them, less those
+named in `remove`. It goes live only while the base is still current: otherwise 409
+`base_changed`, and the client pulls again rather than overwrite someone else's work. A base
+cannot be combined with a path.
+
+**Pull** — downloading a version's files to change them and publish again on it as the base
+(`apps/api/src/pull.ts`, `GET /api/sites/:name/pull`; policy `site.pull`). Anyone signed in who can
+see a site may pull its current version while it is live; another version, or an archived site's,
+also needs `version.read`. The API never streams the bytes: it answers with each file's path,
+SHA-256 and a short-lived signed GET (`Blobs.presignGet`). `fling pull <name> [dir]` and the local
+`fling_pull` download them; `fling_read_files` (both MCP servers; `packages/shared/src/read-files.ts`)
+returns them inline, a page at a time, for agents that cannot download. `Site.canPull` tells the
+web UI whether to offer the command. All behind the `pull` capability.
+
+**Site link** — `.fling-site.json` in a pulled folder (`apps/cli/src/pull.ts`): the server, the
+site, the version pulled and each file's SHA-256. `fling deploy` of the folder (and the local
+`fling_deploy`) reads it and publishes to that site on that version as the base, and rewrites it
+after; `--force` publishes over whatever is live instead. It is a dotfile, so it is never
+published.
 
 **Owner** — someone who holds a site: a person or a group the site's owners name
 (`SiteRecord.owners`, `apps/api/src/store/types.ts`; contract in `packages/shared/src/site-roles.ts`).
@@ -75,8 +100,8 @@ each copy asked of policy. Deleting a group takes it out of every site's owners 
   bytes named in the manifest (sha256 signed into the URL) and expire quickly.
 - **Publishing** — staged bytes are read back and scanned for secrets before the version goes
   live; bytes the server holds (remote MCP) are scanned before they are written. There is no way
-  to skip the scan. A path publish (above) scans the files it sends and copies the rest from its
-  base.
+  to skip the scan. A layered publish (path publish, or on a pulled **base**) scans the files it
+  sends and copies the rest from its base.
 
 **Never published** — dotfiles, gitignored files, secret files (keys, certificates, credentials)
 and files containing secrets. The CLI and local MCP check first for early, specific messages;

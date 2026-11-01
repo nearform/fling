@@ -16,8 +16,10 @@ import {
   NameCheckSchema,
   NotificationPreferencesUpdateSchema,
   NotificationSettingsSchema,
+  normalizePublishPath,
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
+  PullResponseSchema,
   RollbackRequestSchema,
   SentNotificationListSchema,
   SharedSiteListSchema,
@@ -48,6 +50,7 @@ import * as notifications from '../notifications/settings.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
 import { canInstance, userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
+import { pull } from '../pull.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
 import { adminRoutes } from './admin.ts'
@@ -216,6 +219,22 @@ apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
     c.req.param('versionId')
   )
   return c.json(VersionFilesSchema.parse(files))
+})
+
+// Pull (the `pull` capability): a version's files with signed download URLs (pull.ts).
+apiRoutes.get('/sites/:name/pull', async c => {
+  const rawPath = c.req.query('path')
+  const path = rawPath === undefined ? undefined : normalizePublishPath(rawPath)
+  if (path === null) {
+    throw badRequest('path must be a folder of the site, like 30-10-26 or reports/2026')
+  }
+  const versionId = c.req.query('version') || undefined
+  const pulled = await pull(c.get('deps'), c.get('user'), c.req.param('name'), {
+    ...(versionId ? { versionId } : {}),
+    ...(path !== undefined ? { path } : {}),
+  })
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(PullResponseSchema.parse(pulled))
 })
 
 apiRoutes.patch('/sites/:name', async c => {

@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.7.0 (2026-11-01)
+
 - **Two sign-in providers.** A Fling can offer a Google client and another OpenID Connect issuer
   side by side, listed in its metadata (`auth.providers`). On one, `fling login` (and
   `fling_login`) opens the Fling's login page with a button for each, and comes back with a key

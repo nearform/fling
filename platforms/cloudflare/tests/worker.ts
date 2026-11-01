@@ -1,6 +1,7 @@
 /**
- * The Worker the tests run in workerd (bundled by miniflare.ts): R2Blobs' upload route, so signed
- * uploads arrive as real requests and stream into R2 the way they will in production;
+ * The Worker the tests run in workerd (bundled by miniflare.ts): R2Blobs' upload and download
+ * routes, so signed uploads and downloads arrive as real requests and stream through R2 the way they
+ * will in production;
  * `POST /copy` runs `R2Blobs.copy` on a list of `[from, to]` pairs in workerd (where R2 streams
  * need a known length, which the Node proxy can't show); and
  * `*.sites.example.test` is the sites host (src/sites.ts) over the KV + D1 route table and R2,
@@ -8,7 +9,7 @@
  */
 import type { D1Database, KVNamespace, R2Bucket } from '@cloudflare/workers-types'
 import { TableRouteTable } from '@fling/api/route-table/table'
-import { R2Blobs, UPLOAD_ROUTE } from '../src/blobs/r2.ts'
+import { DOWNLOAD_ROUTE, R2Blobs, UPLOAD_ROUTE } from '../src/blobs/r2.ts'
 import { CachedRouteTable } from '../src/route-table/cached.ts'
 import { WorkersKvRouteTable } from '../src/route-table/kv.ts'
 import { handleSiteRequest } from '../src/sites.ts'
@@ -30,6 +31,10 @@ export default {
     if (url.pathname.startsWith(`${UPLOAD_ROUTE}/`)) {
       const blobs = new R2Blobs(env.BUCKET, { secret: env.UPLOAD_SECRET, baseUrl: '' })
       return blobs.handleUpload(request)
+    }
+    if (url.pathname.startsWith(`${DOWNLOAD_ROUTE}/`)) {
+      const blobs = new R2Blobs(env.BUCKET, { secret: env.UPLOAD_SECRET, baseUrl: '' })
+      return blobs.handleDownload(request)
     }
     if (url.pathname === '/copy' && request.method === 'POST') {
       const blobs = new R2Blobs(env.BUCKET, { secret: env.UPLOAD_SECRET, baseUrl: '' })

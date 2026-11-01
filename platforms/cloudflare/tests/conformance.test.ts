@@ -1,6 +1,6 @@
 /**
  * The conformance suites against the Cloudflare adapters on Miniflare (see miniflare.ts): D1Table
- * and Records on it, the data migrations on D1, R2Blobs with its signed-upload route, and the KV
+ * and Records on it, the data migrations on D1, R2Blobs with its signed routes, and the KV
  * route table. Nothing external is needed, so these run in every `pnpm gate`.
  */
 import { Records } from '@fling/api/store/records'
@@ -34,10 +34,12 @@ migrationsConformance('D1Table', async () => new D1Table(await cf.freshDb()))
 
 routeTableConformance('WorkersKvRouteTable', () => new WorkersKvRouteTable(cf.kv))
 
-// Uploads are real requests to the route in tests/worker.ts, which streams them into R2.
+// Uploads and downloads are real requests to the routes in tests/worker.ts, which stream them
+// through R2.
 blobsConformance('R2Blobs', () => ({
   blobs: new R2Blobs(cf.bucket, { secret: cf.uploadSecret, baseUrl: APP_ORIGIN }),
   upload: async (url, init) =>
     (await cf.mf.dispatchFetch(url, init as never)) as unknown as Response,
+  download: async url => (await cf.mf.dispatchFetch(url)) as unknown as Response,
   metadata: async key => (await cf.bucket.head(key))?.httpMetadata ?? null,
 }))

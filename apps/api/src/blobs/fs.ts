@@ -1,14 +1,26 @@
 /**
  * Filesystem storage for dev and tests: objects are files under `root` (`.fling-dev/` at the repo
  * root in dev). Presigned PUTs point at the API's own `PUT /dev-upload/<key>?exp=&sig=` route,
- * which calls `acceptUpload`: the scheme in `signed-upload.ts` (shared with R2Blobs), with the
- * body's SHA-256 checked like S3 checks `x-amz-checksum-sha256`.
+ * which calls `acceptUpload`, and presigned GETs at `GET /dev-download/<key>?exp=&sig=`, which
+ * calls `serveDownload`: the scheme in `signed-url.ts` (shared with R2Blobs), with an upload's
+ * SHA-256 checked like S3 checks `x-amz-checksum-sha256`.
  */
 import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
-import { type SignedUploadRequest, signUpload, verifyUpload } from './signed-upload.ts'
+import {
+  type SignedDownloadRequest,
+  type SignedUploadRequest,
+  signDownload,
+  signUpload,
+  verifyDownload,
+  verifyUpload,
+} from './signed-url.ts'
 import type { Blobs, PresignedPut } from './types.ts'
+
+/** Where the app mounts FsBlobs' signed upload and download routes. */
+export const FS_UPLOAD_ROUTE = '/dev-upload'
+export const FS_DOWNLOAD_ROUTE = '/dev-download'
 
 export class FsBlobs implements Blobs {
   readonly root: string
@@ -30,20 +42,30 @@ export class FsBlobs implements Blobs {
     return full
   }
 
-  private get signer() {
-    return { secret: this.secret, baseUrl: this.baseUrl, route: '/dev-upload', now: this.now }
+  private signer(route: string) {
+    return { secret: this.secret, baseUrl: this.baseUrl, route, now: this.now }
   }
 
   async presignPut(
     key: string,
     opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
   ): Promise<PresignedPut> {
-    return signUpload(this.signer, key, opts)
+    return signUpload(this.signer(FS_UPLOAD_ROUTE), key, opts)
+  }
+
+  async presignGet(key: string, opts: { expiresIn?: number } = {}): Promise<string> {
+    return signDownload(this.signer(FS_DOWNLOAD_ROUTE), key, opts)
+  }
+
+  /** Verify a dev download and read the object: null when the signature is bad or it is missing. */
+  async serveDownload(input: SignedDownloadRequest): Promise<Uint8Array | null> {
+    if (!verifyDownload({ secret: this.secret, now: this.now }, input)) return null
+    return this.get(input.key)
   }
 
   /** Verify a dev upload and store it. Returns false if the signature/expiry/checksum is bad. */
   async acceptUpload(input: SignedUploadRequest & { body: Uint8Array }): Promise<boolean> {
-    if (!verifyUpload(this.signer, input)) return false
+    if (!verifyUpload({ secret: this.secret, now: this.now }, input)) return false
     if (createHash('sha256').update(input.body).digest('base64') !== input.checksum) return false
     const file = this.pathFor(input.key)
     await mkdir(dirname(file), { recursive: true })

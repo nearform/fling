@@ -18,7 +18,7 @@
     "./revocations": "./src/revocations.ts",
     "./blobs": "./src/blobs/types.ts",
     "./blobs/fs": "./src/blobs/fs.ts",
-    "./blobs/signed-upload": "./src/blobs/signed-upload.ts",
+    "./blobs/signed-url": "./src/blobs/signed-url.ts",
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
     "./route-table/table": "./src/route-table/table.ts",

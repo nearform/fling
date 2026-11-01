@@ -61,6 +61,12 @@ export class S3Blobs implements Blobs {
     }
   }
 
+  async presignGet(key: string, opts: { expiresIn?: number } = {}): Promise<string> {
+    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+      expiresIn: opts.expiresIn ?? 900,
+    })
+  }
+
   async head(key: string) {
     try {
       const res = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }))

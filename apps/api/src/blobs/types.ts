@@ -18,6 +18,12 @@ export interface Blobs {
     key: string,
     opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
   ): Promise<PresignedPut>
+  /**
+   * A GET URL for one object, good for `expiresIn` seconds (default 900): how a pull hands out a
+   * version's files without their bytes passing through the API. Fetching it after it expires, or
+   * with the URL changed, is refused.
+   */
+  presignGet(key: string, opts?: { expiresIn?: number }): Promise<string>
   /** null when the object doesn't exist */
   head(key: string): Promise<{ size: number } | null>
   /** Server-side write (remote MCP publishes; chunked-upload staging). */

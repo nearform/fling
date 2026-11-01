@@ -141,6 +141,35 @@ export const VersionFilesSchema = z.object({
 })
 export type VersionFiles = z.infer<typeof VersionFilesSchema>
 
+/** How long the download URLs a pull hands out stay good. */
+export const PULL_URL_TTL_SECONDS = 15 * 60
+
+/** One file of a pulled version: what to fetch, and what its bytes must hash to. */
+export const PullFileSchema = SiteFileSchema.extend({
+  /** hex SHA-256 of the bytes */
+  sha256: z.string(),
+  /** a signed GET for the bytes, good for PULL_URL_TTL_SECONDS */
+  url: z.string(),
+})
+export type PullFile = z.infer<typeof PullFileSchema>
+
+/**
+ * GET /api/sites/:name/pull[?version=&path=] (`pull` capability): a version's files to change and
+ * publish again. Anyone signed in who can see the site pulls its current version; another version
+ * also needs to be an owner, publisher or admin (`version.read`). 404 like a missing site
+ * otherwise, and for a site with no current version or an archived one. `path` limits it to one
+ * folder (publish-path.ts); the files keep their site paths. Publishing on `versionId` as the
+ * `base` sends only what changed (DeployRequest).
+ */
+export const PullResponseSchema = z.object({
+  versionId: z.string(),
+  path: z.string().optional(),
+  files: z.array(PullFileSchema),
+  /** when the URLs stop working */
+  expiresAt: z.string(),
+})
+export type PullResponse = z.infer<typeof PullResponseSchema>
+
 /**
  * GET /api/names/:name — can the caller fling to this name?
  * - available: nobody has it   - yours: the caller's existing site (a fling updates it)

@@ -104,6 +104,8 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'site.read': reads,
   'version.list': reads,
   'version.read': reads,
+  // Everyone who can see the site signed in; pulling an older version also needs version.read.
+  'site.pull': takesPart,
   'site.deploy': publishes,
   'site.rollback': rollsBack,
   'site.settings': changes,

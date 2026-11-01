@@ -36,6 +36,9 @@
  * API's say-so (`/auth/login` asks `can(…, 'site.view', …)` here): tests/policy.test.ts runs the
  * real site router against this table so the two cannot drift.
  *
+ * Whoever can see a site signed in may pull it (`site.pull`): download its current version's
+ * files, to change them and publish again if they may deploy, or to start from them.
+ *
  * Owners publish, roll back, and change everything about the site: its access and settings, its
  * owners and publishers, its share link; they archive and delete it. Publishers publish and roll
  * back, and read the site and its versions, but get no share link and change nothing else (a
@@ -138,7 +141,11 @@ export const accessOf = (site: AccessFields): Access =>
  *   site.read        GET /api/sites/:name (its audience, owners and publishers included),
  *                    fling_info, fling_check_name "yours"
  *   version.list     the versions in GET /api/sites/:name and fling_info
- *   version.read     GET …/versions/:id/files, fling_files
+ *   version.read     GET …/versions/:id/files, fling_files; with site.pull, pulling a version
+ *                    other than the current one (viewers never saw those)
+ *   site.pull        GET …/pull, fling_read_files, `fling pull`: download the current version's
+ *                    files to change and publish again (pull.ts). Anyone signed in who can see the
+ *                    site; share-link holders can't, as the API needs a sign-in
  *   site.deploy      POST …/deploys, …/finalize, fling_publish, fling_upload_*; also what makes a
  *                    claimed name "yours" rather than "taken"
  *   site.rollback    POST …/current, fling_rollback
@@ -179,6 +186,7 @@ export const ACTIONS = [
   'site.read',
   'version.list',
   'version.read',
+  'site.pull',
   'site.deploy',
   'site.rollback',
   'site.settings',
@@ -227,6 +235,7 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'site.read': onTheSite,
   'version.list': onTheSite,
   'version.read': onTheSite,
+  'site.pull': signedIn,
   'site.deploy': role => role === 'owner' || role === 'publisher',
   'site.rollback': role => role === 'publisher' || ownerOrAdminSession(role),
   'site.settings': ownerOrAdminSession,

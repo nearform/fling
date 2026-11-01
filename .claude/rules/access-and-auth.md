@@ -30,6 +30,10 @@ paths:
   the user against the site with `siteActor`/`actorOn` (`sites.ts`), never a bare `userActor`,
   before asking policy about a site. `SiteRecord.email` is the creator: it keys items and grants
   nothing. A guest never holds a role.
+- Reading a site's files goes through `site.pull` (`pull.ts`, `pullable`): anyone signed in who
+  can see the site, for its current version while it is live; any other version also needs
+  `version.read`. Downloads are signed URLs that expire (`Blobs.presignGet`); never a public bucket
+  URL. `canPullCurrent` (`sites.ts`) must agree with `pullable`, since the web UI trusts it.
 - Sign-in is generic OIDC (`auth/oidc.ts`, behind `IdentityProvider`), plus emailed sign-in links
   for invited people (`auth/sign-in-link.ts`). Never add code specific to one provider. Who may
   sign in is decided only by standing (`auth/standing.ts`): the email policy (`auth/identity.ts`:

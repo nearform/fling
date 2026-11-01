@@ -175,6 +175,15 @@ export function siteRoleOf(actor: Actor, site: SiteRecord): SiteRole | undefined
  * The site as `actor` (resolved against it, `actorOn`) sees it: with their role, and the share
  * link only if they may read it (not a publisher).
  */
+/**
+ * Whether the actor may pull the site's current version (`pullable`, pull.ts): `site.pull`, while
+ * it has one; an archived site's also needs `version.read`.
+ */
+export const canPullCurrent = (actor: Actor, site: SiteRecord): boolean =>
+  site.currentVersionId !== null &&
+  can(actor, 'site.pull', site) &&
+  (!site.archived || can(actor, 'version.read', site))
+
 export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
   const { sitesDomain } = deps.config
   const role = siteRoleOf(actor, site)
@@ -194,6 +203,7 @@ export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
     audienceSize: site.audience.emails.length + site.audience.groups.length,
     audienceGroups: site.audience.groups.length,
     ...(role ? { role } : {}),
+    canPull: canPullCurrent(actor, site),
     ...(site.thumbnail ? { thumbnail: site.thumbnail } : {}),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,

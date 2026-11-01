@@ -24,8 +24,12 @@
  *   member invitation signs another outsider in, who deploys, and once revoked finds their site
  *   cookie sent to sign in by the revocation list) → thumbnails (the owner keeps a PNG of the
  *   current version; the publisher replaces it and reads it; an outsider is refused until the
- *   audience names them; another version is a 409) → conditional-write race (concurrent
- *   first deploys of one name) → MCP publish → clean up (every site it made is removed).
+ *   audience names them; another version is a 409) → path publish (a publisher replaces one
+ *   folder; rollback removes it) → pull (a member who can view the site pulls it but may not
+ *   deploy it; the owner pulls it twice, deploys one folder with a page changed and one deleted,
+ *   on the version pulled, and the other is refused as stale; remote MCP reads the files and
+ *   publishes one on a base) → conditional-write race (concurrent first deploys of one name) →
+ *   MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
  * has email, and where the dev drain exists (`POST /dev/notify/drain`, local runs only) the
@@ -708,6 +712,26 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('thumbnails: not on this instance (skipped)')
+    }
+
+    // Pull: whoever can open a site downloads it; a deploy of the folder publishes on the version
+    // pulled, sends only what changed, and is refused once someone else has published.
+    if (meta.capabilities.pull === true) {
+      await pullStep({
+        appOrigin,
+        name: `e2e-${nonce}-pull`,
+        nonce,
+        work,
+        levels,
+        fling,
+        flingAs,
+        made,
+        opts,
+        step,
+        propagationMs,
+      })
+    } else {
+      step('pull: not on this instance (skipped)')
     }
 
     // Invitations: an outsider shared with signs in by the emailed link and reviews as a guest;
@@ -2261,6 +2285,151 @@ async function pathPublishStep(ctx: {
     { timeoutMs: ctx.propagationMs }
   )
   step('rolling back to the base removes the path publish')
+}
+
+async function pullStep(ctx: {
+  appOrigin: string
+  name: string
+  nonce: string
+  work: string
+  levels: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+  propagationMs: number
+}) {
+  const { name, nonce, fling, step } = ctx
+  const original = siteDir(ctx.work, 'pull-original', {
+    'index.html': page('pull', `pulled home ${nonce}`),
+    'about.html': page('about', `about ${nonce}`),
+    'old.html': page('old', `old ${nonce}`),
+  })
+  const first = (await fling(
+    'deploy',
+    original,
+    '--name',
+    name,
+    ...(ctx.levels ? ['--access', 'public'] : ['--public'])
+  )) as { status: string; site: CliSite }
+  ctx.made.push(name)
+  check(first.status === 'live', `pull: first deploy: ${JSON.stringify(first)}`)
+  const siteUrl = first.site.url
+  const v1 = first.site.currentVersionId
+  check(v1, 'pull: no currentVersionId')
+
+  type Pulled = { versionId: string; fileCount: number }
+  const member = ctx.opts.member
+  if (member) {
+    const memberDir = join(ctx.work, 'pull-member')
+    const pulled = (await ctx.flingAs(member)('pull', name, memberDir)) as Pulled
+    check(
+      pulled.versionId === v1 && pulled.fileCount === 3,
+      `member pull: ${JSON.stringify(pulled)}`
+    )
+    writeFileSync(join(memberDir, 'index.html'), page('member', `member edit ${nonce}`))
+    const refused = await ctx
+      .flingAs(member)('deploy', memberDir)
+      .then(
+        () => false,
+        () => true
+      )
+    check(refused, 'a member who may only view the site deployed their pulled folder')
+    step(`${member.email} pulled ${name}, which they may view, but may not deploy it`)
+  } else {
+    step('pull as a viewer: no member session (skipped)')
+  }
+
+  const mine = join(ctx.work, 'pull-mine')
+  const stale = join(ctx.work, 'pull-stale')
+  for (const dir of [mine, stale]) {
+    const pulled = (await fling('pull', name, dir)) as Pulled
+    check(
+      pulled.versionId === v1 && pulled.fileCount === 3,
+      `owner pull: ${JSON.stringify(pulled)}`
+    )
+  }
+  writeFileSync(join(mine, 'index.html'), page('pull', `edited home ${nonce}`))
+  rmSync(join(mine, 'old.html'))
+  const deployed = (await fling('deploy', mine)) as {
+    status: string
+    base?: string | null
+    changes?: { changed: string[]; added: string[]; removed: string[] }
+    site: CliSite
+  }
+  check(
+    deployed.status === 'live' &&
+      deployed.base === v1 &&
+      deployed.changes?.changed.join() === 'index.html' &&
+      deployed.changes.added.length === 0 &&
+      deployed.changes.removed.join() === 'old.html',
+    `deploy of the pulled folder: ${JSON.stringify(deployed)}`
+  )
+  const v2 = deployed.site.currentVersionId
+  const versions = (await fling('versions', name)) as { versions: { id: string; base?: string }[] }
+  check(
+    versions.versions.find(v => v.id === v2)?.base === v1,
+    `versions after the deploy of the pulled folder: ${JSON.stringify(versions)}`
+  )
+  await eventually(
+    'the edited page is served',
+    siteUrl,
+    r => r.text.includes(`edited home ${nonce}`),
+    {
+      timeoutMs: ctx.propagationMs,
+    }
+  )
+  await eventually('the deleted page is gone', `${siteUrl}old.html`, r => r.status === 404, {
+    timeoutMs: ctx.propagationMs,
+  })
+  const about = await get(`${siteUrl}about.html`)
+  check(about.text.includes(`about ${nonce}`), `about.html after the deploy: ${about.status}`)
+  step(
+    `deploying the pulled folder published on ${v1}: index.html changed, old.html removed, about.html kept`
+  )
+
+  writeFileSync(join(stale, 'about.html'), page('about', `stale about ${nonce}`))
+  const refusal = await fling('deploy', stale).then(
+    () => null,
+    (error: Error) => error.message
+  )
+  check(
+    refusal?.includes('changed since you pulled'),
+    `a deploy of a folder pulled before someone published: ${refusal ?? 'it published'}`
+  )
+  step('a folder pulled before someone else published is refused, not deployed over their work')
+
+  const read = await mcpTool(ctx.appOrigin, ctx.opts.session, 'fling_read_files', { name })
+  const readData = read?.structuredContent as
+    | { versionId?: string; files?: { path: string; content?: string }[] }
+    | undefined
+  check(
+    !read?.isError &&
+      readData?.versionId === v2 &&
+      readData?.files
+        ?.find(f => f.path === 'index.html')
+        ?.content?.includes(`edited home ${nonce}`),
+    `MCP fling_read_files: ${JSON.stringify(read)}`
+  )
+  const published = await mcpTool(ctx.appOrigin, ctx.opts.session, 'fling_publish', {
+    name,
+    base: v2,
+    files: [{ path: 'about.html', content: page('about', `mcp about ${nonce}`) }],
+  })
+  check(!published?.isError, `MCP fling_publish on a base: ${JSON.stringify(published)}`)
+  await eventually(
+    'the page published on the base is served',
+    `${siteUrl}about.html`,
+    r => r.text.includes(`mcp about ${nonce}`),
+    { timeoutMs: ctx.propagationMs }
+  )
+  const home = await get(siteUrl)
+  check(
+    home.text.includes(`edited home ${nonce}`),
+    `the home page after the MCP publish: ${home.status}`
+  )
+  step('remote MCP: fling_read_files reads the site, fling_publish on its version changes one file')
 }
 
 async function adminStep(ctx: {

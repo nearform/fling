@@ -214,6 +214,23 @@ It is remembered, and becomes the current one only if none is.
 - `fling_info` shows which folder each version went to; `fling_rollback` to the version before
   removes it.
 
+## Changing an existing site (pull)
+
+- To change a site that is already published (fix a typo, update a page, apply review comments),
+  start from what is live rather than from memory. On this computer: `fling_pull { name }` (or
+  `fling pull <name> <dir>`) downloads it into a folder; edit the files there; then `fling_deploy
+  { path: <that folder> }` (or `fling deploy <dir>`) publishes on the version pulled and uploads
+  only what changed.
+- Without access to the user's files (claude.ai): `fling_read_files { name }` returns the files
+  inline and the `versionId`; follow `cursor` for more, or name the files you need in `paths`. Then
+  `fling_publish { name, base: <versionId>, files: [only the changed or new files], remove: [files
+  to delete] }`: every other file is kept as it is.
+- Anyone signed in who can open a site may pull it; only its owners and publishers may publish it.
+- `base_changed`: someone published the site after you pulled it. Never force over it without
+  asking: pull (or read) it again, redo the change on the new version and publish that. Only if
+  the user says to replace what they published, deploy with `force: true` (`--force`).
+- A Fling without the `pull` capability says so: publish the whole site instead.
+
 ## Archive vs delete
 
 - `fling_archive { name }` takes a site offline (404) and hides it, but keeps every file and

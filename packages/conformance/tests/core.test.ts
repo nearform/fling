@@ -2,7 +2,8 @@
  * The suites against the core's own adapters (memory table and Records on it, fs blobs, memory
  * route table). They run here rather than in apps/api so @fling/api doesn't depend on this package
  * (a cycle).
- * Presigned uploads go through the real app, whose `/dev-upload/*` route is FsBlobs' signed PUT.
+ * Presigned uploads and downloads go through the real app, whose `/dev-upload/*` and
+ * `/dev-download/*` routes are FsBlobs' signed PUT and GET.
  */
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -54,7 +55,11 @@ blobsConformance('FsBlobs', () => {
   }
   const blobs = new FsBlobs(root, APP_ORIGIN, config.secrets.sessionSecret)
   const app = createApp(buildDeps(config, { blobs }))
-  return { blobs, upload: (url, init) => Promise.resolve(app.request(url, init)) }
+  return {
+    blobs,
+    upload: (url, init) => Promise.resolve(app.request(url, init)),
+    download: url => Promise.resolve(app.request(url)),
+  }
 })
 
 mailerConformance(

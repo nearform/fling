@@ -10,6 +10,8 @@ export interface BlobsHarness {
   blobs: Blobs
   /** The client's half of a presigned upload (default: global fetch). */
   upload?: (url: string, init: RequestInit) => Promise<Response>
+  /** The client's half of a presigned download (default: global fetch). */
+  download?: (url: string) => Promise<Response>
   /**
    * The object's stored Content-Type and Cache-Control, read beside the port, for adapters that
    * keep them (S3, R2). FsBlobs keeps none: its dev server derives the type from the name.
@@ -28,7 +30,12 @@ export function blobsConformance(
   describe(`Blobs conformance: ${name}`, () => {
     const setup = async () => {
       const h = await harness()
-      return { ...h, upload: h.upload ?? fetch, p: `conformance/${randomUUID()}/` }
+      return {
+        ...h,
+        upload: h.upload ?? fetch,
+        download: h.download ?? ((url: string) => fetch(url)),
+        p: `conformance/${randomUUID()}/`,
+      }
     }
 
     it('put, get and head an object; missing objects are null', async () => {
@@ -197,6 +204,50 @@ export function blobsConformance(
         })
         expect(res.ok).toBe(false)
         expect(await blobs.head(`${p}up/other.html`)).toBeNull()
+      })
+    })
+
+    describe('presigned downloads', () => {
+      const bin = new Uint8Array([0, 137, 80, 78, 71, 255, 10, 13])
+
+      it('return the object’s bytes', async () => {
+        const { blobs, download, p } = await setup()
+        await blobs.put(`${p}v1/img/a b.png`, bin, { contentType: 'image/png' })
+        const res = await download(await blobs.presignGet(`${p}v1/img/a b.png`))
+        expect(res.status).toBe(200)
+        expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([...bin])
+      })
+
+      it('are bound to their key', async () => {
+        const { blobs, download, p } = await setup()
+        await blobs.put(`${p}v1/a.txt`, bytes('mine'))
+        await blobs.put(`${p}v1/b.txt`, bytes('not yours'))
+        const url = await blobs.presignGet(`${p}v1/a.txt`)
+        const res = await download(url.replace('/v1/a.txt', '/v1/b.txt'))
+        expect(res.ok).toBe(false)
+        await res.arrayBuffer()
+      })
+
+      it('refuse a tampered signature', async () => {
+        const { blobs, download, p } = await setup()
+        await blobs.put(`${p}a.txt`, bytes('mine'))
+        const url = new URL(await blobs.presignGet(`${p}a.txt`))
+        const param = url.searchParams.has('sig') ? 'sig' : 'X-Amz-Signature'
+        const sig = url.searchParams.get(param) ?? ''
+        url.searchParams.set(param, `${sig.slice(0, -2)}${sig.endsWith('AA') ? 'BB' : 'AA'}`)
+        const res = await download(url.toString())
+        expect(res.ok).toBe(false)
+        await res.arrayBuffer()
+      })
+
+      it('refuse once expired', async () => {
+        const { blobs, download, p } = await setup()
+        await blobs.put(`${p}a.txt`, bytes('mine'))
+        const url = await blobs.presignGet(`${p}a.txt`, { expiresIn: 1 })
+        await new Promise(resolve => setTimeout(resolve, 2_500))
+        const res = await download(url)
+        expect(res.ok).toBe(false)
+        await res.arrayBuffer()
       })
     })
   })

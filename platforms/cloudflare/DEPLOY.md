@@ -31,6 +31,7 @@ $APP_HOST        Worker Custom Domain ─┬─ /api/*, /auth/*, /healthz, /mcp,
                                        ├─ GET /api/live        → the site's LiveRoom Durable
                                        │                         Object (WebSocket, live rooms)
                                        ├─ PUT /blob-upload/*   → signed uploads into R2
+                                       ├─ GET /blob-download/* → signed downloads from R2 (pull)
                                        └─ everything else      → the web UI (Static Assets)
 *.$SITES_DOMAIN  Worker route ───────── the shared site routing decision
                                         (route table: KV, D1 on a miss) → R2

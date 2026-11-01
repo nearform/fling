@@ -1,16 +1,26 @@
 /**
  * R2 Blobs over the Worker's R2 binding. R2 could presign S3-style URLs, but only with S3 API keys,
- * which a Worker otherwise never needs; so presigned PUTs point at the Worker's own
- * `PUT /blob-upload/<key>?exp=&sig=` route instead (the scheme in @fling/api/blobs/signed-upload,
- * the same one FsBlobs uses in dev). `handleUpload` is that route: it verifies the signature, then
- * streams the body into R2 with the signed SHA-256, which R2 checks before it stores anything.
+ * which a Worker otherwise never needs; so presigned URLs point at the Worker's own routes instead
+ * (the scheme in @fling/api/blobs/signed-url, the same one FsBlobs uses in dev):
+ *
+ * - `PUT /blob-upload/<key>?exp=&sig=` (`handleUpload`) verifies the signature, then streams the
+ *   body into R2 with the signed SHA-256, which R2 checks before it stores anything.
+ * - `GET /blob-download/<key>?exp=&sig=` (`handleDownload`) verifies the signature, then streams
+ *   the object out of R2.
  */
 import type { R2Bucket, R2ObjectBody } from '@cloudflare/workers-types'
 import type { Blobs, PresignedPut } from '@fling/api/blobs'
-import { signUpload, uploadKeyFromPath, verifyUpload } from '@fling/api/blobs/signed-upload'
+import {
+  keyFromPath,
+  signDownload,
+  signUpload,
+  verifyDownload,
+  verifyUpload,
+} from '@fling/api/blobs/signed-url'
 
-/** Where the Worker mounts `handleUpload`. */
+/** Where the Worker mounts `handleUpload` and `handleDownload`. */
 export const UPLOAD_ROUTE = '/blob-upload'
+export const DOWNLOAD_ROUTE = '/blob-download'
 
 /** Objects up to this size are copied through memory; larger ones stream. */
 const BUFFER_COPY_BYTES = 1024 * 1024
@@ -48,10 +58,37 @@ export class R2Blobs implements Blobs {
     return signUpload({ ...this.signer, route: UPLOAD_ROUTE }, key, opts)
   }
 
+  async presignGet(key: string, opts: { expiresIn?: number } = {}): Promise<string> {
+    return signDownload({ ...this.signer, route: DOWNLOAD_ROUTE }, key, opts)
+  }
+
+  /** The download route: `GET <DOWNLOAD_ROUTE>/<key>?exp=&sig=` from a `presignGet` URL. */
+  async handleDownload(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+    const key = keyFromPath(url.pathname, DOWNLOAD_ROUTE)
+    if (request.method !== 'GET' || key === null) return forbidden('Not a download', 404)
+    const signed = {
+      key,
+      exp: url.searchParams.get('exp') ?? undefined,
+      sig: url.searchParams.get('sig') ?? undefined,
+    }
+    if (!verifyDownload(this.signer, signed)) return forbidden('Bad signature')
+    const object = await this.bucket.get(key)
+    if (!object) return forbidden('No such object', 404)
+    return new Response(object.body as never, {
+      status: 200,
+      headers: {
+        'content-type': 'application/octet-stream',
+        'content-length': String(object.size),
+        'cache-control': 'private, no-store',
+      },
+    })
+  }
+
   /** The upload route: `PUT <UPLOAD_ROUTE>/<key>?exp=&sig=` from a `presignPut` URL. */
   async handleUpload(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    const key = uploadKeyFromPath(url.pathname, UPLOAD_ROUTE)
+    const key = keyFromPath(url.pathname, UPLOAD_ROUTE)
     if (request.method !== 'PUT' || key === null) return forbidden('Not an upload', 404)
     const signed = {
       key,

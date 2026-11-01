@@ -1,7 +1,8 @@
 /** Builds the Hono app from injected deps — no AWS here, so tests run on memory/fs fakes. */
 import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH } from '@fling/shared'
 import { Hono } from 'hono'
-import { FsBlobs } from './blobs/fs.ts'
+import { FS_DOWNLOAD_ROUTE, FS_UPLOAD_ROUTE, FsBlobs } from './blobs/fs.ts'
+import { keyFromPath } from './blobs/signed-url.ts'
 import { instanceMetadata } from './instance.ts'
 import { errorHandler, notFoundHandler, originVerify, securityHeaders } from './middleware.ts'
 import { apiRoutes } from './routes/api.ts'
@@ -42,24 +43,37 @@ export function createApp(deps: Deps) {
   // Local only: drain the notifications outbox on demand, read the mail sent.
   if (deps.config.devLogin) app.route('/dev', devRoutes)
 
-  // Dev/tests only: the target of FsBlobs' "presigned" PUT URLs.
+  // Dev/tests only: the targets of FsBlobs' "presigned" PUT and GET URLs.
   const blobs = deps.blobs
   if (blobs instanceof FsBlobs) {
-    app.put('/dev-upload/*', async c => {
-      const key = decodeURIComponent(c.req.path.slice('/dev-upload/'.length))
-      const ok = await blobs.acceptUpload({
-        key,
-        exp: c.req.query('exp'),
-        sig: c.req.query('sig'),
-        contentType: c.req.header('content-type') ?? '',
-        cacheControl: c.req.header('cache-control') ?? '',
-        checksum: c.req.header('x-amz-checksum-sha256') ?? '',
-        body: new Uint8Array(await c.req.arrayBuffer()),
-      })
-      if (!ok) {
-        return c.json({ error: { code: 'forbidden', message: 'Bad signature or checksum' } }, 403)
-      }
+    const forbidden = (message: string) => ({ error: { code: 'forbidden', message } })
+    app.put(`${FS_UPLOAD_ROUTE}/*`, async c => {
+      const key = keyFromPath(c.req.path, FS_UPLOAD_ROUTE)
+      const ok =
+        key !== null &&
+        (await blobs.acceptUpload({
+          key,
+          exp: c.req.query('exp'),
+          sig: c.req.query('sig'),
+          contentType: c.req.header('content-type') ?? '',
+          cacheControl: c.req.header('cache-control') ?? '',
+          checksum: c.req.header('x-amz-checksum-sha256') ?? '',
+          body: new Uint8Array(await c.req.arrayBuffer()),
+        }))
+      if (!ok) return c.json(forbidden('Bad signature or checksum'), 403)
       return c.body(null, 200)
+    })
+    app.get(`${FS_DOWNLOAD_ROUTE}/*`, async c => {
+      const key = keyFromPath(c.req.path, FS_DOWNLOAD_ROUTE)
+      const body =
+        key === null
+          ? null
+          : await blobs.serveDownload({ key, exp: c.req.query('exp'), sig: c.req.query('sig') })
+      if (!body) return c.json(forbidden('Bad signature, or no such object'), 403)
+      return c.body(body as Uint8Array<ArrayBuffer>, 200, {
+        'content-type': 'application/octet-stream',
+        'cache-control': 'private, no-store',
+      })
     })
   }
 

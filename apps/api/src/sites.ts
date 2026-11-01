@@ -137,12 +137,13 @@ const MAX_LISTING_BYTES = 1024 * 1024
 /**
  * What's kept at manifestKey(): the deploy manifest plus, once finalized, whether the root
  * index.html is Fling's generated "List HTML files" page (absent on versions finalized earlier).
- * A path publish's manifest is the whole merged version, with `layer`: the folder it replaced, the
- * version it builds on, and the paths it carries forward from it (copied at finalize).
+ * A version layered on a base (a path publish, or a publish on a pulled version) keeps the whole
+ * merged version, with `layer`: the version it builds on, the paths it copies from it at finalize
+ * rather than have uploaded, and for a path publish the folder it replaced.
  */
 export type StoredManifest = Manifest & {
   generatedIndex?: boolean
-  layer?: { path: string; base: string; kept: string[] }
+  layer?: { path?: string; base: string; kept: string[] }
 }
 
 /** Is the version's root index.html the generated listing page? Reads it (it's small) to check. */

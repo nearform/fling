@@ -24,11 +24,20 @@ export const ManifestFileSchema = z.object({
 })
 export type ManifestFile = z.infer<typeof ManifestFileSchema>
 
-export const ManifestSchema = z
-  .object({ files: z.array(ManifestFileSchema).min(1).max(MAX_FILES) })
-  .refine(m => new Set(m.files.map(f => f.path)).size === m.files.length, 'duplicate paths')
-  .refine(m => m.files.reduce((n, f) => n + f.size, 0) <= MAX_DEPLOY_BYTES, 'deploy too large')
+const manifestOf = (files: z.ZodArray<typeof ManifestFileSchema>) =>
+  z
+    .object({ files })
+    .refine(m => new Set(m.files.map(f => f.path)).size === m.files.length, 'duplicate paths')
+    .refine(m => m.files.reduce((n, f) => n + f.size, 0) <= MAX_DEPLOY_BYTES, 'deploy too large')
+
+export const ManifestSchema = manifestOf(z.array(ManifestFileSchema).min(1).max(MAX_FILES))
 export type Manifest = z.infer<typeof ManifestSchema>
+
+/**
+ * A deploy's manifest (`DeployRequest.manifest`): a manifest, except that a partial publish on a
+ * base (only the files that changed) may send none, when all it does is remove files.
+ */
+export const DeployManifestSchema = manifestOf(z.array(ManifestFileSchema).max(MAX_FILES))
 
 /**
  * The canonical string a version id is hashed from: one `path\0sha256\n` line per

@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
-import { ManifestSchema } from './manifest.ts'
+import { MAX_FILES, MAX_PATH_LENGTH } from './limits.ts'
+import { DeployManifestSchema } from './manifest.ts'
 import { PublishPathSchema } from './publish-path.ts'
 import {
   OwnersInputSchema,
@@ -195,15 +196,36 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  * changes it. Without it a new site gets the instance's default (`defaultAccess` in the metadata).
  * `path` (`pathPublish` capability; publish-path.ts) replaces only that folder: every file in the
  * manifest is under it (`<path>/…`), and the current version's other files are carried forward.
+ *
+ * `base` (`pull` capability) publishes on top of a version the client pulled: refused with 409
+ * `base_changed` unless it is still the site's current version, when the deploy is made and when
+ * it goes live. The files the base already has (same path and SHA-256) are not uploaded: the
+ * server copies them forward. Without `partial`, the manifest is the whole new version; with
+ * `partial: true` it holds only the files that changed or are new, and `remove` lists the base's
+ * files to leave out. `partial` needs `base`, `remove` needs `partial`, and `base` goes without
+ * `path`.
  */
-export const DeployRequestSchema = z.object({
-  manifest: ManifestSchema,
-  path: PublishPathSchema.optional(),
-  spa: z.boolean().optional(),
-  visibility: VisibilitySchema.optional(),
-  access: AccessLevelSchema.optional(),
-  audience: AudienceInputSchema.optional(),
-})
+export const DeployRequestSchema = z
+  .object({
+    manifest: DeployManifestSchema,
+    path: PublishPathSchema.optional(),
+    base: z.string().min(1).max(100).optional(),
+    partial: z.boolean().optional(),
+    remove: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).max(MAX_FILES).optional(),
+    spa: z.boolean().optional(),
+    visibility: VisibilitySchema.optional(),
+    access: AccessLevelSchema.optional(),
+    audience: AudienceInputSchema.optional(),
+  })
+  .superRefine((req, ctx) => {
+    const issue = (message: string) => ctx.addIssue({ code: 'custom', message })
+    if (req.manifest.files.length === 0 && !(req.partial && req.remove?.length)) {
+      issue('manifest.files: at least one file')
+    }
+    if (req.partial && req.base === undefined) issue('`partial` needs `base`')
+    if (req.remove !== undefined && !req.partial) issue('`remove` needs `partial: true`')
+    if (req.base !== undefined && req.path !== undefined) issue('Pass `base` or `path`, not both')
+  })
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 
 export const UploadSchema = z.object({

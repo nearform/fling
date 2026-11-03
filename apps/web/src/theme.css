@@ -633,8 +633,11 @@
   }
   /* The new comment scrolls with the threads, one line until it is used; while it has focus it
      stays in view as the threads scroll under it. */
+  /* One column that may shrink below its content's width: a long quote, path or type name
+     truncates or wraps inside the panel instead of widening it. */
   .review-composer {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.5rem;
     margin-block-end: 0.75rem;
   }
@@ -647,6 +650,7 @@
   }
   .review-reply {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.5rem;
   }
 

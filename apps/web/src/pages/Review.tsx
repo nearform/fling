@@ -1016,32 +1016,35 @@ function Composer({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setActive(false)
       }}
     >
-      <div className="flex items-center gap-2">
-        <label
-          htmlFor={form ? undefined : 'review-new'}
-          className={expanded ? 'min-w-0 truncate text-sm text-secondary' : 'sr-only'}
-        >
-          {form ? 'Answer' : 'Comment'} on <span className="font-mono">{path}</span>
-        </label>
-        {expanded && forms.length > 0 && (
-          <select
-            className="select select-xs ms-auto w-auto max-w-[60%]"
-            aria-label="Type"
-            value={form?.id ?? ''}
-            onChange={e => {
-              setFormId(e.target.value)
-              setErrors([])
-            }}
-          >
-            <option value="">Comment</option>
-            {forms.map(f => (
-              <option key={f.id} value={f.id}>
-                {f.title}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      <label
+        htmlFor={form ? undefined : 'review-new'}
+        className={expanded ? 'min-w-0 truncate text-sm text-secondary' : 'sr-only'}
+      >
+        {form ? form.title : 'Comment'} on <span className="font-mono">{path}</span>
+      </label>
+      {expanded && forms.length > 0 && (
+        // The comment types side by side, so the forms are seen before anyone types; a long
+        // list wraps onto more rows instead of widening the panel.
+        <div className="join flex-wrap" role="group" aria-label="Type">
+          {[null, ...forms].map(f => {
+            const on = (form?.id ?? null) === (f?.id ?? null)
+            return (
+              <button
+                key={f?.id ?? ''}
+                type="button"
+                className={`btn btn-xs join-item h-auto min-h-6 max-w-full ${on ? 'btn-active' : ''}`}
+                aria-pressed={on}
+                onClick={() => {
+                  setFormId(f?.id ?? '')
+                  setErrors([])
+                }}
+              >
+                <span className="truncate">{f?.title ?? 'Comment'}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       {form ? (
         <LazyResponseForm
           key={`${form.id}\u0000${round}`}
@@ -1055,7 +1058,7 @@ function Composer({
           {footer('Post', actions.respond.isPending)}
         </LazyResponseForm>
       ) : (
-        <form className="grid gap-2" onSubmit={submit}>
+        <form className="grid grid-cols-[minmax(0,1fr)] gap-2" onSubmit={submit}>
           <textarea
             ref={field}
             id="review-new"

@@ -87,6 +87,9 @@ export const UPGRADES: Partial<Record<Kind, readonly Upgrade[]>> = {
   // (`hasListing`).
   sitegrant: [fields => fields],
   groupsite: [fields => fields],
+  // v2: a comment may be a response to a form (`response`, `respondent`, `updatedAt`). A v1
+  // comment is a plain one: nothing to fill in.
+  comment: [fields => fields],
 }
 
 export const currentVersion = (kind: Kind, upgrades = UPGRADES) => (upgrades[kind]?.length ?? 0) + 1

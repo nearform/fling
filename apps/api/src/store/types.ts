@@ -4,6 +4,7 @@ import type {
   ChannelId,
   CommentAnchor,
   CommentAuthor,
+  CommentResponse,
   EventKey,
   InvitationRole,
   InvitationVia,
@@ -357,10 +358,16 @@ export interface VersionRecord {
 /**
  * A comment on a site (a thread's first comment, or a reply to one). Kept in the site's partition,
  * so it outlives versions and goes with the site.
+ *
+ * v2: a comment may be a **response** to one of the site's forms (`response`, forms.ts in
+ * @fling/shared). A page-kind response has the id `R<hash of form, path, author>`, so a reviewer
+ * has one per page and answering again changes it (`Store.updateResponse`): `respondent` (the
+ * author's email, a scalar the update is conditioned on) and `updatedAt` say whose it is and when
+ * it last changed. Its `body` is the response's summary.
  */
 export interface CommentRecord {
   siteId: string
-  /** sortable by creation time (newCommentId) */
+  /** sortable by creation time (newCommentId), except a page-kind response's (`R<hash>`) */
   id: string
   /** the thread's first comment; null when this starts a thread */
   parentId: string | null
@@ -374,7 +381,15 @@ export interface CommentRecord {
   createdAt: string
   resolvedAt: string | null
   resolvedBy: CommentAuthor | null
+  response?: CommentResponse
+  /** a response's author, by email (page-kind responses: what `updateResponse` checks) */
+  respondent?: string
+  /** when a page-kind response was last answered again */
+  updatedAt?: string
 }
+
+/** What answering a page-kind form again changes. */
+export type ResponseUpdate = Required<Pick<CommentRecord, 'response' | 'body' | 'updatedAt'>>
 
 /**
  * A connection to a site's live room (live.ts), kept for hubs whose connections outlive any one
@@ -665,8 +680,18 @@ export interface Store extends NotificationStore {
   /** Store a new comment (its id is unique: false if one has it already). */
   createComment(comment: CommentRecord): Promise<boolean>
   getComment(siteId: string, id: string): Promise<CommentRecord | null>
-  /** In id order: oldest first. */
+  /** In id order (page-kind responses' ids are not by time: the core sorts by `createdAt`). */
   listComments(siteId: string): Promise<CommentRecord[]>
+  /**
+   * Change a response (its data, summary and `updatedAt`) while it is `respondent`'s; null when
+   * the comment is gone or someone else's.
+   */
+  updateResponse(
+    siteId: string,
+    id: string,
+    respondent: string,
+    update: ResponseUpdate
+  ): Promise<CommentRecord | null>
   /** Set or clear a comment's resolution; null when the comment is gone. */
   resolveComment(
     siteId: string,

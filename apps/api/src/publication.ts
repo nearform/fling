@@ -82,6 +82,12 @@
  *     `listHtml` gets its own `<path>/index.html` listing.
  *   - Rollback needs nothing new: a layered version is complete, so rolling back to the base
  *     undoes it.
+ *
+ * Forms (forms.ts): a deploy's `forms` (the folder's `fling.forms.json`) is the version's forms
+ * config, a blob beside its manifest written when the deploy is made (`formsForDeploy`). Omitted,
+ * a layered publish keeps the base's and any other new version has none; `null` removes them. A
+ * version is named by its files, so an `unchanged` or `repointed` deploy that sends `forms` (or is
+ * layered) sets that version's config. The config is scanned for secrets like a file sent.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -93,6 +99,8 @@ import {
   type DeployResponse,
   describeSecretFindings,
   displayPublishPath,
+  FORMS_FILE,
+  type FormsConfig,
   forbiddenPathReason,
   isScannablePath,
   isUnderPath,
@@ -115,6 +123,7 @@ import {
 import { computeVersionId } from '@fling/shared/version-id'
 import { guestRefusal } from './auth/middleware.ts'
 import { manifestKey } from './blobs/types.ts'
+import { formsForDeploy, writeForms } from './forms.ts'
 import { inviterOf } from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
@@ -256,6 +265,13 @@ function admit(raw: unknown): DeployRequest {
         { paths: outside }
       )
     }
+  }
+  if (req.forms) {
+    const findings = scanBytesForSecrets(
+      new TextEncoder().encode(JSON.stringify(req.forms, null, 2)),
+      FORMS_FILE
+    )
+    if (findings.length > 0) throw secretDetected(findings)
   }
   return req
 }
@@ -525,8 +541,12 @@ async function prepare(
   const layer = layered?.layer ?? null
   const files = layered?.files ?? req.manifest.files
   const versionId = computeVersionId(files)
+  const forms = existing
+    ? await formsForDeploy(deps, existing.id, req, layer?.base ?? null)
+    : req.forms
 
   if (existing && existing.currentVersionId === versionId) {
+    if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
     applySettings(existing, req)
     existing.archived = false
     await saveOnBase(deps, existing, layer)
@@ -539,6 +559,7 @@ async function prepare(
   if (existing) {
     const version = await store.getVersion(existing, versionId)
     if (version?.status === 'complete') {
+      if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
       existing.currentVersionId = versionId
       existing.archived = false
       applySettings(existing, req)
@@ -589,6 +610,7 @@ async function prepare(
     files,
     ...(layer ? { layer } : {}),
   } satisfies StoredManifest)
+  await writeForms(deps, site.id, versionId, forms ?? null)
   await store.putVersion(site, version)
   const kept = new Set(layer?.kept)
   const sent = req.manifest.files.filter(f => !kept.has(f.path))
@@ -754,6 +776,8 @@ export async function publishBytes(
     visibility?: Visibility
     access?: AccessLevel
     audience?: AudienceInput
+    /** the version's forms config (null: none); omitted, as DeployRequest.forms */
+    forms?: FormsConfig | null
   }
 ): Promise<Published> {
   const bytesByPath = new Map(input.map(f => [f.path, f.bytes]))
@@ -777,6 +801,7 @@ export async function publishBytes(
     visibility: opts.visibility,
     access: opts.access,
     audience: opts.audience,
+    ...(opts.forms === undefined ? {} : { forms: opts.forms }),
   })
   // Scan exactly the bytes we are about to write, before anything is stored.
   const findings = input.flatMap(f => scanBytesForSecrets(f.bytes, f.path))

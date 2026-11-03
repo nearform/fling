@@ -10,7 +10,8 @@
  *
  * The bytes never pass through the API (a buffered Lambda response is capped well below a site's
  * size): the API answers with each file's path, size, type and SHA-256, and a short-lived signed GET
- * for its bytes (`Blobs.presignGet`).
+ * for its bytes (`Blobs.presignGet`). The version's forms config (forms.ts) comes with them, so
+ * the client can write `fling.forms.json` back into the folder.
  */
 import {
   isUnderPath,
@@ -20,6 +21,7 @@ import {
   siteObjectKey,
 } from '@fling/shared'
 import { manifestKey } from './blobs/types.ts'
+import { readForms } from './forms.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { notFound } from './lib/errors.ts'
 import { can } from './policy.ts'
@@ -65,7 +67,7 @@ export async function pullable(
   return { site, versionId, files }
 }
 
-/** GET /api/sites/:name/pull — the files to download, each with a signed URL. */
+/** GET /api/sites/:name/pull — the files to download, each with a signed URL, and the forms. */
 export async function pull(
   deps: Deps,
   user: User,
@@ -74,6 +76,7 @@ export async function pull(
 ): Promise<PullResponse> {
   const { site, versionId, files } = await pullable(deps, user, name, opts)
   const expiresAt = new Date(deps.clock.now().getTime() + PULL_URL_TTL_SECONDS * 1000)
+  const forms = await readForms(deps, site.id, versionId)
   const signed = await mapLimit(files, PRESIGN_CONCURRENCY, async f => ({
     path: f.path,
     size: f.size,
@@ -88,5 +91,6 @@ export async function pull(
     ...(opts.path !== undefined ? { path: opts.path } : {}),
     files: signed,
     expiresAt: expiresAt.toISOString(),
+    ...(forms ? { forms } : {}),
   }
 }

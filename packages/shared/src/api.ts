@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
+import { FormsConfigSchema } from './forms.ts'
 import { MAX_FILES, MAX_PATH_LENGTH } from './limits.ts'
 import { DeployManifestSchema } from './manifest.ts'
 import { PublishPathSchema } from './publish-path.ts'
@@ -170,6 +171,8 @@ export const PullResponseSchema = z.object({
   files: z.array(PullFileSchema),
   /** when the URLs stop working */
   expiresAt: z.string(),
+  /** the version's forms config (`fling.forms.json`; `forms` capability), absent when it has none */
+  forms: FormsConfigSchema.optional(),
 })
 export type PullResponse = z.infer<typeof PullResponseSchema>
 
@@ -206,6 +209,10 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  * `partial: true` it holds only the files that changed or are new, and `remove` lists the base's
  * files to leave out. `partial` needs `base`, `remove` needs `partial`, and `base` goes without
  * `path`.
+ *
+ * `forms` (`forms` capability; forms.ts) is the new version's forms config, from `fling.forms.json`
+ * (never itself a file of the site), or `null` for none. Omitted, a path publish or a publish on a
+ * base keeps the base's forms, and any other deploy has none.
  */
 export const DeployRequestSchema = z
   .object({
@@ -218,6 +225,7 @@ export const DeployRequestSchema = z
     visibility: VisibilitySchema.optional(),
     access: AccessLevelSchema.optional(),
     audience: AudienceInputSchema.optional(),
+    forms: FormsConfigSchema.nullable().optional(),
   })
   .superRefine((req, ctx) => {
     const issue = (message: string) => ctx.addIssue({ code: 'custom', message })

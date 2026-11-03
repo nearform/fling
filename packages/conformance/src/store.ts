@@ -882,6 +882,46 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.getComment(s.id, 'missing')).toBeNull()
       })
 
+      it('updateResponse changes a response only while it is the respondent’s', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const response = comment(s.id, 1, {
+          id: 'Rabc123',
+          body: 'Labels\nVerdict: Pass',
+          response: {
+            formId: 'decision',
+            data: { verdict: 'pass', scores: [1, 2] },
+            versionId: 'v1',
+          },
+          respondent: 'author@example.test',
+        })
+        expect(await store.createComment(response)).toBe(true)
+        expect(await store.getComment(s.id, response.id)).toEqual(response)
+        const update = {
+          response: { formId: 'decision', data: { verdict: 'fail' }, versionId: 'v2' },
+          body: 'Labels\nVerdict: Fail',
+          updatedAt: LATER,
+        }
+        const updated = { ...response, ...update }
+        expect(
+          await store.updateResponse(s.id, response.id, 'author@example.test', update)
+        ).toEqual(updated)
+        expect(await store.getComment(s.id, response.id)).toEqual(updated)
+        expect(
+          await store.updateResponse(s.id, response.id, 'other@example.test', update)
+        ).toBeNull()
+        expect(
+          await store.updateResponse(s.id, 'Rmissing', 'author@example.test', update)
+        ).toBeNull()
+        expect(await store.getComment(s.id, 'Rmissing')).toBeNull()
+        // A plain comment has no respondent, so it is never changed as a response.
+        const plain = comment(s.id, 2)
+        await store.createComment(plain)
+        expect(await store.updateResponse(s.id, plain.id, 'author@example.test', update)).toBeNull()
+        expect(await store.getComment(s.id, plain.id)).toEqual(plain)
+      })
+
       it('deleteComment removes a thread with its replies, a reply alone; false when gone', async () => {
         const store = await factory()
         const s = site(email())

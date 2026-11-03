@@ -11,8 +11,9 @@
  *                                                        currentVersionId, shareToken, …)
  *   SITE#<siteId>          VERSION#<versionId>           version (status, fileCount, totalBytes, …)
  *   SITE#<siteId>          COMMENT#<commentId>           comment (parentId, path, versionId, body,
- *                                                        author, resolvedAt, …); ids sort by time,
- *                                                        so the partition lists them oldest first
+ *                                                        author, resolvedAt, response?, …); ids
+ *                                                        sort by time, but a page-kind response's
+ *                                                        (`R<hash>`), so the core sorts by createdAt
  *   SITE#<siteId>          LIVE#<connectionId>           a connection to the site's live room (peer,
  *                                                        connectedAt) — 2 h; only hubs that keep
  *                                                        connections in the store write them
@@ -267,6 +268,7 @@ import {
   type OAuthRequestRecord,
   type PendingNotificationRecord,
   type RefreshTokenRecord,
+  type ResponseUpdate,
   type RevocationRecord,
   type SentNotificationRecord,
   type SharedListing,
@@ -1031,9 +1033,25 @@ export class Records implements Store {
     return this.read<CommentRecord>('comment', key.comment(siteId, id))
   }
 
-  /** In id byte order: oldest first. */
+  /** In id byte order. */
   listComments(siteId: string) {
     return this.list<CommentRecord>('comment', sitePk(siteId), 'COMMENT#')
+  }
+
+  async updateResponse(siteId: string, id: string, respondent: string, update: ResponseUpdate) {
+    const { pk, sk } = key.comment(siteId, id)
+    try {
+      const item = await this.table.update(
+        pk,
+        sk,
+        { set: update },
+        fieldEquals('respondent', respondent)
+      )
+      return decode<CommentRecord>('comment', item)
+    } catch (err) {
+      if (err instanceof ConditionFailed) return null
+      throw err
+    }
   }
 
   async resolveComment(

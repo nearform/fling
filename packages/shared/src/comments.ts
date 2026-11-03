@@ -17,6 +17,12 @@ export const COMMENT_MAX_CHARS = 4000
 export const COMMENTS_PER_SITE_MAX = 1000
 /** Characters in a page path. */
 export const COMMENT_PATH_MAX = 1024
+/** Characters in a form's id (forms.ts). */
+export const FORM_ID_MAX = 40
+/** The most a response's data may weigh, as JSON (UTF-8 bytes). */
+export const RESPONSE_DATA_MAX_BYTES = 16 * 1024
+/** Responses one site may hold, counted apart from its comments. */
+export const RESPONSES_PER_SITE_MAX = 10_000
 
 /**
  * Who wrote a comment: a signed-in user, or (later) a guest who opened a share link and gave a
@@ -69,6 +75,35 @@ export const CommentAnchorSchema = z.object({
 })
 export type CommentAnchor = z.infer<typeof CommentAnchorSchema>
 
+/** A form's id: letters, digits, `-` and `_`, starting with a letter or digit. */
+export const FormIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/, 'letters, digits, - and _, starting with a letter or digit')
+  .max(FORM_ID_MAX)
+
+/** The bytes a value takes as JSON (UTF-8). */
+export const jsonBytes = (value: unknown) =>
+  new TextEncoder().encode(JSON.stringify(value) ?? '').byteLength
+
+/** A response's data: a JSON object of at most RESPONSE_DATA_MAX_BYTES. */
+export const ResponseDataSchema = z
+  .record(z.string(), z.unknown())
+  .refine(data => jsonBytes(data) <= RESPONSE_DATA_MAX_BYTES, {
+    message: `at most ${RESPONSE_DATA_MAX_BYTES / 1024} KB of data`,
+  })
+
+/**
+ * The response a comment carries (forms.ts): the form, the data (valid against the form's schema
+ * when it was written) and the version whose forms it answered. Its `body` is the response's
+ * summary (`responseSummary`), so clients that don't know forms still show something readable.
+ */
+export const CommentResponseSchema = z.object({
+  formId: z.string(),
+  data: z.record(z.string(), z.unknown()),
+  versionId: z.string().nullable(),
+})
+export type CommentResponse = z.infer<typeof CommentResponseSchema>
+
 export const CommentSchema = z.object({
   id: z.string(),
   /** the thread this replies to; null for the comment that starts a thread */
@@ -86,6 +121,10 @@ export const CommentSchema = z.object({
   resolvedBy: CommentAuthorSchema.nullable(),
   /** whether the caller may delete it (policy's answer, so clients don't guess) */
   canDelete: z.boolean(),
+  /** a response to a form (forms.ts); absent on a plain comment */
+  response: CommentResponseSchema.optional(),
+  /** a page-kind response: when it was last changed (absent until it is) */
+  updatedAt: z.string().optional(),
 })
 export type Comment = z.infer<typeof CommentSchema>
 
@@ -110,13 +149,28 @@ export const CommentListSchema = z.object({
 })
 export type CommentList = z.infer<typeof CommentListSchema>
 
-/** POST /api/sites/:name/comments → CommentSchema (201). A reply takes its thread's path. */
-export const CreateCommentRequestSchema = z.object({
-  body: z.string().trim().min(1).max(COMMENT_MAX_CHARS),
-  path: z.string().max(COMMENT_PATH_MAX).optional(),
-  parentId: z.string().min(1).max(100).optional(),
-  anchor: CommentAnchorSchema.optional(),
-})
+/**
+ * POST /api/sites/:name/comments → CommentSchema (201). A reply takes its thread's path.
+ *
+ * With `response` (the `forms` capability) the comment answers one of the live version's forms
+ * that applies to `path`, and `body` is ignored (the server writes the response's summary). A
+ * page-kind form takes no `anchor`: it is one response per reviewer per page, and sending it again
+ * replaces it (same id). A comment-kind response starts a new thread, pinned like a comment. Never
+ * a reply. 400 `unknown_form` when no such form applies to the page, 400 `invalid_response` when
+ * the data doesn't fit the form's schema (`error.errors`: FieldError[], forms.ts) or the kind doesn't fit.
+ */
+export const CreateCommentRequestSchema = z
+  .object({
+    body: z.string().trim().min(1).max(COMMENT_MAX_CHARS).optional(),
+    path: z.string().max(COMMENT_PATH_MAX).optional(),
+    parentId: z.string().min(1).max(100).optional(),
+    anchor: CommentAnchorSchema.optional(),
+    response: z.object({ formId: FormIdSchema, data: ResponseDataSchema }).optional(),
+  })
+  .refine(req => req.body !== undefined || req.response !== undefined, {
+    message: 'body: a comment needs some text',
+    path: ['body'],
+  })
 export type CreateCommentRequest = z.infer<typeof CreateCommentRequestSchema>
 
 /** PATCH /api/sites/:name/comments/:id { resolved } → CommentSchema. Threads only. */

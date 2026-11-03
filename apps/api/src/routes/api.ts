@@ -8,6 +8,7 @@ import {
   CreateGroupRequestSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
+  FormsResponseSchema,
   GroupDetailSchema,
   GroupListSchema,
   GroupMembersRequestSchema,
@@ -20,7 +21,12 @@ import {
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
   PullResponseSchema,
+  ResponseExportFormatSchema,
+  ResponsesExportSchema,
   RollbackRequestSchema,
+  responsesCsv,
+  responsesFileName,
+  responsesJsonl,
   SentNotificationListSchema,
   SharedSiteListSchema,
   ShareResponseSchema,
@@ -41,6 +47,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { meOf } from '../admin.ts'
 import { principalOf, requireAccountAction, requireAuth } from '../auth/middleware.ts'
 import * as comments from '../comments.ts'
+import { formsOf, responsesOf } from '../forms.ts'
 import * as groups from '../groups.ts'
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
@@ -391,6 +398,48 @@ apiRoutes.delete('/sites/:name/comments/:id', async c => {
     c.req.param('id')
   )
   return c.body(null, 204)
+})
+
+// --- forms and their responses (the `forms` capability, on with comments; forms.ts) ---
+
+apiRoutes.get('/sites/:name/forms', async c => {
+  const deps = c.get('deps')
+  const { site } = await comments.commentSite(
+    deps,
+    userActor(c.get('user')),
+    c.req.param('name'),
+    'comment.read'
+  )
+  const forms = await formsOf(deps, site, c.req.query('path'))
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(FormsResponseSchema.parse(forms))
+})
+
+apiRoutes.get('/sites/:name/responses', async c => {
+  const deps = c.get('deps')
+  const format = ResponseExportFormatSchema.safeParse(c.req.query('format') ?? 'json')
+  if (!format.success) throw badRequest('format is json, jsonl or csv')
+  const { site, actor } = await comments.commentSite(
+    deps,
+    userActor(c.get('user')),
+    c.req.param('name'),
+    'comment.read'
+  )
+  const form = c.req.query('form') || undefined
+  const exported = await responsesOf(deps, actor, site, {
+    ...(form ? { form } : {}),
+    ...(c.req.query('path') !== undefined ? { path: c.req.query('path') } : {}),
+  })
+  c.header('Cache-Control', 'private, no-store')
+  if (format.data === 'json') return c.json(ResponsesExportSchema.parse(exported))
+  const file = responsesFileName(site.name, exported.title, format.data)
+  c.header('Content-Disposition', `attachment; filename="${file}"`)
+  if (format.data === 'jsonl') {
+    c.header('Content-Type', 'application/x-ndjson; charset=utf-8')
+    return c.body(responsesJsonl(exported.responses))
+  }
+  c.header('Content-Type', 'text/csv; charset=utf-8')
+  return c.body(responsesCsv(exported.responses, exported.forms))
 })
 
 /** A ticket into the site's live room (`live` capability): connect to `${url}?ticket=…` within `expiresIn`. */

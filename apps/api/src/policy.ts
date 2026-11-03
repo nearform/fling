@@ -169,6 +169,9 @@ export const accessOf = (site: AccessFields): Access =>
  *   comment.resolve     PATCH …/comments/:id { resolved }, fling_comment_resolve (any thread)
  *   comment.delete      DELETE …/comments/:id, fling_comment_delete: anyone's comment
  *   comment.delete.own  the same, for a comment the actor wrote (`canDeleteComment`)
+ *   response.read.all   see everyone's responses to a form whose visibility is `own`
+ *                       (`canSeeResponse`): GET …/comments, GET …/responses and their MCP tools.
+ *                       Without it, a reviewer sees only their own responses to such a form
  *
  * Comments are the conversation around a site, so everyone who can see a site by signing in
  * takes part: owners, publishers and members (on a restricted site, only its owners, publishers
@@ -205,6 +208,7 @@ export const ACTIONS = [
   'comment.resolve',
   'comment.delete',
   'comment.delete.own',
+  'response.read.all',
 ] as const
 
 export type Action = (typeof ACTIONS)[number]
@@ -254,6 +258,7 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'comment.resolve': signedIn,
   'comment.delete': ownerOrAdminSession,
   'comment.delete.own': signedIn,
+  'response.read.all': ownerOrAdmin,
 }
 
 /** Whether a list of people and groups names the user, by address or through one of `groups`. */
@@ -355,6 +360,21 @@ export function canDeleteComment(
     can(actor, 'comment.delete', site) ||
     (isAuthor(actor, comment.author) && can(actor, 'comment.delete.own', site))
   )
+}
+
+/**
+ * May the actor see this comment as far as forms go: anything but a response to an `own` form
+ * (`ownForm`) is for every reader; such a response only for its author and those with
+ * `response.read.all`.
+ */
+export function canSeeResponse(
+  actor: Actor,
+  site: PolicySite,
+  comment: { author: CommentAuthor; response?: unknown },
+  ownForm: boolean
+): boolean {
+  if (comment.response === undefined || !ownForm) return true
+  return isAuthor(actor, comment.author) || can(actor, 'response.read.all', site)
 }
 
 // --- groups ---

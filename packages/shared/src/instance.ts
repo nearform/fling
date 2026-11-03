@@ -121,7 +121,8 @@ export type InstanceMetadata = z.infer<typeof InstanceMetadataSchema>
 
 /**
  * What every instance has. Features an instance can turn off are added by its config (`comments`,
- * COMMENTS; `live`; `notifications`, the hub and its settings, on when at least one channel is;
+ * COMMENTS; `forms`, forms and their responses on the review page (forms.ts), on with comments;
+ * `live`; `notifications`, the hub and its settings, on when at least one channel is;
  * `email`, the email channel, on with a mail driver; `invites`, invitations from outside the email
  * policy and the emailed sign-in links they use, INVITES); missing means unsupported.
  */

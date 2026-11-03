@@ -124,6 +124,8 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'comment.resolve': takesPart,
   'comment.delete': changes,
   'comment.delete.own': takesPart,
+  // Everyone's responses to an `own` form; the rest see only their own (canSeeResponse).
+  'response.read.all': ownerReads,
 }
 
 /** A site as stored at each access level; `restricted` absent: a record from before them. */

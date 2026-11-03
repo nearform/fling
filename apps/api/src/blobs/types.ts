@@ -53,6 +53,13 @@ export const manifestKey = (siteId: string, versionId: string) =>
   `sites/${siteId}/_manifests/${versionId}.json`
 
 /**
+ * A version's forms config (`fling.forms.json`, forms.ts in @fling/shared), beside its manifest:
+ * under the site prefix and outside every version, so the edge never serves it.
+ */
+export const formsKey = (siteId: string, versionId: string) =>
+  `sites/${siteId}/_forms/${versionId}.json`
+
+/**
  * A site's thumbnail (a PNG of its home page; `SiteRecord.thumbnail`): under the site prefix, so
  * deleting the site deletes it, and outside every version, so the edge never serves it.
  */

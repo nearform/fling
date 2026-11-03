@@ -16,8 +16,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 - **The CLI says when a newer Fling release is out.** After a command, when the server it used
   runs a newer release (`release` in `/.well-known/fling`) than the CLI, it prints one line on
   stderr, "Fling 0.9.0 is out (this CLI is 0.8.0)", with the commands that update it: the
-  `npm i -g` of the latest CLI, then `fling setup`. It uses the metadata the CLI already holds, at most once a day per server, and
-  never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK` set. The local MCP
+  `npm i -g` of the latest CLI, then `fling setup`. It uses the metadata the CLI already holds,
+  at most once a day per server, and never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK` set. The local MCP
   server puts the same news in its instructions and in the session's first `fling_publish` or
   `fling_deploy` result, so Claude passes it on.
 - **`Fling-Release` on every response.** The API, sign-in and MCP routes say which release the
@@ -37,6 +37,9 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
   marketplace, and the Claude Desktop extension, one line per check with the fix. `--json` prints
   the checks; the exit code is 1 on a problem. The local MCP server's `fling_doctor` runs the same
   checks for Claude.
+- **Answering forms on the review page.** While a form tab is open, selecting text in the page no
+  longer starts a comment, so the text can be copied into an answer. With one form on a page,
+  "Save and next" saves the answer and opens the next page without one; "Save" stays on the page.
 
 ## 0.8.0 (2026-11-03)
 

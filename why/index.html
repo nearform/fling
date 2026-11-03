@@ -361,7 +361,23 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .thread p { color: var(--muted); font-size: 0.92rem; }
 @media (prefers-reduced-motion: no-preference) { .thread.enter { animation: drop 420ms var(--ease-out) both; } }
 
-/* ---------- 7 · notifications ---------- */
+/* ---------- 7 · data capture ---------- */
+.capture { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(24rem, 100%), 1fr)); align-items: start; }
+.capture .term pre { min-block-size: 0; font-size: clamp(0.7rem, 0.64rem + 0.3vw, 0.85rem); line-height: 1.5; white-space: pre; overflow-x: auto; }
+.labeller { display: grid; gap: 0.9rem; }
+.labeller .mock-bar { margin: -1.1rem -1.1rem 0; border-radius: var(--radius) var(--radius) 0 0; }
+.labeller .path { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.labeller .done { margin-inline-start: auto; color: var(--ink); font-weight: 700; white-space: nowrap; }
+.labeller fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.labeller legend { font-weight: 700; font-size: 0.92rem; padding: 0; margin-block-end: 0.4rem; }
+.labeller .levels { margin: 0; }
+.labeller .save { justify-self: start; border: 0; border-radius: 999px; padding: 0.45rem 1.1rem; font-size: 0.9rem; font-weight: 800; background: var(--ink); color: var(--bg); cursor: pointer; }
+.labeller .save:disabled { opacity: 0.4; cursor: default; }
+.labeller .save:not(:disabled):active { scale: 0.96; }
+.jsonl { margin: 0; padding: 0.7rem 0.8rem; border-radius: 12px; background: var(--bg-2); font-family: var(--mono); font-size: 0.72rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; min-block-size: 5.5rem; color: var(--muted); }
+.jsonl b { color: var(--ink); font-weight: 600; }
+
+/* ---------- 8 · notifications ---------- */
 .notify { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
 .facts { margin: 0; padding-inline-start: 1.2rem; display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.95rem; }
 .prefs { display: grid; gap: 0.45rem; margin-block: 0.8rem 1rem; }
@@ -373,7 +389,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .mail.quiet { color: var(--muted); font-style: italic; }
 @media (prefers-reduced-motion: no-preference) { .mail.enter { animation: drop 420ms var(--ease-out) both; } }
 
-/* ---------- 8 · versions ---------- */
+/* ---------- 9 · versions ---------- */
 .versions { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
 .timeline { display: grid; gap: 0.55rem; }
 .ver {
@@ -398,7 +414,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   .preview .pv-hero { transition: background-color 350ms var(--ease-out); }
 }
 
-/* ---------- 9 · your cloud ---------- */
+/* ---------- 10 · your cloud ---------- */
 .clouds { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); }
 .seg { display: inline-flex; border: 2px solid var(--outline); border-radius: 999px; overflow: clip; inline-size: fit-content; }
 .seg button { border: 0; background: var(--card); padding: 0.5rem 1rem; cursor: pointer; font-weight: 700; }
@@ -424,7 +440,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .deploy-links { display: flex; flex-wrap: wrap; gap: 0.7rem; }
 .deploy-links a { text-decoration: none; }
 
-/* ---------- 10 · start ---------- */
+/* ---------- 11 · start ---------- */
 .start .inner { justify-items: center; text-align: center; }
 .cmds { display: grid; gap: 0.7rem; inline-size: min(720px, 100%); text-align: start; }
 .cmd {
@@ -619,7 +635,60 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 7 · notifications -->
+  <!-- 7 · data capture -->
+  <section class="slide" id="capture" data-label="Data capture">
+    <div class="inner capture">
+      <div style="display:grid; gap: var(--gap)">
+        <p class="eyebrow reveal">Data capture</p>
+        <h2 class="reveal">Collect answers, <span class="rainbow-text">not just comments.</span></h2>
+        <p class="lead reveal">Fling a form with the site and every page gets one: eval labelling, structured review, rubric scoring, A/B preferences, a survey. Reviewers pick from readable options instead of typing codes, and every answer is JSON checked against your schema.</p>
+        <ul class="facts reveal">
+          <li>One answer per reviewer per page, or a comment type for flagging a passage, next to ordinary comments.</li>
+          <li>Blind labelling when you need it: reviewers see only their own answers, owners see everyone's.</li>
+          <li>Progress across pages and reviewers, and a CSV or JSONL download. Agents read the same data through the CLI or MCP.</li>
+          <li>Ask your agent for the form: it writes <span class="mono">fling.forms.json</span> from a template, checks it and flings it with the pages.</li>
+        </ul>
+      </div>
+      <div style="display:grid; gap: var(--gap)">
+        <div class="card labeller reveal">
+        <div class="mock-bar"><span class="path" id="lab-path"></span><span class="done" id="lab-done"></span></div>
+        <fieldset>
+          <legend>What should the interviewer do next?</legend>
+          <div class="levels" id="lab-decision"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Confidence</legend>
+          <div class="levels" id="lab-confidence"></div>
+        </fieldset>
+        <button type="button" class="save" id="lab-save" disabled>Save and next page</button>
+        <pre class="jsonl" id="lab-out" aria-live="polite" aria-label="responses.jsonl"></pre>
+        </div>
+        <div class="term reveal">
+          <div class="term-bar"><i></i><i></i><i></i><span>fling.forms.json</span></div>
+          <pre>{
+  "title": "Labels",
+  "forms": [{
+    "id": "decision", "kind": "page", "visibility": "own",
+    "schema": {
+      "type": "object", "required": ["decision"],
+      "properties": {
+        "decision": { "type": "string", "oneOf": [
+          { "const": "probe",  "title": "Probe further" },
+          { "const": "accept", "title": "Accept and move on" },
+          { "const": "close",  "title": "Close the interview" }
+        ] },
+        "confidence": { "type": "integer",
+                        "minimum": 1, "maximum": 5 }
+      }
+    }
+  }]
+}</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 · notifications -->
   <section class="slide" id="hear" data-label="Hear about it">
     <div class="inner notify">
       <div style="display:grid; gap: var(--gap)">
@@ -641,7 +710,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 8 · versions -->
+  <!-- 9 · versions -->
   <section class="slide" id="versions" data-label="Versions">
     <div class="inner versions">
       <div style="display:grid; gap: var(--gap)">
@@ -657,7 +726,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 9 · your cloud -->
+  <!-- 10 · your cloud -->
   <section class="slide" id="your-cloud" data-label="Your cloud">
     <div class="inner">
       <p class="eyebrow reveal">Yours, not ours</p>
@@ -687,7 +756,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 10 · start -->
+  <!-- 11 · start -->
   <section class="slide start" id="start" data-label="Start">
     <div class="inner">
       <svg class="big-f reveal" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rb2" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#ff375f"/><stop offset=".2" stop-color="#ff9f0a"/><stop offset=".4" stop-color="#ffd60a"/><stop offset=".6" stop-color="#30d158"/><stop offset=".8" stop-color="#0a84ff"/><stop offset="1" stop-color="#bf5af2"/></linearGradient></defs><polygon points="12.65,6 30.65,6 29.27,12 17.77,12 16.96,15.5 24.96,15.5 23.69,21 15.69,21 13.85,29 7.35,29" fill="#1c1c3a"/><polygon points="11.15,4.5 29.15,4.5 27.77,10.5 16.27,10.5 15.46,14 23.46,14 22.19,19.5 14.19,19.5 12.35,27.5 5.85,27.5" fill="url(#rb2)" stroke="#1c1c3a" stroke-width="1.4" stroke-linejoin="round"/></svg>
@@ -1083,7 +1152,52 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     }
   };
 
-  /* ---- 7 · notifications: preferences filter the inbox ---- */
+  /* ---- 7 · data capture: a label form whose answers become JSONL rows ---- */
+  var labPages = ['/vdd-close-gate-open/', '/vdd-evasive-unreached-testing/', '/pd-cfo-correction-march-slip/', '/oh-farm-ordinary-aunt-tenderness/'];
+  var labChoices = [['probe', 'Probe further'], ['accept', 'Accept and move on'], ['close', 'Close the interview']];
+  var lab = { page: 0, done: 0, decision: null, confidence: null };
+  function labButtons(box, items, key) {
+    items.forEach(function (it) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = it[1]; b.setAttribute('aria-pressed', 'false'); b.dataset.v = it[0];
+      b.addEventListener('click', function () { labPick(key, it[0]); });
+      box.appendChild(b);
+    });
+  }
+  function labPick(key, v) {
+    lab[key] = v;
+    $$('button', $(key === 'decision' ? '#lab-decision' : '#lab-confidence')).forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === String(v))); });
+    $('#lab-save').disabled = !(lab.decision && lab.confidence);
+  }
+  function labShow() {
+    $('#lab-path').textContent = 'review · ' + labPages[lab.page];
+    $('#lab-done').textContent = 'Labels · ' + lab.done + ' / ' + labPages.length;
+  }
+  function labSave(who) {
+    var row = document.createElement('b');
+    row.textContent = JSON.stringify({ path: labPages[lab.page], author: who, data: { decision: lab.decision, confidence: lab.confidence } }) + '\n';
+    var out = $('#lab-out');
+    out.appendChild(row);
+    if (out.children.length > 3) out.firstElementChild.remove();
+    lab.done = Math.min(lab.done + 1, labPages.length);
+    lab.page = (lab.page + 1) % labPages.length;
+    labPick('decision', null); labPick('confidence', null);
+    labShow();
+  }
+  labButtons($('#lab-decision'), labChoices, 'decision');
+  labButtons($('#lab-confidence'), [1, 2, 3, 4, 5].map(function (n) { return [n, String(n)]; }), 'confidence');
+  $('#lab-save').addEventListener('click', function () { labSave('you@example.com'); });
+  labShow();
+  starters.capture = async function () {
+    await sleep(reduce ? 0 : 700);
+    labPick('decision', 'probe');
+    await sleep(reduce ? 0 : 500);
+    labPick('confidence', 4);
+    await sleep(reduce ? 0 : 700);
+    labSave('aoife@example.com');
+  };
+
+  /* ---- 8 · notifications: preferences filter the inbox ---- */
   var events = [
     ['site.shared', 'Someone shares a site with you'],
     ['site.shared_via_group', 'Someone shares a site with a group you are in'],
@@ -1131,7 +1245,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     while (shown < mails.length) { await sleep(1500); shown++; renderInbox(true); }
   };
 
-  /* ---- 8 · versions ---- */
+  /* ---- 9 · versions ---- */
   var vers = [
     { v: 'v1', id: 'a41f09c2e87b3d15', t: 'Launch plan: first draft', when: 'Mon 09:12', bg: 'oklch(55% 0.16 255)' },
     { v: 'v2', id: '7be2d0135c9a46f8', t: 'Launch plan: with timeline', when: 'Mon 15:40', bg: 'oklch(58% 0.18 300)' },
@@ -1160,7 +1274,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   }
   renderVersions();
 
-  /* ---- 9 · clouds and brand ---- */
+  /* ---- 10 · clouds and brand ---- */
   var stacks = {
     aws: [['API', 'Lambda'], ['Sites at the edge', 'CloudFront'], ['Routes', 'CloudFront KeyValueStore'], ['Records', 'DynamoDB'], ['Files', 'S3'], ['Live review', 'API Gateway WebSockets'], ['Email', 'SES']],
     cf: [['API, UI and sites', 'one Worker'], ['Records', 'D1'], ['Files', 'R2'], ['Routes', 'Workers KV'], ['Live review', 'Durable Objects'], ['Email', 'Email Service']]
@@ -1193,7 +1307,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     $('#swatches').appendChild(s);
   });
 
-  /* ---- 10 · copy buttons ---- */
+  /* ---- 11 · copy buttons ---- */
   $$('.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var text = b.previousElementSibling.textContent;

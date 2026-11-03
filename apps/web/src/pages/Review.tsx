@@ -85,6 +85,8 @@ import {
   type ShownCircle,
 } from '../lib/live'
 import {
+  commentTypeKey,
+  composerFormId,
   type FrameLocation,
   frameUrl,
   linkHost,
@@ -911,14 +913,18 @@ function Composer({
   const actions = useCommentActions(name)
   const [body, setBody] = useState('')
   const [active, setActive] = useState(false)
-  const [formId, setFormId] = useState('')
+  // `null` until a type is picked in this composer; the pick is also remembered for the site.
+  const [picked, setPicked] = useState<string | null>(null)
+  const [remembered, setRemembered] = useLocalStoragePreference(commentTypeKey(name), '')
   const [errors, setErrors] = useState<FieldError[]>([])
   // Bumped after a response is posted, so the next one starts empty.
   const [round, setRound] = useState(0)
   const box = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
+  const inUse = active || body.trim() !== '' || pin !== null || placing
+  const formId = composerFormId({ picked, remembered, inUse, formIds: forms.map(f => f.id) })
   const form = forms.find(f => f.id === formId) ?? null
-  const expanded = active || body.trim() !== '' || pin !== null || placing || form !== null
+  const expanded = inUse || form !== null
 
   useEffect(() => {
     if (focusRequest === 0) return
@@ -933,7 +939,7 @@ function Composer({
   }
   const done = () => {
     setBody('')
-    setFormId('')
+    setPicked(null)
     setErrors([])
     setRound(n => n + 1)
     onClearPin()
@@ -956,7 +962,7 @@ function Composer({
   }
   const cancel = () => {
     setBody('')
-    setFormId('')
+    setPicked(null)
     setErrors([])
     onClearPin()
     if (placing) onPlace()
@@ -1035,7 +1041,8 @@ function Composer({
                 className={`btn btn-xs join-item h-auto min-h-6 max-w-full ${on ? 'btn-active' : ''}`}
                 aria-pressed={on}
                 onClick={() => {
-                  setFormId(f?.id ?? '')
+                  setPicked(f?.id ?? '')
+                  setRemembered(f?.id ?? '')
                   setErrors([])
                 }}
               >

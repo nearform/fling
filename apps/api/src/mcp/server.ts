@@ -8,18 +8,25 @@ import {
   accessChangeHint,
   type Comment,
   changesAudience,
+  checkFormsConfig,
+  commentThreads,
   describeAudience,
   describeComments,
+  describeFormsSummary,
   describeGroup,
   describeGroups,
   describeNotificationSettings,
   describeReadFiles,
+  describeResponses,
   describeRoles,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
   editAudienceInput,
   editRoleInput,
+  FORMS_HINT,
+  formsSummaryLines,
+  formsTemplate,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
   mcpRemoteInstructions,
@@ -32,6 +39,7 @@ import {
   probeUrl,
   READY_TIMEOUT_LAMBDA_MS,
   readinessWaitDisabled,
+  responsesPageUrl,
   reviewUrl,
   roleLabel,
   type Site,
@@ -42,13 +50,16 @@ import {
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
+import { manifestKey } from '../blobs/types.ts'
 import * as comments from '../comments.ts'
 import { isAdminEmail } from '../config.ts'
+import { formsOf, readForms, responsesOf } from '../forms.ts'
 import * as groups from '../groups.ts'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
 import * as notifications from '../notifications/settings.ts'
 import { canInstance, type Principal, userActor } from '../policy.ts'
+import type { StoredManifest } from '../sites.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
@@ -185,13 +196,20 @@ async function publishResult(
       ? { ready: true, note: '' }
       : await edgeReady(deps, site.url, outcome.paths)
   const review = deps.config.comments ? reviewUrl(deps.config.appOrigin, site.name) : undefined
+  const forms = formsEnabled(deps)
+    ? await formsAfterPublish(deps, site.name, outcome.versionId)
+    : null
   const head = review
-    ? `${what}${extra}.\n${shareForFeedback(review, deps.config.instanceName)}\nSite: ${site.url} (${site.access ?? site.visibility}).`
+    ? `${what}${extra}.\n${shareForFeedback(review, deps.config.instanceName, Boolean(forms?.summary))}\nSite: ${site.url} (${site.access ?? site.visibility}).`
     : `${what}${extra}: ${site.url} (${site.access ?? site.visibility}).`
+  const formsText = forms?.summary
+    ? `\n${describeFormsSummary(forms.summary, forms.responsesPage)}`
+    : ''
   return {
     text:
-      `${head}${privacy}${edge.note}${warnings}` +
-      `\nTo check exactly which files the site has, call fling_files with name "${site.name}".`,
+      `${head}${formsText}${privacy}${edge.note}${warnings}` +
+      `\nTo check exactly which files the site has, call fling_files with name "${site.name}".` +
+      (forms && !forms.summary ? `\n${FORMS_HINT}` : ''),
     data: {
       status,
       name: site.name,
@@ -209,8 +227,40 @@ async function publishResult(
       totalBytes: outcome.totalBytes,
       generatedIndex: outcome.generatedIndex,
       warnings: outcome.warnings,
+      ...(forms?.summary
+        ? {
+            forms: {
+              title: forms.summary.title,
+              forms: forms.summary.forms,
+              summary: formsSummaryLines(forms.summary),
+              responsesUrl: forms.responsesPage,
+            },
+          }
+        : forms
+          ? { formsHint: FORMS_HINT }
+          : {}),
     },
   }
+}
+
+/** Whether the instance has forms (the `forms` capability). */
+const formsEnabled = (deps: Deps) => instanceMetadata(deps.config).capabilities.forms === true
+
+/**
+ * The forms a publish left on its version, summarised against the version's pages (null summary:
+ * it has none).
+ */
+async function formsAfterPublish(deps: Deps, name: string, versionId: string) {
+  const responsesPage = responsesPageUrl(deps.config.appOrigin, name)
+  const record = await deps.store.findSite(name)
+  const config = record ? await readForms(deps, record.id, versionId) : null
+  if (!record || !config) return { summary: null, responsesPage }
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(record.id, versionId))
+  const check = checkFormsConfig(
+    config,
+    (manifest?.files ?? []).map(f => f.path)
+  )
+  return { summary: check.summary, responsesPage }
 }
 
 const visibilityOf = (pub: boolean | undefined) =>
@@ -249,6 +299,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     {
       instructions: mcpRemoteInstructions(wording, {
         comments: deps.config.comments,
+        forms: formsEnabled(deps),
         notifications: notificationChannels(deps.config).length > 0,
       }),
     }
@@ -395,6 +446,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       spa: args.spa,
       ...accessOf(args),
       listHtml: args.listHtml,
+      ...(args.forms === undefined ? {} : { forms: args.forms }),
     })
     return publishResult(deps, args.name, outcome, 'fling_publish', args.access)
   })
@@ -602,6 +654,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     registerGroupTools(deps, user, principal, mcpTools, register)
   }
   if (deps.config.comments) registerCommentTools(deps, user, mcpTools, register)
+  if (formsEnabled(deps)) registerFormTools(deps, user, mcpTools, register)
   if (notificationChannels(deps.config).length > 0) {
     registerNotificationTools(deps, user, mcpTools, register)
   }
@@ -702,10 +755,18 @@ function registerCommentTools(
 
   register(mcpTools.commentsList, async args => {
     const list = await comments.listComments(deps, actor, args.name, { path: args.path })
+    // Only worth a look when the threads could be coded labels and the site has no forms to use.
+    const suggestForms =
+      formsEnabled(deps) &&
+      commentThreads(list.comments).length >= 5 &&
+      !(await comments
+        .commentSite(deps, actor, args.name, 'comment.read')
+        .then(({ site }) => readForms(deps, site.id, site.currentVersionId)))
     return {
       text: describeComments(list, {
         includeResolved: args.includeResolved,
         reviewUrl: review(list.site.name),
+        suggestForms,
       }),
       data: {
         ...list,
@@ -776,5 +837,91 @@ function registerNotificationTools(
       preferencesUpdateOf(args)
     )
     return { text: `Saved.\n${describeNotificationSettings(settings)}`, data: settings }
+  })
+}
+
+/** The forms tools: only on an instance with forms (the `forms` capability, on with comments). */
+function registerFormTools(
+  deps: Deps,
+  user: User,
+  mcpTools: ReturnType<typeof mcpToolsFor>,
+  register: <S extends z.ZodRawShape>(
+    def: McpToolDef<S>,
+    handler: (args: z.infer<z.ZodObject<S>>) => Promise<Result>
+  ) => void
+) {
+  const actor = userActor(user)
+  const review = (name: string, path?: string) => reviewUrl(deps.config.appOrigin, name, path)
+  const responsesPage = (name: string) => responsesPageUrl(deps.config.appOrigin, name)
+
+  register(mcpTools.forms, async args => {
+    const { site } = await comments.commentSite(deps, actor, args.name, 'comment.read')
+    const forms = await formsOf(deps, site, args.path)
+    if (!forms.config) {
+      return {
+        text: `${site.name} has no forms on its live version. ${FORMS_HINT}`,
+        data: { name: site.name, ...forms },
+      }
+    }
+    const manifest = site.currentVersionId
+      ? await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, site.currentVersionId))
+      : null
+    const check = checkFormsConfig(
+      forms.config,
+      (manifest?.files ?? []).map(f => f.path)
+    )
+    const lines = check.summary ? formsSummaryLines(check.summary).map(l => `- ${l}`) : []
+    return {
+      text:
+        `${forms.config.title} on ${site.name}${forms.path ? ` (forms on ${forms.path}: ${forms.forms.map(f => f.id).join(', ') || 'none'})` : ''}:\n` +
+        `${lines.join('\n')}\nResponses and progress: ${responsesPage(site.name)}\n\n${JSON.stringify(forms.config)}`,
+      data: { name: site.name, ...forms, responsesUrl: responsesPage(site.name) },
+    }
+  })
+
+  register(mcpTools.formsTemplate, async args => {
+    const config = formsTemplate(args.template, args.title)
+    return {
+      text:
+        `A starter "${args.template}" config. Adapt its options, wording and \`paths\` to what the user wants ` +
+        `collected, check it with fling_forms_check, then publish it as \`forms\`.\n\n${JSON.stringify(config, null, 2)}`,
+      data: { template: args.template, forms: config },
+    }
+  })
+
+  register(mcpTools.formsCheck, async args => {
+    const check = checkFormsConfig(args.forms, args.paths)
+    const lines = check.summary ? formsSummaryLines(check.summary).map(l => `- ${l}`) : []
+    return {
+      text: check.ok
+        ? `The forms config is valid.${lines.length ? `\n${lines.join('\n')}` : ''}`
+        : `The forms config is not valid:\n${check.errors.map(e => `- ${e}`).join('\n')}`,
+      data: { ...check },
+    }
+  })
+
+  register(mcpTools.responsesList, async args => {
+    const { site, actor: who } = await comments.commentSite(deps, actor, args.name, 'comment.read')
+    const exported = await responsesOf(deps, who, site, {
+      ...(args.form ? { form: args.form } : {}),
+      ...(args.path !== undefined ? { path: args.path } : {}),
+    })
+    const data = { ...exported, responsesUrl: responsesPage(site.name) }
+    return {
+      text: `${describeResponses(exported, { responsesPage: responsesPage(site.name) })}\n\n${JSON.stringify(data)}`,
+      data,
+    }
+  })
+
+  register(mcpTools.responseSubmit, async args => {
+    const comment = await comments.addComment(deps, actor, args.name, {
+      path: args.path,
+      ...(args.quote ? { anchor: { x: 0, y: 0, quote: args.quote } } : {}),
+      response: { formId: args.formId, data: args.data },
+    })
+    return {
+      text: `Answered "${args.formId}" on ${args.name} ${comment.path} (id ${comment.id}).\n${comment.body}\nReview page: ${review(args.name, comment.path)}`,
+      data: { ...comment, reviewUrl: review(args.name, comment.path) },
+    }
   })
 }

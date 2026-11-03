@@ -4,7 +4,9 @@
  *
  * Never flung (no flag or option changes this): dotfiles and dot-directories, gitignored files
  * (see gitignore.ts), and `node_modules`; anything matched by a root `.flingignore` (gitignore
- * syntax) is skipped too. Skipped dotfiles and gitignored files are reported in `skipped`.
+ * syntax) is skipped too. Skipped dotfiles and gitignored files are reported in `skipped`. The
+ * folder's own `fling.forms.json` (forms.ts) is never a file of the site: a deploy sends it as the
+ * version's forms instead.
  *
  * Refused outright (a CliError, nothing is uploaded): secret files by name (`server.key`,
  * `id_rsa`, `credentials.json`… — isSecretPath) and files whose contents contain secrets
@@ -21,6 +23,7 @@ import { join, relative, sep } from 'node:path'
 import {
   describeSecretFindings,
   extractHtmlTitle,
+  FORMS_FILE,
   isHtmlPath,
   isScannablePath,
   isSecretPath,
@@ -181,6 +184,7 @@ export async function buildManifest(dir: string): Promise<LocalManifest> {
         continue
       }
       if (ALWAYS_SKIP.has(entry.name)) continue
+      if (rel === FORMS_FILE && !entry.isDirectory()) continue
       let abs = join(realDir, entry.name)
       let isDir = entry.isDirectory()
       let isFile = entry.isFile()

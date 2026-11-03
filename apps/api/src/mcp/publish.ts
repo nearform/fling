@@ -16,11 +16,19 @@
  * With `base` (a version fling_read_files returned) the files are only those changed or added,
  * `remove` names the ones to delete, and publishBytes keeps the rest of that version (the partial
  * form of a publish on a base). The site already has its pages, so there is no listing decision.
+ *
+ * Forms (forms.ts): `forms` is the new version's forms config (null: none; omitted, as
+ * DeployRequest.forms). A `fling.forms.json` among the files, at the top of the folder published,
+ * is taken as `forms` and never published as a file. Either is checked first
+ * (`checkFormsConfig`), so a bad config fails with every error, each saying where.
  */
 import { createHash } from 'node:crypto'
 import {
   type AccessLevel,
+  checkFormsConfig,
   extractHtmlTitle,
+  FORMS_FILE,
+  type FormsConfig,
   isHtmlPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
@@ -67,6 +75,23 @@ export interface PublishOptions extends AccessOptions {
   visibility?: Visibility
   /** no root index.html: true → generate a listing page; false → publish anyway; undefined → ask */
   listHtml?: boolean
+  /** the version's forms config (null: none); omitted, as DeployRequest.forms */
+  forms?: unknown
+}
+
+/** A forms config as an agent sent it, checked; 400 `invalid_forms` listing every error. */
+export function checkedForms(raw: unknown, where = '`forms`'): FormsConfig | null {
+  if (raw === null) return null
+  const check = checkFormsConfig(raw)
+  if (!check.ok) {
+    throw new ApiError(
+      400,
+      'invalid_forms',
+      `${where} is not a forms config Fling can use: ${check.errors.join('; ')}`,
+      { errors: check.errors }
+    )
+  }
+  return raw as FormsConfig
 }
 
 export type PublishOutcome =
@@ -162,6 +187,22 @@ export async function publishFiles(
     if (files.has(path)) throw badRequest(`"${path}" is listed twice`, 'duplicate_path')
     files.set(path, f.bytes)
   }
+  let forms = opts.forms === undefined ? undefined : checkedForms(opts.forms)
+  const formsFile = files.get(FORMS_FILE)
+  if (formsFile) {
+    if (opts.forms !== undefined) {
+      throw badRequest(`Pass \`forms\` or a ${FORMS_FILE} file, not both`, 'bad_request')
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(Buffer.from(formsFile).toString('utf8'))
+    } catch {
+      throw new ApiError(400, 'invalid_forms', `${FORMS_FILE} is not valid JSON`)
+    }
+    forms = checkedForms(parsed, FORMS_FILE)
+    files.delete(FORMS_FILE)
+    if (files.size === 0 && remove.length === 0) throw badRequest('No files to publish', 'no_files')
+  }
   const warnings: string[] = []
   let generatedIndex = false
   // On a base the site keeps the pages it has: no listing to decide on.
@@ -202,6 +243,7 @@ export async function publishFiles(
       visibility: opts.visibility,
       access: opts.access,
       audience: opts.audience,
+      ...(forms === undefined ? {} : { forms }),
     }
   )
   return {

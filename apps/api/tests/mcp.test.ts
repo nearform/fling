@@ -82,6 +82,9 @@ describe('/mcp tools', () => {
         'fling_comments_list',
         'fling_delete',
         'fling_files',
+        'fling_forms',
+        'fling_forms_check',
+        'fling_forms_template',
         'fling_group_create',
         'fling_group_delete',
         'fling_group_members',
@@ -92,6 +95,8 @@ describe('/mcp tools', () => {
         'fling_list',
         'fling_publish',
         'fling_read_files',
+        'fling_response_submit',
+        'fling_responses_list',
         'fling_rollback',
         'fling_set_access',
         'fling_set_audience',
@@ -658,6 +663,7 @@ describe('/mcp comment tools', () => {
     const list = await json(await rpc(env, off, 'tools/list'))
     const names: string[] = list.result.tools.map((t: { name: string }) => t.name)
     expect(names.filter(n => n.includes('comment'))).toEqual([])
+    expect(names.filter(n => n.includes('forms') || n.includes('response'))).toEqual([])
     const init = await json(
       await rpc(env, off, 'initialize', {
         protocolVersion: '2025-06-18',
@@ -672,5 +678,149 @@ describe('/mcp comment tools', () => {
     })
     expect(pub.content[0]?.text).toMatch(/^Published 1 file: https:\/\/quiet\.fling\.test\//)
     expect(pub.structuredContent.reviewUrl).toBeUndefined()
+  })
+})
+
+describe('/mcp forms tools', () => {
+  const pages = [
+    { path: 'index.html', content: page('Home') },
+    { path: 'interviews/1.html', content: page('One') },
+    { path: 'interviews/2.html', content: page('Two') },
+  ]
+
+  it('a template passes fling_forms_check, and a broken config says where', async () => {
+    const t = await callTool(env, bearer, 'fling_forms_template', {
+      template: 'labels',
+      title: 'Evals',
+    })
+    expect(t.isError).toBeFalsy()
+    expect(t.structuredContent.forms.title).toBe('Evals')
+    const ok = await callTool(env, bearer, 'fling_forms_check', {
+      forms: t.structuredContent.forms,
+      paths: pages.map(p => p.path),
+    })
+    expect(ok.structuredContent.ok).toBe(true)
+    expect(ok.content[0]?.text).toContain('3 pages')
+    const bad = await callTool(env, bearer, 'fling_forms_check', { forms: { forms: [] } })
+    expect(bad.structuredContent.ok).toBe(false)
+    expect(bad.content[0]?.text).toMatch(/not valid:\n- title/)
+  })
+
+  it('a publish without forms carries the hint; with forms, the summary and the responses page', async () => {
+    const plain = await callTool(env, bearer, 'fling_publish', {
+      name: 'evals',
+      files: pages,
+      access: 'members',
+    })
+    expect(plain.structuredContent.formsHint).toMatch(/fling_forms_template/)
+    expect(plain.content[0]?.text).toContain('add a form rather than asking reviewers')
+
+    const forms = (await callTool(env, bearer, 'fling_forms_template', { template: 'labels' }))
+      .structuredContent.forms
+    forms.forms[0].paths = ['interviews/**']
+    const live = await callTool(env, bearer, 'fling_publish', {
+      name: 'evals',
+      files: pages,
+      forms,
+    })
+    expect(live.isError).toBeFalsy()
+    expect(live.structuredContent.formsHint).toBeUndefined()
+    expect(live.structuredContent.forms).toMatchObject({
+      title: 'Labels',
+      responsesUrl: 'https://fling.test/sites/evals/responses',
+    })
+    expect(live.structuredContent.forms.forms[0].pages).toEqual([
+      '/interviews/1.html',
+      '/interviews/2.html',
+    ])
+    const text = live.content[0]?.text ?? ''
+    expect(text).toContain('answer its forms')
+    expect(text).toContain('Labels · Label this page (label): one per reviewer per page, 2 pages')
+
+    // A fling.forms.json among the files is the config, never a file of the site.
+    const asFile = await callTool(env, bearer, 'fling_publish', {
+      name: 'evals-file',
+      files: [...pages, { path: 'fling.forms.json', content: JSON.stringify(forms) }],
+    })
+    expect(asFile.structuredContent.fileCount).toBe(3)
+    expect(asFile.structuredContent.forms.title).toBe('Labels')
+    const files = await callTool(env, bearer, 'fling_files', { name: 'evals-file' })
+    expect(files.content[0]?.text).not.toContain('fling.forms.json')
+
+    const refused = await callTool(env, bearer, 'fling_publish', {
+      name: 'evals',
+      files: pages,
+      forms: {
+        title: 'x',
+        forms: [{ id: 'a', title: 'A', kind: 'page', schema: { type: 'array' } }],
+      },
+    })
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0]?.text).toMatch(/invalid_forms/)
+  })
+
+  it('fling_forms shows the config; responses are submitted and listed with progress', async () => {
+    const forms = (await callTool(env, bearer, 'fling_forms_template', { template: 'labels' }))
+      .structuredContent.forms
+    forms.forms[0].visibility = 'everyone'
+    await callTool(env, bearer, 'fling_publish', {
+      name: 'evals',
+      files: pages,
+      forms,
+      access: 'members',
+    })
+    const shown = await callTool(env, bearer, 'fling_forms', { name: 'evals' })
+    expect(shown.structuredContent.config.title).toBe('Labels')
+    expect(shown.content[0]?.text).toContain('3 pages')
+
+    const bob = (await connect(env, 'bob@example.test')).accessToken
+    const sent = await callTool(env, bob, 'fling_response_submit', {
+      name: 'evals',
+      path: '/interviews/1.html',
+      formId: 'label',
+      data: { verdict: 'pass' },
+    })
+    expect(sent.isError).toBeFalsy()
+    expect(sent.content[0]?.text).toContain('Verdict: Pass')
+    const wrong = await callTool(env, bob, 'fling_response_submit', {
+      name: 'evals',
+      path: '/interviews/1.html',
+      formId: 'label',
+      data: { verdict: 'maybe' },
+    })
+    expect(wrong.isError).toBe(true)
+    expect(wrong.content[0]?.text).toMatch(/invalid_response/)
+
+    const listed = await callTool(env, bearer, 'fling_responses_list', { name: 'evals' })
+    expect(listed.structuredContent.responses).toHaveLength(1)
+    expect(listed.structuredContent.responses[0]).toMatchObject({
+      author: 'bob@example.test',
+      data: { verdict: 'pass' },
+    })
+    expect(listed.content[0]?.text).toContain(
+      'Label this page (label): 1 / 3 pages answered, 1 reviewer'
+    )
+    const comments = await callTool(env, bearer, 'fling_comments_list', { name: 'evals' })
+    expect(comments.content[0]?.text).toContain('(response to form "label")')
+  })
+
+  it('a site without forms whose comments look like coded labels gets a note', async () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      path: `p${i}.html`,
+      content: page(`P${i}`),
+    }))
+    await callTool(env, bearer, 'fling_publish', {
+      name: 'coded',
+      files: [{ path: 'index.html', content: page('Home') }, ...many],
+    })
+    for (const [i, code] of ['B2', 'A1', 'B2', 'A1', 'B2', 'C3'].entries()) {
+      await callTool(env, bearer, 'fling_comment_add', {
+        name: 'coded',
+        body: code,
+        path: `p${i}.html`,
+      })
+    }
+    const listed = await callTool(env, bearer, 'fling_comments_list', { name: 'coded' })
+    expect(listed.content[0]?.text).toContain('look like labels typed by hand')
   })
 })

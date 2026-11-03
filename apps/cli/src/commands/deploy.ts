@@ -33,22 +33,33 @@
  *
  * Dotfiles, gitignored files, secret files and files containing secrets are never flung (see
  * manifest.ts); there is no flag to include them. Skipped files are listed (`skipped` in --json).
+ *
+ * Forms (the `forms` capability; forms.ts): a `fling.forms.json` at the top of the folder is never
+ * flung as a file. It is checked against the folder's pages, stopping on errors, and sent as the
+ * version's forms; the result lists each form and the pages it applies to (`forms` in --json).
+ * Without it, the result ends with one line on how to add a form (`formsHint`; `--quiet` hides
+ * it). What a deploy without the file sends is in forms.ts.
  */
 
 import { stat } from 'node:fs/promises'
-import { relative, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import {
   ACCESS_LABELS,
   type AccessLevel,
   type AudienceInput,
   accessChangeHint,
+  checkFormsConfig,
   describeSiteAccess,
+  FORMS_FILE,
+  type FormsSummary,
+  formsSummaryLines,
   type InstanceMetadata,
   isValidSiteName,
   needsAudience,
   normalizePublishPath,
   parseAccessLevel,
   privateAudience,
+  responsesPageUrl,
   reviewUrl,
   SITE_NAME_MAX,
   siteAccessLevel,
@@ -60,6 +71,7 @@ import type { ApiClient } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { BaseChangedError, deploy, resolveSiteName } from '../deploy.ts'
 import { CliError, EXIT_NOT_LOGGED_IN } from '../errors.ts'
+import { formsEnabled, formsHint, getForms, planForms } from '../forms.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
 import { loadInstance, loadInstanceWith } from '../instance.ts'
 import {
@@ -111,6 +123,8 @@ export interface DeployCommandOptions {
   path?: string
   /** a pulled folder: publish without a base, over whatever is live */
   force?: boolean
+  /** leave out the hint on adding a form */
+  quiet?: boolean
 }
 
 export type NoIndexChoice = 'list' | 'fling'
@@ -174,9 +188,15 @@ export async function runDeploy(
         : choice.access
           ? 'accessLevels'
           : null
-  const instance = needs
+  let instance = needs
     ? await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, needs)
     : await loadInstance(ctx.store, ctx.config, ctx.fetch)
+  // A folder with a forms file needs a Fling with forms: asked again if the stored copy predates them.
+  const hasFormsFile =
+    found.isDirectory() && (await stat(join(path, FORMS_FILE)).catch(() => null)) !== null
+  if (hasFormsFile && !formsEnabled(instance)) {
+    instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'forms')
+  }
   const base = sitesBaseOf(instance)
   if (folder !== undefined && !pathPublishEnabled(instance)) {
     throw new CliError(`${instance?.name ?? 'This Fling'} can't publish to a path yet`, {
@@ -310,6 +330,14 @@ async function deployPrepared(
 
   const onBase = link && !opts.force ? onLink(link, local) : null
   const changes: LinkChanges | null = link ? onLink(link, local).changes : null
+  const forms = await planForms({
+    dir: prepared.dir,
+    pages: local.files.map(f => inFolder(f.path)),
+    layered: opts.folder !== undefined || onBase !== null,
+    pulledWithForms: onBase !== null && link?.forms !== undefined,
+    instance,
+    bin: ctx.binName,
+  })
   let progressShown = false
   const result = await deploy(
     { client, fetch: ctx.fetch },
@@ -330,6 +358,7 @@ async function deployPrepared(
       public: opts.public,
       access: opts.access,
       audience: opts.audience,
+      forms: forms.send,
       onProgress: p => {
         if (p.total === 0) return
         progressShown = true
@@ -355,7 +384,7 @@ async function deployPrepared(
   if (link) {
     await writeSiteLink(
       prepared.dir,
-      linkAfter({ ...link, server: client.serverUrl }, result.versionId, local)
+      linkAfter({ ...link, server: client.serverUrl }, result.versionId, local, forms.sha256)
     )
   }
 
@@ -414,6 +443,15 @@ async function deployPrepared(
   const reviewNote = instance
     ? `Share for feedback (reviewers sign in to ${instance.name}):`
     : 'Share for feedback:'
+  // The forms the version has: the ones sent, or (sending none on a layered deploy) the site's.
+  let formsSummary: FormsSummary | null = forms.check?.summary ?? null
+  if (!formsSummary && forms.send === undefined && formsEnabled(instance)) {
+    const live = await getForms(client, result.name).catch(() => null)
+    if (live?.config) formsSummary = checkFormsConfig(live.config).summary
+  }
+  const responsesUrl =
+    formsSummary && instance ? responsesPageUrl(instance.appOrigin, result.name) : undefined
+  const hint = formsEnabled(instance) && !formsSummary ? formsHint(ctx.binName) : undefined
   const data = {
     status: result.status,
     site: result.site,
@@ -424,6 +462,21 @@ async function deployPrepared(
     ...(review ? { reviewUrl: review } : {}),
     ready,
     skipped: local.skipped,
+    ...(formsSummary
+      ? {
+          forms: {
+            title: formsSummary.title,
+            forms: formsSummary.forms,
+            summary: formsSummaryLines(formsSummary),
+            ...(responsesUrl ? { responsesUrl } : {}),
+          },
+        }
+      : {}),
+    ...(hint ? { formsHint: hint } : {}),
+  }
+  if (formsSummary && !ctx.json) {
+    for (const line of formsSummaryLines(formsSummary)) ctx.log.info(line)
+    if (responsesUrl) ctx.log.hint(`Responses and progress: ${responsesUrl}`)
   }
   ctx.out.data(data, () => {
     // On a terminal the URLs get a box; piped, the site URL stays the first line on its own so
@@ -442,6 +495,7 @@ async function deployPrepared(
     for (const n of accessNotes) lines.push(chalk.dim(n))
     return lines.join('\n')
   })
+  if (hint && !opts.quiet && !ctx.json) ctx.log.hint(hint)
 }
 
 const BAR_WIDTH = 20

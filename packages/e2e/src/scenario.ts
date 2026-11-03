@@ -53,10 +53,12 @@ import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
 import {
   defaultAccessOf,
+  INSTANCE_METADATA_PATH,
   type InstanceMetadata,
   InstanceMetadataSchema,
   instanceMetadataUrl,
   type LiveServerMessage,
+  RELEASE_HEADER,
 } from '@fling/shared'
 import { runCli } from './cli.ts'
 import { cookiePairs, type Session } from './sign-in.ts'
@@ -376,6 +378,20 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `metadata appOrigin ${meta.appOrigin}, expected ${appOrigin}`
     )
     step(`instance "${meta.name}": sites at ${meta.siteScheme}://<name>.${meta.sitesDomain}`)
+    // Every response names the release the metadata says (Fling-Release), for clients to compare.
+    const meRes = await api('GET', '/api/me')
+    await meRes.arrayBuffer()
+    for (const [what, res] of [
+      [INSTANCE_METADATA_PATH, metaRes],
+      ['/api/me', meRes],
+    ] as const) {
+      const header = res.headers.get(RELEASE_HEADER)
+      check(
+        header === (meta.release ?? null),
+        `${what}: ${RELEASE_HEADER} ${header}, the metadata's release ${meta.release}`
+      )
+    }
+    step(`${RELEASE_HEADER}: ${meta.release ?? '(none)'} on every response, as the metadata says`)
     // The Claude Desktop extension, where the Get started page links to it: a zip (an mcpb) or,
     // where none was built (local runs), a 404; never the web UI's index.html under its name.
     const mcpb = await fetch(`${appOrigin}/downloads/fling.mcpb`, { redirect: 'manual' })

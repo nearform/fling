@@ -65,12 +65,16 @@ the server it used runs a newer release than the CLI, the CLI prints one line on
 ▲ Fling 0.9.0 is out (this CLI is 0.8.0). Update: npm i -g @nearform/fling@latest && fling setup
 ```
 
-It compares with the metadata the CLI already holds (stored at sign-in, and read again by setup and
-by commands that need a newer feature), so it never makes a request of its own. It says it at most
-once a day per server, remembering when in `update-check.json` in the config directory. It says
-nothing under `--json`, when stderr isn't a terminal, when `CI` is set, or when
-`FLING_NO_UPDATE_CHECK` is set (to anything). A server older than the CLI says nothing either. The
-MCP server tells Claude instead (see [Claude Code plugin and MCP](#claude-code-plugin-and-mcp)).
+It compares with the metadata the CLI already holds, so it never makes a request of its own. The
+stored release stays current because every server response says which release the server runs (the
+`Fling-Release` header): when it differs from the stored one, the CLI stores the new release. That
+needs both the server and the CLI on a release after 0.8.0; with an older server, the stored release
+changes only at sign-in, when `fling setup` reads the metadata again, and when a command needs a
+feature the stored copy lacks. It says it at most once a day per server, remembering when in
+`update-check.json` in the config directory. It says nothing under `--json`, when stderr isn't a
+terminal, when `CI` is set, or when `FLING_NO_UPDATE_CHECK` is set (to anything). A server older
+than the CLI says nothing either. The MCP server tells Claude instead (see [Claude Code plugin and
+MCP](#claude-code-plugin-and-mcp)).
 
 ### When something doesn't work
 

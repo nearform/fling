@@ -4,9 +4,12 @@
  * 403 → exit 3) and validates success bodies with the zod contracts from `@fling/shared`. Network
  * failures are a `CliApiError` with `status: 0` so callers only ever handle one error type.
  *
+ * Every response's `Fling-Release` header (the release the server runs) is compared with the one
+ * stored for the server; a different one is passed to `onRelease`, which stores it (instance.ts).
+ *
  * `putUpload` is the one unauthenticated call: a PUT of file bytes to a presigned S3 URL.
  */
-import { ErrorEnvelopeSchema } from '@fling/shared'
+import { ErrorEnvelopeSchema, RELEASE_HEADER } from '@fling/shared'
 import type { z } from 'zod'
 import { CliError, EXIT_ERROR, EXIT_FORBIDDEN, EXIT_NOT_LOGGED_IN } from './errors.ts'
 import { BIN_NAME, PACKAGE_NAME, VERSION } from './package-info.ts'
@@ -19,6 +22,13 @@ export interface ApiClientOptions {
   apiKey?: string
   fetch?: FetchLike
   timeoutMs?: number
+  /** The release stored for this server (its metadata's `release`). */
+  release?: string
+  /**
+   * Called, and awaited (errors ignored), when a response's `Fling-Release` differs from
+   * `release`: the server runs another release than the one stored.
+   */
+  onRelease?: (release: string) => Promise<void>
 }
 
 export type QueryValue = string | number | boolean | undefined | null
@@ -84,6 +94,14 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   const fetchImpl: FetchLike = options.fetch ?? ((input, init) => fetch(input, init))
   const timeoutMs = options.timeoutMs ?? 60_000
 
+  let knownRelease = options.release
+  async function noteRelease(response: Response): Promise<void> {
+    const release = response.headers?.get?.(RELEASE_HEADER)?.trim()
+    if (!release || release.length > 64 || release === knownRelease) return
+    knownRelease = release
+    await options.onRelease?.(release).catch(() => {})
+  }
+
   async function request<T>(
     method: Method,
     path: string,
@@ -115,6 +133,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       })
     }
 
+    await noteRelease(response)
     const raw = await readBody(response)
     if (!response.ok) throw errorFromResponse(response.status, raw, method, path)
     if (!reqOptions.schema) return raw as T

@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
-import { mcpTools } from '@fling/shared'
+import { mcpTools, RELEASE_HEADER } from '@fling/shared'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -1112,5 +1112,34 @@ describe('local MCP server: fling_doctor', () => {
       'ok'
     )
     expect(m.calls.every(c => c.method === 'GET')).toBe(true)
+  })
+})
+
+describe('local MCP server: Fling-Release', () => {
+  it('a publish answered with a newer release carries the update note', async () => {
+    const store = await loggedInStore()
+    const withRelease = (body: unknown) =>
+      new Response(JSON.stringify(body), {
+        headers: { 'Content-Type': 'application/json', [RELEASE_HEADER]: '999.0.0' },
+      })
+    const m = mockFetch({
+      'POST /api/sites/my-report/deploys': () =>
+        withRelease({ status: 'upload', versionId: '0123456789abcdef', uploads: [] }),
+      'POST /api/sites/my-report/deploys/0123456789abcdef/finalize': () =>
+        withRelease({
+          status: 'live',
+          versionId: '0123456789abcdef',
+          site: site({ name: 'my-report' }),
+        }),
+    })
+    const client = await connect(store, m.fetch, undefined, { servers: [known()] })
+    expect(client.getInstructions() ?? '').not.toContain('is out')
+    const r = await client.callTool({
+      name: 'fling_publish',
+      arguments: { name: 'my-report', files: [{ path: 'index.html', content: '<h1>r</h1>' }] },
+    })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toContain('Fling 999.0.0 is out')
+    expect((await store.resolve()).instance?.release).toBe('999.0.0')
   })
 })

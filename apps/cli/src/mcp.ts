@@ -102,7 +102,7 @@ import {
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { formsEnabled, getForms, getResponses, planForms, submitResponse } from './forms.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
-import { loadInstance, loadInstanceWith } from './instance.ts'
+import { loadInstance, loadInstanceWith, releaseTracking } from './instance.ts'
 import {
   FOUND_AS_GIVEN,
   findFiles,
@@ -341,7 +341,12 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     const url = config.serverUrl
     let instance: Promise<InstanceMetadata | null> | undefined
     return {
-      client: createApiClient({ serverUrl: url, apiKey: config.apiKey, fetch: fetchImpl }),
+      client: createApiClient({
+        serverUrl: url,
+        apiKey: config.apiKey,
+        fetch: fetchImpl,
+        ...releaseTracking(store, config),
+      }),
       url,
       config,
       instance: () => {
@@ -435,7 +440,11 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   let updateNoted = false
   async function updateNoteFor(t: Target): Promise<string> {
     if (updateNoted) return ''
-    const release = newerRelease((await t.instance().catch(() => null))?.release)
+    // Read again: the call's responses may have stored a newer release (Fling-Release).
+    const stored = await store.resolve({ serverUrl: t.url }).catch(() => null)
+    const release = newerRelease(
+      (stored?.instance ?? (await t.instance().catch(() => null)))?.release
+    )
     if (!release) return ''
     updateNoted = true
     return `\n${mcpUpdateNote(release)}`

@@ -1,8 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { RELEASE_HEADER } from '@fling/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 import { updateCheckSilenced } from '../src/config.ts'
+import { requireClient } from '../src/context.ts'
 import { BIN_NAME, PACKAGE_NAME } from '../src/package-info.ts'
+import { whoami } from '../src/sites.ts'
 import {
   NOTIFY_EVERY_MS,
   newerRelease,
@@ -11,7 +14,7 @@ import {
   type UpdateCheckInput,
   updateNotice,
 } from '../src/update-check.ts'
-import { INSTANCE, runCleanups, SERVER, tempStore, testContext } from './helpers.ts'
+import { INSTANCE, mockFetch, runCleanups, SERVER, tempStore, testContext } from './helpers.ts'
 
 afterEach(runCleanups)
 
@@ -156,5 +159,61 @@ describe('noticeAfterCommand', () => {
       await noticeAfterCommand(ctx, undefined, { ...opts, ...extra })
       expect(log.lines).toEqual([])
     }
+  })
+})
+
+describe('Fling-Release', () => {
+  const meWith = (release?: string) => () =>
+    new Response(
+      JSON.stringify({ email: 'ada@example.test', name: 'Ada', picture: null, userSlug: 'ada' }),
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(release ? { [RELEASE_HEADER]: release } : {}),
+        },
+      }
+    )
+
+  async function signedInAt(release: string) {
+    const { store } = await tempStore()
+    await store.putServer(SERVER, {
+      instance: { ...INSTANCE, release },
+      apiKey: 'fling_k_0123456789abcdef',
+    })
+    return store
+  }
+
+  it('a response naming another release updates the stored one, and the hint follows', async () => {
+    const store = await signedInAt('0.5.0')
+    const m = mockFetch({ 'GET /api/me': meWith('0.9.0') })
+    const { ctx, log } = await testContext({ store, fetch: m.fetch })
+    await whoami(requireClient(ctx))
+    const stored = (await store.resolve()).instance
+    expect(stored?.release).toBe('0.9.0')
+    // the rest of the metadata is kept, not refetched
+    expect(stored?.name).toBe(INSTANCE.name)
+    expect(m.calls.map(c => c.url.pathname)).toEqual(['/api/me'])
+    await noticeAfterCommand(ctx, undefined, { stderrTTY: true, silenced: false, version: '0.5.0' })
+    expect(log.lines.join('\n')).toContain('Fling 0.9.0 is out (this CLI is 0.5.0)')
+  })
+
+  it('the same release, or none, writes nothing; the throttle still holds', async () => {
+    for (const header of ['0.5.0', undefined]) {
+      const store = await signedInAt('0.5.0')
+      const before = await readFile(store.file, 'utf8')
+      const m = mockFetch({ 'GET /api/me': meWith(header) })
+      const { ctx } = await testContext({ store, fetch: m.fetch })
+      await whoami(requireClient(ctx))
+      expect(await readFile(store.file, 'utf8')).toBe(before)
+    }
+    const store = await signedInAt('0.5.0')
+    const m = mockFetch({ 'GET /api/me': meWith('0.9.0') })
+    const { ctx, log } = await testContext({ store, fetch: m.fetch })
+    const opts = { stderrTTY: true, silenced: false, version: '0.5.0', now: NOW }
+    await whoami(requireClient(ctx))
+    await noticeAfterCommand(ctx, undefined, opts)
+    await whoami(requireClient(ctx))
+    await noticeAfterCommand(ctx, undefined, { ...opts, now: later(60_000) })
+    expect(log.lines.filter(l => l.includes('is out'))).toHaveLength(1)
   })
 })

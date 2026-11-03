@@ -3,8 +3,14 @@ import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH } from '@fling/shared
 import { Hono } from 'hono'
 import { FS_DOWNLOAD_ROUTE, FS_UPLOAD_ROUTE, FsBlobs } from './blobs/fs.ts'
 import { keyFromPath } from './blobs/signed-url.ts'
-import { instanceMetadata } from './instance.ts'
-import { errorHandler, notFoundHandler, originVerify, securityHeaders } from './middleware.ts'
+import { instanceMetadata, RELEASE } from './instance.ts'
+import {
+  errorHandler,
+  notFoundHandler,
+  originVerify,
+  releaseHeader,
+  securityHeaders,
+} from './middleware.ts'
 import { apiRoutes } from './routes/api.ts'
 import { authRoutes } from './routes/auth.ts'
 import { devRoutes } from './routes/dev.ts'
@@ -22,6 +28,7 @@ export function createApp(deps: Deps) {
     await next()
   })
   app.use('*', securityHeaders)
+  app.use('*', releaseHeader(RELEASE))
 
   app.get('/healthz', c => c.json({ ok: true }))
 

@@ -7,6 +7,7 @@ import { confirm, isCancel, text } from '@clack/prompts'
 import { type ApiClient, createApiClient, type FetchLike } from './api.ts'
 import { type ConfigStore, createConfigStore, type Env, type ResolvedConfig } from './config.ts'
 import { CliError, NoServerError, NotLoggedInError } from './errors.ts'
+import { releaseTracking } from './instance.ts'
 import { BIN_NAME } from './package-info.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
 import { createLogger, type Logger } from './utils/logger.ts'
@@ -96,7 +97,7 @@ export function requireServer(ctx: Pick<CommandContext, 'config' | 'binName'>): 
 
 /** An authenticated client, or `NoServerError` / `NotLoggedInError` (exit 2). */
 export function requireClient(
-  ctx: Pick<CommandContext, 'config' | 'fetch' | 'binName'>
+  ctx: Pick<CommandContext, 'config' | 'fetch' | 'binName'> & Partial<Pick<CommandContext, 'store'>>
 ): ApiClient {
   const serverUrl = requireServer(ctx)
   if (!ctx.config.apiKey) throw new NotLoggedInError(ctx.binName)
@@ -104,5 +105,7 @@ export function requireClient(
     serverUrl,
     apiKey: ctx.config.apiKey,
     fetch: ctx.fetch,
+    // A response saying the server runs another release updates the stored one.
+    ...(ctx.store ? releaseTracking(ctx.store, ctx.config) : {}),
   })
 }

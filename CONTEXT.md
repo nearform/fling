@@ -565,7 +565,12 @@ cuts one; its tag publishes the CLI and the GitHub Release and deploys AWS
 **Update check** — the CLI comparing its own version with the **Release** of the Fling it talked
 to, from the metadata it already holds, and saying on stderr when a newer one is out (at most once
 a day per server; never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK`). The
-local MCP server tells Claude instead. `apps/cli/src/update-check.ts`.
+local MCP server tells Claude instead. `apps/cli/src/update-check.ts`. The stored release is kept
+current by the **Release header**: `Fling-Release: <release>` on every response of the API,
+sign-in and MCP routes (`RELEASE_HEADER` in `packages/shared/src/instance.ts`, set by
+`releaseHeader` in `apps/api/src/middleware.ts`); the CLI's API client stores a release that
+differs (`recordRelease`, `apps/cli/src/instance.ts`). It needs the server and the CLI both on
+the release that added it.
 
 **Doctor** — `fling doctor` and the local MCP tool `fling_doctor`: read-only checks of a machine's
 Fling setup (CLI, config, each Fling, Claude Code plugin, Claude Desktop extension), each warning

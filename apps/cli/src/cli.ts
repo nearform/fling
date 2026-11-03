@@ -2,7 +2,8 @@
  * CLI entry point. Wires commander to the thin command modules; the ONE place that maps errors to
  * exit codes (0 ok · 1 error · 2 not logged in · 3 forbidden) and prints them. Global `--server`
  * and `--json` apply to every command. Bare `fling` prints help; `fling <path>` deploys when the
- * path exists (route.ts).
+ * path exists (route.ts). After each command it says, on stderr, when the server runs a newer Fling
+ * release than this CLI (update-check.ts).
  */
 import {
   DEFAULT_SITE_SORT,
@@ -17,6 +18,7 @@ import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
+import { runDoctor } from './commands/doctor.ts'
 import { runForms, runFormsCheck, runFormsInit, runResponses } from './commands/forms.ts'
 import {
   runGroupCreate,
@@ -55,6 +57,7 @@ import { runMcpServer } from './mcp.ts'
 import { BIN_NAME, VERSION } from './package-info.ts'
 import { routeArgs, routeOptionsFor } from './route.ts'
 import { brand, logo } from './ui/theme.ts'
+import { noticeAfterCommand } from './update-check.ts'
 import { createLogger } from './utils/logger.ts'
 import { formatJson } from './utils/output.ts'
 
@@ -116,6 +119,7 @@ function action<A extends unknown[]>(handler: (ctx: CommandContext, ...args: A) 
       report(error, ctx)
       process.exitCode = exitCodeFor(error)
     }
+    if (ctx) await noticeAfterCommand(ctx, globals.server)
   }
 }
 
@@ -243,6 +247,13 @@ program
       runSetup(ctx, { ...opts, url })
     )
   )
+program
+  .command('doctor')
+  .helpGroup('Setup:')
+  .description(
+    'check this machine: the CLI, its config, each Fling, Claude Code and Claude Desktop (changes nothing)'
+  )
+  .action(action(ctx => runDoctor(ctx)))
 program
   .command('login [url]')
   .helpGroup('Setup:')

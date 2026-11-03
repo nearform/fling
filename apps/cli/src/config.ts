@@ -14,12 +14,13 @@
  * Env overrides (for CI): `FLING_URL` picks a server for one run (a remembered one brings its key),
  * `FLING_API_KEY` overrides the key, `FLING_CONFIG_DIR` relocates the directory. `FLING_DEBUG`
  * enables debug lines. `FLING_ADD_SERVER` (the Claude Desktop extension a Fling serves sets it to
- * that Fling's address) is a server for the local MCP server to remember when it starts. This is the
+ * that Fling's address) is a server for the local MCP server to remember when it starts.
+ * `FLING_NO_UPDATE_CHECK` or `CI` silences the update check (update-check.ts). This is the
  * only module that reads `process.env`.
  */
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { type InstanceMetadata, InstanceMetadataSchema } from '@fling/shared'
 import { z } from 'zod'
 import { CliError } from './errors.ts'
@@ -36,6 +37,10 @@ export const ENV = {
   downloadsDir: 'FLING_DOWNLOADS_DIR',
   /** A server the local MCP server adds to the remembered ones on start (the .mcpb bakes it in). */
   addServer: 'FLING_ADD_SERVER',
+  /** Set (to anything) to turn off the line saying a newer Fling release is out (update-check.ts). */
+  noUpdateCheck: 'FLING_NO_UPDATE_CHECK',
+  /** Set by CI systems; the update check stays quiet there too. */
+  ci: 'CI',
 } as const
 
 /** One remembered server. Each field is read on its own: one this CLI can't read is dropped. */
@@ -77,6 +82,25 @@ function fromEnv(value: string | undefined): string | undefined {
 /** The server `FLING_ADD_SERVER` names, if any (an unsubstituted placeholder counts as none). */
 export function serverToAdd(env: Env = process.env): string | undefined {
   return fromEnv(env[ENV.addServer])
+}
+
+/** Whether the update check is off: `FLING_NO_UPDATE_CHECK` or `CI` is set. */
+export function updateCheckSilenced(env: Env = process.env): boolean {
+  return Boolean(fromEnv(env[ENV.noUpdateCheck]) || fromEnv(env[ENV.ci]))
+}
+
+/** Which overriding variables are set (`fling doctor` names them; it never shows their values). */
+export function envOverrides(env: Env = process.env) {
+  return {
+    configDir: Boolean(env[ENV.configDir]),
+    url: Boolean(fromEnv(env[ENV.url])),
+    apiKey: Boolean(fromEnv(env[ENV.apiKey])),
+  }
+}
+
+/** The directories on `PATH`, in order. */
+export function pathDirs(env: Env = process.env): string[] {
+  return (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)
 }
 
 export function resolveConfigDir(env: Env = process.env): string {

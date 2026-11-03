@@ -13,6 +13,26 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **The CLI says when a newer Fling release is out.** After a command, when the server it used
+  runs a newer release (`release` in `/.well-known/fling`) than the CLI, it prints one line on
+  stderr, "Fling 0.9.0 is out (this CLI is 0.8.0)", with the commands that update it: the
+  `npm i -g` of the latest CLI, then `fling setup`. It uses the metadata the CLI already holds, at most once a day per server, and
+  never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK` set. The local MCP
+  server puts the same news in its instructions and in the session's first `fling_publish` or
+  `fling_deploy` result, so Claude passes it on.
+- **`fling setup` refreshes what it installed.** With the plugin already in Claude Code, setup
+  updates the `fling` marketplace and the plugin without asking, says which version it went from
+  and to, and says to restart Claude Code; a failed refresh is reported and no longer fails setup.
+  The Claude Desktop extension it opens is the CLI's own version (the server's copy when the server
+  runs that release, otherwise the CLI's GitHub Release), and setup reads the server's metadata
+  again when you are already signed in.
+- **`fling doctor` and `fling_doctor`.** A read-only check of the CLI (version, Node.js, the latest
+  on npm, `fling` on PATH), its config (location, file permissions, `FLING_URL` / `FLING_API_KEY`
+  in effect), each Fling (reachable, release, sign-in, features), the Claude Code plugin and
+  marketplace, and the Claude Desktop extension, one line per check with the fix. `--json` prints
+  the checks; the exit code is 1 on a problem. The local MCP server's `fling_doctor` runs the same
+  checks for Claude.
+
 ## 0.8.0 (2026-11-03)
 
 - **Forms.** A site can ship `fling.forms.json` with its deploy: forms (JSON Schemas) its reviewers

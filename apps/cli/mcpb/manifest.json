@@ -56,6 +56,10 @@
       "name": "fling_servers",
       "description": "List the Flings set up on this computer, or switch the current one"
     },
+    {
+      "name": "fling_doctor",
+      "description": "Check the Fling setup on this computer and say how to fix what is wrong"
+    },
     { "name": "fling_whoami", "description": "Show the signed-in user" },
     { "name": "fling_list", "description": "List your sites, or the sites shared with you" },
     { "name": "fling_info", "description": "Show a site and its versions" },

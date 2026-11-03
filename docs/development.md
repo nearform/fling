@@ -150,7 +150,9 @@ including everything due in the next hour (`flush`), and answers what it did:
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
 `pnpm cli deploy <folder>`. The CLI remembers it beside any other Fling you are signed in to:
 `pnpm cli use` lists them and `pnpm cli use <url>` switches back. To keep a throwaway login away
-from your real config altogether, set `FLING_CONFIG_DIR=$(mktemp -d)`.
+from your real config altogether, set `FLING_CONFIG_DIR=$(mktemp -d)`. `pnpm cli doctor` checks the
+setup (CLI, config, each Fling, Claude Code, Claude Desktop) and changes nothing. A checkout older
+than a Fling it talks to says a newer release is out; `FLING_NO_UPDATE_CHECK=1` quietens it.
 
 **The e2e scenario.** Run `pnpm build && pnpm e2e` (or `pnpm --filter @fling/e2e e2e aws` for one
 runtime). It starts each runtime on free ports with fresh state, runs
@@ -250,7 +252,8 @@ version files and CHANGELOG say `x.y.z`, tagged `vx.y.z`. The version is in the 
 `package.json`, `apps/cli/package.json`, `apps/cli/mcpb/manifest.json` and
 `plugin/.claude-plugin/plugin.json` (the list is `VERSION_FILES` in `scripts/release.mjs`); the
 other workspace packages are private and keep their own. A server says which release it runs as
-`release` in `/.well-known/fling`. Up to 0.6.0, releases were the CLI's alone (`cli-v*` tags).
+`release` in `/.well-known/fling`. The CLI and its local MCP server compare it with their own version and
+say when a newer one is out (`apps/cli/src/update-check.ts`). Up to 0.6.0, releases were the CLI's alone (`cli-v*` tags).
 
 1. On a branch, cut it:
 

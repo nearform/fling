@@ -2,21 +2,28 @@
  * `fling setup [url] [--yes] [--scope user|project|local]` — get a machine ready in one go:
  *
  *   1. Sign in, to the Fling at `url` (needed the first time: there is no default server); skipped
- *      when the stored key for that server still works. Either way it becomes the current server,
- *      and the logins to other servers are kept.
- *   2. Claude Code: install the Fling plugin (skill + MCP server) through the `claude` CLI, or
- *      update it when it is already installed. Skipped, with a hint, when `claude` is missing.
- *   3. Claude Desktop (macOS / Windows, when it is installed): download fling.mcpb and open it;
- *      Desktop then asks the user to confirm the install.
+ *      when the stored key for that server still works, in which case its `/.well-known/fling` is
+ *      read again (best effort), so the stored copy, and the release the update check compares
+ *      with, are current. Either way it becomes the current server, and the logins to other
+ *      servers are kept.
+ *   2. Claude Code: install the Fling plugin (skill + MCP server) through the `claude` CLI or, when
+ *      it is already installed, refresh the marketplace and update the plugin, saying which version
+ *      it went from and to. Skipped, with a hint, when `claude` is missing.
+ *   3. Claude Desktop (macOS / Windows, when it is installed): download the fling.mcpb of this
+ *      CLI's version (`extensionSources`) and open it; Desktop then asks the user to confirm the
+ *      install, which replaces an older copy in place.
  *
- * On a terminal it asks before steps 2 and 3; with `--yes` or without a terminal it does them all.
- * Steps report and carry on: one failing doesn't stop the others; the exit code is 1 if any did.
+ * On a terminal it asks before installing the plugin and before step 3; with `--yes` or without a
+ * terminal it does them all. Refreshing an installed plugin needs no question. Steps report and
+ * carry on: one failing doesn't stop the others; the exit code is 1 if any did, except a failed
+ * plugin refresh, which leaves the installed plugin working and is only reported.
  */
 import { intro, outro, spinner } from '@clack/prompts'
 import chalk from 'chalk'
 import {
   claudeCodeStatus,
   downloadExtension,
+  extensionSources,
   findClaudeDesktop,
   installPlugin,
   MARKETPLACE_SOURCE,
@@ -29,6 +36,7 @@ import {
 } from '../claude.ts'
 import { type CommandContext, requireClient, requireServer } from '../context.ts'
 import { CliError, exitCodeFor } from '../errors.ts'
+import { fetchInstance } from '../instance.ts'
 import { whoami } from '../sites.ts'
 import { logo } from '../ui/theme.ts'
 import { createLogger } from '../utils/logger.ts'
@@ -44,7 +52,8 @@ export interface SetupOptions {
 export interface SetupDeps {
   runClaude?: RunClaude
   findClaudeDesktop?: () => Promise<string | null>
-  downloadExtension?: (serverUrl: string) => Promise<string>
+  /** Download fling.mcpb from a URL; returns the file's path. */
+  downloadExtension?: (url: string) => Promise<string>
 }
 
 type StepResult = 'done' | 'updated' | 'already' | 'skipped' | 'missing' | 'failed'
@@ -129,6 +138,10 @@ async function signIn(ctx: CommandContext, serverUrl: string): Promise<StepResul
       const me = await whoami(requireClient(ctx))
       if (ctx.config.remembered) await ctx.store.setCurrent(serverUrl)
       ctx.log.success(`Signed in as ${chalk.bold(me.name)} ${chalk.dim(`<${me.email}>`)}`)
+      if (ctx.config.remembered)
+        await fetchInstance(serverUrl, ctx.fetch)
+          .then(instance => ctx.store.putServer(serverUrl, { instance }, { makeCurrent: false }))
+          .catch(() => {})
       return 'already'
     } catch (error) {
       if (exitCodeFor(error) !== 2) {
@@ -164,33 +177,66 @@ async function stepClaudeCode(
     return 'missing'
   }
 
-  const installed = 'installed' in status && status.installed
-  const question = installed
-    ? `The Fling plugin is installed in Claude Code${status.version ? ` (${status.version})` : ''}. Update it to the latest?`
-    : 'Install the Fling plugin (skill + MCP server) into Claude Code?'
-  if (ask && !(await ctx.confirm(question))) {
-    ctx.log.info(chalk.dim('Claude Code plugin: skipped'))
-    return installed ? 'already' : 'skipped'
-  }
+  if ('installed' in status && status.installed) return refreshPlugin(ctx, run, status, fancy)
 
+  if (
+    ask &&
+    !(await ctx.confirm('Install the Fling plugin (skill + MCP server) into Claude Code?'))
+  ) {
+    ctx.log.info(chalk.dim('Claude Code plugin: skipped'))
+    return 'skipped'
+  }
   const s = fancy ? spinner({ output: process.stderr }) : null
-  s?.start(installed ? 'Updating the Claude Code plugin' : 'Installing the Claude Code plugin')
+  s?.start('Installing the Claude Code plugin')
   try {
-    if (installed) await updatePlugin(run, status.scope)
-    else await installPlugin(run, scope)
+    await installPlugin(run, scope)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (s) s.error(message)
     else ctx.log.error(message)
     return 'failed'
   }
-  const done = installed
-    ? `Claude Code plugin ${PLUGIN_NAME} is up to date`
-    : `Claude Code plugin ${PLUGIN_NAME} installed ${chalk.dim(`(${scope} scope)`)}`
+  const done = `Claude Code plugin ${PLUGIN_NAME} installed ${chalk.dim(`(${scope} scope)`)}`
   if (s) s.stop(done)
   else ctx.log.success(done)
   ctx.log.hint('Restart Claude Code (or run /reload-plugins) to pick it up.')
-  return installed ? 'updated' : 'done'
+  return 'done'
+}
+
+/**
+ * Refresh the marketplace and update the installed plugin, then say what changed: the versions
+ * before and after, read from `claude plugin list`. A failure is reported as a warning: the
+ * installed plugin still works.
+ */
+async function refreshPlugin(
+  ctx: CommandContext,
+  run: RunClaude,
+  before: { version?: string; scope?: string },
+  fancy: boolean
+): Promise<StepResult> {
+  const s = fancy ? spinner({ output: process.stderr }) : null
+  s?.start('Updating the Claude Code plugin')
+  try {
+    await updatePlugin(run, before.scope)
+  } catch (error) {
+    const message = `${error instanceof Error ? error.message : String(error)} — the installed plugin${before.version ? ` (${before.version})` : ''} is unchanged`
+    if (s) s.stop(chalk.yellow(message))
+    else ctx.log.warn(message)
+    return 'already'
+  }
+  const after = await claudeCodeStatus(run).catch(() => null)
+  const version = after && 'installed' in after && after.installed ? after.version : undefined
+  const unchanged = before.version !== undefined && version === before.version
+  const done = unchanged
+    ? `Claude Code plugin ${PLUGIN_NAME} is up to date ${chalk.dim(`(${version})`)}`
+    : before.version && version
+      ? `Claude Code plugin ${PLUGIN_NAME} updated from ${before.version} to ${version}`
+      : `Claude Code plugin ${PLUGIN_NAME} updated${version ? ` to ${version}` : ''}`
+  if (s) s.stop(done)
+  else ctx.log.success(done)
+  if (unchanged) return 'already'
+  ctx.log.hint('Restart Claude Code (or run /reload-plugins) to pick up the new version.')
+  return 'updated'
 }
 
 async function stepClaudeDesktop(
@@ -207,12 +253,23 @@ async function stepClaudeDesktop(
   }
   const s = fancy ? spinner({ output: process.stderr }) : null
   s?.start('Downloading the Claude Desktop extension')
+  const download = deps.downloadExtension ?? (url => downloadExtension(url, ctx.fetch))
   try {
-    const file = await (
-      deps.downloadExtension ?? (serverUrl => downloadExtension(serverUrl, ctx.fetch))
-    )(requireServer(ctx))
-    await ctx.open(file)
-    const done = 'Opened fling.mcpb in Claude Desktop — click Install there to finish'
+    const sources = extensionSources(requireServer(ctx), ctx.config.instance?.release)
+    let got: { file: string; version?: string } | undefined
+    let lastError: unknown
+    for (const source of sources) {
+      try {
+        got = { file: await download(source.url), version: source.version }
+        break
+      } catch (error) {
+        lastError = error
+        ctx.log.debug(`Could not download ${source.url}: ${String(error)}`)
+      }
+    }
+    if (!got) throw lastError
+    await ctx.open(got.file)
+    const done = `Opened fling.mcpb${got.version ? ` ${got.version}` : ''} in Claude Desktop — click Install there to finish (it replaces an older version)`
     if (s) s.stop(done)
     else ctx.log.success(done)
     return 'done'

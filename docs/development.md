@@ -85,6 +85,41 @@ the rooms in process (`apps/api/src/live-memory.ts`) and accepts the sockets its
 `wrangler dev` runs the `LiveRoom` Durable Objects locally at `ws://flingcf.lvh.me:47103/api/live`.
 Open the same review page in two browser profiles to see each other's pointers.
 
+**Forms locally.** Forms are on wherever comments are (the `forms` capability follows `COMMENTS`;
+there is no config value of their own). To try them:
+
+1. `pnpm cli forms init <folder> --template labels` writes a `fling.forms.json` (the other
+   templates are `rubric`, `compare`, `issue` and `survey`); change its `paths` to match the
+   folder's pages and run `pnpm cli forms check <folder>`.
+2. `pnpm cli deploy <folder> --access members` deploys it and lists each form with the pages it
+   applies to. `http://<name>.fling.lvh.me:47102/fling.forms.json` is a 404: the file is never a
+   site file.
+3. Open `http://fling.lvh.me:47100/review/<name>`: a page-kind form is the panel's tab named after
+   the config's `title`, and a comment-kind one is a type in the new-comment box. Sign in as another
+   `@example.test` address in a second browser profile to see an `own` form hide each reviewer's
+   answers from the other, while the owner sees both.
+4. `http://fling.lvh.me:47100/sites/<name>/responses` shows the page × reviewer grid, and
+   `pnpm cli responses <name> --format csv` the export.
+
+Where forms are stored:
+
+- **The config** is a blob per version beside its manifest,
+  `sites/<siteId>/_forms/<versionId>.json` (`formsKey`, `apps/api/src/blobs/types.ts`), outside
+  every version's files, so the edge never serves it. Publication writes it when the deploy is made
+  (`formsForDeploy`, `apps/api/src/forms.ts`): the request's `forms` when it sends them, none when
+  it sends `null`, and otherwise the base's for a layered publish (a path publish, or a deploy of a
+  pulled folder) and none for a whole-site deploy. A version is named by its files alone, so an
+  `unchanged` or `repointed` deploy that sends `forms` rewrites that version's blob in place. The
+  CLI sends the folder's file when there is one. Without it, a whole-site deploy sends `null`, and
+  a layered one sends nothing (the site keeps its forms) unless the folder was pulled with a
+  `fling.forms.json` that has since been deleted, which sends `null`.
+- **Responses** are comment records, v2 (`CommentRecord`, `apps/api/src/store/types.ts`): `response`
+  (`{ formId, data, versionId }`), `respondent` (the author's email, which `Store.updateResponse`
+  conditions on) and `updatedAt` (when a page-kind response was last changed). A v1 comment needs
+  nothing filled in (`evolution.ts`), so there is no migration. A page-kind response's id is
+  `R<hash of form, path, author>` rather than a time-sortable one, so `listComments` sorts by
+  `createdAt` in the core. `updateResponse` is in the conformance store suite.
+
 **Notifications locally.** Mail is off until you turn it on:
 
 - **Node** (`pnpm dev`): set `MAIL_DRIVER=file` and `MAIL_FROM=fling@mail.fling.lvh.me` first

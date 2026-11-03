@@ -23,14 +23,18 @@ import {
   type AuditEntry,
   AuditListSchema,
   type Comment,
-  type CommentAnchor,
   type CommentList,
   CommentListSchema,
   CommentSchema,
   type Connection,
   ConnectionListSchema,
+  type CreateCommentRequest,
   type CreateGroupRequest,
   ErrorEnvelopeSchema,
+  type FieldError,
+  FieldErrorSchema,
+  type FormsResponse,
+  FormsResponseSchema,
   type GroupDetail,
   GroupDetailSchema,
   GroupListSchema,
@@ -51,6 +55,9 @@ import {
   OAuthDecisionSchema,
   type OAuthRequestInfo,
   OAuthRequestInfoSchema,
+  type ResponseExportFormat,
+  type ResponsesExport,
+  ResponsesExportSchema,
   type SentNotification,
   SentNotificationListSchema,
   type SharedSite,
@@ -79,12 +86,15 @@ interface Parser<T> {
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  /** what was wrong with each field of a form's response (`invalid_response`); empty otherwise */
+  readonly fieldErrors: FieldError[]
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, fieldErrors: FieldError[] = []) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.fieldErrors = fieldErrors
   }
 }
 
@@ -133,13 +143,7 @@ export async function request<T>(
   }
 
   const data = await readJson(res)
-  if (!res.ok) {
-    const envelope = ErrorEnvelopeSchema.safeParse(data)
-    if (envelope.success) {
-      throw new ApiError(res.status, envelope.data.error.code, envelope.data.error.message)
-    }
-    throw new ApiError(res.status, `http_${res.status}`, `Request failed (${res.status})`)
-  }
+  if (!res.ok) throw failure(res, data)
 
   try {
     return parser.parse(data)
@@ -150,6 +154,23 @@ export async function request<T>(
       'Fling sent a response this page cannot read'
     )
   }
+}
+
+/** The `ApiError` a failed response stands for, from its `{ error }` envelope when it has one. */
+function failure(res: Response, data: unknown): ApiError {
+  const envelope = ErrorEnvelopeSchema.safeParse(data)
+  if (!envelope.success) {
+    return new ApiError(res.status, `http_${res.status}`, `Request failed (${res.status})`)
+  }
+  const fields = FieldErrorSchema.array().safeParse(
+    (data as { error: { errors?: unknown } }).error.errors
+  )
+  return new ApiError(
+    res.status,
+    envelope.data.error.code,
+    envelope.data.error.message,
+    fields.success ? fields.data : []
+  )
 }
 
 const ShareResponseParser: Parser<{ shareUrl: string }> = {
@@ -219,10 +240,8 @@ export const api = {
   /** A site's comments and what the caller may do (members too: it is how they review). */
   listComments: (name: string): Promise<CommentList> =>
     request(`${site(name)}/comments`, CommentListSchema),
-  addComment: (
-    name: string,
-    body: { body: string; path?: string; parentId?: string; anchor?: CommentAnchor }
-  ): Promise<Comment> => request(`${site(name)}/comments`, CommentSchema, { method: 'POST', body }),
+  addComment: (name: string, body: CreateCommentRequest): Promise<Comment> =>
+    request(`${site(name)}/comments`, CommentSchema, { method: 'POST', body }),
   resolveComment: (name: string, id: string, resolved: boolean): Promise<Comment> =>
     request(`${site(name)}/comments/${encodeURIComponent(id)}`, CommentSchema, {
       method: 'PATCH',
@@ -233,6 +252,23 @@ export const api = {
     request(`${site(name)}/live`, LiveTicketSchema, { method: 'POST' }),
   deleteComment: (name: string, id: string) =>
     request(`${site(name)}/comments/${encodeURIComponent(id)}`, ignoreBody, { method: 'DELETE' }),
+  /** The live version's forms config (`forms` capability); `config` is null when it has none. */
+  getForms: (name: string): Promise<FormsResponse> =>
+    request(`${site(name)}/forms`, FormsResponseSchema),
+  /** The responses the caller may see, and each form's progress (`forms` capability). */
+  listResponses: (name: string): Promise<ResponsesExport> =>
+    request(`${site(name)}/responses`, ResponsesExportSchema),
+  /** The responses as a file to save (`jsonl` or `csv`), fetched with the session. */
+  async downloadResponses(name: string, format: ResponseExportFormat): Promise<Blob> {
+    let res: Response
+    try {
+      res = await fetch(`${site(name)}/responses?format=${format}`, { credentials: 'same-origin' })
+    } catch {
+      throw new ApiError(0, 'network_error', 'Could not reach Fling. Check your connection.')
+    }
+    if (!res.ok) throw failure(res, await readJson(res))
+    return res.blob()
+  },
   /** Every group on the instance, or only the caller's own (`mine`), by slug. */
   async listGroups(mine = false): Promise<GroupSummary[]> {
     const { groups } = await request(`/api/groups${mine ? '?mine=1' : ''}`, GroupListSchema)

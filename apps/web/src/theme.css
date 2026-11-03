@@ -650,6 +650,7 @@
     gap: 0.5rem;
   }
 
+
   /* The one scroller. Positioned, so the screen-reader text inside its threads scrolls with them
      instead of stretching the page; padded so a selected thread's outline isn't clipped. */
   .review-threads {
@@ -855,6 +856,66 @@
 .review-header-row > .review-tools-button {
   display: none;
 }
+/* A form's response (ResponseForm.tsx), sized for the side panel: the renderer's DaisyUI theme
+   lays fields out for a page, so labels, gaps and messages are brought down to the panel's
+   scale here, and its own error colour gives way to the theme's. Unlayered, like the sizes
+   above, to apply over daisyUI's layers and the theme's utilities. */
+.response-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+.response-form .field-template {
+  display: grid;
+  gap: 0.375rem;
+  margin: 0;
+}
+.response-form .label {
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  white-space: normal;
+}
+.response-form .label-text {
+  color: inherit;
+}
+.response-form .text-error {
+  color: var(--color-error);
+}
+.response-form .input,
+.response-form .select,
+.response-form .textarea {
+  inline-size: 100%;
+  font-size: 0.875rem;
+}
+/* The theme draws a select as an outlined button over a list; here it looks like the other fields. */
+.response-form .dropdown > .btn {
+  border-color: var(--border-control);
+  font-weight: 400;
+}
+.response-form .dropdown-content {
+  border: 1px solid var(--border-default);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-popover);
+}
+.response-form .radio,
+.response-form .checkbox {
+  flex: none;
+}
+.response-form-errors {
+  color: var(--color-error);
+}
+/* A response's answers (ResponseView): each label over its answer. */
+.response-view {
+  display: grid;
+  gap: 0.375rem;
+  font-size: 0.875rem;
+}
+.response-view dt {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
 @container review-body (width < 55rem) {
   .review-composer[data-expanded] .review-textarea {
     min-block-size: 2lh;
@@ -863,6 +924,55 @@
 @container review-header (width < 52rem) {
   .review-header-row > .review-tools-button {
     display: inline-flex;
+  }
+}
+
+/* The progress view (pages/Responses.tsx): a page × reviewer matrix that scrolls sideways when
+   reviewers outnumber the width, the page column staying in view. */
+@layer components {
+  .responses-matrix {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+  .responses-matrix th[scope="row"],
+  .responses-matrix thead th:first-child {
+    position: sticky;
+    inset-inline-start: 0;
+    z-index: 1;
+    background: var(--surface-panel);
+  }
+  .responses-reviewer {
+    max-inline-size: 10rem;
+    text-align: center;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  .responses-cell {
+    display: inline-grid;
+    place-items: center;
+    inline-size: 1.5rem;
+    block-size: 1.5rem;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+  }
+  .responses-cell.is-done {
+    background: var(--tone-primary-surface);
+    border-color: var(--tone-primary-border);
+  }
+  .responses-cell:active {
+    scale: 0.94;
+  }
+  .responses-cell:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .responses-cell:hover {
+      border-color: var(--border-control);
+    }
   }
 }
 

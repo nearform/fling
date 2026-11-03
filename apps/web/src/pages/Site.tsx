@@ -11,6 +11,7 @@ import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams } from 'react-router-dom'
 import { NotFound } from '../components/NotFound'
 import { PageHeader } from '../components/PageHeader'
+import { ResponsesLink } from '../components/review/Forms'
 import { ReviewButton } from '../components/SiteButtons'
 import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
@@ -78,7 +79,17 @@ export default function Site() {
             )}
           </span>
         }
-        actions={reviewable && <ReviewButton name={site.name} />}
+        actions={
+          reviewable && (
+            <>
+              <ReviewButton name={site.name} />
+              <ResponsesLink
+                name={site.name}
+                className="btn btn-xs h-7 min-h-7 px-2 text-sm font-normal tabular-nums"
+              />
+            </>
+          )
+        }
       />
       {othersSite && (
         <div className="alert alert-info text-sm" role="note">

@@ -14,6 +14,11 @@
  * live room (useLive) shows who else is reviewing, where they point, and refetches comments as
  * soon as anyone changes them.
  *
+ * With the `forms` capability and a site whose live version has forms, page-kind responses leave
+ * the threads and pins for a tab of their own, named after the config's title, and the composer
+ * offers the comment-kind forms that apply to the page as types of comment
+ * (components/review/Forms.tsx).
+ *
  * The comments panel sits beside the frame while the frame keeps most of the width, and over the
  * site as a sheet from the bottom when it can't (the stylesheet's container query decides, and
  * says so in `--review-sheet`). The reviewer shows and hides it from the header; the choice is
@@ -26,6 +31,9 @@ import {
   type CommentList,
   type CommentThread,
   commentThreads,
+  type FieldError,
+  type FormDefinition,
+  type FormsConfig,
   type PageMessage,
   pageMessage,
   reviewShellUrl,
@@ -56,14 +64,16 @@ import {
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { LogoMark } from '../components/LogoMark'
+import { FormsPanel, LazyResponseForm, ResponseView } from '../components/review/Forms'
 import ThemeToggle from '../components/ThemeToggle'
 import { UserMenu } from '../components/UserMenu'
 import { useInstance } from '../hooks/instance'
-import { useCommentActions, useComments } from '../hooks/queries'
+import { useCommentActions, useComments, useForms, useMe, useResponses } from '../hooks/queries'
 import { type Live, useLive } from '../hooks/useLive'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { ApiError, errorMessage } from '../lib/api'
 import { fullDate, shortVersion, timeAgo } from '../lib/format'
+import { formsOfKind, hasKind, myProgress, responsesHref, splitPageResponses } from '../lib/forms'
 import { DEFAULT_INSTANCE_NAME } from '../lib/instance'
 import {
   cursorsAt,
@@ -147,7 +157,14 @@ export default function Review() {
       </Message>
     )
   }
-  return <ReviewSession name={name} list={comments.data} live={live} />
+  return (
+    <ReviewSession
+      name={name}
+      list={comments.data}
+      live={live}
+      formsOn={instance?.capabilities.forms === true}
+    />
+  )
 }
 
 function Message({ title, children }: { title: string; children: ReactNode }) {
@@ -164,7 +181,17 @@ function Message({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
-function ReviewSession({ name, list, live }: { name: string; list: CommentList; live: Live }) {
+function ReviewSession({
+  name,
+  list,
+  live,
+  formsOn,
+}: {
+  name: string
+  list: CommentList
+  live: Live
+  formsOn: boolean
+}) {
   const [params, setParams] = useSearchParams()
   // The shell loads once, on the page asked for; after that it navigates itself and reports.
   const [initial] = useState(() => reviewTarget(params.get('path')))
@@ -189,7 +216,22 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
   } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const threads = useMemo(() => commentThreads(list.comments), [list.comments])
+  // The site's forms: page-kind responses go to the forms tab, out of the threads and pins.
+  const email = useMe().data?.email
+  const config = useForms(name, formsOn).data?.config ?? null
+  const split = useMemo(() => splitPageResponses(list.comments, config), [list.comments, config])
+  const { pageResponses } = split
+  const pageForms = hasKind(config, 'page')
+  const responses = useResponses(name, pageForms)
+  const progress = useMemo(
+    () =>
+      responses.data ? myProgress(config, responses.data.progress, pageResponses, email) : null,
+    [responses.data, config, pageResponses, email]
+  )
+  const [tab, setTab] = useState<'comments' | 'forms'>('comments')
+  const formsTab = pageForms && config !== null && tab === 'forms'
+
+  const threads = useMemo(() => commentThreads(split.comments), [split.comments])
   const shown = visibleThreads(threads, { path: scope === 'page' ? at.path : null, showResolved })
   const counts = openCountsByPath(threads)
   const openCount = openThreadCount(threads)
@@ -308,6 +350,7 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
       case 'pinPlaced':
         // Alt places a pin without pin mode, so the page checks here who may comment.
         if (!list.can.create) break
+        setTab('comments')
         setPin({ anchor: m.anchor, at: atRef.current, from: 'placed' })
         setPlacing(false)
         setRevealed(true)
@@ -316,6 +359,7 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
       case 'textSelected':
         // Selecting text pins the new comment to it, but never moves a pin the reviewer placed.
         if (!list.can.create) break
+        setTab('comments')
         setPin(p =>
           p?.from === 'placed' ? p : { anchor: m.anchor, at: atRef.current, from: 'selection' }
         )
@@ -334,6 +378,7 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
         if (!thread) break
         if (scope === 'page' && thread.comment.path !== at.path) setScope('all')
         if (thread.comment.resolvedAt !== null) setShowResolved(true)
+        setTab('comments')
         setSelectedId(m.id)
         setRevealed(true)
         break
@@ -416,6 +461,15 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
   const [linkedThread, setLinkedThread] = useState(() => params.get('thread'))
   useEffect(() => {
     if (!linkedThread || !ready) return
+    // A page-kind response is shown on its page's forms tab.
+    const response = pageResponses.find(c => c.id === linkedThread)
+    if (response) {
+      setLinkedThread(null)
+      setTab('forms')
+      setRevealed(true)
+      if (response.path !== atRef.current.path) go(response.path)
+      return
+    }
     const thread = threads.find(t => t.comment.id === linkedThread)
     if (!thread) return
     setLinkedThread(null)
@@ -423,7 +477,7 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
     if (thread.comment.resolvedAt !== null) setShowResolved(true)
     setRevealed(true)
     select(linkedThread)
-  }, [linkedThread, ready, threads, select])
+  }, [linkedThread, ready, threads, select, pageResponses, go])
 
   const instanceName = useInstance()?.name ?? DEFAULT_INSTANCE_NAME
 
@@ -542,10 +596,50 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
           hidden={!panelShown}
         >
           <div className="flex items-center gap-2">
-            <h2 id="review-comments-title" className="text-sm font-semibold">
+            <h2
+              id="review-comments-title"
+              className={pageForms ? 'sr-only' : 'text-sm font-semibold'}
+            >
               Comments
             </h2>
-            <span className="text-xs text-secondary">{openCount} open</span>
+            {pageForms && config ? (
+              <div role="tablist" className="tabs tabs-box tabs-sm" aria-label="Show">
+                <button
+                  type="button"
+                  role="tab"
+                  id="review-tab-comments"
+                  aria-selected={!formsTab}
+                  aria-controls="review-tabpanel"
+                  className={`tab gap-1.5 ${formsTab ? '' : 'tab-active'}`}
+                  onClick={() => setTab('comments')}
+                >
+                  Comments
+                  <span className="review-count text-xs">
+                    {openCount}
+                    <span className="sr-only"> open</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="review-tab-forms"
+                  aria-selected={formsTab}
+                  aria-controls="review-tabpanel"
+                  className={`tab gap-1.5 ${formsTab ? 'tab-active' : ''}`}
+                  onClick={() => setTab('forms')}
+                >
+                  {config.title}
+                  {progress && progress.pages.length > 0 && (
+                    <span className="review-count text-xs">
+                      {progress.done.length}/{progress.pages.length}
+                      <span className="sr-only"> pages done</span>
+                    </span>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <span className="text-xs text-secondary">{openCount} open</span>
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-sm btn-square ms-auto"
@@ -558,7 +652,7 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
               <XMarkIcon className="h-4 w-4" aria-hidden />
             </button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm" hidden={formsTab}>
             <div className="join" role="group" aria-label="Which comments">
               <button
                 type="button"
@@ -595,55 +689,86 @@ function ReviewSession({ name, list, live }: { name: string; list: CommentList; 
               />
               Pins
             </label>
+            {config && !pageForms && (
+              <Link to={responsesHref(name)} className="link ms-auto text-xs">
+                {config.title}
+              </Link>
+            )}
           </div>
 
-          <div className="review-threads">
-            <Composer
-              name={name}
-              path={at.path}
-              canCreate={list.can.create}
-              pin={pin?.anchor ?? null}
-              placing={placing}
-              focusRequest={composeRequest}
-              onPlace={() => setPlacing(p => !p)}
-              onClearPin={() => setPin(null)}
-            />
-            {shown.length === 0 ? (
-              <div className="space-y-2 py-6 text-center text-sm text-secondary">
-                <ChatBubbleLeftRightIcon className="mx-auto h-6 w-6 text-muted" aria-hidden />
-                <p>
-                  {scope === 'page' ? `No open comments on ${at.path}.` : 'No open comments yet.'}
-                </p>
-                {scope === 'page' && counts.size > 0 && (
-                  <p>
-                    Other pages have some:{' '}
-                    {[...counts.entries()].map(([p, n], i) => (
-                      <span key={p}>
-                        {i > 0 && ', '}
-                        <button type="button" className="link" onClick={() => go(p)}>
-                          {p}
-                        </button>{' '}
-                        ({n})
-                      </span>
-                    ))}
-                  </p>
-                )}
-              </div>
+          <div
+            className="review-threads"
+            {...(pageForms && {
+              id: 'review-tabpanel',
+              role: 'tabpanel',
+              'aria-labelledby': formsTab ? 'review-tab-forms' : 'review-tab-comments',
+            })}
+          >
+            {formsTab && config ? (
+              <FormsPanel
+                name={name}
+                config={config}
+                path={at.path}
+                pageResponses={pageResponses}
+                email={email}
+                canCreate={list.can.create}
+                progress={progress}
+                onGo={go}
+              />
             ) : (
-              <ol className="space-y-3">
-                {shown.map(t => (
-                  <Thread
-                    key={t.comment.id}
-                    name={name}
-                    thread={t}
-                    number={threads.indexOf(t) + 1}
-                    list={list}
-                    onPage={t.comment.path === at.path}
-                    selected={t.comment.id === selectedId}
-                    onSelect={() => select(t.comment.id)}
-                  />
-                ))}
-              </ol>
+              <>
+                <Composer
+                  name={name}
+                  path={at.path}
+                  canCreate={list.can.create}
+                  pin={pin?.anchor ?? null}
+                  placing={placing}
+                  focusRequest={composeRequest}
+                  onPlace={() => setPlacing(p => !p)}
+                  onClearPin={() => setPin(null)}
+                  forms={formsOfKind(config, at.path, 'comment')}
+                />
+                {shown.length === 0 ? (
+                  <div className="space-y-2 py-6 text-center text-sm text-secondary">
+                    <ChatBubbleLeftRightIcon className="mx-auto h-6 w-6 text-muted" aria-hidden />
+                    <p>
+                      {scope === 'page'
+                        ? `No open comments on ${at.path}.`
+                        : 'No open comments yet.'}
+                    </p>
+                    {scope === 'page' && counts.size > 0 && (
+                      <p>
+                        Other pages have some:{' '}
+                        {[...counts.entries()].map(([p, n], i) => (
+                          <span key={p}>
+                            {i > 0 && ', '}
+                            <button type="button" className="link" onClick={() => go(p)}>
+                              {p}
+                            </button>{' '}
+                            ({n})
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <ol className="space-y-3">
+                    {shown.map(t => (
+                      <Thread
+                        key={t.comment.id}
+                        name={name}
+                        thread={t}
+                        number={threads.indexOf(t) + 1}
+                        list={list}
+                        onPage={t.comment.path === at.path}
+                        selected={t.comment.id === selectedId}
+                        onSelect={() => select(t.comment.id)}
+                        config={config}
+                      />
+                    ))}
+                  </ol>
+                )}
+              </>
             )}
           </div>
         </aside>
@@ -758,6 +883,8 @@ function Avatar({ circle }: { circle: PresenceCircle }) {
  * The new comment: one line ("Add a comment…") until it is used, then the full composer with its
  * pin and buttons. It stays open while it holds text or a pin, or while one is being placed, and
  * closes after posting or cancelling. `focusRequest` changing brings it into view and focuses it.
+ * When comment-kind forms apply to the page, a type picker offers them beside "Comment": choosing
+ * one puts the form where the text was, and the response is posted with the pin like a comment.
  */
 function Composer({
   name,
@@ -768,6 +895,7 @@ function Composer({
   focusRequest,
   onPlace,
   onClearPin,
+  forms,
 }: {
   name: string
   path: string
@@ -777,17 +905,24 @@ function Composer({
   focusRequest: number
   onPlace: () => void
   onClearPin: () => void
+  /** the comment-kind forms that apply to this page */
+  forms: FormDefinition[]
 }) {
   const actions = useCommentActions(name)
   const [body, setBody] = useState('')
   const [active, setActive] = useState(false)
-  const form = useRef<HTMLFormElement>(null)
+  const [formId, setFormId] = useState('')
+  const [errors, setErrors] = useState<FieldError[]>([])
+  // Bumped after a response is posted, so the next one starts empty.
+  const [round, setRound] = useState(0)
+  const box = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement>(null)
-  const expanded = active || body.trim() !== '' || pin !== null || placing
+  const form = forms.find(f => f.id === formId) ?? null
+  const expanded = active || body.trim() !== '' || pin !== null || placing || form !== null
 
   useEffect(() => {
     if (focusRequest === 0) return
-    form.current?.scrollIntoView({ block: 'nearest' })
+    box.current?.scrollIntoView({ block: 'nearest' })
     field.current?.focus({ preventScroll: true })
   }, [focusRequest])
 
@@ -796,106 +931,152 @@ function Composer({
     setActive(false)
     field.current?.blur()
   }
+  const done = () => {
+    setBody('')
+    setFormId('')
+    setErrors([])
+    setRound(n => n + 1)
+    onClearPin()
+    close()
+  }
   const submit = (e: { preventDefault(): void }) => {
     e.preventDefault()
     if (!body.trim()) return
-    actions.add.mutate(
-      { body, path, ...(pin ? { anchor: pin } : {}) },
+    actions.add.mutate({ body, path, ...(pin ? { anchor: pin } : {}) }, { onSuccess: done })
+  }
+  const respond = (data: Record<string, unknown>) => {
+    if (!form) return
+    actions.respond.mutate(
+      { path, ...(pin ? { anchor: pin } : {}), response: { formId: form.id, data } },
       {
-        onSuccess: () => {
-          setBody('')
-          onClearPin()
-          close()
-        },
+        onSuccess: done,
+        onError: e => setErrors(e instanceof ApiError ? e.fieldErrors : []),
       }
     )
   }
   const cancel = () => {
     setBody('')
+    setFormId('')
+    setErrors([])
     onClearPin()
     if (placing) onPlace()
     close()
   }
+  const footer = (submitLabel: string, disabled: boolean) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {pin ? (
+        <span className="badge badge-sm tone-primary h-auto min-w-0 max-w-full gap-1">
+          <MapPinIcon className="h-3 w-3 shrink-0" aria-hidden />
+          {pin.quote ? (
+            <span className="truncate" title={pin.quote}>
+              “{pin.quote}”
+            </span>
+          ) : (
+            <span>{pin.ew !== undefined || pin.docW !== undefined ? 'Pinned box' : 'Pinned'}</span>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs btn-square h-4 min-h-4 w-4"
+            aria-label="Remove the pin"
+            onClick={onClearPin}
+          >
+            <XMarkIcon className="h-3 w-3" aria-hidden />
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          className={`btn btn-ghost btn-xs ${placing ? 'btn-active' : ''}`}
+          aria-pressed={placing}
+          onClick={onPlace}
+          title="Click a spot or drag a box in the page, or select text in it: the pin stays on that element as the page scrolls. Shortcut: hold Alt (⌥) and click or drag in the page"
+        >
+          <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pin to a spot
+        </button>
+      )}
+      <span className="ms-auto flex gap-1">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={cancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={disabled}>
+          {submitLabel}
+        </button>
+      </span>
+    </div>
+  )
   return (
-    <form
-      ref={form}
+    <div
+      ref={box}
+      role="group"
+      aria-label="New comment"
       className="review-composer surface-panel !p-2"
       data-expanded={expanded || undefined}
-      onSubmit={submit}
       onFocus={() => setActive(true)}
       onBlur={e => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setActive(false)
       }}
     >
-      <label htmlFor="review-new" className={expanded ? 'text-sm text-secondary' : 'sr-only'}>
-        Comment on <span className="font-mono">{path}</span>
-      </label>
-      <textarea
-        ref={field}
-        id="review-new"
-        rows={1}
-        className="textarea review-textarea w-full"
-        value={body}
-        onChange={e => setBody(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e)
-          if (e.key === 'Escape' && !body.trim()) {
-            e.stopPropagation()
-            cancel()
-          }
-        }}
-        placeholder={expanded ? 'What should change?' : 'Add a comment…'}
-        maxLength={4000}
-      />
-      {expanded && (
-        <div className="flex flex-wrap items-center gap-2">
-          {pin ? (
-            <span className="badge badge-sm tone-primary h-auto min-w-0 max-w-full gap-1">
-              <MapPinIcon className="h-3 w-3 shrink-0" aria-hidden />
-              {pin.quote ? (
-                <span className="truncate" title={pin.quote}>
-                  “{pin.quote}”
-                </span>
-              ) : (
-                <span>
-                  {pin.ew !== undefined || pin.docW !== undefined ? 'Pinned box' : 'Pinned'}
-                </span>
-              )}
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs btn-square h-4 min-h-4 w-4"
-                aria-label="Remove the pin"
-                onClick={onClearPin}
-              >
-                <XMarkIcon className="h-3 w-3" aria-hidden />
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              className={`btn btn-ghost btn-xs ${placing ? 'btn-active' : ''}`}
-              aria-pressed={placing}
-              onClick={onPlace}
-              title="Click a spot or drag a box in the page, or select text in it: the pin stays on that element as the page scrolls. Shortcut: hold Alt (⌥) and click or drag in the page"
-            >
-              <MapPinIcon className="h-3.5 w-3.5" aria-hidden /> Pin to a spot
-            </button>
-          )}
-          <span className="ms-auto flex gap-1">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={cancel}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm"
-              disabled={!body.trim() || actions.add.isPending}
-            >
-              Comment
-            </button>
-          </span>
-        </div>
+      <div className="flex items-center gap-2">
+        <label
+          htmlFor={form ? undefined : 'review-new'}
+          className={expanded ? 'min-w-0 truncate text-sm text-secondary' : 'sr-only'}
+        >
+          {form ? 'Answer' : 'Comment'} on <span className="font-mono">{path}</span>
+        </label>
+        {expanded && forms.length > 0 && (
+          <select
+            className="select select-xs ms-auto w-auto max-w-[60%]"
+            aria-label="Type"
+            value={form?.id ?? ''}
+            onChange={e => {
+              setFormId(e.target.value)
+              setErrors([])
+            }}
+          >
+            <option value="">Comment</option>
+            {forms.map(f => (
+              <option key={f.id} value={f.id}>
+                {f.title}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+      {form ? (
+        <LazyResponseForm
+          key={`${form.id}\u0000${round}`}
+          form={form}
+          idPrefix={`new-${form.id}`}
+          errors={errors}
+          disabled={actions.respond.isPending}
+          onChange={() => setErrors(e => (e.length ? [] : e))}
+          onSubmit={respond}
+        >
+          {footer('Post', actions.respond.isPending)}
+        </LazyResponseForm>
+      ) : (
+        <form className="grid gap-2" onSubmit={submit}>
+          <textarea
+            ref={field}
+            id="review-new"
+            rows={1}
+            className="textarea review-textarea w-full"
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e)
+              if (e.key === 'Escape' && !body.trim()) {
+                e.stopPropagation()
+                cancel()
+              }
+            }}
+            placeholder={expanded ? 'What should change?' : 'Add a comment…'}
+            maxLength={4000}
+          />
+          {expanded && footer('Comment', !body.trim() || actions.add.isPending)}
+        </form>
       )}
-    </form>
+    </div>
   )
 }
 
@@ -907,6 +1088,7 @@ function Thread({
   onPage,
   selected,
   onSelect,
+  config,
 }: {
   name: string
   thread: CommentThread
@@ -915,8 +1097,12 @@ function Thread({
   onPage: boolean
   selected: boolean
   onSelect: () => void
+  config: FormsConfig | null
 }) {
   const { comment, replies } = thread
+  const form = comment.response
+    ? (config?.forms.find(f => f.id === comment.response?.formId) ?? null)
+    : null
   const actions = useCommentActions(name)
   const [replying, setReplying] = useState(false)
   const [reply, setReply] = useState('')
@@ -986,7 +1172,12 @@ function Thread({
           </button>
         </blockquote>
       )}
-      <CommentBody comment={comment} list={list} onDelete={() => setDeleting(comment)} />
+      <CommentBody
+        comment={comment}
+        list={list}
+        form={form}
+        onDelete={() => setDeleting(comment)}
+      />
       {replies.length > 0 && (
         <ol className="review-replies space-y-2">
           {replies.map(r => (
@@ -1072,13 +1263,16 @@ function Thread({
   )
 }
 
+/** A comment, or a response shown as its answers when its form is known (`form`). */
 function CommentBody({
   comment,
   list,
+  form = null,
   onDelete,
 }: {
   comment: Comment
   list: CommentList
+  form?: FormDefinition | null
   onDelete: () => void
 }) {
   const older = comment.versionId !== null && comment.versionId !== list.site.currentVersionId
@@ -1115,7 +1309,11 @@ function CommentBody({
           </button>
         )}
       </div>
-      <p className="review-text text-sm">{comment.body}</p>
+      {form && comment.response ? (
+        <ResponseView form={form} data={comment.response.data} showTitle />
+      ) : (
+        <p className="review-text text-sm">{comment.body}</p>
+      )}
     </div>
   )
 }

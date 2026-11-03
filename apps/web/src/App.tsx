@@ -21,6 +21,7 @@ import Group from './pages/Group'
 import Groups from './pages/Groups'
 import Login from './pages/Login'
 import Notifications from './pages/Notifications'
+import Responses from './pages/Responses'
 import Review from './pages/Review'
 import SignInLink from './pages/SignInLink'
 import Site from './pages/Site'
@@ -100,6 +101,7 @@ export default function App() {
             <Route element={<Authenticated />}>
               <Route index element={<Sites />} />
               <Route path="sites/:name" element={<Site />} />
+              <Route path="sites/:name/responses" element={<Responses />} />
               <Route element={<MembersOnly />}>
                 <Route path="groups" element={<Groups />} />
                 <Route path="groups/:slug" element={<Group />} />

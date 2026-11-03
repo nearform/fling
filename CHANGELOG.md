@@ -29,8 +29,7 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 - **Forms come with comments.** The `forms` capability is on wherever comments are, with no new
   configuration: `COMMENTS=false` turns both off. Operators have nothing to do: the comment record
-  gains optional response fields (v2), which need no migration.
-  Rolling back to 0.7.0 keeps every
+  gains optional response fields (v2), which need no migration. Rolling back to 0.7.0 keeps every
   comment readable; a response shows as its summary text.
 
 ## 0.7.0 (2026-11-01)

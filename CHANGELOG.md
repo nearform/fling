@@ -13,6 +13,10 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Answering forms on the review page.** While a form tab is open, selecting text in the page no
+  longer starts a comment, so the text can be copied into an answer. With one form on a page,
+  "Save and next" saves the answer and opens the next page without one; "Save" stays on the page.
+
 ## 0.8.0 (2026-11-03)
 
 - **Forms.** A site can ship `fling.forms.json` with its deploy: forms (JSON Schemas) its reviewers

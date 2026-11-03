@@ -360,7 +360,9 @@ function ReviewSession({
         break
       case 'textSelected':
         // Selecting text pins the new comment to it, but never moves a pin the reviewer placed.
-        if (!list.can.create) break
+        // While the reviewer answers a form, a selection is theirs to copy: the page keeps
+        // focus and the panel stays on the form.
+        if (!list.can.create || formsTab) break
         setTab('comments')
         setPin(p =>
           p?.from === 'placed' ? p : { anchor: m.anchor, at: atRef.current, from: 'selection' }

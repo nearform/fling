@@ -18,6 +18,12 @@ export const INSTANCE_METADATA_VERSION = 1
 /** `Cache-Control` max-age of the metadata, in seconds. */
 export const INSTANCE_METADATA_MAX_AGE = 300
 
+/**
+ * The response header carrying the release the server runs (the metadata's `release`), on every
+ * response of the API, sign-in and MCP routes, so clients learn of a new release from any call.
+ */
+export const RELEASE_HEADER = 'Fling-Release'
+
 /** `#rgb` or `#rrggbb`: the only colour syntax brand config accepts (it ends up in CSS). */
 export const HEX_COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
 

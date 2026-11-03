@@ -1,8 +1,16 @@
-import { CORE_CAPABILITIES, INSTANCE_METADATA_PATH, InstanceMetadataSchema } from '@fling/shared'
+import {
+  CORE_CAPABILITIES,
+  INSTANCE_METADATA_PATH,
+  InstanceMetadataSchema,
+  RELEASE_HEADER,
+} from '@fling/shared'
+import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import rootPackage from '../../../package.json'
 import { loadBaseConfig } from '../src/config.ts'
 import { instanceMetadata } from '../src/instance.ts'
+import { releaseHeader } from '../src/middleware.ts'
+import type { AppEnv } from '../src/types.ts'
 import { setup, testConfig } from './helpers.ts'
 
 const PROD = {
@@ -305,5 +313,26 @@ describe('mail configuration', () => {
     expect(
       mail({ MAIL_DRIVER: 'file', SITES_DOMAIN: 'localhost:47102', MAIL_FROM: 'f@localhost' })
     ).toBeDefined()
+  })
+})
+
+describe('Fling-Release', () => {
+  it('is on every response, the release the metadata says, errors included', async () => {
+    const env = setup()
+    const meta = await (await env.app.request(INSTANCE_METADATA_PATH)).json()
+    expect(meta.release).toBe(rootPackage.version)
+    for (const path of [INSTANCE_METADATA_PATH, '/api/me', '/auth/login', '/mcp', '/api/nowhere']) {
+      const res = await env.app.request(path)
+      expect(res.headers.get(RELEASE_HEADER), path).toBe(meta.release)
+    }
+  })
+
+  it('is absent when the build has no release', async () => {
+    const app = new Hono<AppEnv>()
+    app.use('*', releaseHeader(undefined))
+    app.get('/x', c => c.text('ok'))
+    const res = await app.request('/x')
+    expect(res.status).toBe(200)
+    expect(res.headers.has(RELEASE_HEADER)).toBe(false)
   })
 })

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import { RELEASE_HEADER } from '@fling/shared'
 import type { ErrorHandler, NotFoundHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
@@ -24,6 +25,17 @@ export const securityHeaders = createMiddleware<AppEnv>(async (c, next) => {
   }
   if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store')
 })
+
+/**
+ * `Fling-Release: <release>` on every response, when the build has a release: clients compare it
+ * with their own version (the CLI's update check). Same-origin clients only, so it is not exposed
+ * to cross-origin scripts.
+ */
+export const releaseHeader = (release: string | undefined) =>
+  createMiddleware<AppEnv>(async (c, next) => {
+    await next()
+    if (release) c.header(RELEASE_HEADER, release)
+  })
 
 /**
  * CloudFront adds `x-origin-verify: <secret>` on its way to the function URL; anything without it

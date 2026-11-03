@@ -78,3 +78,34 @@ export async function loadInstanceWith(
     return stored
   }
 }
+
+/**
+ * Store `release` (from a response's `Fling-Release` header) in a remembered server's stored
+ * metadata, without fetching the rest: the update check, the MCP note and `fling doctor` then see
+ * it. A server without stored metadata is left alone.
+ */
+export async function recordRelease(
+  store: ConfigStore,
+  serverUrl: string,
+  release: string
+): Promise<void> {
+  const entry = (await store.load()).servers[serverUrl]
+  if (!entry?.instance || entry.instance.release === release) return
+  await store.putServer(
+    serverUrl,
+    { instance: { ...entry.instance, release } },
+    { makeCurrent: false }
+  )
+}
+
+/** The `createApiClient` options that keep the stored release in step with the server's. */
+export const releaseTracking = (
+  store: ConfigStore,
+  config: Pick<ResolvedConfig, 'serverUrl' | 'remembered' | 'instance'>
+) =>
+  config.remembered && config.serverUrl
+    ? {
+        release: config.instance?.release,
+        onRelease: (release: string) => recordRelease(store, config.serverUrl as string, release),
+      }
+    : {}

@@ -20,6 +20,11 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
   never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK` set. The local MCP
   server puts the same news in its instructions and in the session's first `fling_publish` or
   `fling_deploy` result, so Claude passes it on.
+- **`Fling-Release` on every response.** The API, sign-in and MCP routes say which release the
+  server runs in a `Fling-Release` header (the metadata's `release`). The CLI and its MCP server
+  store a release that differs from the one they hold, so the update check notices a new server
+  release from any call, not only after signing in again. It needs both the server and the CLI
+  on this release; older CLIs ignore the header.
 - **`fling setup` refreshes what it installed.** With the plugin already in Claude Code, setup
   updates the `fling` marketplace and the plugin without asking, says which version it went from
   and to, and says to restart Claude Code; a failed refresh is reported and no longer fails setup.

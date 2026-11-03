@@ -14,6 +14,10 @@ import {
 // platform's bundler (esbuild on AWS, wrangler on Cloudflare) inlines it at build time.
 import rootPackage from '../../../package.json'
 import { signInProviders } from './auth/oidc.ts'
+
+/** The release this server runs: `release` in the metadata and the `Fling-Release` header. */
+export const RELEASE: string | undefined = rootPackage.version || undefined
+
 import type { Config } from './config.ts'
 
 /**
@@ -75,6 +79,6 @@ export function instanceMetadata(config: Config): InstanceMetadata {
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,
-    release: rootPackage.version,
+    ...(RELEASE ? { release: RELEASE } : {}),
   }
 }

@@ -11,11 +11,16 @@
  * since rather than overwrite their work. A whole-site pull deploys the whole folder (the server
  * uploads only what changed); a pull of one folder (`path`) deploys that folder's files and removes
  * the pulled files that are gone, keeping the rest of the site.
+ *
+ * A version with forms (forms.ts) comes with its config: the pull writes it as `fling.forms.json`
+ * at the top of the folder and records its hash in the link (`forms`), so a deploy after it was
+ * deleted removes the forms (forms.ts in the CLI). It is never one of the link's `files`.
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
+  FORMS_FILE,
   isValidSitePath,
   PULL_URL_TTL_SECONDS,
   type PullFile,
@@ -44,6 +49,8 @@ const SiteLinkSchema = z.object({
   path: z.string().optional(),
   /** every file pulled (or deployed), by site path: its SHA-256 */
   files: z.record(z.string(), z.string()),
+  /** the SHA-256 of the fling.forms.json pulled (or deployed); absent when the version had none */
+  forms: z.string().optional(),
 })
 export type SiteLink = z.infer<typeof SiteLinkSchema>
 
@@ -104,12 +111,19 @@ export function onLink(link: SiteLink, local: Hashed) {
   }
 }
 
-/** The link after a deploy made `versionId` current with the folder's files. */
-export const linkAfter = (link: SiteLink, versionId: string, local: Hashed): SiteLink => ({
-  ...link,
-  versionId,
-  files: siteFiles(link, local),
-})
+/**
+ * The link after a deploy made `versionId` current with the folder's files, and its forms file
+ * (`forms`, its hash; undefined: the folder has none).
+ */
+export const linkAfter = (
+  link: SiteLink,
+  versionId: string,
+  local: Hashed,
+  forms?: string
+): SiteLink => {
+  const { forms: _was, ...rest } = link
+  return { ...rest, versionId, files: siteFiles(link, local), ...(forms ? { forms } : {}) }
+}
 
 /** "2 changed, 1 added, 1 removed", or "no changes". */
 export function describeChanges(c: LinkChanges): string {
@@ -142,6 +156,8 @@ export interface PullResult {
   path?: string
   fileCount: number
   totalBytes: number
+  /** the version has forms: written as fling.forms.json */
+  forms: boolean
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
@@ -191,8 +207,15 @@ export async function pullSite(
     bytes += f.size
     opts.onProgress?.({ done, total: pulled.files.length, bytes, totalBytes })
   })
+  let forms: string | undefined
+  if (pulled.forms) {
+    const bytes = Buffer.from(`${JSON.stringify(pulled.forms, null, 2)}\n`)
+    await writeFile(join(opts.dir, FORMS_FILE), bytes)
+    forms = createHash('sha256').update(bytes).digest('hex')
+  }
   // A pull over an earlier one of the same site: what it pulled that the site no longer has goes.
   if (before && before.server === deps.client.serverUrl && before.name === opts.name) {
+    if (before.forms && !pulled.forms) await rm(join(opts.dir, FORMS_FILE), { force: true })
     const now = new Set(pulled.files.map(f => f.path))
     const beforePrefix = before.path === undefined ? '' : `${before.path}/`
     for (const path of Object.keys(before.files)) {
@@ -207,6 +230,7 @@ export async function pullSite(
     versionId: pulled.versionId,
     ...(pulled.path === undefined ? {} : { path: pulled.path }),
     files: Object.fromEntries(pulled.files.map(f => [f.path, f.sha256])),
+    ...(forms ? { forms } : {}),
   })
   return {
     server: deps.client.serverUrl,
@@ -216,6 +240,7 @@ export async function pullSite(
     ...(pulled.path === undefined ? {} : { path: pulled.path }),
     fileCount: pulled.files.length,
     totalBytes,
+    forms: pulled.forms !== undefined,
   }
 }
 

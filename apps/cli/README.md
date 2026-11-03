@@ -327,6 +327,38 @@ feedback (`reviewUrl` in `--json`); reviewers sign in to use it.
 | `fling resolve <name> <id> [--reopen]` | resolve a thread, or reopen it |
 | `fling uncomment <name> <id> [--yes]` | delete a comment (a thread with its replies): your own, or any on your site |
 
+## Forms
+
+A form collects structured feedback on a site's review page: a label per page, rubric scores, an
+A/B preference, a flagged passage's severity. It is a JSON Schema the review page renders, and
+reviewers' answers (responses) come back as data you can export, instead of codes typed into
+comments. On a Fling with forms (the `forms` capability, on with comments), put a
+`fling.forms.json` at the top of the folder you deploy:
+
+```sh
+fling forms init ./dist --template labels --title Labels   # a starter: labels, rubric, compare, issue or survey
+fling forms check ./dist                                   # as a deploy will: errors, and the pages each form applies to
+fling deploy ./dist                                        # sends it as the site's forms (never served as a file)
+fling responses my-app                                     # who answered which page, and how far each form has got
+fling responses my-app --format csv -o labels.csv          # the export: json, jsonl or csv
+```
+
+- `fling deploy` checks the file against the folder's pages and stops on errors. After the deploy
+  it lists each form and the pages it applies to (`forms` in `--json`). Without the file, it ends
+  with one line on adding a form (`formsHint` in `--json`; `--quiet` leaves it out).
+- Without the file, deploying a whole site removes its forms. A `--path` deploy keeps them, and so
+  does a pulled folder, unless it was pulled with a `fling.forms.json` you have since deleted.
+- `fling pull` writes the site's `fling.forms.json` back into the folder.
+- On a form with `"visibility": "own"`, reviewers see only their own answers; the site's owners see
+  everyone's.
+
+| Command | |
+|---|---|
+| `fling forms <name> [--path <page>]` | the live forms: a line per form, then the config as JSON (`> fling.forms.json` saves it) |
+| `fling forms init [dir] [--template <name>] [--title <title>] [--force]` | write a starter `fling.forms.json` |
+| `fling forms check [path]` | check a folder's `fling.forms.json` (or a file) against the folder's pages |
+| `fling responses <name> [--form <id>] [--path <page>] [--format json\|jsonl\|csv] [-o file]` | the responses as a table with progress, or the export |
+
 ## Notifications
 
 A Fling with email tells you when a site is shared with you (directly or through a group), when
@@ -409,7 +441,9 @@ The MCP tools:
   current), read when called. `{use: <server>}` makes one current, the same as `fling use`.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
-  `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, and
+  `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
+  (`fling_forms`, `fling_forms_template`, `fling_forms_check`, `fling_responses_list`, and
+  `fling_response_submit`, which answers a form as you, only when you ask), and
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,
   and `addGroups`, `removeGroups`, `setGroups` for groups) when it can limit sites to listed
   people, `fling_set_owners` and `fling_set_publishers` (the same changes, to a site's owners or

@@ -15,12 +15,23 @@ import { ACCESS_LEVELS, type DefaultAccessLevel } from './access.ts'
 import type { VersionFiles } from './api.ts'
 import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import {
+  ANCHOR_QUOTE_MAX,
   authorLabel,
   COMMENT_MAX_CHARS,
   type CommentList,
+  type CommentThread,
   commentThreads,
   reviewUrl,
 } from './comments.ts'
+import {
+  FORMS_FILE,
+  FORMS_TITLE_MAX,
+  type FormsSummary,
+  formsSummaryLines,
+  progressLines,
+  type ResponsesExport,
+} from './forms.ts'
+import { FORM_TEMPLATE_DESCRIPTIONS, FORM_TEMPLATE_NAMES } from './forms-templates.ts'
 import { GROUP_MEMBERS_MAX, GROUP_NAME_MAX, GROUP_SLUG_RULES } from './groups.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
 import {
@@ -246,6 +257,77 @@ const groupName = z.string().min(1).max(GROUP_NAME_MAX)
 const commentPath = z.string().max(1024)
 const commentId = z.string().min(1).max(100)
 
+/** A forms config as an agent sends it; checked with checkFormsConfig, so errors say where. */
+const formsConfig = z.record(z.string(), z.unknown())
+const formId = z.string().min(1).max(40)
+
+// --- forms (the `forms` capability) ---------------------------------------------------------------
+
+const TEMPLATES_LIST = FORM_TEMPLATE_NAMES.map(
+  n => `\`${n}\` (${FORM_TEMPLATE_DESCRIPTIONS[n]})`
+).join(', ')
+
+/**
+ * How a forms config is written, for the tools that take one: the envelope, the kinds, `paths`,
+ * `visibility` and what makes a schema easy to answer.
+ */
+export const FORMS_FORMAT =
+  `A forms config is \`{ title, forms: [...] }\` (the same JSON as a folder's ${FORMS_FILE}): \`title\` (up to ` +
+  `${FORMS_TITLE_MAX} characters, e.g. "Labels", "Evals", "Scores") names the feature on the review page; each form ` +
+  'has an `id`, a `title`, a `kind` ("page": one response per reviewer per page, which they can change, e.g. a ' +
+  'label; "comment": a comment type for flagging a passage, each one a thread), optional `paths` (globs over the ' +
+  'pages, e.g. ["**", "!drafts/**"]; omitted, every page), optional `visibility` ("everyone", the default, or ' +
+  '"own": reviewers see only their own responses, for blind labelling), a JSON Schema (2020-12, `type: "object"`) ' +
+  'and an optional `uiSchema` (react-jsonschema-form). Give choices as `oneOf` of `{ const, title }` with readable ' +
+  'titles (never bare codes), mark what must be answered `required`, use `"ui:widget": "radio"` for short choices, ' +
+  "and put the rubric in each field's `description`."
+
+/**
+ * The hint a publish result carries when the site has no forms (both servers, `forms` capability):
+ * the way to structured feedback.
+ */
+export const FORMS_HINT =
+  'To collect labels, ratings, scores or eval judgements, add a form rather than asking reviewers to type codes ' +
+  `in comments: fling_forms_template gives a starter config, fling_forms_check checks it, and publishing again ` +
+  `with it (\`forms\`, or ${FORMS_FILE} at the top of a deployed folder) puts it on the review page.`
+
+/** What the servers say about forms, when the instance has them. */
+export const FORMS_NOTE = (_w: McpWording) =>
+  `Forms collect structured feedback on the review page: labels, ratings, scores, eval judgements, A/B ` +
+  'preferences, surveys. When the user wants that, ask them what to collect (the options, the scale, whether ' +
+  `reviewers should see each other's answers), then write a config (fling_forms_template for a starter, ` +
+  'fling_forms_check before publishing) and publish it with the site as `forms`. Reviewers answer on the review ' +
+  'page; fling_responses_list shows the responses and how far each form has got. Only answer a form yourself ' +
+  '(fling_response_submit) when the user asks, e.g. to pre-label pages for comparison with people.'
+
+/**
+ * The forms part of a publish result's text (both servers): the config's title, a line per form
+ * with the pages it applies to, and where to follow the responses.
+ */
+export function describeFormsSummary(summary: FormsSummary, responsesPage: string): string {
+  return [
+    `Forms (${summary.title}):`,
+    ...formsSummaryLines(summary).map(l => `- ${l}`),
+    `Responses and progress: ${responsesPage} (or fling_responses_list).`,
+  ].join('\n')
+}
+
+/** The text of a fling_responses_list result (both servers): progress per form, then the count. */
+export function describeResponses(
+  exported: ResponsesExport,
+  opts: { responsesPage?: string } = {}
+): string {
+  const name = exported.site.name
+  if (!exported.title) {
+    return `${name} has no forms on its live version, so there is nothing to answer.${exported.responses.length ? ` (${exported.responses.length} response(s) to earlier forms are kept.)` : ''}`
+  }
+  return [
+    `${exported.title} on ${name}: ${exported.responses.length} response${exported.responses.length === 1 ? '' : 's'}.`,
+    ...progressLines(exported).map(l => `- ${l}`),
+    ...(opts.responsesPage ? [`Progress and downloads (CSV, JSONL): ${opts.responsesPage}`] : []),
+  ].join('\n')
+}
+
 const encoding = z
   .enum(['utf8', 'base64'])
   .optional()
@@ -410,7 +492,8 @@ export function mcpToolsFor(w: McpWording) {
         `${PULL_NOTE} ` +
         `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
         'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
-        'the site has.',
+        'the site has. To collect labels, ratings, scores or eval judgements from reviewers, pass `forms` (or include ' +
+        `${FORMS_FILE} among the files): see fling_forms_template.`,
       inputSchema: {
         name: siteName,
         files: z
@@ -434,6 +517,12 @@ export function mcpToolsFor(w: McpWording) {
         groups: accessGroups,
         public: isPublic,
         listHtml,
+        forms: formsConfig
+          .nullable()
+          .optional()
+          .describe(
+            `The site's forms config (as ${FORMS_FILE}; fling_forms_template, fling_forms_check), for structured feedback on the review page. null removes the forms. Omitted: a publish with \`path\` or \`base\` keeps the site's forms, any other publish has none`
+          ),
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
     }),
@@ -785,6 +874,102 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { destructiveHint: true, openWorldHint: false },
     }),
 
+    forms: tool({
+      name: 'fling_forms',
+      title: "Show a site's forms",
+      description:
+        "Show the forms config of a site's live version (its fling.forms.json): the title, each form with its kind, " +
+        'the pages it applies to, its visibility and its schema. With `path`, only the forms on that page. Use it ' +
+        'before changing a config (publish it again with `forms`), or to know the `formId`s for fling_responses_list.',
+      inputSchema: {
+        name: siteName,
+        path: commentPath.optional().describe('Only the forms on this page, e.g. "/" or "/docs/"'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    formsTemplate: tool({
+      name: 'fling_forms_template',
+      title: 'Start a forms config',
+      description:
+        `A starter forms config to adapt, for structured feedback on a site's review page: ${TEMPLATES_LIST}. ` +
+        "Ask the user what they want collected first, then change the template's options, wording and `paths` to " +
+        `fit, check it with fling_forms_check and publish it as \`forms\`. ${FORMS_FORMAT}`,
+      inputSchema: {
+        template: z.enum(FORM_TEMPLATE_NAMES).describe('Which starter'),
+        title: z
+          .string()
+          .min(1)
+          .max(FORMS_TITLE_MAX)
+          .optional()
+          .describe('The config\'s title, what the review page calls the forms (e.g. "Evals")'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    formsCheck: tool({
+      name: 'fling_forms_check',
+      title: 'Check a forms config',
+      description:
+        'Check a forms config before publishing it, as a publish will: the envelope, each schema against JSON ' +
+        'Schema 2020-12, the limits and the globs. With `paths` (the site\'s files, e.g. ["index.html", ' +
+        '"interviews/1.html"]) it also says which pages each form applies to and warns about globs that match none. ' +
+        `Returns \`ok\`, the \`errors\` (each saying where) and a summary. ${FORMS_FORMAT}`,
+      inputSchema: {
+        forms: formsConfig.describe('The forms config to check'),
+        paths: z
+          .array(z.string().min(1).max(1024))
+          .max(MAX_FILES)
+          .optional()
+          .describe(
+            "The site's file paths (or page paths), to see which pages each form applies to"
+          ),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    responsesList: tool({
+      name: 'fling_responses_list',
+      title: 'List form responses',
+      description:
+        "List the responses reviewers gave to a site's forms, oldest first: each with its page, form, reviewer, " +
+        "when, the version it answered and its `data` (the stored values, as the schema's `const`s), and per form " +
+        'how far it has got (its pages, who answered, and where). On a form with visibility "own", only the site\'s ' +
+        "owners (and admins) see everyone's. Use it to analyse labels or scores, or to tell the user what is left " +
+        'to review; the responses page has CSV and JSONL downloads.',
+      inputSchema: {
+        name: siteName,
+        form: formId.optional().describe('Only this form (its id, from fling_forms)'),
+        path: commentPath.optional().describe('Only this page, e.g. "/interviews/1.html"'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    responseSubmit: tool({
+      name: 'fling_response_submit',
+      title: 'Answer a form',
+      description:
+        "Answer one of a site's forms on a page, as the user (responses are signed with their name). Only when " +
+        'the user asks, for example to pre-label pages with your own judgement so it can be compared with ' +
+        "reviewers'; never to fill in reviewers' work. A page-kind form takes one response per person per page: " +
+        'answering again replaces it. A comment-kind form starts a thread, pinned to `quote` when given. `data` must ' +
+        "fit the form's schema (fling_forms shows it), using the `const` values; a mismatch fails with " +
+        "invalid_response and each field's error.",
+      inputSchema: {
+        name: siteName,
+        path: commentPath.describe('The page, e.g. "/" or "/interviews/1.html"'),
+        formId: formId.describe('The form (its id, from fling_forms)'),
+        data: z.record(z.string(), z.unknown()).describe('The answers, keyed by schema property'),
+        quote: z
+          .string()
+          .min(1)
+          .max(ANCHOR_QUOTE_MAX)
+          .optional()
+          .describe('A comment-kind form: the text on the page the response is about'),
+      },
+      annotations: { destructiveHint: false, openWorldHint: true },
+    }),
+
     notifications: tool({
       name: 'fling_notifications',
       title: 'Notification settings',
@@ -843,7 +1028,7 @@ export const mcpTools: McpTools = mcpToolsFor(mcpWording())
 /** Sent at `initialize` by the remote server. */
 export const mcpRemoteInstructions = (
   w: McpWording,
-  opts: { comments?: boolean; notifications?: boolean } = {}
+  opts: { comments?: boolean; forms?: boolean; notifications?: boolean } = {}
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
@@ -869,7 +1054,8 @@ export const mcpRemoteInstructions = (
       'Use fling_list / fling_info to find existing sites, fling_rollback ' +
       'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
       'exactly which files a site has (e.g. when the user reports a 404).',
-    ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
+    ...(opts.comments ? [COMMENTS_NOTE(w, { forms: opts.forms })] : []),
+    ...(opts.comments && opts.forms ? [FORMS_NOTE(w)] : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
   ].join('\n\n')
 
@@ -880,19 +1066,24 @@ export const NOTIFICATIONS_NOTE = (w: McpWording) =>
   'fling_notifications_set only when they ask.'
 
 /** What the servers say about comments, when the instance has them. */
-export const COMMENTS_NOTE = (w: McpWording) =>
+export const COMMENTS_NOTE = (w: McpWording, opts: { forms?: boolean } = {}) =>
   `People review sites at ${w.reviewPattern} and leave comments on its pages. Publishing returns this review link ` +
   '(`reviewUrl`): it is the one to share when the user wants feedback; reviewers sign in to use it. ' +
   'fling_comments_list shows the comments; ' +
   'after acting on feedback, resolve the threads with fling_comment_resolve. Only post (fling_comment_add) or ' +
-  'delete (fling_comment_delete) comments when the user asks.'
+  'delete (fling_comment_delete) comments when the user asks.' +
+  (opts.forms
+    ? ' To collect labels, ratings, scores or eval judgements, add a form (fling_forms_template) rather than ' +
+      'asking reviewers to type codes in comments: their answers are then checked and exported as data.'
+    : '')
 
 /**
  * The line a publish result leads with when the instance has comments (both servers): the review
- * page is the link to share for feedback, and reviewers sign in to use it.
+ * page is the link to share for feedback, and reviewers sign in to use it (and, with `forms`, answer
+ * the site's forms there). A result for a site without forms ends with FORMS_HINT instead.
  */
-export const shareForFeedback = (reviewPage: string, instanceName: string) =>
-  `Share for feedback: ${reviewPage} (reviewers sign in to ${instanceName} to see the site and comment).`
+export const shareForFeedback = (reviewPage: string, instanceName: string, forms = false) =>
+  `Share for feedback: ${reviewPage} (reviewers sign in to ${instanceName} to see the site${forms ? ', comment and answer its forms' : ' and comment'}).`
 
 /** Max files listed in a fling_files text result (structured data always has them all). */
 export const MCP_FILES_LISTED = 200
@@ -936,12 +1127,38 @@ export function describeVersionFiles(
 export type McpToolName = (typeof mcpTools)[keyof typeof mcpTools]['name']
 
 /**
+ * Whether open threads look like labels typed as comments: several short plain comments (not form
+ * responses) on at least three pages, most of them repeating a body used elsewhere ("pass", "B2").
+ */
+export function looksLikeCodedLabels(threads: readonly CommentThread[]): boolean {
+  const short = threads.map(t => t.comment).filter(c => !c.response && c.body.trim().length <= 40)
+  if (short.length < 5 || short.length * 2 < threads.length) return false
+  const key = (body: string) =>
+    body
+      .trim()
+      .toLowerCase()
+      .replace(/[\s.!]+$/g, '')
+  const counts = new Map<string, number>()
+  for (const c of short) counts.set(key(c.body), (counts.get(key(c.body)) ?? 0) + 1)
+  const repeated = short.filter(c => (counts.get(key(c.body)) ?? 0) > 1)
+  return repeated.length * 2 >= short.length && new Set(repeated.map(c => c.path)).size >= 3
+}
+
+/** The note a comments list ends with when its threads look like coded labels and there are no forms. */
+export const CODED_LABELS_NOTE =
+  'These comments look like labels typed by hand (short, repeated across pages). For the next round, suggest a ' +
+  'form to the user (fling_forms_template, e.g. `labels`): reviewers then pick from readable options, every page ' +
+  'gets one answer per reviewer, and fling_responses_list exports them as data.'
+
+/**
  * The text of a fling_comments_list result (both servers): one block per thread — id, state, page,
- * version, author and body, then its replies indented.
+ * version, author and body (a form response marked with its form), then its replies indented. With
+ * `suggestForms` (the instance has forms and the site none), threads that look like coded labels
+ * end with CODED_LABELS_NOTE.
  */
 export function describeComments(
   list: CommentList,
-  opts: { includeResolved?: boolean; reviewUrl?: string } = {}
+  opts: { includeResolved?: boolean; reviewUrl?: string; suggestForms?: boolean } = {}
 ): string {
   const all = commentThreads(list.comments)
   const threads = opts.includeResolved ? all : all.filter(t => t.comment.resolvedAt === null)
@@ -955,7 +1172,10 @@ export function describeComments(
     (opts.reviewUrl ? `. Review page: ${opts.reviewUrl}` : '')
   const blocks = threads.map(({ comment: c, replies }) =>
     [
-      `- [${c.id}] ${c.resolvedAt ? 'RESOLVED ' : ''}${c.path}${version(c.versionId)} — ${authorLabel(c.author)}, ${c.createdAt}:`,
+      `- [${c.id}] ${c.resolvedAt ? 'RESOLVED ' : ''}${c.path}${version(c.versionId)} — ${authorLabel(c.author)}, ${c.updatedAt ?? c.createdAt}` +
+        (c.response ? ` (response to form "${c.response.formId}")` : '') +
+        ':',
+      ...(c.anchor?.quote ? [`  > ${c.anchor.quote.replace(/\n/g, ' ')}`] : []),
       `  ${c.body.replace(/\n/g, '\n  ')}`,
       ...replies.map(
         r =>
@@ -963,5 +1183,6 @@ export function describeComments(
       ),
     ].join('\n')
   )
-  return [head, ...blocks].join('\n')
+  const note = opts.suggestForms && looksLikeCodedLabels(threads) ? [CODED_LABELS_NOTE] : []
+  return [head, ...blocks, ...note].join('\n')
 }

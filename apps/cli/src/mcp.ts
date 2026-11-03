@@ -28,17 +28,27 @@ import {
   accessChangeHint,
   COMMENTS_NOTE,
   changesAudience,
+  checkFormsConfig,
+  commentThreads,
   describeAudience,
   describeComments,
+  describeFormsSummary,
   describeGroup,
   describeGroups,
   describeNotificationSettings,
   describeReadFiles,
+  describeResponses,
   describeRoles,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
   encodeForAgent,
+  FORMS_FILE,
+  FORMS_HINT,
+  FORMS_NOTE,
+  type FormsSummary,
+  formsSummaryLines,
+  formsTemplate,
   type InstanceMetadata,
   isSecretPath,
   isValidSitePath,
@@ -57,6 +67,7 @@ import {
   PullResponseSchema,
   pageOfFiles,
   privateAudience,
+  responsesPageUrl,
   reviewUrl,
   shareForFeedback,
 } from '@fling/shared'
@@ -77,6 +88,7 @@ import {
 import type { OpenLike } from './context.ts'
 import { BaseChangedError, deploy, NameTakenError, resolveSiteName } from './deploy.ts'
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
+import { formsEnabled, getForms, getResponses, planForms, submitResponse } from './forms.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
 import { loadInstance, loadInstanceWith } from './instance.ts'
 import {
@@ -193,7 +205,12 @@ export const NO_SERVER_HINT = `No Fling server is set up on this computer. Ask t
 /** Sent at `initialize`: how to use this (local) server. */
 export const mcpLocalInstructions = (
   w: McpWording,
-  opts: { comments?: boolean; notifications?: boolean; servers?: readonly KnownServer[] } = {}
+  opts: {
+    comments?: boolean
+    forms?: boolean
+    notifications?: boolean
+    servers?: readonly KnownServer[]
+  } = {}
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
@@ -210,7 +227,12 @@ export const mcpLocalInstructions = (
     NEVER_PUBLISHED,
     'Not logged in? Call fling_login, let the user finish signing in in the browser, then retry.',
     `${ACCESS_NOTE(w)} Use fling_share for a link people who cannot sign in can open. ${opts.comments ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL.' : 'Always give the user the URL that comes back.'}`,
-    ...(opts.comments ? [COMMENTS_NOTE(w)] : []),
+    ...(opts.comments ? [COMMENTS_NOTE(w, { forms: opts.forms })] : []),
+    ...(opts.comments && opts.forms
+      ? [
+          `${FORMS_NOTE(w)} A folder deployed with fling_deploy takes its forms from a ${FORMS_FILE} at its top.`,
+        ]
+      : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
   ].join('\n\n')
 
@@ -416,6 +438,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       /** The files are only those changed or added on this version; `remove` those to delete. */
       base?: string
       remove?: string[]
+      /** a forms config given inline (null: none), instead of the folder's fling.forms.json */
+      forms?: unknown
     }
   ): Promise<DeployOutcome> {
     if (opts.access) await requireAccessLevels(t)
@@ -462,6 +486,20 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
     const onBase = link && !opts.force ? onLink(link, local) : null
     const changes = link ? onLink(link, local).changes : null
+    const layered = folder !== undefined || onBase !== null || opts.base !== undefined
+    let instance = await t.instance()
+    const forms = await planForms({
+      dir,
+      pages: local.files.map(f => inFolder(f.path)),
+      layered,
+      pulledWithForms: onBase !== null && link?.forms !== undefined,
+      // A Fling whose stored metadata predates forms is asked again before a forms file is refused.
+      instance: formsEnabled(instance)
+        ? instance
+        : await loadInstanceWith(store, t.config, fetchImpl, 'forms'),
+      bin: 'fling',
+      ...(opts.forms === undefined ? {} : { inline: opts.forms }),
+    })
     const result = await deploy(
       { client: t.client, fetch: fetchImpl },
       {
@@ -488,6 +526,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
                 : {}),
             }
           : { public: opts.public }),
+        forms: forms.send,
       }
     ).catch((error: unknown) => {
       if (error instanceof BaseChangedError) {
@@ -508,7 +547,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           `Ask the user which name to use (one of these or their own), then call ${opts.retryWith} again with \`name\`.`
       )
     })
-    if (link) await writeSiteLink(dir, linkAfter(link, result.versionId, local))
+    if (link) await writeSiteLink(dir, linkAfter(link, result.versionId, local, forms.sha256))
     const what =
       result.status === 'unchanged'
         ? 'Unchanged — already live'
@@ -528,14 +567,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             local.files.map(f => inFolder(f.path))
           )
     const url = shownFolder === undefined ? result.url : new URL(`${shownFolder}/`, result.url).href
-    const instance = await t.instance()
+    instance = await t.instance()
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
+    // The version's forms: the ones sent, or (sending none on a layered deploy) the site's.
+    let formsSummary: FormsSummary | null = forms.check?.summary ?? null
+    if (!formsSummary && forms.send === undefined && formsEnabled(instance)) {
+      const live = await getForms(t.client, result.name).catch(() => null)
+      if (live?.config) formsSummary = checkFormsConfig(live.config).summary
+    }
+    const responsesPage =
+      formsSummary && instance ? responsesPageUrl(instance.appOrigin, result.name) : undefined
+    const formsHint = formsEnabled(instance) && !formsSummary ? FORMS_HINT : undefined
+    const formsText =
+      formsSummary && responsesPage ? `\n${describeFormsSummary(formsSummary, responsesPage)}` : ''
     const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
     const level = result.site.access ?? result.site.visibility
     const head = review
-      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling')}\nSite: ${url} (${level})`
-      : `${what}: ${url} (${level})${listing}`
+      ? `${what}${listing}.\n${shareForFeedback(review, instance?.name ?? 'Fling', formsSummary !== null)}\nSite: ${url} (${level})${formsText}`
+      : `${what}: ${url} (${level})${listing}${formsText}`
     // A new site says who can open it (asked for, or the Fling's default) and how to change it; an
     // existing one asked for an access level says it kept its own.
     const who = describeSiteAccess(result.site, await membersOn(t))
@@ -548,7 +598,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       kind: 'deployed',
       summary:
         `${head}${access}${warnings}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
-        `\nTo check exactly which files the site has, call fling_files with name "${result.name}".`,
+        `\nTo check exactly which files the site has, call fling_files with name "${result.name}".` +
+        (formsHint ? `\n${formsHint}` : ''),
       data: {
         status: result.status,
         ready: edge.ready,
@@ -564,6 +615,17 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         generatedIndex,
         warnings: result.warnings,
         skipped: local.skipped,
+        ...(formsSummary
+          ? {
+              forms: {
+                title: formsSummary.title,
+                forms: formsSummary.forms,
+                summary: formsSummaryLines(formsSummary),
+                ...(responsesPage ? { responsesUrl: responsesPage } : {}),
+              },
+            }
+          : {}),
+        ...(formsHint ? { formsHint } : {}),
       },
     }
   }
@@ -573,12 +635,21 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     {
       instructions: mcpLocalInstructions(wording, {
         comments: servers.some(s => commentsEnabled(s.instance)),
+        forms: servers.some(s => formsEnabled(s.instance)),
         notifications: servers.some(s => notificationsEnabled(s.instance)),
         servers,
       }),
     }
   )
-  const { listHtml, spa, public: isPublic, access, emails, groups } = mcpTools.publish.inputSchema
+  const {
+    listHtml,
+    spa,
+    public: isPublic,
+    access,
+    emails,
+    groups,
+    forms: formsArg,
+  } = mcpTools.publish.inputSchema
 
   server.registerTool(
     'fling_deploy',
@@ -603,6 +674,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'A folder made by fling_pull publishes to the site and Fling it was pulled from, on the version pulled: ' +
         'only what changed is sent, and if someone published the site since, it stops (base_changed) rather than ' +
         'replace their work; `force: true` replaces it anyway (only when the user says so). ' +
+        `A ${FORMS_FILE} at the top of the folder is never published: it is the site's forms, for structured ` +
+        'feedback (labels, ratings, scores, eval judgements) on the review page; `forms` passes one inline instead ' +
+        '(fling_forms_template). ' +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
@@ -637,6 +711,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           .describe(
             'A folder made by fling_pull: publish it without a base, replacing whatever is live even if someone published since. Only when the user says so'
           ),
+        forms: formsArg.describe(
+          `The site's forms config, instead of the folder's ${FORMS_FILE} (null: none). Omitted: the file, if any; without one, deploying a whole site removes its forms and a \`sitePath\` or pulled folder keeps them`
+        ),
         server: serverArg,
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -680,6 +757,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             folder: args.sitePath,
             retryWith: 'fling_deploy',
             skippedDotfiles: prepared.skippedDotfiles,
+            ...(args.forms === undefined ? {} : { forms: args.forms }),
           })
           const where =
             located.foundIn === FOUND_AS_GIVEN
@@ -767,6 +845,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         return {
           summary:
             `Pulled ${pulled.fileCount} file(s) of ${pulled.name}${path ? ` /${path}/` : ''} (version ${pulled.versionId}, ${formatBytes(pulled.totalBytes)}) into ${pulled.dir}. ` +
+            (pulled.forms ? `Its forms are in ${FORMS_FILE} there. ` : '') +
             `Edit the files there, then call fling_deploy with path "${pulled.dir}": it publishes on version ${pulled.versionId}.`,
           data: pulled,
         }
@@ -891,6 +970,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             listHtml: args.listHtml,
             folder: args.path,
             ...(args.base === undefined ? {} : { base: args.base, remove: args.remove }),
+            ...(args.forms === undefined ? {} : { forms: args.forms }),
             retryWith: 'fling_publish',
           })
         } finally {
@@ -1400,8 +1480,16 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         const { review, fling } = await reviewOn(target)
         const list = await listComments(target.client, args.name, { path: args.path })
         const reviewPage = review(list.site.name)
+        // Only worth a look when the threads could be coded labels and the site has no forms to use.
+        const suggestForms =
+          formsEnabled(await target.instance()) &&
+          commentThreads(list.comments).length >= 5 &&
+          (await getForms(target.client, args.name).then(
+            f => f.config === null,
+            () => false
+          ))
         return {
-          summary: `${describeComments(list, { includeResolved: args.includeResolved, reviewUrl: reviewPage })}${fling}`,
+          summary: `${describeComments(list, { includeResolved: args.includeResolved, reviewUrl: reviewPage, suggestForms })}${fling}`,
           data: { ...list, reviewUrl: reviewPage },
         }
       })
@@ -1439,6 +1527,119 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         await reviewOn(target)
         const result = await deleteComment(target.client, args.name, args.id)
         return { summary: `Comment ${args.id} on ${args.name} deleted`, data: result }
+      })
+    )
+  }
+
+  // Forms: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => formsEnabled(s.instance))) {
+    /** The call's Fling, refused when it has no forms; and its review and responses pages. */
+    const withForms = async (target: Target) => {
+      const instance = await loadInstanceWith(store, target.config, fetchImpl, 'forms')
+      if (instance && !formsEnabled(instance)) {
+        throw new CliError(`${instance.name} (${serverLabel(target.url)}) has no forms`)
+      }
+      const appOrigin = instance?.appOrigin ?? target.url
+      return {
+        review: (name: string, path?: string) => reviewUrl(appOrigin, name, path),
+        responses: (name: string) => responsesPageUrl(appOrigin, name),
+        fling: onFling(target.url, instance),
+      }
+    }
+
+    server.registerTool(t.forms.name, serverTool(t.forms), args =>
+      run(t.forms.name, args.server, async target => {
+        const { responses, fling } = await withForms(target)
+        const forms = await getForms(target.client, args.name, args.path)
+        if (!forms.config) {
+          return {
+            summary: `${args.name} has no forms on its live version. ${FORMS_HINT}${fling}`,
+            data: { name: args.name, ...forms },
+          }
+        }
+        const summary = checkFormsConfig(forms.config).summary
+        const lines = summary ? formsSummaryLines(summary).map(l => `- ${l}`) : []
+        return {
+          summary:
+            `${forms.config.title} on ${args.name}${forms.path ? ` (forms on ${forms.path}: ${forms.forms.map(f => f.id).join(', ') || 'none'})` : ''}:\n` +
+            `${lines.join('\n')}\nResponses and progress: ${responses(args.name)}${fling}`,
+          data: { name: args.name, ...forms, responsesUrl: responses(args.name) },
+        }
+      })
+    )
+
+    // Templates and checks are local: no Fling is asked.
+    server.registerTool(
+      t.formsTemplate.name,
+      {
+        title: t.formsTemplate.title,
+        description: `${t.formsTemplate.description} To deploy a folder with it, save it as ${FORMS_FILE} at the folder's top.`,
+        inputSchema: t.formsTemplate.inputSchema,
+        annotations: t.formsTemplate.annotations,
+      },
+      async args => {
+        try {
+          const config = formsTemplate(args.template, args.title)
+          return textResult(
+            `A starter "${args.template}" config. Adapt its options, wording and \`paths\` to what the user wants ` +
+              `collected, check it with fling_forms_check, then publish it as \`forms\` (or save it as ${FORMS_FILE} at the top of a folder to deploy).\n\n` +
+              JSON.stringify(config, null, 2)
+          )
+        } catch (error) {
+          return failure(error)
+        }
+      }
+    )
+
+    server.registerTool(
+      t.formsCheck.name,
+      {
+        title: t.formsCheck.title,
+        description: t.formsCheck.description,
+        inputSchema: t.formsCheck.inputSchema,
+        annotations: t.formsCheck.annotations,
+      },
+      async args => {
+        try {
+          const check = checkFormsConfig(args.forms, args.paths)
+          const lines = check.summary ? formsSummaryLines(check.summary).map(l => `- ${l}`) : []
+          const summary = check.ok
+            ? `The forms config is valid.${lines.length ? `\n${lines.join('\n')}` : ''}`
+            : `The forms config is not valid:\n${check.errors.map(e => `- ${e}`).join('\n')}`
+          return textResult(`${summary}\n\n${JSON.stringify(check, null, 2)}`)
+        } catch (error) {
+          return failure(error)
+        }
+      }
+    )
+
+    server.registerTool(t.responsesList.name, serverTool(t.responsesList), args =>
+      run(t.responsesList.name, args.server, async target => {
+        const { responses, fling } = await withForms(target)
+        const exported = await getResponses(target.client, args.name, {
+          form: args.form,
+          path: args.path,
+        })
+        return {
+          summary: `${describeResponses(exported, { responsesPage: responses(args.name) })}${fling}`,
+          data: { ...exported, responsesUrl: responses(args.name) },
+        }
+      })
+    )
+
+    server.registerTool(t.responseSubmit.name, serverTool(t.responseSubmit), args =>
+      run(t.responseSubmit.name, args.server, async target => {
+        const { review, fling } = await withForms(target)
+        const comment = await submitResponse(target.client, args.name, {
+          path: args.path,
+          formId: args.formId,
+          data: args.data,
+          quote: args.quote,
+        })
+        return {
+          summary: `Answered "${args.formId}" on ${args.name} ${comment.path} (id ${comment.id}).\n${comment.body}\nReview page: ${review(args.name, comment.path)}${fling}`,
+          data: comment,
+        }
       })
     )
   }

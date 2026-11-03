@@ -18,6 +18,7 @@ import {
   type AudienceInput,
   DeployResponseSchema,
   FinalizeResponseSchema,
+  type FormsConfig,
   isValidSiteName,
   SITE_NAME_MAX,
   type Site,
@@ -131,6 +132,8 @@ export interface DeployOptions {
   remove?: string[]
   /** With `partial`: the folder is this folder of the site (a pull of one folder). */
   within?: string
+  /** The new version's forms config (null: none); omitted, as DeployRequest.forms (forms.ts). */
+  forms?: FormsConfig | null
   /** A manifest already built from `dir` (so the caller can inspect it before deploying). */
   manifest?: LocalManifest
   onProgress?: (event: {
@@ -217,6 +220,7 @@ async function deployOnce(
         ...(opts.public ? { visibility: 'public' as const } : {}),
         ...(opts.access ? { access: opts.access } : {}),
         ...(opts.audience ? { audience: opts.audience } : {}),
+        ...(opts.forms === undefined ? {} : { forms: opts.forms }),
       },
     })
     .catch(async (error: unknown) => {

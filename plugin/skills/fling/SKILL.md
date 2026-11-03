@@ -1,6 +1,6 @@
 ---
 name: fling
-description: Deploy, host, publish or share a static site, HTML file (including one in Downloads), zip, report, prototype or build folder (dist/, build/, out/) on the user's Fling server so they get a stable URL. Use when the user wants to put something online, get a link to a page or app they built, share a static build with colleagues or a client, or manage (list, share, archive, delete, roll back) their Fling sites.
+description: Deploy, host, publish or share a static site, HTML file (including one in Downloads), zip, report, prototype or build folder (dist/, build/, out/) on the user's Fling server so they get a stable URL. Use when the user wants to put something online, get a link to a page or app they built, share a static build with colleagues or a client, manage (list, share, archive, delete, roll back) their Fling sites, or collect structured feedback, labels, ratings or eval judgements from reviewers on a site's pages.
 ---
 
 # Fling
@@ -18,6 +18,8 @@ content is a no-op; older content is restored instantly.
   Svelte/Astro build, a generated HTML report, a single `index.html`, docs output, a prototype.
 - The user asks about their existing Fling sites (list, share link, visibility, archive, delete,
   roll back).
+- The user wants reviewers to label, rate, score or judge pages (an eval, a labelling round, a
+  rubric, an A/B comparison, a survey): see [Structured feedback (forms)](#structured-feedback-forms).
 
 Not for servers or anything needing a backend at runtime — Fling serves files only.
 
@@ -249,6 +251,76 @@ pages. When the Fling has comments, these tools exist:
   republishing), resolve it.
 - `fling_comment_add { name, body, path?, replyTo? }` and `fling_comment_delete { name, id }` —
   only when the user asks: comments are signed with their name.
+
+## Structured feedback (forms)
+
+When the Fling has forms (the forms tools are listed), a site can carry a **form**: a JSON Schema
+the review page shows beside each page, so reviewers pick from options instead of typing codes into
+comments. Reach for one whenever the user wants labels, ratings, scores, eval judgements, an A/B
+preference or survey answers. If they are asking reviewers to comment "PASS/FAIL" or "B2", suggest
+a form instead (`fling_comments_list` says so when the comments look like that).
+
+1. **Ask what to collect first**: the question, the options (or the scale and what each score
+   means), what must be answered, whether a page gets one answer per reviewer (`kind: "page"`) or
+   reviewers flag passages (`kind: "comment"`), which pages it is for, and whether reviewers should
+   see each other's answers.
+2. **Start from a template**: `fling_forms_template { template, title? }` with `labels` (a verdict
+   and notes per page, blind), `rubric` (criteria scored 1 to 5), `compare` (A, B or a tie, and
+   why), `issue` (a comment type: severity and category) or `survey`. Adapt it to the answers.
+3. **Check it**: `fling_forms_check { forms, paths }` with the site's file paths. It lists errors
+   (each saying where), the pages each form applies to, and globs that match nothing.
+4. **Publish it**: `fling_publish` / `fling_deploy` with `forms`, or save it as `fling.forms.json`
+   at the top of the folder (`fling forms init` writes one; never served as a file). Publishing the
+   whole site again without it removes the forms; a `path` publish or one on a `base` keeps them.
+
+The file:
+
+```json
+{
+  "title": "Labels",
+  "forms": [
+    {
+      "id": "verdict",
+      "title": "Label this interview",
+      "kind": "page",
+      "paths": ["interviews/**"],
+      "visibility": "own",
+      "schema": {
+        "type": "object",
+        "required": ["verdict"],
+        "properties": {
+          "verdict": {
+            "title": "Verdict",
+            "description": "Pass: the interviewer followed up on every vague answer.",
+            "oneOf": [
+              { "const": "pass", "title": "Pass: handled it well" },
+              { "const": "fail", "title": "Fail: missed it" }
+            ]
+          },
+          "notes": { "type": "string", "title": "Notes" }
+        }
+      },
+      "uiSchema": { "verdict": { "ui:widget": "radio" }, "notes": { "ui:widget": "textarea" } }
+    }
+  ]
+}
+```
+
+- `title` (up to 40 characters) is what the review page calls the forms ("Labels", "Evals").
+- Choices are `oneOf` of `{ "const", "title" }`: the `const` is stored, the `title` is what
+  reviewers read, so make titles readable sentences, never bare codes.
+- Mark what must be answered `required`, and use `"ui:widget": "radio"` for short choices.
+- Put the rubric in each field's `description`: that is what reviewers see while answering.
+- `paths` are globs over the pages (`["**", "!drafts/**"]`); without them a form is on every page.
+- `"visibility": "own"` keeps answers blind: each reviewer sees only theirs, the owners see all,
+  which is what inter-rater agreement needs.
+
+After publishing, give the user the review link to share; the result lists the forms and the pages
+each applies to, and the responses page that shows progress. `fling_responses_list { name, form?,
+path? }` returns every response as data and how many pages each form has left
+(`fling responses <name> --format csv` in a terminal). Only answer a form yourself with
+`fling_response_submit { name, path, formId, data }` when the user asks, for example to pre-label
+pages so your judgements can be compared with the reviewers'.
 
 ## Notifications
 

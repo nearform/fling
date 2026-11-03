@@ -643,3 +643,27 @@ export function responsesFileName(
     .replace(/^-+|-+$/g, '')
   return `${site}-${slug || 'responses'}.${format}`
 }
+
+/**
+ * The site's responses page on the app (`/sites/<name>/responses`): who has answered which page,
+ * and the exports. Its heading is the config's title.
+ */
+export function responsesPageUrl(appOrigin: string, name: string): string {
+  return `${appOrigin.replace(/\/+$/, '')}/sites/${encodeURIComponent(name)}/responses`
+}
+
+/** How far each form has got, a line each: `Label this page (label): 12 / 51 pages, 3 reviewers`. */
+export function progressLines(
+  exported: Pick<ResponsesExport, 'forms' | 'progress' | 'responses'>
+): string[] {
+  return exported.progress.map(p => {
+    const form = exported.forms.find(f => f.id === p.form)
+    const done = p.pages.filter(page => (p.done[page]?.length ?? 0) > 0).length
+    const count = exported.responses.filter(r => r.formId === p.form).length
+    const where =
+      form?.kind === 'comment'
+        ? `${count} response${count === 1 ? '' : 's'} on ${Object.keys(p.done).length} of ${p.pages.length} pages`
+        : `${done} / ${p.pages.length} page${p.pages.length === 1 ? '' : 's'} answered`
+    return `${form?.title ?? p.form} (${p.form}): ${where}, ${p.reviewers.length} reviewer${p.reviewers.length === 1 ? '' : 's'}`
+  })
+}

@@ -4,12 +4,20 @@
  * and `--json` apply to every command. Bare `fling` prints help; `fling <path>` deploys when the
  * path exists (route.ts).
  */
-import { DEFAULT_SITE_SORT, SITE_SORTS, type SiteSort } from '@fling/shared'
+import {
+  DEFAULT_SITE_SORT,
+  FORM_TEMPLATE_NAMES,
+  FORMS_FILE,
+  RESPONSE_EXPORT_FORMATS,
+  SITE_SORTS,
+  type SiteSort,
+} from '@fling/shared'
 import chalk from 'chalk'
 import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
+import { runForms, runFormsCheck, runFormsInit, runResponses } from './commands/forms.ts'
 import {
   runGroupCreate,
   runGroupDelete,
@@ -174,6 +182,7 @@ program
     '--force',
     'a pulled folder: publish it without a base, replacing whatever is live (even if someone published since you pulled)'
   )
+  .option('-q, --quiet', `leave out the hint on adding a form (${FORMS_FILE})`)
   .action(
     action(
       (
@@ -190,6 +199,7 @@ program
           listHtml?: boolean
           path?: string
           force?: boolean
+          quiet?: boolean
         }
       ) => runDeploy(ctx, path, opts)
     )
@@ -527,6 +537,66 @@ program
   .action(
     action((ctx, name: string, id: string, opts: { yes?: boolean }) =>
       runUncomment(ctx, name, id, opts)
+    )
+  )
+
+// ---- forms ---------------------------------------------------------------------------------
+
+const forms = program
+  .command('forms')
+  .helpGroup('Forms:')
+  .description(
+    `structured feedback on the review page: labels, ratings, scores, eval judgements (${FORMS_FILE})`
+  )
+forms
+  .command('show <name>', { isDefault: true })
+  .description("show a site's forms (`forms <name>`): a line per form, then the config as JSON")
+  .option('-p, --path <path>', 'only the forms on this page, e.g. / or /docs/')
+  .action(action((ctx, name: string, opts: { path?: string }) => runForms(ctx, name, opts)))
+forms
+  .command('init [dir]')
+  .description(`write a starter ${FORMS_FILE} into dir (default: .), the folder you deploy`)
+  .addOption(
+    new Option('-t, --template <name>', 'what it collects')
+      .choices(FORM_TEMPLATE_NAMES)
+      .default('labels')
+  )
+  .option('--title <title>', 'what the review page calls the forms (e.g. Evals, Scores)')
+  .option('--force', `replace an existing ${FORMS_FILE}`)
+  .action(
+    action(
+      (
+        ctx,
+        dir: string | undefined,
+        opts: { template?: string; title?: string; force?: boolean }
+      ) => runFormsInit(ctx, dir, opts)
+    )
+  )
+forms
+  .command('check [path]')
+  .description(
+    `check a folder's ${FORMS_FILE} (or a file) as a deploy will, against the folder's pages`
+  )
+  .action(action((ctx, path: string | undefined) => runFormsCheck(ctx, path)))
+program
+  .command('responses <name>')
+  .helpGroup('Forms:')
+  .description("list the responses to a site's forms and how far each has got")
+  .option('--form <id>', 'only this form')
+  .option('-p, --path <path>', 'only this page')
+  .addOption(
+    new Option('--format <format>', 'print the export instead of the table').choices(
+      RESPONSE_EXPORT_FORMATS
+    )
+  )
+  .option('-o, --output <file>', 'write the export to a file (default format: json)')
+  .action(
+    action(
+      (
+        ctx,
+        name: string,
+        opts: { form?: string; path?: string; format?: string; output?: string }
+      ) => runResponses(ctx, name, opts)
     )
   )
 

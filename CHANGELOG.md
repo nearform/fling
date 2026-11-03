@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.9.0 (2026-11-03)
+
 - **The CLI says when a newer Fling release is out.** After a command, when the server it used
   runs a newer release (`release` in `/.well-known/fling`) than the CLI, it prints one line on
   stderr, "Fling 0.9.0 is out (this CLI is 0.8.0)", with the commands that update it: the

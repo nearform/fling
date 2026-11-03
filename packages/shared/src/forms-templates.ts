@@ -1,7 +1,7 @@
 // Starter forms configs (forms.ts) for the CLI's `fling forms init` and the MCP servers'
-// `fling_forms_template`, written once so every client offers the same ones. Each uses readable
-// `oneOf` options (`const` for the stored value, `title` for what reviewers read), `required` for
-// what must be answered, and radio widgets for short choices. Browser-safe.
+// `fling_forms_template`, written once so every client offers the same ones. Each uses readable,
+// typed `oneOf` options (`const` for the stored value, `title` for what reviewers read),
+// `required` for what must be answered, and radio widgets for short choices. Browser-safe.
 
 import type { FormsConfig } from './forms.ts'
 
@@ -20,6 +20,7 @@ export const FORM_TEMPLATE_DESCRIPTIONS: Record<FormTemplateName, string> = {
 const score = (title: string, description: string) => ({
   title,
   description,
+  type: 'integer',
   oneOf: [
     { const: 1, title: '1: poor' },
     { const: 2, title: '2: weak' },
@@ -44,6 +45,7 @@ const TEMPLATES: Record<FormTemplateName, FormsConfig> = {
           properties: {
             verdict: {
               title: 'Verdict',
+              type: 'string',
               oneOf: [
                 { const: 'pass', title: 'Pass: it does what it should' },
                 { const: 'partial', title: 'Partial: some of it is right' },
@@ -98,6 +100,7 @@ const TEMPLATES: Record<FormTemplateName, FormsConfig> = {
           properties: {
             preference: {
               title: 'Preference',
+              type: 'string',
               oneOf: [
                 { const: 'a', title: 'A is better' },
                 { const: 'tie', title: 'About the same' },
@@ -125,6 +128,7 @@ const TEMPLATES: Record<FormTemplateName, FormsConfig> = {
           properties: {
             severity: {
               title: 'Severity',
+              type: 'string',
               oneOf: [
                 { const: 'blocker', title: 'Blocker: must fix before release' },
                 { const: 'major', title: 'Major: should fix' },
@@ -133,6 +137,7 @@ const TEMPLATES: Record<FormTemplateName, FormsConfig> = {
             },
             category: {
               title: 'Category',
+              type: 'string',
               oneOf: [
                 { const: 'accuracy', title: 'Wrong or misleading' },
                 { const: 'clarity', title: 'Hard to follow' },
@@ -165,6 +170,7 @@ const TEMPLATES: Record<FormTemplateName, FormsConfig> = {
           properties: {
             useful: {
               title: 'Was this page useful?',
+              type: 'string',
               oneOf: [
                 { const: 'yes', title: 'Yes' },
                 { const: 'somewhat', title: 'Somewhat' },

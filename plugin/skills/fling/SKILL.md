@@ -292,6 +292,7 @@ The file:
           "verdict": {
             "title": "Verdict",
             "description": "Pass: the interviewer followed up on every vague answer.",
+            "type": "string",
             "oneOf": [
               { "const": "pass", "title": "Pass: handled it well" },
               { "const": "fail", "title": "Fail: missed it" }
@@ -308,7 +309,8 @@ The file:
 
 - `title` (up to 40 characters) is what the review page calls the forms ("Labels", "Evals").
 - Choices are `oneOf` of `{ "const", "title" }`: the `const` is stored, the `title` is what
-  reviewers read, so make titles readable sentences, never bare codes.
+  reviewers read, so make titles readable sentences, never bare codes. Give a choice field its
+  `type` (`"string"`, or `"integer"` for scores) so it renders as a choice everywhere.
 - Mark what must be answered `required`, and use `"ui:widget": "radio"` for short choices.
 - Put the rubric in each field's `description`: that is what reviewers see while answering.
 - `paths` are globs over the pages (`["**", "!drafts/**"]`); without them a form is on every page.

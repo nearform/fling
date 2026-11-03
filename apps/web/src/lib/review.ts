@@ -113,6 +113,26 @@ export type PanelChoice = 'open' | 'closed' | 'auto'
 /** The localStorage key of the reviewer's panel choice. */
 export const PANEL_CHOICE_KEY = 'reviewCommentsPanel'
 
+/** The localStorage key of the comment type a reviewer last chose on a site's review page. */
+export function commentTypeKey(site: string): string {
+  return `reviewCommentType:${site}`
+}
+
+/**
+ * The form a new comment is written with: the type picked in this composer, else, once the
+ * composer is in use, the type last picked on this site. `''` is a plain comment, and so is a
+ * remembered form that doesn't apply to this page.
+ */
+export function composerFormId(opts: {
+  picked: string | null
+  remembered: string
+  inUse: boolean
+  formIds: readonly string[]
+}): string {
+  const id = opts.picked ?? (opts.inUse ? opts.remembered : '')
+  return opts.formIds.includes(id) ? id : ''
+}
+
 /** A stored panel choice; anything else is `auto`. */
 export function panelChoice(raw: string | null): PanelChoice {
   return raw === 'open' || raw === 'closed' ? raw : 'auto'

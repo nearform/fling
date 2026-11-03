@@ -1,6 +1,7 @@
 import type { Comment, CommentThread } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import {
+  composerFormId,
   frameUrl,
   linkHost,
   openCountsByPath,
@@ -135,5 +136,24 @@ describe('review helpers', () => {
     // A thread link or a pin opens it, whatever was chosen.
     expect(open('closed', false, true)).toBe(true)
     expect(open('auto', true, true)).toBe(true)
+  })
+})
+
+describe('composerFormId', () => {
+  const formIds = ['issue', 'praise']
+  it('uses the type picked in this composer', () => {
+    expect(composerFormId({ picked: 'praise', remembered: 'issue', inUse: false, formIds })).toBe(
+      'praise'
+    )
+    expect(composerFormId({ picked: '', remembered: 'issue', inUse: true, formIds })).toBe('')
+  })
+  it('falls back to the type last picked on the site once the composer is in use', () => {
+    expect(composerFormId({ picked: null, remembered: 'issue', inUse: true, formIds })).toBe(
+      'issue'
+    )
+    expect(composerFormId({ picked: null, remembered: 'issue', inUse: false, formIds })).toBe('')
+  })
+  it('writes a plain comment when the remembered form does not apply to this page', () => {
+    expect(composerFormId({ picked: null, remembered: 'gone', inUse: true, formIds })).toBe('')
   })
 })

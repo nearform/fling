@@ -3,6 +3,8 @@
 @import "./theme.css";
 
 @source "./**/*.{ts,tsx}";
+/* The form renderer's DaisyUI theme (ResponseForm.tsx) writes its classes in its own bundle. */
+@source "../node_modules/@rjsf/daisyui/dist/daisyui.esm.js";
 
 /* Classes assembled from props (toast `alert-*`, confirm `btn-*`) are invisible to the scanner. */
 @source inline("alert-{success,error,warning,info}");

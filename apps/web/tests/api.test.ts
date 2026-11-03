@@ -34,6 +34,28 @@ describe('request', () => {
     expect(error).toMatchObject({ status: 409, code: 'name_taken', message: 'That name is taken' })
   })
 
+  it("carries a response's field errors, and none for other errors", async () => {
+    const errors = [{ field: 'verdict', message: 'is required' }]
+    respond(400, { error: { code: 'invalid_response', message: 'No', errors } })
+    await expect(request('/api/x', MeSchema)).rejects.toMatchObject({ fieldErrors: errors })
+    respond(400, { error: { code: 'bad_request', message: 'No' } })
+    await expect(request('/api/x', MeSchema)).rejects.toMatchObject({ fieldErrors: [] })
+  })
+
+  it('downloads an export as a blob, and fails with the envelope', async () => {
+    const fetchMock = respond(200, 'a,b\r\n')
+    const blob = await api.downloadResponses('deck', 'csv')
+    expect(await blob.text()).toBe('a,b\r\n')
+    expect(fetchMock).toHaveBeenCalledWith('/api/sites/deck/responses?format=csv', {
+      credentials: 'same-origin',
+    })
+    respond(404, { error: { code: 'not_found', message: 'No such site' } })
+    await expect(api.downloadResponses('deck', 'jsonl')).rejects.toMatchObject({
+      status: 404,
+      code: 'not_found',
+    })
+  })
+
   it('falls back to a synthetic code when the body is not an envelope', async () => {
     respond(502, '<html>Bad gateway</html>')
     await expect(request('/api/me', MeSchema)).rejects.toMatchObject({

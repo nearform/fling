@@ -1,6 +1,7 @@
 import type {
   AccessLevel,
   CommentAnchor,
+  CreateCommentRequest,
   CreateGroupRequest,
   GroupDetail,
   SiteRoleInput,
@@ -8,7 +9,7 @@ import type {
 } from '@fling/shared'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ADMIN_USERS_PATH } from '../lib/admin'
-import { api, errorMessage } from '../lib/api'
+import { ApiError, api, errorMessage } from '../lib/api'
 import { showToast } from '../lib/toast'
 
 export const queryKeys = {
@@ -20,6 +21,10 @@ export const queryKeys = {
   site: (name: string) => ['site', name] as const,
   versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
   comments: (name: string) => ['comments', name] as const,
+  // Under the comments' key, so whatever refetches the comments (the live room, a new comment or
+  // response) refetches these too.
+  forms: (name: string) => ['comments', name, 'forms'] as const,
+  responses: (name: string) => ['comments', name, 'responses'] as const,
   allGroups: ['groups'] as const,
   groups: (mine: boolean) => ['groups', mine ? 'mine' : 'all'] as const,
   groupsWithMembers: (emails: readonly string[]) => ['groups', 'members', ...emails] as const,
@@ -212,7 +217,39 @@ export function useCommentActions(name: string) {
       mutationFn: (id: string) => api.deleteComment(name, id),
       ...options,
     }),
+    /** A response to a form; field errors are the form's to show, anything else is toasted. */
+    respond: useMutation({
+      mutationFn: (body: {
+        path: string
+        anchor?: CommentAnchor
+        response: NonNullable<CreateCommentRequest['response']>
+      }) => api.addComment(name, body),
+      onSuccess: options.onSuccess,
+      onError: (error: unknown) => {
+        if (error instanceof ApiError && error.fieldErrors.length > 0) return
+        options.onError(error)
+      },
+    }),
   }
+}
+
+/** A site's forms config (`forms` capability): `enabled` false skips it. */
+export function useForms(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.forms(name),
+    queryFn: () => api.getForms(name),
+    enabled,
+    staleTime: 60_000,
+  })
+}
+
+/** The responses the caller may see and each form's progress (`forms` capability). */
+export function useResponses(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.responses(name),
+    queryFn: () => api.listResponses(name),
+    enabled,
+  })
 }
 
 export function useGroups(mine: boolean, enabled = true) {

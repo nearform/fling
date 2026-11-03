@@ -19,7 +19,8 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
   people, teams, everyone signed in with your identity provider, or anyone. Share links, public sites, archive and delete are one command each. Secrets and dotfiles never ship.
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
-  agents read the feedback and act on it.
+  agents read the feedback and act on it. Ship a form with the site to collect labels or scores,
+  and export the answers as CSV.
 - **Hear about it.** With email set up, people are told when a site is shared with them, they join a
   group, or someone comments on their site, and choose what they hear about from any client.
 - **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.
@@ -104,6 +105,24 @@ in a frame beside its comments, threads per page that can be replied to, resolve
   all use the same API.
 - An instance turns comments off with `COMMENTS=false`; its metadata then lacks the `comments`
   capability and every client hides them.
+
+**Structured feedback (forms).** For labels, ratings, rubric scores or eval judgements, a site can
+ship forms instead of asking reviewers to type codes into comments. Put a `fling.forms.json` at
+the top of the folder (`fling forms init` writes one from a template, `fling forms check` checks
+it) and deploy: the file is never served, and each form is a JSON Schema the review page renders.
+- A **page** form takes one answer per reviewer per page, which they can change; the review page
+  shows it in a tab named after the file's `title` (Labels, Evals, …), with how many pages they
+  have done and a link to the next.
+- A **comment** form is a type of comment: pin a spot or select text, then fill it in. Each answer
+  is a thread that can be replied to and resolved.
+- `"visibility": "own"` shows reviewers only their own answers (owners and admins see everyone's),
+  for blind labelling.
+- `fling responses <site> --format csv` (or JSON, JSON Lines; `fling_responses_list` for agents)
+  exports the answers, and `<app>/sites/<site>/responses` shows who has answered which page.
+
+Forms come with comments: there is no switch of their own, and `COMMENTS=false` turns both off.
+Agents write and check forms with `fling_forms_template` and `fling_forms_check`, and publish them
+with `forms` on `fling_publish` and `fling_deploy`.
 
 **Previews and thumbnails.** A site's page in the web UI shows its home page live, as a desktop
 browser sees it, scaled down; private and restricted sites included. When an owner or publisher

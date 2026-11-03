@@ -13,6 +13,22 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Forms.** A site can ship `fling.forms.json` with its deploy: forms (JSON Schemas) its reviewers
+  answer on the review page, for labels, ratings, rubric scores or eval judgements. A page-kind
+  form takes one answer per reviewer per page, in a tab named after the file's `title`, with each
+  reviewer's progress; a comment-kind form is a type of comment, pinned like any other.
+  `"visibility": "own"` shows reviewers only their own answers, and owners and admins everyone's.
+  The file is never served; a path publish or a deploy of a pulled folder keeps it, and `fling pull`
+  brings it back. New commands: `fling forms <name>`, `fling forms init`, `fling forms check` and
+  `fling responses` (a table with progress, or JSON, JSON Lines and CSV). New MCP tools on both
+  servers: `fling_forms`, `fling_forms_template`, `fling_forms_check`, `fling_responses_list` and
+  `fling_response_submit`; `fling_publish` and `fling_deploy` take `forms`. The site page links to
+  the new responses page, a page × reviewer grid per form with the downloads.
+
+- **Forms come with comments.** The `forms` capability is on wherever comments are, with no new
+  configuration: `COMMENTS=false` turns both off. Operators have nothing to do: the comment record
+  gains optional response fields (v2), which need no migration.
+
 ## 0.7.0 (2026-11-01)
 
 - **Two sign-in providers.** A Fling can offer a Google client and another OpenID Connect issuer

@@ -411,6 +411,41 @@ also keeps its **quote**, which the shell finds again inside the element first. 
 resolves it in that order (`apps/web/src/lib/review-shell.ts`), so a pin lands on the same element
 on another screen size.
 
+**Forms config** — `fling.forms.json` at the top of a deployed folder, a version's forms
+(`FormsConfigSchema`, `packages/shared/src/forms.ts`; `DeployRequest.forms`). The CLI takes it out
+of the manifest, so it is never a site file, checks it against the folder's pages
+(`checkFormsConfig`; `fling forms check`, `fling_forms_check`) and sends it with the deploy;
+`fling forms init` and `fling_forms_template` write a starter (`forms-templates.ts`). Its `title`
+(at most 40 characters, such as "Labels" or "Evals") names the feature wherever the site's forms
+appear: the review page's tab, the responses page and the export's file name, so the UI never
+says a generic "Forms". It holds up to 20 forms in at most 64 KB. Each version has its own, a blob
+beside its manifest (`formsKey`, `apps/api/src/forms.ts`); a layered publish keeps its base's
+unless the deploy sends one (`null` removes it), and a pull returns it. `fling forms <name>` and
+`fling_forms` show the live version's. The `forms` capability, on with comments.
+
+**Form** — one set of questions a site asks its reviewers (`FormDefinitionSchema`,
+`packages/shared/src/forms.ts`): an `id`, a `title`, a JSON Schema (draft 2020-12, an object at the
+root, no remote `$ref`) with an optional UI schema for the web's form, a **kind**, the **paths** it
+applies to (globs over review paths, `!` to leave some out; every page without them) and a
+**visibility**. The server validates answers with `@cfworker/json-schema`, the same on every
+platform; the web renders the form with react-jsonschema-form (`apps/web/src/components/ResponseForm.tsx`).
+
+**Response** — a reviewer's answers to a form on one page: a **comment** carrying `response`
+(`{ formId, data, versionId }`, `CommentResponse` in `packages/shared/src/comments.ts`; `addComment`
+in `apps/api/src/comments.ts`), its `body` a readable summary (`responseSummary`). Data that does
+not fit the schema is a 400 `invalid_response` naming each field. A **page-kind** form takes one
+response per reviewer per page, with no pin: its id is `R<hash of form, path, author>`, so
+answering again changes it in place (`Store.updateResponse`) and tells no one; the review page
+shows it in a tab of its own, with the reviewer's progress. A **comment-kind** form is a type in the
+new-comment box: each response is a new thread, pinned like any other, that can be replied to and
+resolved. **Visibility** `everyone` (the default) shows responses to every reader of the comments;
+`own` shows reviewers only their own, and everyone's to owners and admins (`response.read.all`,
+`canSeeResponse` in `policy.ts`), for blind labelling. A site holds up to 10,000 responses
+(`RESPONSES_PER_SITE_MAX`). The export (`GET /api/sites/<name>/responses`, `responsesOf` in
+`apps/api/src/forms.ts`; `fling responses`, `fling_responses_list`) lists them as JSON with each
+form's progress, as JSON Lines or as CSV, and the **responses page** (`/sites/<name>/responses`,
+`apps/web/src/pages/Responses.tsx`) shows a page × reviewer grid per form with the downloads.
+
 **Live room** — a site's realtime channel in review mode (`apps/api/src/live.ts`, protocol in
 `packages/shared/src/review-live.ts`): everyone with the site's review page open is a **peer**
 (`{id, name, colour}`; one per connection, named from their profile, coloured from their email)

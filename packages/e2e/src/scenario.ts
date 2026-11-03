@@ -8,7 +8,11 @@
  *   version served follows → versions (who published) → rollback to v1 → open to
  *   members: anonymous redirect to sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
  *   site with no `--access` (the instance's default; only you: the member is refused, the share
- *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → live room (two peers: pointers,
+ *   link serves it; then open to members, the member sees it) → comments (owner and member; anonymous refused) → forms (a site
+ *   deployed with fling.forms.json, which is not served; a page-kind response answered twice is one
+ *   row, a bad one a 400, a comment-kind one a pinned thread; on an `own` form the member sees only
+ *   their own responses and the owner everyone's; the CSV export; the config comes back with a pull
+ *   and goes again with its deploy) → live room (two peers: pointers,
  *   comment changes) → admin (the users list; every site's listing, the owner's site included;
  *   the settings, secrets by name only; the owner's site read by key, changed only from the
  *   browser, audited; impersonating the owner: their sites, no API key, stop) → audience (restricted to the member:
@@ -43,7 +47,7 @@
  * wait covers them, and the scenario fails if a new site is not routed when the CLI says it is.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
@@ -603,6 +607,27 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       step('comments: turned off on this instance (skipped)')
     }
 
+    // Forms (structured feedback on the review page): a site deployed with fling.forms.json, its
+    // responses answered, refused, kept private to their authors and exported, and the config
+    // pulled back. Only where the instance has them.
+    if (meta.capabilities.forms === true) {
+      await formsStep({
+        appOrigin,
+        name: `e2e-${nonce}-forms`,
+        nonce,
+        work,
+        levels,
+        fling,
+        made,
+        opts,
+        step,
+        mail,
+        instance: meta.name,
+      })
+    } else {
+      step('forms: not on this instance (skipped)')
+    }
+
     // Live rooms (review mode's realtime): two people in the site's room. Only where the instance
     // has them.
     if (meta.capabilities.live === true) {
@@ -1028,6 +1053,279 @@ async function commentsStep(ctx: {
   const after = (await fling('comments', name, '--all')) as { comments: CommentJson[] }
   check(after.comments.length === 0, `after deleting the thread: ${JSON.stringify(after.comments)}`)
   step('resolved (CLI), listed (CLI and MCP), deleted with its reply (CLI)')
+}
+
+interface ResponseRowJson {
+  id: string
+  path: string
+  formId: string
+  author: string
+  data: Record<string, unknown>
+}
+
+/** The forms config the forms step deploys: a page-kind label kept to its authors, and an issue. */
+const E2E_FORMS = {
+  title: 'Labels',
+  forms: [
+    {
+      id: 'label',
+      title: 'Label this interview',
+      kind: 'page',
+      paths: ['interview-*.html'],
+      visibility: 'own',
+      schema: {
+        type: 'object',
+        required: ['verdict'],
+        properties: {
+          verdict: {
+            title: 'Verdict',
+            oneOf: [
+              { const: 'pass', title: 'Pass' },
+              { const: 'fail', title: 'Fail' },
+            ],
+          },
+          notes: { type: 'string', title: 'Notes' },
+        },
+      },
+    },
+    {
+      id: 'issue',
+      title: 'Flag an issue',
+      kind: 'comment',
+      schema: {
+        type: 'object',
+        required: ['severity'],
+        properties: { severity: { title: 'Severity', enum: ['major', 'minor'] } },
+      },
+    },
+  ],
+}
+
+async function formsStep(ctx: {
+  appOrigin: string
+  name: string
+  nonce: string
+  work: string
+  levels: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+  mail: Mailbox | null
+  instance: string
+}) {
+  const { appOrigin, name, nonce, fling, opts, step } = ctx
+  const respond = (session: Session, body: unknown) =>
+    fetch(`${appOrigin}/api/sites/${name}/comments`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.apiKey}`,
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+  const responsesAs = async (session: Session, query = '') => {
+    const res = await fetch(`${appOrigin}/api/sites/${name}/responses${query}`, {
+      headers: { authorization: `Bearer ${session.apiKey}`, accept: 'application/json' },
+    })
+    check(res.status === 200, `GET responses as ${session.email}: ${res.status}`)
+    return ((await res.json()) as { responses: ResponseRowJson[] }).responses
+  }
+
+  const dir = siteDir(ctx.work, 'forms', {
+    'index.html': page('home', `forms home ${nonce}`),
+    'interview-1.html': page('one', `interview one ${nonce}`),
+    'interview-2.html': page('two', `interview two ${nonce}`),
+    'fling.forms.json': `${JSON.stringify(E2E_FORMS, null, 2)}\n`,
+  })
+  const deployed = (await fling(
+    'deploy',
+    dir,
+    '--name',
+    name,
+    ...(ctx.levels ? ['--access', 'public'] : ['--public'])
+  )) as {
+    status: string
+    site: CliSite
+    forms?: { title: string; forms: { id: string; pages: string[] | null }[] }
+  }
+  ctx.made.push(name)
+  const labelPages = deployed.forms?.forms.find(f => f.id === 'label')?.pages
+  check(
+    deployed.status === 'live' &&
+      deployed.forms?.title === E2E_FORMS.title &&
+      labelPages?.length === 2 &&
+      labelPages.every(p => p.includes('interview-')),
+    `deploy with forms: ${JSON.stringify(deployed)}`
+  )
+  const siteUrl = deployed.site.url
+  const v1 = deployed.site.currentVersionId
+  check(v1, 'forms: no currentVersionId')
+  const config = await get(`${siteUrl}fling.forms.json`)
+  check(config.status === 404, `fling.forms.json served on the site: ${config.status}`)
+  const shown = (await fling('forms', name)) as {
+    versionId: string | null
+    config: { title: string } | null
+    forms: { id: string }[]
+  }
+  check(
+    shown.versionId === v1 &&
+      shown.config?.title === E2E_FORMS.title &&
+      E2E_FORMS.forms.every(f => shown.forms.some(s => s.id === f.id)),
+    `fling forms: ${JSON.stringify(shown)}`
+  )
+  step(`deployed ${name} with fling.forms.json: not served, and \`fling forms\` shows it`)
+
+  // A page-kind response, answered twice: the same response, changed in place.
+  const answer = (data: Record<string, unknown>) =>
+    respond(opts.session, { path: '/interview-1.html', response: { formId: 'label', data } })
+  const first = await answer({ verdict: 'pass' })
+  check(first.status === 201, `page-kind response: ${first.status} ${await first.clone().text()}`)
+  const created = (await first.json()) as CommentJson & { response?: { versionId: string } }
+  const again = await answer({ verdict: 'fail', notes: `changed ${nonce}` })
+  check(again.status === 201, `page-kind response again: ${again.status}`)
+  const changed = (await again.json()) as CommentJson
+  check(
+    changed.id === created.id && created.response?.versionId === v1,
+    `page-kind response answered twice: ${JSON.stringify(created)} then ${JSON.stringify(changed)}`
+  )
+  const rows = await responsesAs(opts.session, '?form=label')
+  check(
+    rows.length === 1 &&
+      rows[0]?.data.verdict === 'fail' &&
+      rows[0]?.data.notes === `changed ${nonce}`,
+    `responses after answering twice: ${JSON.stringify(rows)}`
+  )
+  step('a page-kind response answered twice is one row, with the second answers')
+
+  const bad = await answer({ verdict: 'maybe' })
+  const badBody = (await bad.json()) as {
+    error?: { code?: string; errors?: { field: string }[] }
+  }
+  check(
+    bad.status === 400 &&
+      badBody.error?.code === 'invalid_response' &&
+      badBody.error.errors?.some(e => e.field === 'verdict'),
+    `a response that doesn't fit: ${bad.status} ${JSON.stringify(badBody)}`
+  )
+  step('a response that does not fit the schema: 400 invalid_response, naming the field')
+
+  // A comment-kind response: a thread pinned where the reviewer pointed.
+  const anchor = { x: 12, y: 34, selector: 'h1', quote: 'forms home' }
+  const issue = await respond(opts.session, {
+    path: '/',
+    anchor,
+    response: { formId: 'issue', data: { severity: 'major' } },
+  })
+  check(
+    issue.status === 201,
+    `comment-kind response: ${issue.status} ${await issue.clone().text()}`
+  )
+  const thread = (await issue.json()) as CommentJson & {
+    anchor: { quote?: string } | null
+    response?: { formId: string }
+  }
+  check(
+    thread.parentId === null &&
+      thread.path === '/' &&
+      thread.anchor?.quote === anchor.quote &&
+      thread.response?.formId === 'issue',
+    `comment-kind response: ${JSON.stringify(thread)}`
+  )
+  step('a comment-kind response is a thread pinned to its anchor')
+
+  // `own` visibility: the member sees only their own label; the owner sees everyone's.
+  const member = opts.member
+  if (member) {
+    const theirs = await respond(member, {
+      path: '/interview-2.html',
+      response: { formId: 'label', data: { verdict: 'pass' } },
+    })
+    check(theirs.status === 201, `member's response: ${theirs.status}`)
+    const listed = await mcpTool(appOrigin, member, 'fling_responses_list', { name, form: 'label' })
+    const seen = (listed?.structuredContent as { responses?: ResponseRowJson[] } | undefined)
+      ?.responses
+    check(
+      !listed?.isError && seen?.length === 1 && seen[0]?.author === member.email,
+      `the member's fling_responses_list on an own form: ${JSON.stringify(listed)}`
+    )
+    const all = await responsesAs(opts.session, '?form=label')
+    check(
+      all.length === 2 &&
+        [opts.session.email, member.email].every(e => all.some(r => r.author === e)),
+      `the owner's responses on an own form: ${JSON.stringify(all)}`
+    )
+    if (ctx.mail) {
+      // The member's new response tells the owner, as a new thread does.
+      oneEmail(
+        await ctx.mail.take(opts.session),
+        ['comment.created'],
+        ctx.instance,
+        "owner, after the member's response"
+      )
+      noEmail(await ctx.mail.take(member), 'the member who responded')
+    }
+    step("own form: the member sees only their response (MCP), the owner sees everyone's")
+  } else {
+    step('own form: no second user (skipped)')
+  }
+
+  // The export as CSV: the row's fields, then a column per answer in the schema's order.
+  const csvFile = join(ctx.work, 'responses.csv')
+  await fling('responses', name, '--format', 'csv', '-o', csvFile)
+  const csv = readFileSync(csvFile, 'utf8').trim().split('\r\n')
+  const columns = [
+    'id',
+    'path',
+    'formId',
+    'author',
+    'createdAt',
+    'updatedAt',
+    'versionId',
+    ...E2E_FORMS.forms.flatMap(f => Object.keys(f.schema.properties)),
+  ]
+  check(
+    csv[0] === columns.join(',') && csv.length === 1 + (member ? 3 : 2),
+    `fling responses --format csv: ${csv.join(' | ')}`
+  )
+  step(`fling responses --format csv: ${csv.length - 1} rows, columns ${columns.join(', ')}`)
+
+  // Pulled, the config comes back as fling.forms.json; deployed again, the version keeps it.
+  const pulledDir = join(ctx.work, 'forms-pulled')
+  const pulled = (await fling('pull', name, pulledDir)) as { versionId: string; forms: boolean }
+  const pulledForms = JSON.parse(readFileSync(join(pulledDir, 'fling.forms.json'), 'utf8')) as {
+    title: string
+    forms: { id: string }[]
+  }
+  check(
+    pulled.versionId === v1 &&
+      pulled.forms &&
+      pulledForms.title === E2E_FORMS.title &&
+      pulledForms.forms.length === E2E_FORMS.forms.length,
+    `pull with forms: ${JSON.stringify(pulled)} ${JSON.stringify(pulledForms)}`
+  )
+  writeFileSync(join(pulledDir, 'index.html'), page('home', `forms home again ${nonce}`))
+  const redeployed = (await fling('deploy', pulledDir)) as {
+    status: string
+    base?: string | null
+    site: CliSite
+    forms?: { title: string }
+  }
+  check(
+    redeployed.status === 'live' &&
+      redeployed.base === v1 &&
+      redeployed.forms?.title === E2E_FORMS.title,
+    `deploy of the pulled folder with forms: ${JSON.stringify(redeployed)}`
+  )
+  const after = (await fling('forms', name)) as { versionId: string | null; config: unknown }
+  check(
+    after.versionId === redeployed.site.currentVersionId && after.config !== null,
+    `forms after the redeploy: ${JSON.stringify(after)}`
+  )
+  step(
+    'pulled: fling.forms.json comes back; deployed again on the version pulled, it keeps its forms'
+  )
 }
 
 /** A live room socket that keeps what it hears, for the scenario to wait on. */

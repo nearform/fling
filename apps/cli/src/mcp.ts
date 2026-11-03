@@ -14,8 +14,12 @@
  * Local extras: fling_deploy (a file, zip or folder on this computer, found by name in Downloads
  * etc. — see locate.ts / inputs.ts), fling_pull (a site's files into a folder here, by default
  * ~/Documents/Claude/fling/<name>, which fling_deploy then publishes on the version pulled; pull.ts),
- * fling_find_files, fling_servers and fling_login. Never relies on Claude's sandbox paths or
+ * fling_find_files, fling_servers, fling_login and fling_doctor (doctor.ts, read-only). Never relies on Claude's sandbox paths or
  * network.
+ *
+ * When a known Fling runs a newer release than this server, the instructions say so, and so does
+ * the first fling_publish or fling_deploy result of the session on such a Fling: Claude passes on
+ * the update command, as the user never sees the CLI's own update line in Claude.
  *
  * stdout carries only the MCP protocol: nothing here logs, and errors become tool results.
  */
@@ -77,6 +81,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { type ApiClient, CliApiError, createApiClient, type FetchLike } from './api.ts'
 import { type LoginResult, loginFlow } from './auth.ts'
+import { findClaudeDesktop, runClaude } from './claude.ts'
 import {
   type ConfigStore,
   createConfigStore,
@@ -87,6 +92,13 @@ import {
 } from './config.ts'
 import type { OpenLike } from './context.ts'
 import { BaseChangedError, deploy, NameTakenError, resolveSiteName } from './deploy.ts'
+import {
+  type DoctorDeps,
+  describeChecks,
+  doctorExitCode,
+  runChecks,
+  systemDoctorDeps,
+} from './doctor.ts'
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { formsEnabled, getForms, getResponses, planForms, submitResponse } from './forms.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
@@ -170,6 +182,7 @@ import {
   versionFiles,
   whoami,
 } from './sites.ts'
+import { mcpUpdateNote, newerRelease } from './update-check.ts'
 import { silentLogger } from './utils/logger.ts'
 import { formatBytes } from './utils/output.ts'
 
@@ -195,6 +208,8 @@ export interface McpDeps {
    * generic wording, several → listed by host.
    */
   servers?: KnownServer[]
+  /** What fling_doctor checks with (default: this machine). */
+  doctor?: Partial<DoctorDeps>
 }
 
 export const LOGIN_HINT = `Not logged in to Fling. Call fling_login (it opens the browser to sign in), or ask the user to run \`${NPX_COMMAND} login\` in a terminal (in Claude Code: \`! ${NPX_COMMAND} login\`), then try again.`
@@ -210,10 +225,13 @@ export const mcpLocalInstructions = (
     forms?: boolean
     notifications?: boolean
     servers?: readonly KnownServer[]
+    /** A newer Fling release a known server runs (`newestRelease`). */
+    newerRelease?: string | null
   } = {}
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
+    ...(opts.newerRelease ? [mcpUpdateNote(opts.newerRelease)] : []),
     ...[serversInstructions(opts.servers ?? [])].filter(p => p !== undefined),
     'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
       'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
@@ -247,6 +265,20 @@ interface Target {
   config: ResolvedConfig
   /** Its `/.well-known/fling` (stored; fetched once if missing). Null when it can't be had. */
   instance(): Promise<InstanceMetadata | null>
+}
+
+/** The tools whose results carry the update note (`mcpUpdateNote`). */
+const PUBLISHING_TOOLS: ReadonlySet<string> = new Set(['fling_publish', 'fling_deploy'])
+
+/** The newest release among the known Flings when it is newer than this server, else null. */
+export function newestRelease(servers: readonly KnownServer[]): string | null {
+  const newer = servers
+    .map(s => newerRelease(s.instance?.release))
+    .filter((r): r is string => r !== null)
+  return newer.reduce<string | null>(
+    (best, r) => (best && newerRelease(r, best) === null ? best : r),
+    null
+  )
 }
 
 /** The line a result naming URLs ends with: which Fling it went to. */
@@ -396,6 +428,19 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
   }
 
+  /**
+   * The update note a publishing result ends with, the first time in this session that the call's
+   * Fling runs a newer release than this server.
+   */
+  let updateNoted = false
+  async function updateNoteFor(t: Target): Promise<string> {
+    if (updateNoted) return ''
+    const release = newerRelease((await t.instance().catch(() => null))?.release)
+    if (!release) return ''
+    updateNoted = true
+    return `\n${mcpUpdateNote(release)}`
+  }
+
   /** Run an operation on the Fling the call chose, and shape its outcome as a tool result. */
   async function run(
     tool: string,
@@ -403,8 +448,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     op: (t: Target) => Promise<{ summary: string; data: unknown }>
   ): Promise<CallToolResult> {
     try {
-      const { summary, data } = await op(await target(server, tool))
-      return textResult(`${summary}\n\n${JSON.stringify(data, null, 2)}`)
+      const t = await target(server, tool)
+      const { summary, data } = await op(t)
+      const update = PUBLISHING_TOOLS.has(tool) ? await updateNoteFor(t) : ''
+      return textResult(`${summary}${update}\n\n${JSON.stringify(data, null, 2)}`)
     } catch (error) {
       return failure(error)
     }
@@ -638,6 +685,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         forms: servers.some(s => formsEnabled(s.instance)),
         notifications: servers.some(s => notificationsEnabled(s.instance)),
         servers,
+        newerRelease: newestRelease(servers),
       }),
     }
   )
@@ -1130,6 +1178,33 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         return textResult(
           `Signed in as ${waited.r.user.email} (${waited.r.serverUrl}, ${waited.r.instance.name}).`
         )
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  server.registerTool(
+    'fling_doctor',
+    {
+      title: "Check this computer's Fling setup",
+      description:
+        "Diagnose Fling on the user's computer, read-only: the CLI's version (and the latest on npm), Node.js, " +
+        'the config, each Fling set up here (reachable, its release, whether the sign-in still works, its features), ' +
+        'the Claude Code plugin and the Claude Desktop extension. One line per check (✔ ok, ▲ warning, ✖ problem), ' +
+        'each warning and problem with its fix. Call it when something about Fling does not work (sign-in, tools ' +
+        'missing, versions), then tell the user the fixes; never run them for the user without asking.',
+      inputSchema: {},
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async () => {
+      try {
+        const checks = await runChecks({
+          ...systemDoctorDeps(store, fetchImpl, runClaude, () => findClaudeDesktop()),
+          ...deps.doctor,
+        })
+        const ok = doctorExitCode(checks) === 0
+        return textResult(`${describeChecks(checks)}\n\n${JSON.stringify({ ok, checks }, null, 2)}`)
       } catch (error) {
         return failure(error)
       }

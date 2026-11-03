@@ -152,6 +152,23 @@ It is remembered, and becomes the current one only if none is.
 
 `fling_whoami` checks the login.
 
+## When something doesn't work, and updates
+
+When something about Fling doesn't work (sign-in fails, tools are missing, versions disagree), call
+`fling_doctor`. It checks the CLI, its config, each Fling, the Claude Code plugin and the Claude
+Desktop extension, read-only, and gives the fix for each warning (▲) and problem (✖). Tell the user
+the fixes; run nothing for them without asking. Without the tool, ask them to run `! fling doctor`.
+
+If the Fling MCP server says a newer Fling release is out (in its instructions or a publish
+result), tell the user once and suggest the update it names, in a terminal:
+
+```
+npm i -g @nearform/fling@latest && fling setup
+```
+
+then restart Claude Code (or Claude Desktop). `fling setup` also updates this plugin and the
+Claude Desktop extension.
+
 ## Who can see a site
 
 - Five access levels, narrowest first: `only_me`, `groups`, `people`, `members`, `public`.

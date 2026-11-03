@@ -4,11 +4,13 @@
  * opened. `runClaude` is the seam tests replace.
  */
 import { execFile } from 'node:child_process'
-import { access, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { REPO_SLUG } from '@fling/shared'
+import { REPO_SLUG, REPO_URL } from '@fling/shared'
+import extensionManifest from '../mcpb/manifest.json'
 import type { FetchLike } from './api.ts'
+import { VERSION } from './package-info.ts'
 
 /** The marketplace (this repo) and the plugin in it. */
 export const MARKETPLACE_SOURCE = REPO_SLUG
@@ -87,6 +89,18 @@ export async function updatePlugin(run: RunClaude, scope?: string): Promise<void
   )
 }
 
+/** Whether `claude` knows the marketplace (by name), or null when it can't be told. */
+export async function marketplaceConfigured(run: RunClaude): Promise<boolean | null> {
+  const list = await run(['plugin', 'marketplace', 'list', '--json'])
+  if (list.code !== 0) return null
+  try {
+    const marketplaces = JSON.parse(list.stdout) as { name?: string }[]
+    return Array.isArray(marketplaces) && marketplaces.some(m => m.name === MARKETPLACE_NAME)
+  } catch {
+    return null
+  }
+}
+
 function check(result: ClaudeResult, what: string): void {
   if (result.code === 0) return
   const detail = (result.stderr || result.stdout).trim().split('\n').at(-1)
@@ -113,9 +127,83 @@ export async function findClaudeDesktop(
   return null
 }
 
-/** Download fling.mcpb from the server into a temp folder; returns its path. */
-export async function downloadExtension(serverUrl: string, fetch: FetchLike): Promise<string> {
-  const url = new URL(MCPB_PATH, serverUrl).toString()
+/**
+ * The id Claude Desktop installs the extension under: `local.mcpb.<author>.<name>`, from the
+ * manifest (neither ever changes, so every copy updates the same install).
+ */
+export const DESKTOP_EXTENSION_ID = `local.mcpb.${extensionManifest.author.name
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')}.${extensionManifest.name}`
+
+/** Where Claude Desktop keeps its data (extensions among it), or null where there is none. */
+export function claudeDesktopDataDir(
+  platform: NodeJS.Platform = process.platform,
+  env: Record<string, string | undefined> = process.env,
+  home: string = homedir()
+): string | null {
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'Claude')
+  if (platform === 'win32' && env.APPDATA) return join(env.APPDATA, 'Claude')
+  return null
+}
+
+export type DesktopExtensionStatus =
+  | { installed: false }
+  | { installed: true; version?: string; enabled?: boolean }
+
+/** Is the Fling extension installed in Claude Desktop (data in `dataDir`), at which version? */
+export async function desktopExtensionStatus(dataDir: string): Promise<DesktopExtensionStatus> {
+  const readJson = async (path: string) => {
+    try {
+      return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+    } catch {
+      return null
+    }
+  }
+  const manifest = await readJson(
+    join(dataDir, 'Claude Extensions', DESKTOP_EXTENSION_ID, 'manifest.json')
+  )
+  if (!manifest) return { installed: false }
+  const settings = await readJson(
+    join(dataDir, 'Claude Extensions Settings', `${DESKTOP_EXTENSION_ID}.json`)
+  )
+  return {
+    installed: true,
+    ...(typeof manifest.version === 'string' ? { version: manifest.version } : {}),
+    ...(typeof settings?.isEnabled === 'boolean' ? { enabled: settings.isEnabled } : {}),
+  }
+}
+
+/** A place fling.mcpb is downloaded from, and the version it holds when known. */
+export interface ExtensionSource {
+  url: string
+  version?: string
+}
+
+/** The extension attached to the GitHub Release of `version`. */
+export const releaseExtensionUrl = (version: string) =>
+  `${REPO_URL}/releases/download/v${version}/fling.mcpb`
+
+/**
+ * Where to get the extension that matches this CLI, in order. The server's copy, when it runs
+ * the CLI's release: it also adds that Fling on start (FLING_ADD_SERVER). Otherwise the GitHub
+ * Release of the CLI's version first, then the server's copy (the server's release) should that
+ * download fail.
+ */
+export function extensionSources(
+  serverUrl: string,
+  serverRelease: string | undefined,
+  version: string = VERSION
+): ExtensionSource[] {
+  const server: ExtensionSource = {
+    url: new URL(MCPB_PATH, serverUrl).toString(),
+    ...(serverRelease ? { version: serverRelease } : {}),
+  }
+  if (serverRelease === version) return [server]
+  return [{ url: releaseExtensionUrl(version), version }, server]
+}
+
+/** Download fling.mcpb from `url` into a temp folder; returns its path. */
+export async function downloadExtension(url: string, fetch: FetchLike): Promise<string> {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`Could not download ${url} (HTTP ${response.status})`)
   const dir = await mkdtemp(join(tmpdir(), 'fling-mcpb-'))

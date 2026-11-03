@@ -38,13 +38,60 @@ This does everything a new machine needs:
    sign-in providers, its login page, to choose one) and an API key is
    stored in `~/.fling/config.json` (mode 0600). This is skipped if you're already signed in.
    The server becomes your current one; logins to other Flings are kept.
+   When you are already signed in, it reads the server's `/.well-known/fling` again, so the CLI
+   knows the release it runs now.
 2. **Adds Fling to Claude Code.** If `claude` is on your PATH, setup installs the Fling plugin
-   (skill + MCP server) from the `nearform/fling` marketplace, or updates it if it's already
-   installed. `--scope project|local` installs it for this project only (default `user`).
+   (skill + MCP server) from the `nearform/fling` marketplace. `--scope project|local` installs it
+   for this project only (default `user`). When the plugin is already installed, setup refreshes
+   it instead (`claude plugin marketplace update fling`, then `claude plugin update fling@fling`)
+   and says which version it went from and to; restart Claude Code (or run `/reload-plugins`)
+   after an update. A refresh that fails is reported and leaves the installed plugin as it was;
+   it doesn't fail setup.
 3. **Adds Fling to Claude Desktop.** If Claude Desktop is installed (macOS, Windows), setup
-   downloads `fling.mcpb` and opens it, and Claude Desktop asks you to confirm.
+   downloads the `fling.mcpb` of the CLI's own version and opens it, and Claude Desktop asks you
+   to confirm. That is the server's copy when the server runs the same release, otherwise the one
+   attached to the CLI's GitHub Release (the server's copy if that download fails). Running setup
+   again updates an older extension in place.
 
-On a terminal it asks before steps 2 and 3. With `--yes` it does them without asking.
+On a terminal it asks before installing the plugin and before step 3. With `--yes` it does them
+without asking. Refreshing an installed plugin needs no question.
+
+### Staying up to date
+
+Every Fling publishes the release it runs (`release` in `/.well-known/fling`). After a command, when
+the server it used runs a newer release than the CLI, the CLI prints one line on stderr:
+
+```
+▲ Fling 0.9.0 is out (this CLI is 0.8.0). Update: npm i -g @nearform/fling@latest && fling setup
+```
+
+It compares with the metadata the CLI already holds (stored at sign-in, and read again by setup and
+by commands that need a newer feature), so it never makes a request of its own. It says it at most
+once a day per server, remembering when in `update-check.json` in the config directory. It says
+nothing under `--json`, when stderr isn't a terminal, when `CI` is set, or when
+`FLING_NO_UPDATE_CHECK` is set (to anything). A server older than the CLI says nothing either. The
+MCP server tells Claude instead (see [Claude Code plugin and MCP](#claude-code-plugin-and-mcp)).
+
+### When something doesn't work
+
+`fling doctor` checks the setup and prints one line per check, `✔` ok, `▲` warning or `✖` problem,
+each warning and problem with its fix:
+
+- **CLI:** its version, Node.js against the versions it supports, the latest version on npm
+  (skipped when npm can't be reached), and whether `fling` on your PATH is this CLI.
+- **Config:** where it lives (`FLING_CONFIG_DIR`), whether the config file is private (mode 0600:
+  it holds your API keys), and whether `FLING_URL` or `FLING_API_KEY` is in effect (named, never
+  shown).
+- **Each Fling** you signed in to, the current one marked: whether its `/.well-known/fling`
+  answers, the release it runs against the CLI's, whether your API key is still accepted, and the
+  features it reports.
+- **Claude Code:** `claude` on your PATH, the Fling plugin (installed, enabled, its version against
+  the CLI's) and the `fling` marketplace.
+- **Claude Desktop:** whether the extension is installed, enabled, and its version.
+
+It only reads: it changes nothing, and each request has a short timeout. `--json` prints
+`{ ok, checks: [{ area, id, status, message, fix?, server? }] }`. The exit code is 1 when any check
+is a problem.
 
 To sign in only, use `fling login <url>` (the URL is remembered: later `fling login` needs none).
 There is no default server: until you log in, commands say to run `fling login <url>`.
@@ -382,7 +429,8 @@ another server (a remembered one brings its key; see [Several Flings](#several-f
 Environment: `FLING_API_KEY`, `FLING_URL`, `FLING_CONFIG_DIR`, `FLING_DEBUG`, `FLING_DOWNLOADS_DIR`
 (where the MCP server looks for files given by name first), `FLING_ADD_SERVER` (a Fling the MCP
 server adds to the remembered ones when it starts), `FLING_NO_WAIT=1` (after a deploy or a new share
-link, don't wait the few seconds it takes to reach every edge).
+link, don't wait the few seconds it takes to reach every edge), `FLING_NO_UPDATE_CHECK` (never say
+that a newer Fling release is out; see [Staying up to date](#staying-up-to-date)).
 
 ## Claude Code plugin and MCP
 
@@ -439,6 +487,8 @@ The MCP tools:
   Fling, including a new one, which becomes current only if none is.
 - `fling_servers`: lists the Flings on this computer (address, name, who is signed in, which is
   current), read when called. `{use: <server>}` makes one current, the same as `fling use`.
+- `fling_doctor`: the checks of `fling doctor`, read-only, as lines and data. Claude calls it when
+  something about Fling doesn't work (sign-in, tools missing, versions) and tells you the fixes.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
   `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
@@ -453,6 +503,11 @@ The MCP tools:
   `{ event, channel, value: on|off|default }`) when it has notifications.
 
 Results that give URLs (deploys, publishes, comments) end with the Fling they went to.
+
+**Updates.** When a Fling the MCP server knows runs a newer release than it, its instructions say
+so, and so does the first `fling_publish` or `fling_deploy` result of the session on that Fling.
+Claude then suggests the update command (`npm i -g @nearform/fling@latest && fling setup`, then
+restart Claude): inside Claude you never see the CLI's own update line.
 
 The MCP server never prompts:
 

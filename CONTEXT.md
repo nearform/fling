@@ -561,3 +561,12 @@ extension, plugin), `x.y.z` in semver, tagged `v<x.y.z>` on `main` and described
 cuts one; its tag publishes the CLI and the GitHub Release and deploys AWS
 (`.github/workflows/release-cli.yml`, then `deploy.yml`). A server publishes the release it runs as
 `release` in `/.well-known/fling` (`apps/api/src/instance.ts`, from the root `package.json`).
+
+**Update check** — the CLI comparing its own version with the **Release** of the Fling it talked
+to, from the metadata it already holds, and saying on stderr when a newer one is out (at most once
+a day per server; never under `--json`, off a terminal, in CI or with `FLING_NO_UPDATE_CHECK`). The
+local MCP server tells Claude instead. `apps/cli/src/update-check.ts`.
+
+**Doctor** — `fling doctor` and the local MCP tool `fling_doctor`: read-only checks of a machine's
+Fling setup (CLI, config, each Fling, Claude Code plugin, Claude Desktop extension), each warning
+and problem with its fix. `apps/cli/src/doctor.ts`.

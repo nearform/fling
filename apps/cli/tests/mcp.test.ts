@@ -6,9 +6,10 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { FetchLike } from '../src/api.ts'
 import { type ConfigStore, createConfigStore, serverToAdd } from '../src/config.ts'
-import { createMcpServer, type McpDeps } from '../src/mcp.ts'
+import { createMcpServer, type McpDeps, newestRelease } from '../src/mcp.ts'
 import { addServerOnStart, type KnownServer, knownServers } from '../src/mcp-servers.ts'
-import { NPX_COMMAND } from '../src/package-info.ts'
+import { NPX_COMMAND, VERSION } from '../src/package-info.ts'
+import { UPDATE_COMMAND } from '../src/update-check.ts'
 import {
   INSTANCE,
   instanceRoute,
@@ -1022,5 +1023,94 @@ describe('MCP server', () => {
     })
     expect(ok.isError).toBeFalsy()
     expect(m.calls.map(c => c.method)).toEqual(['DELETE'])
+  })
+})
+
+describe('local MCP server: a newer Fling release', () => {
+  /** A Fling at `release` that publishes `my-report` straight away. */
+  async function flingAt(release: string) {
+    const store = await loggedInStore()
+    const instance = { ...INSTANCE, release }
+    await store.putServer(SERVER, { instance })
+    const m = mockFetch({
+      'POST /api/sites/my-report/deploys': () =>
+        jsonResponse({ status: 'upload', versionId: '0123456789abcdef', uploads: [] }),
+      'POST /api/sites/my-report/deploys/0123456789abcdef/finalize': () =>
+        jsonResponse({
+          status: 'live',
+          versionId: '0123456789abcdef',
+          site: site({ name: 'my-report' }),
+        }),
+    })
+    const client = await connect(store, m.fetch, undefined, { servers: [known(instance)] })
+    const publish = () =>
+      client.callTool({
+        name: 'fling_publish',
+        arguments: { name: 'my-report', files: [{ path: 'index.html', content: '<h1>r</h1>' }] },
+      })
+    return { client, publish }
+  }
+
+  it('says so in the instructions and in the first publishing result of the session', async () => {
+    const { client, publish } = await flingAt('999.0.0')
+    const instructions = client.getInstructions() ?? ''
+    expect(instructions).toContain(`Fling 999.0.0 is out and this Fling MCP server is ${VERSION}.`)
+    expect(instructions).toContain(UPDATE_COMMAND)
+    const first = await publish()
+    expect(first.isError).toBeFalsy()
+    expect(text(first)).toContain('Fling 999.0.0 is out')
+    expect(text(first)).toContain(UPDATE_COMMAND)
+    // the data stays JSON after the summary
+    expect(dataOf(first)).toMatchObject({ name: 'my-report' })
+    const second = await publish()
+    expect(text(second)).not.toContain('is out')
+  })
+
+  it('says nothing when the Fling runs this release or an older one', async () => {
+    for (const release of [VERSION, '0.0.1']) {
+      const { client, publish } = await flingAt(release)
+      expect(client.getInstructions() ?? '').not.toContain('is out')
+      expect(text(await publish())).not.toContain('is out')
+    }
+  })
+
+  it('newestRelease picks the newest of the known Flings newer than this server', () => {
+    expect(
+      newestRelease([
+        known({ ...INSTANCE, release: '998.0.0' }),
+        known({ ...INSTANCE, release: '999.1.0' }, OTHER),
+        known({ ...INSTANCE, release: '0.0.1' }, 'https://c.test'),
+        known({ ...INSTANCE }, 'https://d.test'),
+      ])
+    ).toBe('999.1.0')
+    expect(newestRelease([known()])).toBeNull()
+  })
+})
+
+describe('local MCP server: fling_doctor', () => {
+  it('runs the checks read-only and answers with lines and data', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      ...instanceRoute,
+      'GET /api/me': () => jsonResponse({ email: 'ada@example.test', name: 'Ada' }),
+    })
+    const client = await connect(store, m.fetch, undefined, {
+      doctor: {
+        env: { PATH: '' },
+        runClaude: async () => ({ code: -1, stdout: '', stderr: '' }),
+        findClaudeDesktop: async () => null,
+        runProgram: async () => ({ code: 1, stdout: '' }),
+      },
+    })
+    const { tools } = await client.listTools()
+    expect(tools.find(t => t.name === 'fling_doctor')?.annotations?.readOnlyHint).toBe(true)
+    const r = await client.callTool({ name: 'fling_doctor', arguments: {} })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toMatch(/^✔ /)
+    expect(text(r)).toContain('signed in as ada@example.test')
+    expect(dataOf(r).checks.find((c: { id: string }) => c.id === 'server.signedIn').status).toBe(
+      'ok'
+    )
+    expect(m.calls.every(c => c.method === 'GET')).toBe(true)
   })
 })

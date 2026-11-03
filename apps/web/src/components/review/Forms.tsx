@@ -13,7 +13,7 @@ import {
   responseFields,
 } from '@fling/shared'
 import { ArrowRightIcon, CheckCircleIcon } from '@heroicons/react/24/outline'
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useInstance } from '../../hooks/instance'
 import { useCommentActions, useForms, useResponses } from '../../hooks/queries'
@@ -175,6 +175,8 @@ export function FormsPanel({
             path={path}
             heading={forms.length > 1}
             canCreate={canCreate}
+            // With one form on the page, saving can move straight on to the next page to answer.
+            {...(forms.length === 1 && next ? { onNext: () => onGo(next) } : {})}
             {...responsesTo(pageResponses, { formId: form.id, path, email })}
           />
         ))
@@ -189,6 +191,7 @@ function PageForm({
   path,
   heading,
   canCreate,
+  onNext,
   mine,
   others,
 }: {
@@ -197,11 +200,15 @@ function PageForm({
   path: string
   heading: boolean
   canCreate: boolean
+  /** go to the next page without a response, after "Save and next" */
+  onNext?: () => void
   mine: Comment | undefined
   others: Comment[]
 }) {
   const actions = useCommentActions(name)
   const [errors, setErrors] = useState<FieldError[]>([])
+  // Which submit button sent the form: the form library hands only the data to onSubmit.
+  const advance = useRef(false)
   const titleId = `form-${form.id}-title`
   const changed = mine?.updatedAt ?? mine?.createdAt
   return (
@@ -223,7 +230,10 @@ function PageForm({
             actions.respond.mutate(
               { path, response: { formId: form.id, data } },
               {
-                onSuccess: () => showToast(`Saved: ${form.title}`, 'success'),
+                onSuccess: () => {
+                  showToast(`Saved: ${form.title}`, 'success')
+                  if (advance.current) onNext?.()
+                },
                 onError: e => setErrors(e instanceof ApiError ? e.fieldErrors : []),
               }
             )
@@ -239,13 +249,31 @@ function PageForm({
                 'Not answered yet'
               )}
             </span>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm ms-auto"
-              disabled={actions.respond.isPending}
-            >
-              Save
-            </button>
+            <span className="ms-auto flex gap-1">
+              {onNext && (
+                <button
+                  type="submit"
+                  className="btn btn-ghost btn-sm"
+                  disabled={actions.respond.isPending}
+                  onClick={() => {
+                    advance.current = false
+                  }}
+                >
+                  Save
+                </button>
+              )}
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={actions.respond.isPending}
+                onClick={() => {
+                  advance.current = onNext !== undefined
+                }}
+              >
+                {onNext ? 'Save and next' : 'Save'}
+                {onNext && <ArrowRightIcon className="h-4 w-4" aria-hidden />}
+              </button>
+            </span>
           </div>
         </LazyResponseForm>
       ) : mine?.response ? (

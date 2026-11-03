@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.8.0 (2026-11-03)
+
 - **Forms.** A site can ship `fling.forms.json` with its deploy: forms (JSON Schemas) its reviewers
   answer on the review page, for labels, ratings, rubric scores or eval judgements. A page-kind
   form takes one answer per reviewer per page, in a tab named after the file's `title`, with each
@@ -28,6 +30,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 - **Forms come with comments.** The `forms` capability is on wherever comments are, with no new
   configuration: `COMMENTS=false` turns both off. Operators have nothing to do: the comment record
   gains optional response fields (v2), which need no migration.
+  Rolling back to 0.7.0 keeps every
+  comment readable; a response shows as its summary text.
 
 ## 0.7.0 (2026-11-01)
 

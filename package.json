@@ -1,6 +1,6 @@
 {
   "name": "fling",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "license": "MIT",
   "description": "Fling \u2014 throw a folder of static files at a Fling server and get a link back",

@@ -213,8 +213,9 @@ export interface ConfigSetting {
 }
 
 /**
- * OAuth redirect URIs any client (DCR or CIMD) may use. Exact URLs, plus the keyword `loopback`
- * for `http://localhost|127.0.0.1|[::1]:<any port>/<any path>` (Claude Code, MCP Inspector).
+ * OAuth redirect URIs any client (DCR or CIMD) may use. Exact URLs; a prefix ending in `*`, for a
+ * last path segment that names the user (oauth/clients.ts `prefixAllows`); and the keyword
+ * `loopback` for `http://localhost|127.0.0.1|[::1]:<any port>/<any path>`.
  */
 export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   'https://claude.ai/api/mcp/auth_callback',
@@ -224,6 +225,8 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   'https://chatgpt.com/connector_platform_oauth_redirect',
   // Cursor's web app and background agents (its desktop app and CLI use loopback).
   'https://www.cursor.com/agents/mcp/oauth/callback',
+  // The Gemini app's custom connectors: one redirect per user and server.
+  'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-*',
   // Desktop and command-line clients on this computer: Claude Code, Cursor, Gemini CLI, Codex,
   // VS Code, MCP Inspector.
   'loopback',

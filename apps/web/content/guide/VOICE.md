@@ -13,7 +13,7 @@ whoever runs the instance read their own parts.
 1. **What it is and why** — two or three sentences, before any heading. What the feature does for
    the reader, not how it is built.
 2. **The routes, one section each, in this order, only those that apply:**
-   - `## In Claude or ChatGPT` — what to ask, as example prompts in quotes. The assistant does the
+   - `## In your assistant` — what to ask (Claude, ChatGPT, Gemini…), as example prompts in quotes. The assistant does the
      rest through the connector, the Desktop extension or the Claude Code plugin.
    - `## On the command line` — the commands, each in a fenced `sh` block the reader can copy.
    - `## In the web app` — where to click: name the page and the button as they appear.

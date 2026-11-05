@@ -21,7 +21,7 @@ task lists, code blocks and the rest.
 - Links between Markdown files work as you wrote them: `[the spec](spec.md)` opens the formatted
   spec.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Write up the plan as Markdown and fling it as payments-plan"
 - "Fling my notes folder as team-notes"

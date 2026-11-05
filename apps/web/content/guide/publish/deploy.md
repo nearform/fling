@@ -13,7 +13,7 @@ name again to update it: the address stays the same, and earlier versions are ke
 You can fling a folder (usually a build's output, such as `dist`), a single HTML page, a zip of a
 site, or any other file, such as a PDF or an image, which gets a small page that shows it.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Fling this page as q3-report"
 - "Build the app and fling the dist folder as my-app"

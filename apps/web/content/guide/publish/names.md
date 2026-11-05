@@ -17,7 +17,7 @@ has it until they delete the site.
 - Up to {{fact:site-name-max}} characters, starting and ending with a letter or digit.
 - A few names are reserved, such as `api`, `www` and `fling`.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Is the name q3-report free?"
 - "What name would my dist folder get?"

@@ -17,7 +17,7 @@ Who can open a Path is the site's, so you set access once for the whole team. Pu
 never touches the site's own pages or any other Path. A Path is served at
 `{{instance:site:payments-plans}}/PAY-412/`.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Publish this plan to `payments-plans` as `PAY-412`."
 - "What Paths are on `payments-plans`?"

@@ -15,7 +15,7 @@ group, every site it is named on follows.
 Anyone signed in can see every group, see who is in it and use it on their own sites. Only the
 person who made a group can change it.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Which groups are there?"
 - "Make a group called `design` with ana@example.com and bob@example.com."

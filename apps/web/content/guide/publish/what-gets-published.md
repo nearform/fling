@@ -54,7 +54,7 @@ page's own title. It is added to the site only; your folder is not changed.
 A Markdown file can be the home page too: see [Markdown pages](/guide/publish/markdown).
 <!-- /requires -->
 
-- **In Claude or ChatGPT**, your assistant asks whether you want the listing or not.
+- **In your assistant**, it asks whether you want the listing or not.
 - **On the command line**, Fling asks: `[L]ist the HTML pages`, `[f]ling anyway` (the address shows
   a 404) or `[a]bort`. `--list-html` and `--no-list-html` decide up front; with `--yes` it makes
   the listing.

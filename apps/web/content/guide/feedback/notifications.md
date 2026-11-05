@@ -33,7 +33,7 @@ after an email about comments on a site, the next one for that site waits a litt
 a **Stop these emails** link that turns that kind of email off in one click.
 <!-- /requires -->
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Why am I getting emails about comments?"
 - "Stop emailing me when someone comments on my sites."

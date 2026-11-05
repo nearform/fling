@@ -20,7 +20,7 @@ You can use Fling from wherever you work. They all reach the same sites.
 
 | From | Good for | Set it up |
 |---|---|---|
-| Claude or ChatGPT | "Fling this page", without leaving the chat | [Connect your assistant](/guide/start/connect) |
+| Claude, ChatGPT or Gemini | "Fling this page", without leaving the chat | [Connect your assistant](/guide/start/connect) |
 | The command line | Build folders, scripts and coding agents | [The CLI](/guide/start/cli) |
 | The web app | Seeing your sites, sharing, versions, comments | [{{instance:origin}}]({{instance:origin}}) |
 

@@ -26,7 +26,7 @@ Only a site's owners can archive or delete it.
 Prefer archiving unless you need the name back or the files gone.
 <!-- /requires -->
 
-## In Claude or ChatGPT
+## In your assistant
 
 <!-- requires: archive -->
 - "Archive q3-report"

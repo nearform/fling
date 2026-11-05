@@ -24,7 +24,7 @@ can open the site but not comment.
 
 Everyone can delete their own comments. A site's owners can delete anyone's.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "What feedback is there on `q3-report`?"
 - "Fix what the comments on `q3-report` ask for, republish, and resolve those threads."

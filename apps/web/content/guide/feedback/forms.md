@@ -22,7 +22,7 @@ A form comes in one of two kinds:
 A form can also be **blind**: each reviewer sees only their own answers, and the site's owners see
 everyone's.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Set up a form on `interviews` so reviewers label each page pass or fail, with notes. Keep it
   blind."

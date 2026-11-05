@@ -11,16 +11,14 @@
 // links to other `.md` files reach their rendered pages too.
 
 import { Marked, type Token, type Tokens } from 'marked'
+import { isMarkdownPath, MARKDOWN_EXTENSION, markdownHomePages } from './markdown-path.ts'
 
 /** Publish renders at most this many Markdown files per version. */
 export const MAX_RENDERED_MARKDOWN = 200
 /** Publish renders only Markdown files up to this size, in bytes. */
 export const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024
 
-const MARKDOWN_EXTENSION = /\.(md|markdown)$/i
-
-/** Whether a site path is a Markdown file (`.md` or `.markdown`, any case). */
-export const isMarkdownPath = (path: string): boolean => MARKDOWN_EXTENSION.test(path)
+export { isMarkdownPath, markdownHomePages }
 
 /**
  * Where the rendered page for a Markdown file lives inside a version's prefix. Site paths never
@@ -70,9 +68,10 @@ const STYLE = `
 :root{color-scheme:light dark;--fg:light-dark(#1f2328,#e6edf3);--muted:light-dark(#59636e,#9198a1);--bg:light-dark(#fff,#0d1117);--line:light-dark(#d1d9e0,#3d444d);--code:light-dark(#f6f8fa,#151b23);--link:light-dark(#0969da,#4493f8)}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
-.fling-md-header{max-width:72ch;margin:0 auto;padding:.75rem 1.25rem;display:flex;gap:1rem;justify-content:space-between;font-size:.8125rem;color:var(--muted);border-bottom:1px solid var(--line)}
+.fling-md-header,main{max-width:64rem;margin:0 auto;padding-inline:clamp(1rem,4vw,2rem)}
+.fling-md-header{padding-block:.75rem;display:flex;gap:1rem;justify-content:space-between;font-size:.8125rem;color:var(--muted);border-bottom:1px solid var(--line)}
 .fling-md-header span{overflow-wrap:anywhere}
-main{max-width:72ch;margin:0 auto;padding:1.5rem 1.25rem 4rem;overflow-wrap:break-word}
+main{padding-block:1.5rem 4rem;overflow-wrap:break-word}
 a{color:var(--link)}
 h1,h2,h3,h4,h5,h6{line-height:1.25;margin:1.75em 0 .6em}
 h1:first-child,h2:first-child{margin-top:0}
@@ -132,41 +131,11 @@ export function renderMarkdownPage(
 <style>${STYLE}</style>
 </head>
 <body>
-<header class="fling-md-header"><span>${escapeHtml(opts.path)}</span><a href="?raw=1">View source</a></header>
+<header class="fling-md-header"><span>${escapeHtml(opts.path)}</span><a href="${escapeHtml(encodeURIComponent(name))}?raw=1">View source</a></header>
 <main>
 ${body}</main>
 </body>
 </html>
 `
   return { html, title: pageTitle }
-}
-
-const HOME_PAGE_NAMES = [/^index\.(md|markdown)$/i, /^readme\.(md|markdown)$/i]
-
-/**
- * For a version's files (site-relative, no leading slash), the folders that have no `index.html`
- * but have Markdown to stand in for one, mapped to that Markdown file's path. A folder is one that
- * directly holds a file; the root is `''`, others have no trailing slash (`docs/guide`). The
- * stand-in is `index.md`, else `README.md` (either name in any case, `.md` or `.markdown`), else
- * the folder's only Markdown file.
- */
-export function markdownHomePages(files: readonly string[]): Map<string, string> {
-  const folders = new Map<string, string[]>()
-  for (const path of files) {
-    const slash = path.lastIndexOf('/')
-    const folder = slash === -1 ? '' : path.slice(0, slash)
-    const names = folders.get(folder) ?? []
-    names.push(path.slice(slash + 1))
-    folders.set(folder, names)
-  }
-  const pages = new Map<string, string>()
-  for (const [folder, names] of folders) {
-    if (names.includes('index.html')) continue
-    const markdown = names.filter(isMarkdownPath).sort()
-    const chosen =
-      HOME_PAGE_NAMES.map(pattern => markdown.find(name => pattern.test(name))).find(Boolean) ??
-      (markdown.length === 1 ? markdown[0] : undefined)
-    if (chosen) pages.set(folder, folder ? `${folder}/${chosen}` : chosen)
-  }
-  return pages
 }

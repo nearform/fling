@@ -27,7 +27,9 @@ describe('renderMarkdownPage', () => {
     expect(html).toContain('<meta charset="utf-8">')
     expect(html).toContain('<meta name="viewport"')
     expect(html).toContain('<meta name="robots" content="noindex">')
-    expect(html).toContain('<a href="?raw=1">View source</a>')
+    // By file name, so it works on the folder's home page (`/docs/`) as on the file's own URL.
+    expect(html).toContain('<a href="plan.md?raw=1">View source</a>')
+    expect(render('# Hi', 'a b&c.md').html).toContain('<a href="a%20b%26c.md?raw=1">')
     expect(html).toContain('docs/plan.md')
     expect(html).toContain('color-scheme:light dark')
     expect(html).not.toMatch(/<script|<link|https?:/)

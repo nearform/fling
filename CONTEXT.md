@@ -8,37 +8,68 @@ the site and listed to admins alone.
 
 **Version** — one immutable set of files, identified by a hash of its manifest (path + sha256 of
 every file). `pending` until it passes publication, then `complete`. It records who published it
-(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`) and, for a
-layered publish (a path publish, or a publish on a pulled version), its **base** (`base`) and, for
-a path publish, the folder it replaced (`path`). Rollback only ever points a site at a complete
-version.
+(`publishedBy`, the email of whoever made it live; `apps/api/src/publication.ts`), for a publish
+on a pulled version its **base** (`base`), and for a **Path**'s version the Path's folder (`path`).
+Rollback only ever points a site (or a Path) at a complete version. **Retention** may delete old
+ones.
 
-**Path publish** — a deploy that replaces one folder of a site (`DeployRequest.path`, e.g.
-`30-10-26`, spelled as in `packages/shared/src/publish-path.ts`) and keeps the rest. The edge serves
-every version whole, so the server makes a whole new version: the files sent (each under the
-folder, else 400 `outside_path`) plus the current version's files outside it, copied forward with
-`Blobs.copy`. That current version is the **base**; the new version goes live only while the base
-is still current (409 `base_changed` otherwise: clients publish again on top of the new one). At
-most 1,000 files are carried forward (`MAX_KEPT_FILES`, 413 `too_large`), and only the files sent
-are scanned: the rest are copies of a version already scanned. On a site with no current version
-it is a plain publish of the folder. Rolling back to the base removes it. `fling deploy <dir>
---name <site> --path <folder>`, `path` on `fling_publish` and `fling_upload_begin`, `sitePath` on
-the local `fling_deploy`, all behind the `pathPublish` capability; publishers may path-publish
-like any other deploy.
+**Path** — a top-level folder of a site with its own versions, rollback, owners and publishers,
+served at `/<folder>/` (`PathRecord` at `SITE#<siteId>/PATH#<folder>`; `apps/api/src/paths.ts`).
+Who can open it is the site's. Its versions are stored like a site's, under its own storage id
+(`sites/<pathId>/<versionId>/…`, the folder taken off), so publishing one never touches the site's
+version or another Path, and teammates publishing different Paths never collide. The edge finds it
+by `path:<siteId>/<folder>` in the route table (the site's value says `p` when it has live ones)
+and serves it in place of the site's own copy of that folder. Policy asks of it as the site
+actions on `pathPolicySite`: its owners and the site's change it, its publishers publish to it; a
+site publisher making a new Path owns it (403 `path_not_yours` to publish someone else's). At most
+`MAX_PATHS_PER_SITE`, folders of at most `MAX_PATH_FOLDER_LENGTH` characters. `/api/sites/<name>/paths`,
+`fling paths`, `fling_paths`; the `paths` capability.
 
-**Base** — the version a layered publish builds on (`DeployRequest.base`, or the current version
-for a path publish; `layerFor` in `apps/api/src/publication.ts`). The new version is the files sent
+**Path publish** — a deploy to one top-level folder of a site (`DeployRequest.path`, e.g.
+`PAY-412`, spelled as in `packages/shared/src/publish-path.ts`): the files sent (each under the
+folder, else 400 `outside_path`) become the **Path**'s new version, making the Path on first use.
+A nested folder (`reports/2026`) is not a Path and is refused. `fling deploy <dir> --name <site>
+--path <folder>`, `path` on `fling_publish` and `fling_upload_begin`, `sitePath` on the local
+`fling_deploy`, behind the `pathPublish` capability.
+
+**Paths block** — the marker in a site's root index.html (`<!-- fling:paths -->`, or a
+`<!-- fling:paths -->`…`<!-- /fling:paths -->` template repeated per Path) that Fling fills in with
+the site's live Paths, with search, sort and "2 hours ago" dates for the last week
+(`packages/shared/src/paths-index.ts`). The API renders
+the page whenever the site or a Path changes (`refreshHome` in `apps/api/src/paths.ts`) to
+`sites/<id>/_rendered/<hash>.html`, the listing's data beside it as `.json`; the route value names
+the hash (`i`), and the edge serves them for `/` and `/_fling-paths.json`. A site with Paths and no
+index.html gets the default listing. Starter pages: `packages/shared/src/paths-templates.ts`
+(`fling paths init`, `fling_paths_template`; `fling paths check`, `fling_paths_check`).
+
+**Publish hint** — something a publish result suggests the publisher do (`PublishHintSchema`):
+`paths_index_missing` (several Paths, a home page that doesn't list them) and `paths_block_hidden`
+(the site's own files under a Path's folder).
+
+**Markdown rendering** — every `.md` file of a version is rendered at go-live as a GitHub-flavoured
+page at `.rendered/<path>.html` beside its files (`apps/api/src/rendering.ts`,
+`packages/shared/src/markdown.ts`), and the edge serves it for the file unless the request says
+`?raw=1` (the route's `m`). A folder without an index.html has its `index.md`, else `README.md`,
+else its only Markdown file, as its home page. The `markdown` capability.
+
+**Retention** — how many complete versions of each site and Path are kept besides the current one
+(`VERSION_RETENTION`, 0 = all; `apps/api/src/maintenance.ts`, run hourly). Older ones are marked
+`pruning`, then at least an hour later claimed `sweeping` and deleted, files and records; one
+published again or rolled back to meanwhile is kept.
+
+**Base** — the version a publish after a pull builds on (`DeployRequest.base`, of the site or,
+with `path`, of a Path; `layerOn` in `apps/api/src/publication.ts`). The new version is the files sent
 plus the base's other files, copied forward with `Blobs.copy`; a sent file the base already has
 byte for byte is kept rather than uploaded. A complete publish on a base (the whole folder) leaves
 out the base's files the client did not send; a partial one (`partial`) keeps them, less those
 named in `remove`. It goes live only while the base is still current: otherwise 409
-`base_changed`, and the client pulls again rather than overwrite someone else's work. A base
-cannot be combined with a path.
+`base_changed`, and the client pulls again rather than overwrite someone else's work. This is
+the only partial publish.
 
 **Pull** — downloading a version's files to change them and publish again on it as the base
 (`apps/api/src/pull.ts`, `GET /api/sites/:name/pull`; policy `site.pull`). Anyone signed in who can
 see a site may pull its current version while it is live; another version, or an archived site's,
-also needs `version.read`. The API never streams the bytes: it answers with each file's path,
+also needs `version.read`. With `path`, it pulls that Path. The API never streams the bytes: it answers with each file's path,
 SHA-256 and a short-lived signed GET (`Blobs.presignGet`). `fling pull <name> [dir]` and the local
 `fling_pull` download them; `fling_read_files` (both MCP servers; `packages/shared/src/read-files.ts`)
 returns them inline, a page at a time, for agents that cannot download. `Site.canPull` tells the
@@ -100,8 +131,8 @@ each copy asked of policy. Deleting a group takes it out of every site's owners 
   bytes named in the manifest (sha256 signed into the URL) and expire quickly.
 - **Publishing** — staged bytes are read back and scanned for secrets before the version goes
   live; bytes the server holds (remote MCP) are scanned before they are written. There is no way
-  to skip the scan. A layered publish (path publish, or on a pulled **base**) scans the files it
-  sends and copies the rest from its base.
+  to skip the scan. A publish on a pulled **base** scans the files it sends and copies the rest
+  from its base.
 
 **Never published** — dotfiles, gitignored files, secret files (keys, certificates, credentials)
 and files containing secrets. The CLI and local MCP check first for early, specific messages;
@@ -419,7 +450,7 @@ of the manifest, so it is never a site file, checks it against the folder's page
 (at most 40 characters, such as "Labels" or "Evals") names the feature wherever the site's forms
 appear: the review page's tab, the responses page and the export's file name, so the UI never
 says a generic "Forms". It holds up to 20 forms in at most 64 KB. Each version has its own, a blob
-beside its manifest (`formsKey`, `apps/api/src/forms.ts`); a layered publish keeps its base's
+beside its manifest (`formsKey`, `apps/api/src/forms.ts`); a publish on a base keeps its base's
 unless the deploy sends one (`null` removes it), and a pull returns it. `fling forms <name>` and
 `fling_forms` show the live version's. The `forms` capability, on with comments.
 

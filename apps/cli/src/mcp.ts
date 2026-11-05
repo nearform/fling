@@ -40,6 +40,9 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describePathDetail,
+  describePaths,
+  describePathsCheck,
   describePublishHints,
   describeReadFiles,
   describeResponses,
@@ -77,6 +80,8 @@ import {
   reviewUrl,
   shareForFeedback,
 } from '@fling/shared'
+import { checkPathsIndex } from '@fling/shared/paths-index'
+import { pathsTemplate } from '@fling/shared/paths-templates'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
@@ -159,18 +164,23 @@ import {
   deleteSite,
   getGroup,
   getNotifications,
+  getPath,
   getSite,
   groupsEnabled,
   listComments,
   listGroups,
+  listPaths,
   listShared,
   listSites,
   notificationsEnabled,
   pathPublishEnabled,
+  pathsEnabled,
+  pathVersionFiles,
   pullEnabled,
   renameGroup,
   resolveComment,
   rollback,
+  rollbackPath,
   setAccess,
   setAudience,
   setNotifications,
@@ -425,6 +435,30 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
   }
 
+  /**
+   * A Path's folder, normalised, on a Fling with Paths (its metadata fetched again when the stored
+   * copy predates them).
+   */
+  async function pathOn(target: Target, raw: string) {
+    const folder = normalizePathFolder(raw)
+    if (folder === null) {
+      throw new CliError(
+        `"${raw}" is not a Path: give one top-level folder of the site, like "PAY-412"`
+      )
+    }
+    await requirePaths(target)
+    return folder
+  }
+
+  /** Refuse a Paths call to a Fling without them; returns its metadata. */
+  async function requirePaths(target: Target) {
+    const instance = await loadInstanceWith(store, target.config, fetchImpl, 'paths')
+    if (instance && !pathsEnabled(instance)) {
+      throw new CliError(`${instance.name} (${serverLabel(target.url)}) has no Paths`)
+    }
+    return instance
+  }
+
   /** The Fling a pulled folder came from (its site link), to deploy it there; else undefined. */
   async function linkedServer(path: string): Promise<string | undefined> {
     try {
@@ -516,7 +550,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     let generatedIndex = false
     // A pulled site, or part of one, is published as it is: no listing page is added to it.
     const asItIs = link !== null || opts.base !== undefined
-    if (!asItIs && !hasRootIndex(local)) {
+    if (!asItIs && !hasRootIndex(local, (await t.instance())?.capabilities.markdown === true)) {
       const pages = htmlPages(local).map(f => f.path)
       if (pages.length > 0 && opts.listHtml === undefined) {
         const shown = pages.slice(0, 20)
@@ -554,6 +588,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         : await loadInstanceWith(store, t.config, fetchImpl, 'forms'),
       bin: 'fling',
       ...(opts.forms === undefined ? {} : { inline: opts.forms }),
+      ...(shownFolder === undefined ? {} : { path: shownFolder }),
     })
     const result = await deploy(
       { client: t.client, fetch: fetchImpl },
@@ -623,14 +658,16 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     const review =
       instance && commentsEnabled(instance) ? reviewUrl(instance.appOrigin, result.name) : undefined
     // The version's forms: the ones sent, or (sending none on a layered deploy) the site's.
+    // A Path has none of its own, so its deploy says nothing about forms.
+    const onPath = shownFolder !== undefined
     let formsSummary: FormsSummary | null = forms.check?.summary ?? null
-    if (!formsSummary && forms.send === undefined && formsEnabled(instance)) {
+    if (!formsSummary && !onPath && forms.send === undefined && formsEnabled(instance)) {
       const live = await getForms(t.client, result.name).catch(() => null)
       if (live?.config) formsSummary = checkFormsConfig(live.config).summary
     }
     const responsesPage =
       formsSummary && instance ? responsesPageUrl(instance.appOrigin, result.name) : undefined
-    const formsHint = formsEnabled(instance) && !formsSummary ? FORMS_HINT : undefined
+    const formsHint = formsEnabled(instance) && !formsSummary && !onPath ? FORMS_HINT : undefined
     const formsText =
       formsSummary && responsesPage ? `\n${describeFormsSummary(formsSummary, responsesPage)}` : ''
     const listing = generatedIndex ? ' — with a generated index.html listing the HTML pages' : ''
@@ -779,7 +816,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             '`sitePath` needs `name`: the site to publish into. Ask the user which site, then call fling_deploy again'
           )
         }
-        const prepared = await prepareInput(located.path)
+        const prepared = await prepareInput(located.path, {
+          markdown: (await t.instance())?.capabilities.markdown === true,
+        })
         try {
           // A pulled folder builds on its pull, unless the call names another site, path or Fling.
           const found = prepared.kind === 'folder' ? await readSiteLink(prepared.dir) : null
@@ -1305,6 +1344,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
 
   server.registerTool(t.info.name, serverTool(t.info), args =>
     run(t.info.name, args.server, async target => {
+      if (args.path !== undefined) {
+        const path = await getPath(target.client, args.name, await pathOn(target, args.path))
+        return { summary: describePathDetail(args.name, path), data: { name: args.name, ...path } }
+      }
       const site = await getSite(target.client, args.name)
       const access = site.audience ? `\n${describeAudience(site, await membersOn(target))}` : ''
       const current = site.versions.find(v => v.id === site.currentVersionId)
@@ -1317,8 +1360,19 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   )
 
   server.registerTool(t.files.name, serverTool(t.files), args =>
-    run(t.files.name, args.server, async ({ client }) => {
-      const result = await versionFiles(client, args.name, args.versionId)
+    run(t.files.name, args.server, async target => {
+      if (args.path !== undefined) {
+        const folder = await pathOn(target, args.path)
+        const result = await pathVersionFiles(target.client, args.name, folder, args.versionId)
+        return {
+          summary: describeVersionFiles(`${args.name} /${folder}/`, result, {
+            current: result.current,
+            url: result.url,
+          }),
+          data: result,
+        }
+      }
+      const result = await versionFiles(target.client, args.name, args.versionId)
       return {
         summary: describeVersionFiles(result.name, result, {
           current: result.current,
@@ -1537,13 +1591,77 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   )
 
   server.registerTool(t.rollback.name, serverTool(t.rollback), args =>
-    run(t.rollback.name, args.server, async ({ client }) => {
-      const site = await rollback(client, args.name, args.versionId)
+    run(t.rollback.name, args.server, async target => {
+      if (args.path !== undefined) {
+        const folder = await pathOn(target, args.path)
+        const path = await rollbackPath(target.client, args.name, folder, args.versionId)
+        return {
+          summary: `/${folder}/ of ${args.name} now serves version ${path.currentVersionId}: ${path.url} (the rest of the site untouched)`,
+          data: { name: args.name, ...path },
+        }
+      }
+      const site = await rollback(target.client, args.name, args.versionId)
       return {
         summary: `${site.name} now serves version ${site.currentVersionId}: ${site.url}`,
         data: site,
       }
     })
+  )
+
+  // Paths: the list is offered when a Fling known at start has them, and each call checks the
+  // Fling it goes to; the template and the check are local, no Fling asked.
+  if (servers.some(s => pathsEnabled(s.instance))) {
+    server.registerTool(t.paths.name, serverTool(t.paths), args =>
+      run(t.paths.name, args.server, async target => {
+        const instance = await requirePaths(target)
+        const paths = await listPaths(target.client, args.name)
+        return {
+          summary: `${describePaths(args.name, paths)}${onFling(target.url, instance)}`,
+          data: { name: args.name, paths },
+        }
+      })
+    )
+  }
+
+  server.registerTool(
+    t.pathsTemplate.name,
+    {
+      title: t.pathsTemplate.title,
+      description: `${t.pathsTemplate.description} To deploy a folder with it, save it as the folder's index.html.`,
+      inputSchema: t.pathsTemplate.inputSchema,
+      annotations: t.pathsTemplate.annotations,
+    },
+    async args => {
+      try {
+        const html = pathsTemplate(args.template, { title: args.title })
+        return textResult(
+          `A starter "${args.template}" home page with its Paths block in place. Adapt it to what the user wants ` +
+            "while keeping the block, check it with fling_paths_check, then publish it as the site's root " +
+            'index.html (without `path`), or save it as index.html at the top of a folder to deploy.\n\n' +
+            html
+        )
+      } catch (error) {
+        return failure(error)
+      }
+    }
+  )
+
+  server.registerTool(
+    t.pathsCheck.name,
+    {
+      title: t.pathsCheck.title,
+      description: t.pathsCheck.description,
+      inputSchema: t.pathsCheck.inputSchema,
+      annotations: t.pathsCheck.annotations,
+    },
+    async args => {
+      try {
+        const check = checkPathsIndex(args.html)
+        return textResult(`${describePathsCheck(check)}\n\n${JSON.stringify(check, null, 2)}`)
+      } catch (error) {
+        return failure(error)
+      }
+    }
   )
 
   // Comments: offered when a Fling known at start has them; each call checks the Fling it goes to.

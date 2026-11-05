@@ -1,6 +1,7 @@
 /**
- * The Sites page's search box. `/` focuses it from anywhere on the page (unless you're already
- * typing somewhere); Escape clears it, and a second Escape on an empty box leaves it.
+ * The Sites page's search box, and the site page's for its Paths (`placeholder`, `label`). `/`
+ * focuses it from anywhere on the page (unless you're already typing somewhere); Escape clears
+ * it, and a second Escape on an empty box leaves it.
  */
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import { useEffect, useRef } from 'react'
@@ -19,10 +20,15 @@ export function SiteSearch({
   value,
   onChange,
   className = '',
+  placeholder = 'Search sites…',
+  label = 'Search sites by name, URL or share link',
 }: {
   value: string
   onChange: (value: string) => void
   className?: string
+  placeholder?: string
+  /** the input's accessible name */
+  label?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -45,8 +51,8 @@ export function SiteSearch({
         ref={inputRef}
         type="search"
         className="grow [&::-webkit-search-cancel-button]:hidden"
-        placeholder="Search sites…"
-        aria-label="Search sites by name, URL or share link"
+        placeholder={placeholder}
+        aria-label={label}
         aria-keyshortcuts="/"
         autoComplete="off"
         spellCheck={false}

@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
+import { type MaintainResult, maintain } from '@fling/api/maintenance'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
 import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
 import { sweepRevocations } from '@fling/api/revocations'
@@ -101,6 +102,13 @@ const isFlingEvent = (event: unknown, name: string) =>
 
 const isNotify = (event: unknown): event is NotifyEvent => isFlingEvent(event, 'notify')
 
+/** The scheduler's hourly tick: retention and the tidying of rendered pages (maintenance.ts). */
+export interface MaintainEvent {
+  fling: 'maintain'
+}
+
+const isMaintain = (event: unknown): event is MaintainEvent => isFlingEvent(event, 'maintain')
+
 /** Leave this much of the invocation when draining. */
 const NOTIFY_MARGIN_MS = 5_000
 
@@ -137,7 +145,7 @@ let ready: ReturnType<typeof init> | undefined
 let edgeKeySynced: Promise<void> | undefined
 
 export const handler = async (
-  event: LambdaEvent | MigrateEvent | NotifyEvent | LiveEvent,
+  event: LambdaEvent | MigrateEvent | NotifyEvent | MaintainEvent | LiveEvent,
   context: LambdaContext
 ) => {
   if (isMigrate(event)) return migrate(event, context)
@@ -165,6 +173,13 @@ export const handler = async (
           JSON.stringify({ level: 'warn', msg: 'revocation sweep failed', err: String(err) })
         )
       )
+    return result
+  }
+  if (isMaintain(event)) {
+    const result: MaintainResult = await maintain(deps, {
+      deadline: Date.now() + Math.max(0, context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS),
+    })
+    console.log(JSON.stringify({ level: 'info', msg: 'maintenance', ...result }))
     return result
   }
   if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }

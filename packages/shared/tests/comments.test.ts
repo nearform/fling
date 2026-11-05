@@ -29,6 +29,19 @@ describe('normalizeCommentPath', () => {
       expect({ input, path: normalizeCommentPath(input) }).toEqual({ input, path })
   })
 
+  it('keeps a Markdown file’s source view (?raw=1) as a page of its own, and no other query', () => {
+    const cases: [string, string][] = [
+      ['/plan.md?raw=1', '/plan.md?raw=1'],
+      ['/docs/README.markdown?x=2&raw=1#top', '/docs/README.markdown?raw=1'],
+      ['https://s.example/plan.md?raw=1', '/plan.md?raw=1'],
+      ['/plan.md?raw=0', '/plan.md'],
+      ['/page.html?raw=1', '/page.html'],
+      ['/docs/?raw=1', '/docs/'],
+    ]
+    for (const [input, path] of cases)
+      expect({ input, path: normalizeCommentPath(input) }).toEqual({ input, path })
+  })
+
   it('refuses what is not a page path', () => {
     for (const input of ['/a b', '/../x', '/a/./b', `/${'a'.repeat(1024)}`]) {
       expect(normalizeCommentPath(input)).toBeNull()

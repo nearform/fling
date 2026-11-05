@@ -14,10 +14,12 @@
 // order), `sort=folder-desc`, `nocontrols`, `nostyle`. A template opener without its closer is a
 // bare marker. Placeholders in a template item: {{href}} {{folder}} {{title}} {{updated}} {{date}}
 // {{version}}, all HTML-escaped; {{title}} falls back to the folder when the Path has no title.
+// A row's `<time datetime="{{updated}}">{{date}}</time>` reads as how long ago it was, up to a
+// week, once the script runs: the page is rendered once, so only the viewer's clock can say.
 //
 // The listing is complete HTML without script. The controls' inline script is progressive
-// enhancement, and it is built from `matchesQuery` and `compareRows` themselves (their source
-// text), so the tests of those functions cover what ships. That is why both are self-contained:
+// enhancement, and it is built from `matchesQuery`, `compareRows` and `relativeTime` themselves
+// (their source text), so the tests of those functions cover what ships. That is why they are self-contained:
 // no references outside their own bodies and no nested named functions or arrow constants.
 // Pure: no Node built-ins, no dependencies, never throws on any HTML.
 
@@ -172,6 +174,24 @@ export function humanDate(iso: string): string {
   return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
 }
 
+/**
+ * How long ago `iso` was, as the listing's script shows it when the page is viewed: `just now`,
+ * `5 minutes ago`, `3 hours ago`, `yesterday`, `4 days ago`; '' from a week on (and for an
+ * unreadable date), where the rendered date stays. Self-contained: the script embeds it as text.
+ */
+export function relativeTime(iso: string, now: number): string {
+  const t = Date.parse(iso)
+  if (!Number.isFinite(t)) return ''
+  const minutes = Math.floor((now - t) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return days === 1 ? 'yesterday' : `${days} days ago`
+  return ''
+}
+
 function clean(paths: readonly PathListing[]): PathListing[] {
   if (!Array.isArray(paths)) return []
   return paths
@@ -257,12 +277,16 @@ function controls(sort: PathsSort, total: number): string {
 const HIDE_RULE = '[data-fling-path][hidden]{display:none!important}'
 
 const LOOK = [
-  '.fling-paths-controls{display:flex;flex-wrap:wrap;align-items:center;gap:var(--fling-paths-gap,.75rem);margin:0 0 var(--fling-paths-gap,.75rem);font:inherit;color:inherit}',
+  '.fling-paths-controls{display:flex;flex-wrap:wrap;align-items:stretch;gap:var(--fling-paths-gap,.75rem);margin:0 0 var(--fling-paths-gap,.75rem);font:inherit;color:inherit}',
   '.fling-paths-controls label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}',
-  '.fling-paths-controls input,.fling-paths-controls select{font:inherit;color:inherit;background:transparent;color-scheme:inherit;accent-color:var(--fling-paths-accent,LinkText);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:var(--fling-paths-radius,.5rem);padding:.4rem .6rem}',
+  '.fling-paths-controls input,.fling-paths-controls select{font:inherit;line-height:1.25;color:inherit;background-color:transparent;color-scheme:inherit;accent-color:var(--fling-paths-accent,LinkText);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:var(--fling-paths-radius,.5rem);padding:.45rem .65rem;margin:0}',
+  // The platform's own select keeps its height and arrow whatever the padding: draw both, the
+  // arrow in the text's colour so it follows the page.
+  '.fling-paths-controls select{appearance:none;cursor:pointer;padding-inline-end:2rem;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-size:.3rem .3rem;background-position:right 1rem center,right .7rem center;background-repeat:no-repeat}',
+  '.fling-paths-controls select option{color:CanvasText;background:Canvas}',
   '.fling-paths-controls input{flex:1 1 14rem;min-inline-size:0}',
   '.fling-paths-controls :focus-visible{outline:2px solid var(--fling-paths-accent,LinkText);outline-offset:1px}',
-  '.fling-paths-count{opacity:.7;font-size:.9em;font-variant-numeric:tabular-nums}',
+  '.fling-paths-count{align-self:center;opacity:.7;font-size:.9em;font-variant-numeric:tabular-nums}',
   '.fling-paths{list-style:none;margin:0;padding:0;display:grid;gap:calc(var(--fling-paths-gap,.75rem)/2)}',
   '.fling-paths li{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.25rem var(--fling-paths-gap,.75rem);padding:.6rem .8rem;border:1px solid color-mix(in srgb,currentColor 15%,transparent);border-radius:var(--fling-paths-radius,.5rem)}',
   '.fling-paths a{color:var(--fling-paths-accent,LinkText);text-decoration:none;font-weight:600}',
@@ -275,11 +299,26 @@ const LOOK = [
 export const PATHS_SCRIPT = `(function () {
   var matchesQuery = (${matchesQuery.toString()});
   var compareRows = (${compareRows.toString()});
+  var relativeTime = (${relativeTime.toString()});
+  // Dates within the last week read as how long ago they were; the rendered date stays as the
+  // tooltip, and as the text from a week on.
+  function ages() {
+    var now = Date.now();
+    document.querySelectorAll('[data-fling-path] time[datetime]').forEach(function (el) {
+      if (!el.hasAttribute('data-fling-date')) el.setAttribute('data-fling-date', el.textContent);
+      var fixed = el.getAttribute('data-fling-date');
+      var ago = relativeTime(el.getAttribute('datetime'), now);
+      el.textContent = ago || fixed;
+      if (ago && fixed) el.title = fixed; else el.removeAttribute('title');
+    });
+  }
   function start() {
     if (window.__flingPaths) return;
     var box = document.querySelector('[data-fling-paths-controls]');
     if (!box) return;
     window.__flingPaths = true;
+    ages();
+    setInterval(ages, 60000);
     var input = box.querySelector('input');
     var select = box.querySelector('select');
     var count = box.querySelector('[data-fling-paths-count]');

@@ -84,6 +84,13 @@ only from `mail.from`), sets `MAIL_DRIVER=ses`, `MAIL_FROM`, `MAIL_FROM_NAME`, `
 `MAIL_*` and `SES_*` come only from `mail`: the module refuses them in `environment` and
 `instance`, and the build refuses them in `INSTANCE`.
 
+Every instance also gets an hourly EventBridge Scheduler schedule
+([`maintenance.tf`](infra/maintenance.tf); `<namespace>-<env>-<name>-maintain`, `rate(1 hour)`)
+that invokes the function with `{"fling":"maintain"}` through its own role. It deletes what
+nothing serves any more: versions past `VERSION_RETENTION`, deploys staged and never finalized
+for a day, and replaced rendered home pages of sites with Paths
+([`maintenance.ts`](../../apps/api/src/maintenance.ts)).
+
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
 provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
 resources with the providers' `default_tags`.
@@ -188,6 +195,7 @@ Values reach the function two ways, and the function's own environment wins:
 | `SES_CONFIGURATION_SET` | no (the identity's default) | AWS: the SES configuration set each send names. |
 | `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. See [Outside invitations](#outside-invitations). |
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
+| `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, the hourly maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |

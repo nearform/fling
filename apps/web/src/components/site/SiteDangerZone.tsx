@@ -1,7 +1,7 @@
 /**
  * Taking a site away: archive (offline, files and versions kept), unarchive, and delete for good,
- * which needs the name typed. After a delete the page has nothing left to show, so it goes back
- * to the list it came from (`home`).
+ * which needs the name typed (`TypedDeleteModal`, which a Path's danger zone uses too). After a
+ * delete the page has nothing left to show, so it goes back to the list it came from (`home`).
  */
 import type { Site } from '@fling/shared'
 import {
@@ -9,7 +9,7 @@ import {
   ArchiveBoxXMarkIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSiteActions } from '../../hooks/queries'
 import { ConfirmModal } from '../ConfirmModal'
@@ -87,15 +87,40 @@ export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string
   )
 }
 
-/** Delete for good: the name must be typed to confirm. */
-function DeleteSiteModal({
+/** Delete a site for good: its name must be typed to confirm. */
+function DeleteSiteModal(props: {
+  name: string
+  open: boolean
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <TypedDeleteModal
+      {...props}
+      title={`Delete ${props.name}?`}
+      label="Site name"
+      message="This removes the site, every version and its share link. The URL stops working and this cannot be undone. To keep the files, archive it instead."
+    />
+  )
+}
+
+/** Delete for good, a site or one of its Paths: `name` must be typed to confirm. */
+export function TypedDeleteModal({
   name,
+  title,
+  message,
+  label,
   open,
   busy,
   onCancel,
   onConfirm,
 }: {
   name: string
+  title: string
+  message: string
+  /** the input's accessible name */
+  label: string
   open: boolean
   busy: boolean
   onCancel: () => void
@@ -103,6 +128,7 @@ function DeleteSiteModal({
 }) {
   const [typed, setTyped] = useState('')
   const matches = typed.trim() === name
+  const formId = `delete-${useId()}`
   const cancel = () => {
     setTyped('')
     onCancel()
@@ -112,7 +138,7 @@ function DeleteSiteModal({
     <Modal
       open={open}
       onClose={cancel}
-      title={`Delete ${name}?`}
+      title={title}
       closeButton={false}
       actions={
         <>
@@ -121,7 +147,7 @@ function DeleteSiteModal({
           </button>
           <button
             type="submit"
-            form={`delete-${name}`}
+            form={formId}
             className="btn btn-sm btn-error"
             disabled={!matches || busy}
           >
@@ -131,17 +157,14 @@ function DeleteSiteModal({
       }
     >
       <form
-        id={`delete-${name}`}
+        id={formId}
         className="space-y-3"
         onSubmit={e => {
           e.preventDefault()
           if (matches) onConfirm()
         }}
       >
-        <p>
-          This removes the site, every version and its share link. The URL stops working and this
-          cannot be undone. To keep the files, archive it instead.
-        </p>
+        <p>{message}</p>
         <label className="block space-y-1.5">
           <span className="text-sm">
             Type <code className="font-semibold text-base-content">{name}</code> to confirm
@@ -152,7 +175,7 @@ function DeleteSiteModal({
             onChange={e => setTyped(e.target.value)}
             autoComplete="off"
             spellCheck={false}
-            aria-label="Site name"
+            aria-label={label}
           />
         </label>
       </form>

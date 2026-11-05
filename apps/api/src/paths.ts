@@ -39,6 +39,7 @@ import {
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
 import { manifestKey } from './blobs/types.ts'
 import { conflict, notFound } from './lib/errors.ts'
+import { reviveVersion } from './maintenance.ts'
 import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
 import {
   actorOn,
@@ -53,6 +54,9 @@ import {
 import type { PathRecord, SiteRecord, SiteRef, User } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
+
+/** How many replaced home pages a site remembers for maintenance to delete (`homeOld`). */
+const MAX_HOME_OLD = 50
 
 /** Where a Path's versions are kept: its own partition, under the site's creator for the old keys. */
 export const pathRef = (
@@ -137,6 +141,10 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
   if ((site.paths === true) === hasPaths && site.home === home) return
   if (hasPaths) site.paths = true
   else delete site.paths
+  if (site.home && site.home !== home) {
+    const at = deps.clock.now().toISOString()
+    site.homeOld = [...(site.homeOld ?? []), { sha: site.home, at }].slice(-MAX_HOME_OLD)
+  }
   if (home) site.home = home
   else delete site.home
   // A rendered page is not a change to the site: `updatedAt` stays.
@@ -223,14 +231,16 @@ async function toSitePath(
   const policySite = pathPolicySite(site, path)
   const actor = await actorOn(deps, siteActor, policySite)
   const onSite = can(siteActor, 'site.read', site)
+  const canManage = can(actor, 'site.owners', policySite)
   return {
     folder: path.folder,
     title: path.title,
     url: `${toSite(deps, siteActor, site).url}${encodeURIComponent(path.folder)}/`,
     currentVersionId: path.currentVersionId,
     archived: path.archived,
-    ...(onSite ? { ...(await rolesView(deps, path)), createdBy: path.createdBy } : {}),
+    ...(onSite || canManage ? { ...(await rolesView(deps, path)), createdBy: path.createdBy } : {}),
     canPublish: can(actor, 'site.deploy', policySite),
+    canManage,
     createdAt: path.createdAt,
     updatedAt: path.updatedAt,
   }
@@ -282,7 +292,8 @@ export async function rollbackPath(
   versionId: string
 ): Promise<SitePath> {
   const { site, path, siteActor } = await requirePath(deps, user, name, folder, 'site.rollback')
-  const version = await deps.store.getVersion(pathRef(site, path), versionId)
+  const ref = pathRef(site, path)
+  const version = await reviveVersion(deps, ref, await deps.store.getVersion(ref, versionId))
   if (version?.status !== 'complete') {
     throw notFound(`No version ${versionId} of ${displayPublishPath(folder)} of "${name}"`)
   }

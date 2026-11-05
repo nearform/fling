@@ -5,7 +5,8 @@
  * admin opens anyone's (`site.role` is `admin`), and is told whose it is and that what they change
  * is on the record. A publisher sees the overview, the owners and publishers (read-only) and the
  * versions, to roll back: not Access, the share link or the danger zone. Archived sites are
- * offline, so Access waits until they are unarchived.
+ * offline, so Access waits until they are unarchived. With the `paths` capability, the site's
+ * Paths are listed when it has any, each linking to its own page.
  */
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams } from 'react-router-dom'
@@ -17,6 +18,7 @@ import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
 import { SiteOverview } from '../components/site/SiteOverview'
+import { SitePaths } from '../components/site/SitePaths'
 import { SiteTeam } from '../components/site/SiteTeam'
 import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
@@ -105,6 +107,9 @@ export default function Site() {
         <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />
       )}
       {instance?.capabilities.siteRoles === true && <SiteTeam site={site} />}
+      {instance?.capabilities.paths === true && (
+        <SitePaths name={site.name} reviewable={reviewable} />
+      )}
       <SiteVersions site={site} />
       {!publisher && <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />}
     </div>

@@ -1,5 +1,5 @@
 /**
- * Forms through the API: the config a deploy carries (kept by a path publish, removed with null,
+ * Forms through the API: the config a deploy carries (kept by a publish on a base, removed with null,
  * returned by pull), `GET …/forms`, responses submitted as comments (page kind: one per reviewer
  * per page; comment kind: a thread), what is refused, `own` visibility, and the export with its
  * progress, as JSON, JSON Lines and CSV.

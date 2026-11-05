@@ -12,7 +12,7 @@
  */
 import { z } from 'zod'
 import { ACCESS_LEVELS, type DefaultAccessLevel } from './access.ts'
-import type { VersionFiles } from './api.ts'
+import type { PathDetail, SitePath, VersionFiles } from './api.ts'
 import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import {
   ANCHOR_QUOTE_MAX,
@@ -40,10 +40,17 @@ import {
   instanceSitesPattern,
   privateAudience,
 } from './instance.ts'
-import { MAX_FILES } from './limits.ts'
+import { MAX_FILES, MAX_PATH_FOLDER_LENGTH } from './limits.ts'
 import { CellChangeSchema } from './notifications.ts'
+import { PATHS_OPTIONS, PATHS_PLACEHOLDERS } from './paths-index.ts'
+import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from './paths-templates.ts'
 import { MCP_READ_MAX_BYTES } from './read-files.ts'
-import { OWNER_EMAILS_MAX, PUBLISHER_EMAILS_MAX, PUBLISHER_GROUPS_MAX } from './site-roles.ts'
+import {
+  OWNER_EMAILS_MAX,
+  PUBLISHER_EMAILS_MAX,
+  PUBLISHER_GROUPS_MAX,
+  whoHolds,
+} from './site-roles.ts'
 import { SITE_SORTS } from './site-sort.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -204,7 +211,9 @@ export const PATH_PUBLISH_NOTE =
   '<site>/PAY-412/… (give their paths relative to the folder, its page being "index.html"), and the rest of the ' +
   'site is untouched. A Path has its own versions, rollback, owners and publishers, and is made on first use ' +
   "(you own it). Use it for one plan, spec, report or week's page on a shared team site; teammates publishing " +
-  "other Paths never collide. The site's home page can list its Paths (fling_paths_template)."
+  "other Paths never collide. fling_paths lists a site's Paths. The site's home page lists them by default when " +
+  'it has no index.html, or as a custom page with a Paths block (fling_paths_template); an index.html without a ' +
+  'block lists none: settle which with the user (see fling_paths).'
 
 /** Changing an existing site from what is live (pull.ts in apps/api; the `pull` capability). */
 export const PULL_NOTE =
@@ -335,6 +344,141 @@ export function describeResponses(
   ].join('\n')
 }
 
+// --- Paths (the `paths` capability) --------------------------------------------------------------
+
+const PATHS_TEMPLATES_LIST = PATHS_TEMPLATE_NAMES.map(
+  n => `\`${n}\` (${PATHS_TEMPLATE_DESCRIPTIONS[n]})`
+).join(', ')
+
+/** How a Paths block is written (paths-index.ts): the markers, placeholders and options. */
+export const PATHS_BLOCK_FORMAT =
+  "A Paths block is either the bare marker `<!-- fling:paths -->` (Fling's default list, styled by the page) or a " +
+  'template pair `<!-- fling:paths sort=updated --> item <!-- fling:empty --> shown when there are none ' +
+  '<!-- /fling:paths -->`, whose item repeats once per Path with the placeholders ' +
+  `${PATHS_PLACEHOLDERS.map(p => `{{${p}}}`).join(' ')} (HTML-escaped; the \`<!-- fling:empty -->\` part is ` +
+  'optional). Put dates in `<time datetime="{{updated}}">{{date}}</time>`: within a week they read as how long ago ' +
+  `("2 hours ago") once the page loads. Options go in the opening marker: ${PATHS_OPTIONS.join(', ')}. ` +
+  '`<!-- fling:paths-controls -->` places the search and sort controls. Only the first block is filled.'
+
+/**
+ * The choice of home page for a site with Paths, for the Paths tools' descriptions: the default
+ * listing, a custom page with a Paths block, or a page without one, which lists nothing.
+ */
+export const PATHS_HOME_CHOICE =
+  'A site with Paths has a home page (its root index.html) that can list them. Make the choice explicit with the user: ' +
+  '(a) the default: with no root index.html, Fling serves a listing of the live Paths, and a site whose first ' +
+  'publish is a Path gets one (the `minimal` template); nothing to do. ' +
+  "(b) a custom page: the site's own index.html with a Paths block, which Fling fills with the live Paths whenever " +
+  `one changes. Start from fling_paths_template (${PATHS_TEMPLATE_NAMES.join(', ')}), adapt it freely while keeping ` +
+  'the block, check it with fling_paths_check, then publish it as the site root (without `path`). ' +
+  '(c) an index.html without a Paths block is served as it is and lists no Paths; publishing then says so ' +
+  '(the paths_index_missing hint).'
+
+/** What a fling_paths result ends with: what the site's home page does, as far as it is known. */
+export type PathsHome = 'block' | 'default' | 'own'
+
+/** The last line of a fling_paths result: what the home page does now, and what to offer. */
+export function describePathsHome(home: PathsHome | undefined): string {
+  if (home === 'block') {
+    return (
+      "Home page: the site's index.html has a Paths block, which lists the live Paths. To change how it looks, " +
+      'edit that page keeping the block (fling_read_files), check it with fling_paths_check and publish it as ' +
+      'the site root (without `path`).'
+    )
+  }
+  if (home === 'default') {
+    return (
+      "Home page: Fling's default listing of the live Paths (the site has no index.html of its own). For a " +
+      'custom page, start from fling_paths_template, check it with fling_paths_check and publish it as the ' +
+      "site's index.html (without `path`)."
+    )
+  }
+  if (home === 'own') {
+    return (
+      "Home page: the site's own index.html, which has no Paths block, so it lists none of them. Offer the user " +
+      'a custom page with a block (fling_paths_template) or the default listing (remove index.html: fling_publish ' +
+      'with `base` and `remove: ["index.html"]`).'
+    )
+  }
+  return (
+    "Home page: if the site's home page has no Paths block, offer a custom one (fling_paths_template) or the " +
+    'default (remove index.html: fling_publish with `base` and `remove: ["index.html"]`).'
+  )
+}
+
+/** One Path, as a line of a fling_paths result. */
+function describePathLine(p: SitePath): string {
+  const state = p.archived
+    ? 'archived'
+    : p.currentVersionId
+      ? `version ${p.currentVersionId}`
+      : 'nothing published'
+  return (
+    `- /${p.folder}/${p.title ? ` "${p.title}"` : ''}: ${p.url} (${state}, updated ${p.updatedAt}` +
+    `${p.canPublish ? ', you can publish it' : ''})`
+  )
+}
+
+/**
+ * The text of a fling_paths result (both servers): a line per Path, then what the home page does
+ * (`describePathsHome`).
+ */
+export function describePaths(
+  name: string,
+  paths: readonly SitePath[],
+  opts: { home?: PathsHome } = {}
+): string {
+  const head = paths.length
+    ? `${paths.length} Path${paths.length === 1 ? '' : 's'} on ${name}:`
+    : `${name} has no Paths yet. Publish a folder as one with \`path\` (e.g. "PAY-412").`
+  return [head, ...paths.map(describePathLine), describePathsHome(opts.home)].join('\n')
+}
+
+/** The text of fling_info with `path` (both servers): the Path, its roles and its versions. */
+export function describePathDetail(name: string, path: PathDetail): string {
+  const roles = path.owners
+    ? [`Owners: ${whoHolds(path.owners)}. Publishers: ${whoHolds(path.publishers)}.`]
+    : []
+  const versions = path.versions
+    .slice(0, 10)
+    .map(
+      v =>
+        `- ${v.id}${v.id === path.currentVersionId ? ' (current)' : ''}: ${v.fileCount} files, ${v.createdAt}${v.publishedBy ? `, by ${v.publishedBy}` : ''}`
+    )
+  return [
+    `/${path.folder}/ of ${name}${path.title ? ` "${path.title}"` : ''}: ${path.url}` +
+      `${path.archived ? ' (archived)' : ''}${path.canPublish ? ' — you can publish it' : ''}`,
+    ...roles,
+    'Versions (newest first; roll back with fling_rollback and this `path`):',
+    ...(versions.length ? versions : ['(none)']),
+  ].join('\n')
+}
+
+/** The text of a fling_paths_check result (both servers). */
+export function describePathsCheck(check: {
+  ok: boolean
+  block: 'bare' | 'template' | null
+  options: readonly string[]
+  warnings: readonly string[]
+  errors: readonly string[]
+}): string {
+  const head = check.ok
+    ? `The page has a ${check.block === 'template' ? 'template' : 'bare'} Paths block${check.options.length ? ` (options: ${check.options.join(', ')})` : ''}: Fling fills it with the live Paths.`
+    : 'The page has no Paths block Fling can fill:'
+  return [
+    head,
+    ...check.errors.map(e => `- Error: ${e}`),
+    ...check.warnings.map(w => `- Warning: ${w}`),
+    ...(check.ok ? ["Publish it as the site's root index.html (without `path`)."] : []),
+  ].join('\n')
+}
+
+/** A Path's folder, as the Paths tools take it. */
+const pathFolder = z
+  .string()
+  .min(1)
+  .max(MAX_PATH_FOLDER_LENGTH + 2)
+
 const encoding = z
   .enum(['utf8', 'base64'])
   .optional()
@@ -415,8 +559,17 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_info',
       title: 'Site details',
       description:
-        'Show one site: URL, visibility, share link, current version and version history (ids for fling_rollback).',
-      inputSchema: { name: siteName },
+        'Show one site: URL, visibility, share link, current version and version history (ids for fling_rollback). ' +
+        "With `path` (one of the site's Paths, from fling_paths), show that Path instead: its URL, owners, " +
+        'publishers and its own versions.',
+      inputSchema: {
+        name: siteName,
+        path: pathFolder
+          .optional()
+          .describe(
+            'One of the site\'s Paths, its folder (e.g. "PAY-412"): show it instead of the site'
+          ),
+      },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 
@@ -435,6 +588,11 @@ export function mcpToolsFor(w: McpWording) {
           .max(100)
           .optional()
           .describe('Version id (from fling_info); omit for the version being served'),
+        path: pathFolder
+          .optional()
+          .describe(
+            'One of the site\'s Paths, its folder (e.g. "PAY-412"): list that Path\'s version (ids from fling_info with this `path`) instead; its files are under the folder'
+          ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
@@ -528,7 +686,7 @@ export function mcpToolsFor(w: McpWording) {
           .nullable()
           .optional()
           .describe(
-            `The site's forms config (as ${FORMS_FILE}; fling_forms_template, fling_forms_check), for structured feedback on the review page. null removes the forms. Omitted: a publish with \`path\` or \`base\` keeps the site's forms, any other publish has none`
+            `The site's forms config (as ${FORMS_FILE}; fling_forms_template, fling_forms_check), for structured feedback on the review page. null removes the forms. Omitted: a publish on a \`base\` keeps the site's forms, a publish with \`path\` leaves them as they are (forms are the site's, never a Path's: \`forms\` with \`path\` is refused), any other publish has none`
           ),
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -1010,14 +1168,68 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { idempotentHint: true, openWorldHint: false },
     }),
 
+    paths: tool({
+      name: 'fling_paths',
+      title: "List a site's Paths",
+      description:
+        "List a site's Paths: the top-level folders (e.g. one per ticket, PAY-412) published on their own with " +
+        '`path`, each with its title, URL, current version, when it was updated, whether it is archived and whether ' +
+        'the user can publish to it. Use it before publishing to a shared team site, to find a Path to change or ' +
+        `roll back (fling_info, fling_files and fling_rollback take \`path\`), or when the user asks what is on it. ${PATHS_HOME_CHOICE} ${PATHS_BLOCK_FORMAT}`,
+      inputSchema: { name: siteName },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    pathsTemplate: tool({
+      name: 'fling_paths_template',
+      title: 'Start a Paths home page',
+      description:
+        'A starter home page (index.html) for a site with Paths, with its Paths block in place: Fling fills it with ' +
+        `the site's live Paths. Templates: ${PATHS_TEMPLATES_LIST}. Use it when the user wants a custom home page ` +
+        'listing their Paths rather than the default one. Adapt it freely (wording, layout, styling) while keeping ' +
+        'the block, check it with fling_paths_check, then publish it as the site root (without `path`). Needs no ' +
+        `sign-in. ${PATHS_HOME_CHOICE} ${PATHS_BLOCK_FORMAT}`,
+      inputSchema: {
+        template: z.enum(PATHS_TEMPLATE_NAMES).describe('Which starter'),
+        title: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('The page\'s title and heading (e.g. "Payments plans")'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    pathsCheck: tool({
+      name: 'fling_paths_check',
+      title: 'Check a Paths home page',
+      description:
+        "Check a site's home page (index.html) before publishing it, for the Paths block Fling fills with the " +
+        "site's Paths: whether there is one, bare or template, its options, and warnings (unknown options or " +
+        'placeholders, an unclosed template, an item without a link). Returns `ok`, `errors` and `warnings`. Use it ' +
+        `on every custom home page for a site with Paths. Needs no sign-in. ${PATHS_HOME_CHOICE} ${PATHS_BLOCK_FORMAT}`,
+      inputSchema: {
+        html: z.string().min(1).max(MCP_PUBLISH_MAX_BYTES).describe('The page, as HTML'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
     rollback: tool({
       name: 'fling_rollback',
       title: 'Roll back',
       description:
-        'Point a site at an earlier version (ids from fling_info). Instant; nothing is uploaded.',
+        'Point a site at an earlier version (ids from fling_info). Instant; nothing is uploaded. With `path`, roll ' +
+        'back only that Path (ids from fling_info with the same `path`); the rest of the site and its other Paths ' +
+        'stay as they are.',
       inputSchema: {
         name: siteName,
         versionId: z.string().min(1).max(100).describe('Version id to serve'),
+        path: pathFolder
+          .optional()
+          .describe(
+            'One of the site\'s Paths, its folder (e.g. "PAY-412"): roll back only that Path'
+          ),
       },
       annotations: { idempotentHint: true, openWorldHint: false },
     }),

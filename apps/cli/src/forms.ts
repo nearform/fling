@@ -108,9 +108,17 @@ export async function planForms(opts: {
   bin: string
   /** a config given inline (the local MCP's `forms`): used instead of the file */
   inline?: unknown
+  /** the Path the deploy publishes: forms are the site's, so it sends none and refuses a config */
+  path?: string
 }): Promise<FormsPlan> {
   const file = opts.inline === undefined ? await readFormsFile(opts.dir) : null
   const raw = opts.inline !== undefined ? opts.inline : file?.config
+  if (opts.path !== undefined) {
+    if (raw === undefined || raw === null) return { send: undefined, check: null }
+    throw new CliError(`Forms belong to the site, not to the Path /${opts.path}/`, {
+      hint: `Deploy ${file ? FORMS_FILE : 'the forms'} with the site's root (without a path), with \`paths\` patterns that reach /${opts.path}/ if its pages need them.`,
+    })
+  }
   if (raw === undefined) {
     if (!formsEnabled(opts.instance)) return { send: undefined, check: null }
     const send = !opts.layered || opts.pulledWithForms ? null : undefined

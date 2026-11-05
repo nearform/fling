@@ -26,6 +26,9 @@ import {
   NameCheckSchema,
   type NotificationSettings,
   NotificationSettingsSchema,
+  type PathDetail,
+  PathDetailSchema,
+  PathListSchema,
   preferencesUpdateOf,
   type SentNotification,
   SentNotificationListSchema,
@@ -35,6 +38,8 @@ import {
   type SiteDetail,
   SiteDetailSchema,
   SiteListSchema,
+  type SitePath,
+  SitePathSchema,
   type SiteRoleMembers,
   SiteSchema,
   type SiteSort,
@@ -336,6 +341,142 @@ export async function setRoles(
     body: { [which]: editRoleInput(current[which], change) },
   })
   return withRoles(site)
+}
+
+// --- Paths ---
+
+/**
+ * Whether the instance has Paths (`paths`): a site's top-level folders with their own versions,
+ * rollback, owners and publishers. A stored copy from before the flag: no, so callers refresh it
+ * first (`loadInstanceWith`).
+ */
+export function pathsEnabled(
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+): boolean {
+  return instance?.capabilities.paths === true
+}
+
+const pathOf = (name: string, folder: string) =>
+  `${sitePath(name)}/paths/${encodeURIComponent(folder)}`
+
+/** GET …/paths: the site's Paths, by folder. */
+export async function listPaths(client: ApiClient, name: string): Promise<SitePath[]> {
+  const res = await client.request('GET', `${sitePath(name)}/paths`, { schema: PathListSchema })
+  return res.paths
+}
+
+/** GET …/paths/:folder: the Path with its versions, newest first. */
+export function getPath(client: ApiClient, name: string, folder: string): Promise<PathDetail> {
+  return client.request('GET', pathOf(name, folder), { schema: PathDetailSchema })
+}
+
+/** POST …/paths/:folder/current: serve an earlier version of the Path. */
+export function rollbackPath(
+  client: ApiClient,
+  name: string,
+  folder: string,
+  versionId: string
+): Promise<SitePath> {
+  return client.request('POST', `${pathOf(name, folder)}/current`, {
+    schema: SitePathSchema,
+    body: { versionId },
+  })
+}
+
+/** PATCH …/paths/:folder: take the Path off the site (archived) or put it back. */
+export function archivePath(
+  client: ApiClient,
+  name: string,
+  folder: string,
+  archived: boolean
+): Promise<SitePath> {
+  return client.request('PATCH', pathOf(name, folder), {
+    schema: SitePathSchema,
+    body: { archived },
+  })
+}
+
+export async function deletePath(
+  client: ApiClient,
+  name: string,
+  folder: string
+): Promise<{ name: string; path: string; deleted: true }> {
+  await client.request('DELETE', pathOf(name, folder))
+  return { name, path: folder, deleted: true }
+}
+
+/** A Path with its owners and publishers, as those on the site see it. */
+export type PathWithRoles = SitePath & { owners: SiteRoleMembers; publishers: SiteRoleMembers }
+
+const pathWithRoles = <T extends SitePath>(path: T): T & PathWithRoles => {
+  if (!path.owners) {
+    throw new CliError(`You can't see who owns /${path.folder}/`, {
+      hint: "Only those on the site see its Paths' owners and publishers.",
+    })
+  }
+  return {
+    ...path,
+    owners: path.owners,
+    publishers: path.publishers ?? { emails: [], groups: [] },
+  }
+}
+
+/** The Path with its owners and publishers. */
+export async function getPathRoles(
+  client: ApiClient,
+  name: string,
+  folder: string
+): Promise<PathDetail & PathWithRoles> {
+  return pathWithRoles(await getPath(client, name, folder))
+}
+
+/** Change a Path's owners or publishers (as `setRoles` does a site's): PATCH the whole new list. */
+export async function setPathRoles(
+  client: ApiClient,
+  name: string,
+  folder: string,
+  which: RoleList,
+  change: AudienceChange
+): Promise<PathWithRoles> {
+  const current = await getPathRoles(client, name, folder)
+  const path = await client.request('PATCH', pathOf(name, folder), {
+    schema: SitePathSchema,
+    body: { [which]: editRoleInput(current[which], change) },
+  })
+  return pathWithRoles(path)
+}
+
+export interface PathFiles extends VersionFiles {
+  name: string
+  /** the Path's folder */
+  path: string
+  url: string
+  /** the version the Path serves */
+  current: boolean
+}
+
+/** The files in a version of the Path (`versionId`, or the one it serves); paths in the folder. */
+export async function pathVersionFiles(
+  client: ApiClient,
+  name: string,
+  folder: string,
+  versionId?: string
+): Promise<PathFiles> {
+  const path = await getPath(client, name, folder)
+  const id = versionId ?? path.currentVersionId
+  if (!id) throw new CliError(`/${path.folder}/ of ${name} has no published version yet`)
+  const files = await client.request(
+    'GET',
+    `${sitePath(name)}/versions/${encodeURIComponent(id)}/files`,
+    { schema: VersionFilesSchema, query: { path: path.folder } }
+  )
+  return {
+    name,
+    path: path.folder,
+    url: path.url,
+    current: id === path.currentVersionId,
+    ...files,
+  }
 }
 
 // --- groups ---

@@ -11,7 +11,8 @@
  * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`) drains the
  *   notifications outbox (@fling/api/notifications) and takes due revocations off the edge's
  *   revocation list (@fling/api/revocations); hourly, deletes expired items from D1. Reads
- *   already ignore them; that reclaims the space.
+ *   already ignore them; that reclaims the space; and runs maintenance (@fling/api/maintenance:
+ *   version retention, replaced rendered pages).
  *
  * Data migrations are not run here: scripts/migrate.ts runs them from the deploy, through a
  * remote binding to the same D1 database, so the Worker has no admin surface (DEPLOY.md).
@@ -23,6 +24,7 @@
 import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-types'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
+import { maintain } from '@fling/api/maintenance'
 import { drain, errorName, logNotify } from '@fling/api/notifications'
 import { sweepRevocations } from '@fling/api/revocations'
 import type { Deps } from '@fling/api/types'
@@ -52,6 +54,8 @@ export function isApiPath(path: string): boolean {
 
 /** The every-minute cron: the notifications outbox's tick. Any other cron purges expired items. */
 const NOTIFY_CRON = '* * * * *'
+/** How long the hourly maintenance runs (maintenance.ts); the next hour carries on. */
+const MAINTAIN_BUDGET_MS = 20_000
 
 /** The headers CloudFront's managed SecurityHeadersPolicy adds to the UI on AWS. */
 const UI_SECURITY_HEADERS: Record<string, string> = {
@@ -185,6 +189,19 @@ export default {
       new D1Table(env.DB).purgeExpired().then(n => {
         console.log(JSON.stringify({ level: 'info', msg: 'purged expired items', count: n }))
       })
+    )
+    instance ??= init(env)
+    const { deps } = instance
+    ctx.waitUntil(
+      maintain(deps, { deadline: Date.now() + MAINTAIN_BUDGET_MS })
+        .then(result =>
+          console.log(JSON.stringify({ level: 'info', msg: 'maintenance', ...result }))
+        )
+        .catch(err =>
+          console.warn(
+            JSON.stringify({ level: 'warn', msg: 'maintenance failed', err: errorName(err) })
+          )
+        )
     )
   },
 }

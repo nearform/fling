@@ -10,6 +10,7 @@
 // route, the quoted text) to find it again on another screen.
 
 import { z } from 'zod'
+import { isMarkdownPath } from './markdown-path.ts'
 
 /** Characters in one comment. */
 export const COMMENT_MAX_CHARS = 4000
@@ -180,25 +181,31 @@ export const UpdateCommentRequestSchema = z.object({ resolved: z.boolean() })
  * A page path as comments store it: site-relative with a leading slash, without the query or
  * fragment, `index.html` folded into its folder (`/docs/index.html` → `/docs/`). Accepts a full
  * URL (its path is used) and a bare relative path (`about.html` → `/about.html`). Null when it is
- * not a path.
+ * not a path. One query is kept: a Markdown file's source (`/plan.md?raw=1`, markdown.ts) is a page
+ * of its own, so a comment on it reopens there and not on the rendered page.
  */
 export function normalizeCommentPath(input: string | undefined | null): string | null {
   let path = (input ?? '').trim()
   if (path === '') return '/'
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
     try {
-      path = new URL(path).pathname
+      const url = new URL(path)
+      path = url.pathname + url.search
     } catch {
       return null
     }
   }
+  const query = /^[^?#]*\?([^#]*)/.exec(path)?.[1] ?? ''
   path = path.replace(/[?#].*$/, '')
+  if (isMarkdownPath(path) && query.split('&').includes('raw=1')) path += RAW_QUERY
   if (!path.startsWith('/')) path = `/${path}`
   path = path.replace(/\/{2,}/g, '/').replace(/(^|\/)index\.html$/, '$1')
   if (path.length > COMMENT_PATH_MAX || /\s/.test(path)) return null
   if (path.split('/').some(s => s === '.' || s === '..')) return null
   return path
 }
+
+const RAW_QUERY = '?raw=1'
 
 /** A thread: the comment that starts it and its replies, oldest first. */
 export interface CommentThread {

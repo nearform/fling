@@ -6,8 +6,10 @@
  * - a .zip: extracted to a temp folder (zip-slip safe, within the shared size limits), skipping
  *   `__MACOSX/`, OS junk and dotfiles (reported in `skippedDotfiles`, except `.DS_Store` / `._*`),
  *   and unwrapping a single top-level folder;
- * - any other single file (.svg, .pdf, .png, .md…): copied to a temp folder next to a generated
- *   minimal `index.html` that shows or links it.
+ * - a single Markdown file (.md, .markdown) on a Fling that renders Markdown (`markdown`
+ *   capability): copied to a temp folder alone, so its rendered page becomes the home page;
+ * - any other single file (.svg, .pdf, .png, .md without that capability…): copied to a temp folder
+ *   next to a generated minimal `index.html` that shows or links it.
  *
  * A single file whose name starts with `.` (`.env`) or is a secret file (`server.key`) is refused:
  * Fling never publishes those.
@@ -20,6 +22,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs
 import { tmpdir } from 'node:os'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import {
+  isMarkdownPath,
   isSecretPath,
   MAX_DEPLOY_BYTES,
   MAX_FILE_BYTES,
@@ -71,7 +74,14 @@ async function tempFolder(): Promise<{ dir: string; cleanup: () => Promise<void>
   return { dir, cleanup: () => rm(dir, { recursive: true, force: true }) }
 }
 
-export async function prepareInput(path: string): Promise<PreparedInput> {
+/**
+ * `markdown`: the Fling renders Markdown, so a single Markdown file needs no generated page (the
+ * server makes its rendered page the home page).
+ */
+export async function prepareInput(
+  path: string,
+  opts: { markdown?: boolean } = {}
+): Promise<PreparedInput> {
   let info: Awaited<ReturnType<typeof stat>>
   try {
     info = await stat(path)
@@ -112,7 +122,9 @@ export async function prepareInput(path: string): Promise<PreparedInput> {
     } else {
       const name = basename(path)
       await copyFile(path, join(tmp.dir, name))
-      await writeFile(join(tmp.dir, 'index.html'), wrapperPage(name))
+      if (!(opts.markdown && isMarkdownPath(name))) {
+        await writeFile(join(tmp.dir, 'index.html'), wrapperPage(name))
+      }
     }
   } catch (error) {
     await tmp.cleanup()

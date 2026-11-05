@@ -105,6 +105,7 @@ import {
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
+import { reviveVersion } from './maintenance.ts'
 import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
 import { refreshHome, removePath } from './paths.ts'
 import {
@@ -966,7 +967,7 @@ export async function updateSite(
 
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.rollback')
-  const version = await deps.store.getVersion(site, versionId)
+  const version = await reviveVersion(deps, site, await deps.store.getVersion(site, versionId))
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
   await save(deps, site)

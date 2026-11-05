@@ -3,7 +3,7 @@ import { mkdir, symlink, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { MAX_DEPLOY_BYTES, MAX_FILE_BYTES } from '@fling/shared'
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildManifest, contentTypeFor, toManifest } from '../src/manifest.ts'
+import { buildManifest, contentTypeFor, hasRootIndex, toManifest } from '../src/manifest.ts'
 import { captureError, runCleanups, tempDir, writeTree } from './helpers.ts'
 
 afterEach(runCleanups)
@@ -112,6 +112,19 @@ describe('buildManifest', () => {
       await truncate(join(many, `f${i}.bin`), per)
     }
     expect((await captureError(buildManifest(many))).message).toMatch(/limit is 100 MB per deploy/)
+  })
+})
+
+describe('hasRootIndex', () => {
+  const of = (...paths: string[]) => ({ files: paths.map(path => ({ path })) })
+  it('is an index.html, or on a Fling that renders Markdown, the Markdown standing in for one', () => {
+    expect(hasRootIndex(of('index.html'))).toBe(true)
+    expect(hasRootIndex(of('README.md'))).toBe(false)
+    expect(hasRootIndex(of('README.md'), true)).toBe(true)
+    expect(hasRootIndex(of('index.md', 'notes.md'), true)).toBe(true)
+    expect(hasRootIndex(of('plan.md'), true)).toBe(true)
+    expect(hasRootIndex(of('a.md', 'b.md'), true)).toBe(false)
+    expect(hasRootIndex(of('docs/README.md'), true)).toBe(false)
   })
 })
 

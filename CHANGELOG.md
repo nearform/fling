@@ -13,6 +13,10 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Connectors that identify themselves by a document connect on Cloudflare.** Fling fetches a
+  client's metadata document (how Claude Code and ChatGPT sign in) in a way the Workers runtime
+  allows, and logs why a fetch failed.
+
 ## 0.11.0 (2026-11-05)
 
 - **ChatGPT, the Gemini app and Cursor's web agents connect.** Add your Fling as a connector in

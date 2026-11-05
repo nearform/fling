@@ -383,6 +383,30 @@ describe('authorize', () => {
     }
   })
 
+  it('fetches a CIMD document the way every runtime allows: redirects not followed, only a 200 taken', async () => {
+    const cimd = 'https://client.example/meta.json'
+    const seen: RequestInit[] = []
+    env.deps.fetch = async (_input, init) => {
+      seen.push(init ?? {})
+      return new Response(null, {
+        status: 302,
+        headers: { location: 'https://elsewhere.example/' },
+      })
+    }
+    const res = await env.app.request(
+      authorizeUrl({
+        response_type: 'code',
+        client_id: cimd,
+        redirect_uri: CLAUDE_CALLBACK,
+        code_challenge: pkce().challenge,
+        code_challenge_method: 'S256',
+      })
+    )
+    expect(res.headers.get('location')).toMatch(/error=invalid_client/)
+    // Workers throw on `redirect: 'error'`.
+    expect(seen[0]?.redirect).toBe('manual')
+  })
+
   it('refuses a CIMD client that cannot be public (no `none` among its methods)', async () => {
     const cimd = 'https://client.example/meta.json'
     env.deps.fetch = async () =>

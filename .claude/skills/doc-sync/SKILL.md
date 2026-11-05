@@ -41,7 +41,10 @@ that also edits the page counts as a check). The register and page shape are
    `sources` and `verified`.
 5. **Fact-check with a separate sub-agent**: give it the edited pages, the diff and the code to
    read; ask it to verify every changed sentence against the code. Fix what it finds.
-6. **Move `verified`** to `git rev-parse --short HEAD` on every page you checked.
+6. **Move `verified`** on every page you checked to the newest commit of `main` it was checked
+   against (`git rev-parse --short origin/main` after rebasing onto it), never a commit of your
+   branch: merging rebases the branch, so its commits never reach `main`. Your commit that edits
+   the page counts as the check for anything after.
 7. **Repeat** `node scripts/docs-stale.mjs` until it is clean, then `pnpm gate` (its guide tests
    check frontmatter, facts, placeholders, links and anchors). Look at changed pages in the
    browser: `pnpm dev`, `pnpm --filter @fling/web dev`, `http://fling.lvh.me:47100/guide`.

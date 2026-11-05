@@ -46,6 +46,14 @@ const realGit = {
       return null
     }
   },
+  isAncestor: sha => {
+    try {
+      git('merge-base', '--is-ancestor', sha, 'HEAD')
+      return true
+    } catch {
+      return false
+    }
+  },
   commitsSince: sha =>
     parseNumstatLog(git('log', '--no-renames', '--numstat', '--format=@@%H', `${sha}..HEAD`)),
   workingChanges: () => [

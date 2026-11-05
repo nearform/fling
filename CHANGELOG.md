@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.10.1 (2026-11-05)
+
 - **Security updates to dependencies.** The web UI runs on React Router 7.18, and the tests on
   Vitest 4.1. Patched versions of undici, sharp, tmp and zod replace the vulnerable ones pulled in
   by Miniflare and the Claude Desktop extension's packer. Nothing changes in how Fling behaves.

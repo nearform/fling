@@ -5,3 +5,10 @@ packages:
   - 'edge'
 onlyBuiltDependencies:
   - esbuild
+# Patched versions of transitive dependencies whose parents pin a vulnerable one: miniflare (undici,
+# sharp) and the CLI's .mcpb packer (zod 3, tmp). Drop an entry once its parent ships the fix.
+overrides:
+  undici@<7.30.1: ^7.30.1
+  sharp@<0.35.5: ^0.35.5
+  tmp@<0.2.6: ^0.2.7
+  '@anthropic-ai/mcpb>zod': ^4.6.7

@@ -3,7 +3,7 @@
  * (its rules, what it may not do, its expiry, stopping it), and administering other people's
  * sites (reading with any credential, changing from the browser session, on the record).
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 import * as admin from '../src/admin.ts'
 import type { SiteRecord } from '../src/store/types.ts'
 import {
@@ -31,7 +31,7 @@ const OTHER_ADMIN = 'other-boss@example.test'
 const MEMBER = 'member@example.test'
 
 let env: Env
-let info: ReturnType<typeof vi.spyOn>
+let info: MockInstance<typeof console.info>
 beforeEach(() => {
   env = setup({ adminEmails: [BOSS, OTHER_ADMIN] })
   info = vi.spyOn(console, 'info').mockImplementation(() => {})

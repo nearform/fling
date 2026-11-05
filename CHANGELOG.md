@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.10.0 (2026-11-05)
+
 - **Paths: one site, a folder per ticket.** A one-folder path publish (`fling deploy ./plan
   --name payments-plans --path PAY-412`, `path` on `fling_publish`) now publishes that folder as a
   Path: its own versions, rollback, owners and publishers, served at `/PAY-412/`, with the site's

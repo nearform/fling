@@ -36,7 +36,7 @@ Or add it by hand, inside Claude Code:
 The plugin runs the Fling tools with `npx`, so it needs Node.js {{fact:node-version}} or later.
 Restart Claude Code, or run `/reload-plugins`, to pick it up.
 
-## In Claude or ChatGPT
+## In your assistant
 
 Ask in your own words:
 

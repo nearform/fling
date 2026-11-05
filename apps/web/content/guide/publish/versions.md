@@ -14,7 +14,7 @@ nothing is uploaded.
 
 A site's owners and publishers can roll it back.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Show me the versions of my-app"
 - "Roll my-app back to the version from yesterday morning"

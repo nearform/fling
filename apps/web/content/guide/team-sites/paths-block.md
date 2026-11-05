@@ -20,7 +20,7 @@ There are three ways to have a home page on a site with Paths:
 - **No list.** An `index.html` without a Paths block lists nothing. When a site has two or more
   Paths and its home page doesn't list them, publishing says so.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Make a home page for `payments-plans` that lists the plans as cards."
 - "Give `payments-plans` a docs-style home page titled Payments docs."

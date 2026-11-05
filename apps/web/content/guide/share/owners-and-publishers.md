@@ -31,7 +31,7 @@ Owners and publishers can always open the site, whatever its
 Only people who can sign in to {{instance:name}} as members can hold either role. Guests can't,
 even through a group.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Make bob@example.com a publisher of `q3-report`."
 - "Add the design group as publishers of `q3-report`."

@@ -16,7 +16,7 @@ than overwrite their work.
 Anyone signed in who can open a site can download its files. Only its owners and publishers can
 publish it.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Fix the typo in the heading of q3-report"
 - "Apply the open comments on my-app and publish it again"

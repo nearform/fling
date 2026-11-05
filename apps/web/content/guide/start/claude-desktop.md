@@ -29,7 +29,7 @@ The first time Claude uses it, your browser opens {{instance:name}} to sign in w
 If you use the command line, `fling setup` offers to install the extension for you: see [The
 CLI](/guide/start/cli).
 
-## In Claude or ChatGPT
+## In your assistant
 
 Name the file, or describe it:
 

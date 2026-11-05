@@ -16,7 +16,7 @@ A share link looks like `https://s--<token>.{{instance:sites}}`. It works on top
 [access level](/guide/share/who-can-open): even a site only you can open is open to whoever holds
 its link.
 
-## In Claude or ChatGPT
+## In your assistant
 
 - "Give me a share link for `q3-report`."
 - "Replace the share link for `q3-report`: the old one went to the wrong person."

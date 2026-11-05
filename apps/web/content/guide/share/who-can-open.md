@@ -22,7 +22,7 @@ A new site starts as **only you**, unless {{instance:name}} is set up to open ne
 signed in. When you publish a new site, the result says who can open it. Publishing again keeps the
 level, unless you deploy with `--public`.
 
-## In Claude or ChatGPT
+## In your assistant
 
 Say who should see the site when you publish it, or ask for a change later:
 

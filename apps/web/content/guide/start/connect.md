@@ -1,10 +1,10 @@
 ---
-title: Connect Claude or ChatGPT
+title: Connect Claude, ChatGPT or Gemini
 part: start
 order: 20
 summary: Add your Fling as a connector, so your assistant can publish what it makes for you.
 requires: [remoteMcp]
-sources: [apps/api/src/mcp/**, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
+sources: [apps/api/src/config.ts, apps/api/src/mcp/**, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
 verified: 60d6113
 ---
 
@@ -14,7 +14,7 @@ yours and private until you say otherwise.
 
 Nothing to install: the connector is an address, `{{instance:mcp}}`.
 
-## In Claude or ChatGPT
+## In your assistant
 
 **In Claude** (the desktop app, the web or mobile):
 
@@ -29,6 +29,13 @@ Everyone else then only clicks **Connect** and signs in.
 **In ChatGPT**, add `{{instance:mcp}}` as a custom connector (an app) from its settings. ChatGPT
 only offers custom connectors with developer mode turned on, and the names of its menus change, so
 follow its own help for where to find them. You sign in and click **Allow** the same way.
+
+**In Gemini** (gemini.google.com), open **Settings → Connected Apps → Add a custom app**, paste
+`{{instance:mcp}}`, then sign in and click **Allow**. Once added, it works in the Gemini mobile app
+too.
+
+**In Cursor, VS Code, Gemini CLI or Codex**, add `{{instance:mcp}}` as a remote MCP server in its
+settings; it opens your browser to sign in the first time.
 
 Then ask for what you want:
 
@@ -53,8 +60,8 @@ Click **Revoke**, then **Disconnect**, to disconnect one: it is signed out at on
   extension](/guide/start/claude-desktop), the [Claude Code plugin](/guide/start/claude-code) or
   the [command line](/guide/start/cli).
 - **Connecting fails before you see the sign-in page.** Each Fling accepts the assistants its
-  operators allowed. Claude is accepted unless they changed that; if ChatGPT can't connect, ask whoever runs
-  {{instance:name}}.
+  operators allowed: Claude, ChatGPT, Gemini, Cursor and the assistants on your own computer,
+  unless they changed that. If yours can't connect, ask whoever runs {{instance:name}}.
 - **Your assistant says it isn't signed in.** You revoked it, or its sign-in expired. Connect it
   again from the connector's settings.
 - **The name is taken.** Site names are first come, first served. Your assistant shows free names

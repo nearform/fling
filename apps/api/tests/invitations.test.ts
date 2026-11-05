@@ -9,7 +9,7 @@ import { createHmac } from 'node:crypto'
 import { revokedKvsKey } from '@fling/shared'
 import { revocationMac, SITE_COOKIE_TTL_SECONDS, signSiteCookie } from '@fling/shared/site-cookie'
 import { routeSiteRequest } from '@fling/shared/site-routing'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 import type { MailConfig } from '../src/config.ts'
 import { drain } from '../src/notifications/drain.ts'
 import { sweepRevocations } from '../src/revocations.ts'
@@ -36,7 +36,7 @@ const ALICE = 'alice@example.test'
 const PAT = 'pat@outside.test'
 const SAM = 'sam@outside.test'
 
-let info: ReturnType<typeof vi.spyOn>
+let info: MockInstance<typeof console.info>
 beforeEach(() => {
   info = vi.spyOn(console, 'info').mockImplementation(() => {})
 })

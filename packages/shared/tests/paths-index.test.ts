@@ -8,6 +8,7 @@ import {
   PATHS_SCRIPT,
   type PathListing,
   type PathRow,
+  relativeTime,
   renderPathsIndex,
 } from '../src/paths-index.ts'
 
@@ -26,6 +27,9 @@ const PATHS = [
 
 const folders = (html: string) => [...html.matchAll(/data-folder="([^"]*)"/g)].map(m => m[1])
 const page = (body: string) => `<html><head><title>t</title></head><body>${body}</body></html>`
+
+/** The viewer's clock in the date tests: 2 a.m. UTC, 5 Nov 2026. */
+const NOW = Date.parse('2026-11-05T02:00:00Z')
 
 describe('hasPathsBlock', () => {
   it('finds the bare marker and a template, and not the controls marker alone', () => {
@@ -413,6 +417,22 @@ describe('compareRows', () => {
   })
 })
 
+describe('relativeTime', () => {
+  const at = (iso: string) => relativeTime(iso, NOW)
+  it('counts minutes, hours and days up to a week, then gives way to the date', () => {
+    expect(at('2026-11-05T02:00:00Z')).toBe('just now')
+    expect(at('2026-11-05T01:59:00Z')).toBe('1 minute ago')
+    expect(at('2026-11-05T01:15:00Z')).toBe('45 minutes ago')
+    expect(at('2026-11-05T01:00:00Z')).toBe('1 hour ago')
+    expect(at('2026-11-04T03:00:00Z')).toBe('23 hours ago')
+    expect(at('2026-11-04T02:00:00Z')).toBe('yesterday')
+    expect(at('2026-10-29T02:00:01Z')).toBe('6 days ago')
+    expect(at('2026-10-29T02:00:00Z')).toBe('')
+    expect(at('2026-11-06T00:00:00Z')).toBe('just now')
+    expect(at('nope')).toBe('')
+  })
+})
+
 describe('humanDate', () => {
   it('is UTC and locale-independent', () => {
     expect(humanDate('2026-11-05T23:59:59Z')).toBe('5 Nov 2026')
@@ -455,6 +475,21 @@ describe('the inline script', () => {
       parent.children.push(el)
     }
     const els = [...parent.children]
+    const times = rows.map(row => {
+      const attrs: Record<string, string> = { datetime: row.updated }
+      return {
+        textContent: humanDate(row.updated),
+        title: '',
+        hasAttribute: (n: string) => n in attrs,
+        getAttribute: (n: string) => attrs[n] ?? null,
+        setAttribute: (n: string, v: string) => {
+          attrs[n] = v
+        },
+        removeAttribute: (n: string) => {
+          delete attrs[n]
+        },
+      }
+    })
     const input = {
       value: '',
       listeners: {},
@@ -491,7 +526,7 @@ describe('the inline script', () => {
       readyState: 'complete',
       listeners: {} as Record<string, Listener[]>,
       querySelector: () => box,
-      querySelectorAll: () => els,
+      querySelectorAll: (q: string) => (q.includes('time') ? times : els),
       addEventListener: undefined as unknown,
     }
     doc.addEventListener = on(doc)
@@ -502,12 +537,19 @@ describe('the inline script', () => {
       replaceState: (_s: unknown, _t: string, u: string) => urls.push(u),
     }
     const win: Record<string, unknown> = {}
-    new Function('window', 'document', 'location', 'history', PATHS_SCRIPT)(
-      win,
-      doc,
-      location,
-      history
-    )
+    const timers: (() => void)[] = []
+    const clock = { now: () => NOW, parse: Date.parse }
+    const script = () =>
+      new Function(
+        'window',
+        'document',
+        'location',
+        'history',
+        'setInterval',
+        'Date',
+        PATHS_SCRIPT
+      )(win, doc, location, history, (f: () => void) => timers.push(f), clock)
+    script()
     const shown = () =>
       parent.children
         .filter(el => !el.hidden)
@@ -524,15 +566,21 @@ describe('the inline script', () => {
       urls,
       shown,
       fire,
-      rerun: () =>
-        new Function('window', 'document', 'location', 'history', PATHS_SCRIPT)(
-          win,
-          doc,
-          location,
-          history
-        ),
+      times,
+      timers,
+      rerun: script,
     }
   }
+
+  it('shows dates within the last week as how long ago, the date as the tooltip', () => {
+    const dom = run(rows)
+    expect(dom.times.map(t => [t.textContent, t.title])).toEqual([
+      ['2 hours ago', '5 Nov 2026'],
+      ['4 days ago', '1 Nov 2026'],
+      ['1 Oct 2026', ''],
+    ])
+    expect(dom.timers).toHaveLength(1)
+  })
 
   const rows: PathRow[] = [
     { folder: 'PAY-10', title: 'Refund flow', updated: '2026-11-05T00:00:00Z' },

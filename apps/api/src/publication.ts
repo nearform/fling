@@ -130,6 +130,7 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
+import { reviveVersion } from './maintenance.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
 import { isLivePath, makePathCurrent, pathRef, refreshHome } from './paths.ts'
 import {
@@ -561,7 +562,13 @@ async function prepare(
   }
 
   if (existing) {
-    const version = await store.getVersion(existing, versionId)
+    const version = await reviveVersion(deps, existing, await store.getVersion(existing, versionId))
+    if (version?.status === 'sweeping') {
+      throw conflict(
+        `This version of "${name}" is being deleted: publish again in a minute`,
+        'retry_later'
+      )
+    }
     if (version?.status === 'complete') {
       if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
       existing.currentVersionId = versionId
@@ -716,7 +723,12 @@ async function preparePath(
     layered?.files ?? req.manifest.files.map(f => ({ ...f, path: f.path.slice(prefix.length) }))
   const versionId = computeVersionId(files)
   const ref = pathRef(site, path)
-  const forms = await formsForDeploy(deps, path.id, req, layer?.base ?? null)
+  // Forms are the site's: its review page reads them from the site's live version.
+  if (req.forms) {
+    throw badRequest(
+      `Forms belong to the site, not to the Path /${folder}/: publish them with the site's root, without a path`
+    )
+  }
   const result = async (status: 'unchanged' | 'repointed'): Promise<Prepared> => {
     const hints = await pathHints(deps, site)
     return {
@@ -730,13 +742,11 @@ async function preparePath(
     }
   }
   if (path.currentVersionId === versionId) {
-    if (forms !== undefined) await writeForms(deps, path.id, versionId, forms)
     if (path.archived) await makePathCurrent(deps, site, path, versionId, null)
     return result('unchanged')
   }
-  const known = await store.getVersion(ref, versionId)
+  const known = await reviveVersion(deps, ref, await store.getVersion(ref, versionId))
   if (known?.status === 'complete') {
-    if (forms !== undefined) await writeForms(deps, path.id, versionId, forms)
     await makePathCurrent(deps, site, path, versionId, known.title ?? null)
     return result('repointed')
   }
@@ -756,7 +766,6 @@ async function preparePath(
     files,
     ...(layer ? { layer } : {}),
   } satisfies StoredManifest)
-  await writeForms(deps, path.id, versionId, forms ?? null)
   await store.putVersion(ref, version)
   const expires = new Date(clock.now().getTime() + PATH_DEPLOY_TTL_MS).toISOString()
   await store.notePathDeploy(site.id, versionId, folder, expires)

@@ -142,6 +142,7 @@ const envSchema = z.object({
   /** Outside invitations: off unless `on` (or true/yes/1); on needs mail. */
   INVITES: flag,
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
+  VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
 })
 
 export type EnvKey = keyof typeof envSchema.shape
@@ -184,6 +185,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   LIVE_URL: 'features',
   INVITES: 'features',
   INVITES_PER_DAY: 'features',
+  VERSION_RETENTION: 'features',
   MAIL_DRIVER: 'mail',
   MAIL_FROM: 'mail',
   MAIL_FROM_NAME: 'mail',
@@ -366,6 +368,11 @@ export interface Config {
   invites: boolean
   /** New outside addresses one person may invite a day (`INVITES_PER_DAY`, default 20). */
   invitesPerDay: number
+  /**
+   * How many complete versions of each site and Path to keep besides its current one
+   * (`VERSION_RETENTION`, default 0: every version kept); maintenance.ts deletes the rest.
+   */
+  versionRetention: number
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -464,6 +471,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     }),
     invites: e.INVITES,
     invitesPerDay: e.INVITES_PER_DAY,
+    versionRetention: e.VERSION_RETENTION,
     settings: [],
   }
   const mail = mailConfig(e, cfg)

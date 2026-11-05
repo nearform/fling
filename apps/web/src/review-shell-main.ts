@@ -220,7 +220,7 @@ function report() {
   lastGood = `${loc.pathname}${loc.search}${loc.hash}`
   post({
     type: 'location',
-    path: normalizeCommentPath(loc.pathname) ?? '/',
+    path: normalizeCommentPath(`${loc.pathname}${loc.search}`) ?? '/',
     hash: loc.hash.slice(0, 1024),
     title: win.document.title.slice(0, 300),
   })

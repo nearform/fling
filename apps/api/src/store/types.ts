@@ -211,6 +211,11 @@ export interface SiteRecord {
    * the hash they are named by, while it has live Paths and its home page lists them.
    */
   home?: string
+  /**
+   * Rendered home pages it served before (`sha`) and when they were replaced (`at`), newest
+   * last: maintenance.ts deletes their objects once nothing can still be serving them.
+   */
+  homeOld?: { sha: string; at: string }[]
   createdAt: string
   updatedAt: string
 }

@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
-import { mcpTools, RELEASE_HEADER } from '@fling/shared'
+import { type InstanceMetadata, mcpTools, RELEASE_HEADER } from '@fling/shared'
+import { PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -1149,4 +1150,116 @@ describe('local MCP server: Fling-Release', () => {
     expect(text(r)).toContain('Fling 999.0.0 is out')
     expect((await store.resolve()).instance?.release).toBe('999.0.0')
   })
+})
+
+describe('local MCP server: Paths', () => {
+  const PATHS: InstanceMetadata = {
+    ...INSTANCE,
+    capabilities: { ...INSTANCE.capabilities, paths: true },
+  }
+  const path = {
+    folder: 'PAY-1',
+    title: 'Plan 1',
+    url: 'https://team.sites.example.test/PAY-1/',
+    currentVersionId: 'v2',
+    archived: false,
+    canPublish: true,
+    createdAt: '2026-10-01T10:00:00.000Z',
+    updatedAt: '2026-10-02T10:00:00.000Z',
+  }
+  const version = (id: string) => ({
+    id,
+    fileCount: 1,
+    totalBytes: 10,
+    path: 'PAY-1',
+    createdAt: '2026-10-01T10:00:00.000Z',
+  })
+
+  async function pathsFling(instance = PATHS) {
+    const store = await loggedInStore()
+    await store.putServer(SERVER, { instance })
+    const m = mockFetch({
+      'GET /.well-known/fling': () => jsonResponse(instance),
+      'GET /api/sites/team/paths': () => jsonResponse({ paths: [path] }),
+      'GET /api/sites/team/paths/PAY-1': () =>
+        jsonResponse({ ...path, versions: [version('v2'), version('v1')] }),
+      'POST /api/sites/team/paths/PAY-1/current': (_url, init) =>
+        jsonResponse({ ...path, currentVersionId: JSON.parse(String(init.body)).versionId }),
+      'GET /api/sites/team/versions/v2/files': () =>
+        jsonResponse({
+          versionId: 'v2',
+          files: [{ path: 'PAY-1/index.html', size: 10, contentType: 'text/html' }],
+          totalBytes: 10,
+          generatedIndex: false,
+        }),
+    })
+    const client = await connect(store, m.fetch, undefined, { servers: [known(instance)] })
+    return { client, calls: m.calls }
+  }
+
+  it('fling_paths lists them and ends with what the home page can do', async () => {
+    const { client } = await pathsFling()
+    const r = await client.callTool({ name: 'fling_paths', arguments: { name: 'team' } })
+    expect(r.isError).toBeFalsy()
+    expect(text(r)).toContain('1 Path on team:\n- /PAY-1/ "Plan 1"')
+    expect(text(r)).toContain("Home page: if the site's home page has no Paths block")
+    expect(dataOf(r).paths).toMatchObject([{ folder: 'PAY-1' }])
+    const { tools } = await client.listTools()
+    for (const name of ['fling_paths', 'fling_paths_template', 'fling_paths_check']) {
+      const d = tools.find(t => t.name === name)?.description ?? ''
+      expect(d, name).toContain('<!-- fling:paths -->')
+      expect(d, name).toContain('paths_index_missing')
+    }
+  })
+
+  it('takes `path` on fling_info, fling_files and fling_rollback', async () => {
+    const { client, calls } = await pathsFling()
+    const info = await client.callTool({
+      name: 'fling_info',
+      arguments: { name: 'team', path: 'PAY-1' },
+    })
+    expect(text(info)).toContain('/PAY-1/ of team "Plan 1"')
+    expect(text(info)).toContain('- v2 (current)')
+    const files = await client.callTool({
+      name: 'fling_files',
+      arguments: { name: 'team', path: 'PAY-1' },
+    })
+    expect(text(files)).toContain('- PAY-1/index.html')
+    expect(calls.some(c => c.url.search === '?path=PAY-1')).toBe(true)
+    const rolled = await client.callTool({
+      name: 'fling_rollback',
+      arguments: { name: 'team', path: 'PAY-1', versionId: 'v1' },
+    })
+    expect(text(rolled)).toMatch(/^\/PAY-1\/ of team now serves version v1/)
+    const nested = await client.callTool({
+      name: 'fling_rollback',
+      arguments: { name: 'team', path: 'a/b', versionId: 'v1' },
+    })
+    expect(nested.isError).toBe(true)
+  })
+
+  it('refuses `path` on a Fling without Paths, and offers no fling_paths there', async () => {
+    const { client } = await pathsFling(INSTANCE)
+    const { tools } = await client.listTools()
+    expect(tools.some(t => t.name === 'fling_paths')).toBe(false)
+    const info = await client.callTool({
+      name: 'fling_info',
+      arguments: { name: 'team', path: 'PAY-1' },
+    })
+    expect(info.isError).toBe(true)
+    expect(text(info)).toMatch(/has no Paths/)
+  })
+
+  it.each(PATHS_TEMPLATE_NAMES)(
+    'the %s template passes fling_paths_check, offline',
+    async template => {
+      const { store } = await tempStore()
+      const client = await connect(store)
+      const t = await client.callTool({ name: 'fling_paths_template', arguments: { template } })
+      expect(t.isError).toBeFalsy()
+      const html = text(t).slice(text(t).indexOf('\n\n') + 2)
+      const check = await client.callTool({ name: 'fling_paths_check', arguments: { html } })
+      expect(dataOf(check)).toMatchObject({ ok: true, errors: [], warnings: [] })
+    }
+  )
 })

@@ -216,7 +216,9 @@ export async function runDeploy(
     })
   }
 
-  const prepared = await prepareInput(path)
+  const prepared = await prepareInput(path, {
+    markdown: instance?.capabilities.markdown === true,
+  })
   try {
     const { access: _asked, path: _path, ...rest } = opts
     await deployPrepared(
@@ -310,7 +312,7 @@ async function deployPrepared(
   }
 
   // A pulled site is published as it is: no listing page is added to it.
-  if (!link && !hasRootIndex(local)) {
+  if (!link && !hasRootIndex(local, instance?.capabilities.markdown === true)) {
     const pages = htmlPages(local).length
     const root = base ? siteUrlFor(name, base) + (folder ? `${folder}/` : '') : 'the site root'
     const warning = `No index.html ${folder ? `in ${folder}/` : 'at the root'} — ${root} will show a 404.`
@@ -339,6 +341,7 @@ async function deployPrepared(
     pulledWithForms: onBase !== null && link?.forms !== undefined,
     instance,
     bin: ctx.binName,
+    ...(folder === undefined ? {} : { path: folder }),
   })
   let progressShown = false
   const result = await deploy(
@@ -407,10 +410,11 @@ async function deployPrepared(
   const ready =
     result.status === 'unchanged'
       ? true
-      : (
+      : // From the site's root, as the files are named there: a Path's are under its folder.
+        (
           await waitWithSpinner(
             ctx.waitReady,
-            url,
+            result.url,
             local.files.map(f => inFolder(f.path)),
             { progress: ctx.progress, warn: m => ctx.log.warn(m) }
           )
@@ -444,18 +448,24 @@ async function deployPrepared(
     ? `Share for feedback (reviewers sign in to ${instance.name}):`
     : 'Share for feedback:'
   // The forms the version has: the ones sent, or (sending none on a layered deploy) the site's.
+  // A Path has none of its own, so its deploy says nothing about forms.
   let formsSummary: FormsSummary | null = forms.check?.summary ?? null
-  if (!formsSummary && forms.send === undefined && formsEnabled(instance)) {
+  if (!formsSummary && folder === undefined && forms.send === undefined && formsEnabled(instance)) {
     const live = await getForms(client, result.name).catch(() => null)
     if (live?.config) formsSummary = checkFormsConfig(live.config).summary
   }
   const responsesUrl =
     formsSummary && instance ? responsesPageUrl(instance.appOrigin, result.name) : undefined
-  const hint = formsEnabled(instance) && !formsSummary ? formsHint(ctx.binName) : undefined
+  const hint =
+    formsEnabled(instance) && !formsSummary && folder === undefined
+      ? formsHint(ctx.binName)
+      : undefined
   const data = {
     status: result.status,
     site: result.site,
     ...(folder ? { path: folder, url } : {}),
+    versionId: result.versionId,
+    ...(result.hints.length ? { hints: result.hints } : {}),
     ...(changes && link ? { base: opts.force ? null : link.versionId, changes } : {}),
     access: level,
     ...(result.first ? { created: true } : {}),

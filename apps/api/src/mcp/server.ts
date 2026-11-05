@@ -16,6 +16,9 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describePathDetail,
+  describePaths,
+  describePathsCheck,
   describePublishHints,
   describeReadFiles,
   describeResponses,
@@ -35,6 +38,8 @@ import {
   mcpWording,
   NOT_READY_NOTE,
   needsAudience,
+  normalizePathFolder,
+  type PathsHome,
   preferencesUpdateOf,
   privateAudience,
   probeUrl,
@@ -48,6 +53,8 @@ import {
   sortSites,
   waitUntilReachable,
 } from '@fling/shared'
+import { checkPathsIndex } from '@fling/shared/paths-index'
+import { pathsTemplate } from '@fling/shared/paths-templates'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
@@ -59,6 +66,7 @@ import * as groups from '../groups.ts'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
 import { ApiError } from '../lib/errors.ts'
 import * as notifications from '../notifications/settings.ts'
+import * as paths from '../paths.ts'
 import { canInstance, type Principal, userActor } from '../policy.ts'
 import type { StoredManifest } from '../sites.ts'
 import * as sites from '../sites.ts'
@@ -265,6 +273,39 @@ async function formsAfterPublish(deps: Deps, name: string, versionId: string) {
   return { summary: check.summary, responsesPage }
 }
 
+/** A Path's folder as a tool was given it, normalised; 400 unless it is one top-level folder. */
+function folderOf(raw: string): string {
+  const folder = normalizePathFolder(raw)
+  if (folder === null) {
+    throw new ApiError(
+      400,
+      'bad_request',
+      `"${raw}" is not a Path: give one top-level folder of the site, like "PAY-412"`
+    )
+  }
+  return folder
+}
+
+/**
+ * What the site's home page does with its Paths, from its current version (rendering.ts): a Paths
+ * block, no home page (the default listing) or its own page without a block. Undefined without a
+ * current version. Only called once the caller may see the site.
+ */
+async function pathsHomeOf(deps: Deps, name: string): Promise<PathsHome | undefined> {
+  const site = await deps.store.findSite(name)
+  if (!site?.currentVersionId) return undefined
+  const version = await deps.store.getVersion(site, site.currentVersionId)
+  if (!version) return undefined
+  if (version.home === 'block') return 'block'
+  if (version.home === 'none') return 'default'
+  // Versions published before the home page was recorded: whether they have an index.html.
+  const manifest = await deps.blobs.getJson<StoredManifest>(
+    manifestKey(site.id, site.currentVersionId)
+  )
+  if (!manifest) return undefined
+  return manifest.files.some(f => f.path === 'index.html') ? 'own' : undefined
+}
+
 const visibilityOf = (pub: boolean | undefined) =>
   pub === undefined ? undefined : pub ? ('public' as const) : ('private' as const)
 
@@ -356,6 +397,10 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.info, async args => {
+    if (args.path !== undefined) {
+      const path = await paths.pathDetail(deps, user, args.name, folderOf(args.path))
+      return { text: describePathDetail(args.name, path), data: { name: args.name, ...path } }
+    }
     const site = await sites.siteDetail(deps, user, args.name)
     const versions = site.versions
       .slice(0, 10)
@@ -374,6 +419,21 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.files, async args => {
+    if (args.path !== undefined) {
+      const folder = folderOf(args.path)
+      const found = await paths.requirePath(deps, user, args.name, folder, 'version.read')
+      const versionId = args.versionId ?? found.path.currentVersionId
+      if (!versionId) {
+        throw new ApiError(404, 'not_found', `/${folder}/ of ${args.name} has no version yet`)
+      }
+      const files = await paths.pathVersionFiles(deps, user, args.name, folder, versionId)
+      const current = versionId === found.path.currentVersionId
+      const url = `${sites.toSite(deps, found.siteActor, found.site).url}${encodeURIComponent(folder)}/`
+      return {
+        text: describeVersionFiles(`${found.site.name} /${folder}/`, files, { current, url }),
+        data: { name: found.site.name, path: folder, current, ...files },
+      }
+    }
     const { site, actor } = await sites.requireSiteAs(deps, user, args.name, 'version.read')
     const versionId = args.versionId ?? site.currentVersionId
     if (!versionId)
@@ -645,12 +705,47 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   })
 
   registerSiteTool(mcpTools.rollback, async args => {
+    if (args.path !== undefined) {
+      const folder = folderOf(args.path)
+      const path = await paths.rollbackPath(deps, user, args.name, folder, args.versionId)
+      return {
+        text: `/${folder}/ of ${args.name} now serves version ${path.currentVersionId}: ${path.url} (the rest of the site untouched)`,
+        data: { name: args.name, ...path },
+      }
+    }
     const site = await sites.rollback(deps, user, args.name, args.versionId)
     return {
       text: `${site.name} now serves version ${site.currentVersionId}: ${site.url}`,
       data: site,
     }
   })
+
+  if (instanceMetadata(deps.config).capabilities.paths === true) {
+    registerSiteTool(mcpTools.paths, async args => {
+      const list = await paths.listPathsOf(deps, user, args.name)
+      const home = await pathsHomeOf(deps, args.name)
+      return {
+        text: describePaths(args.name, list, { home }),
+        data: { name: args.name, paths: list, ...(home ? { home } : {}) },
+      }
+    })
+
+    registerSiteTool(mcpTools.pathsTemplate, async args => {
+      const html = pathsTemplate(args.template, { title: args.title })
+      return {
+        text:
+          `A starter "${args.template}" home page with its Paths block in place. Adapt it to what the user wants ` +
+          "while keeping the block, check it with fling_paths_check, then publish it as the site's root " +
+          `index.html (without \`path\`).\n\n${html}`,
+        data: { template: args.template, html },
+      }
+    })
+
+    registerSiteTool(mcpTools.pathsCheck, async args => {
+      const check = checkPathsIndex(args.html)
+      return { text: describePathsCheck(check), data: { ...check } }
+    })
+  }
 
   if (canInstance(principal, 'account.groups.read')) {
     registerGroupTools(deps, user, principal, mcpTools, register)

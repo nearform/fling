@@ -19,7 +19,13 @@ export const queryKeys = {
   allSites: ['sites'] as const,
   shared: ['sites', 'shared'] as const,
   site: (name: string) => ['site', name] as const,
-  versionFiles: (name: string, versionId: string) => ['site', name, 'files', versionId] as const,
+  versionFiles: (name: string, versionId: string, folder?: string) =>
+    folder
+      ? (['site', name, 'files', versionId, folder] as const)
+      : (['site', name, 'files', versionId] as const),
+  // Under the site's key, so whatever refetches the site refetches its Paths too.
+  paths: (name: string) => ['site', name, 'paths'] as const,
+  path: (name: string, folder: string) => ['site', name, 'paths', folder] as const,
   comments: (name: string) => ['comments', name] as const,
   // Under the comments' key, so whatever refetches the comments (the live room, a new comment or
   // response) refetches these too.
@@ -69,14 +75,100 @@ export function useSiteDetail(name: string, enabled: boolean) {
   return useQuery({ queryKey: queryKeys.site(name), queryFn: () => api.getSite(name), enabled })
 }
 
-/** A version's files never change (versions are content-addressed), so fetch once, when shown. */
-export function useVersionFiles(name: string, versionId: string, enabled: boolean) {
+/**
+ * A version's files (of the site, or of its Path at `folder`) never change (versions are
+ * content-addressed), so fetch once, when shown.
+ */
+export function useVersionFiles(
+  name: string,
+  versionId: string,
+  enabled: boolean,
+  folder?: string
+) {
   return useQuery({
-    queryKey: queryKeys.versionFiles(name, versionId),
-    queryFn: () => api.versionFiles(name, versionId),
+    queryKey: queryKeys.versionFiles(name, versionId, folder),
+    queryFn: () => api.versionFiles(name, versionId, folder),
     enabled,
     staleTime: Number.POSITIVE_INFINITY,
   })
+}
+
+/** The site's Paths (`paths` capability): `enabled` false skips them. */
+export function useSitePaths(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.paths(name),
+    queryFn: () => api.listPaths(name),
+    enabled,
+  })
+}
+
+/** One Path and its versions. */
+export function usePathDetail(name: string, folder: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.path(name, folder),
+    queryFn: () => api.getPath(name, folder),
+    enabled,
+  })
+}
+
+/**
+ * The changes to one Path: on success the site (its detail and Paths, all under its key) and the
+ * site lists refetch, and the optional message is toasted; failures are toasted unless the caller
+ * shows them.
+ */
+function usePathMutation<TVars, TResult>(
+  name: string,
+  fn: (vars: TVars) => Promise<TResult>,
+  success?: string | ((vars: TVars) => string),
+  toastErrors = true
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (_result, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
+      if (success) showToast(typeof success === 'string' ? success : success(vars))
+    },
+    onError: error => {
+      if (toastErrors) showToast(errorMessage(error), 'error')
+    },
+  })
+}
+
+export function usePathActions(name: string, folder: string) {
+  const queryClient = useQueryClient()
+  const shown = `/${folder}/`
+  return {
+    /** The whole new owners or publishers; refusals are the caller's to show. */
+    setRoles: usePathMutation(
+      name,
+      (change: { owners?: SiteRoleInput; publishers?: SiteRoleInput }) =>
+        api.updatePath(name, folder, change),
+      'Owners and publishers updated',
+      false
+    ),
+    setArchived: usePathMutation(
+      name,
+      (archived: boolean) => api.updatePath(name, folder, { archived }),
+      archived => (archived ? `${shown} archived` : `${shown} restored`)
+    ),
+    restoreVersion: usePathMutation(
+      name,
+      (versionId: string) => api.setPathVersion(name, folder, versionId),
+      `Version restored — ${shown} now serves it`
+    ),
+    remove: useMutation({
+      mutationFn: () => api.deletePath(name, folder),
+      onSuccess: () => {
+        queryClient.removeQueries({ queryKey: queryKeys.path(name, folder) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
+        showToast(`${shown} deleted`)
+      },
+      onError: error => showToast(errorMessage(error), 'error'),
+    }),
+  }
 }
 
 export function useApiKeys() {

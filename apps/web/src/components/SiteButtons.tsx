@@ -22,20 +22,26 @@ const compactWrapClass = 'inline-flex shrink-0 items-center'
 /** A grid card's action: a borderless icon button (`.site-tile-action` in theme.css). */
 const actionClass = 'site-tile-action'
 
-export function ReviewButton({ name, compact = false }: { name: string; compact?: boolean }) {
+export function ReviewButton({
+  name,
+  path,
+  compact = false,
+}: {
+  name: string
+  /** a page of the site to open the review on (a Path's `/<folder>/`) */
+  path?: string
+  compact?: boolean
+}) {
+  const href = reviewHref(name, path)
+  const what = path ? `${name}${path}` : name
   const copy = {
-    text: `${window.location.origin}${reviewHref(name)}`,
-    label: `Copy the review link of ${name} (anyone who can open the site can comment)`,
+    text: `${window.location.origin}${href}`,
+    label: `Copy the review link of ${what} (anyone who can open the site can comment)`,
   }
   if (compact) {
     return (
       <span className={compactWrapClass}>
-        <Link
-          to={reviewHref(name)}
-          className={actionClass}
-          aria-label={`Review ${name}`}
-          title="Review"
-        >
+        <Link to={href} className={actionClass} aria-label={`Review ${what}`} title="Review">
           <ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden />
         </Link>
         <CopyButton {...copy} tooltip="Copy review link" className={actionClass} />
@@ -45,10 +51,10 @@ export function ReviewButton({ name, compact = false }: { name: string; compact?
   return (
     <span className={wrapClass}>
       <Link
-        to={reviewHref(name)}
+        to={href}
         className={`${buttonClass} tone-primary hover:brightness-95`}
-        aria-label={`Review ${name}`}
-        title={`Review ${name}: the site with its comments, the link to share for feedback`}
+        aria-label={`Review ${what}`}
+        title={`Review ${what}: the site with its comments, the link to share for feedback`}
       >
         <ChatBubbleLeftRightIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
         Review

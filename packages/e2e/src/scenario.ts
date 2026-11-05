@@ -725,6 +725,8 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
         work,
         levels,
         roles: meta.capabilities.siteRoles === true,
+        paths: meta.capabilities.paths === true,
+        markdown: meta.capabilities.markdown === true,
         fling,
         flingAs,
         made,
@@ -2518,6 +2520,8 @@ async function pathPublishStep(ctx: {
   work: string
   levels: boolean
   roles: boolean
+  paths: boolean
+  markdown: boolean
   fling: (...args: string[]) => Promise<unknown>
   flingAs: (session: Session) => (...args: string[]) => Promise<unknown>
   made: string[]
@@ -2588,6 +2592,162 @@ async function pathPublishStep(ctx: {
   step(
     `${publisher.email} published the Path /30-10-26/ of ${name}: it hides the site's copy, and the site's version is as it was`
   )
+  if (!ctx.paths) {
+    step('Paths: list, rollback, home page listing and delete not on this instance (skipped)')
+    return
+  }
+  await pathsLifecycle({ ...ctx, siteUrl, firstWeek: published as { versionId?: string } })
+}
+
+interface CliPathList {
+  paths: { folder: string; title: string; currentVersionId: string | null }[]
+}
+
+/**
+ * Paths after the first one: a second Path (Markdown, where the Fling renders it), rollback of one
+ * Path alone, `fling paths`, the site's home page listing them through a Paths block (and keeping
+ * up as Paths come and go), and deleting a Path.
+ */
+async function pathsLifecycle(
+  ctx: Parameters<typeof pathPublishStep>[0] & {
+    siteUrl: string
+    firstWeek: { versionId?: string }
+  }
+) {
+  const { name, nonce, fling, step, siteUrl } = ctx
+  const wait = { timeoutMs: ctx.propagationMs }
+  const weekV1 = ctx.firstWeek.versionId
+  check(weekV1, `the Path publish gave no versionId: ${JSON.stringify(ctx.firstWeek)}`)
+
+  // A second Path: Markdown served rendered as the folder's home page, its source with ?raw=1.
+  const plan = siteDir(
+    ctx.work,
+    'path-plan',
+    ctx.markdown
+      ? { 'index.md': `# Plan ${nonce}\n\n- [x] **ship** it\n` }
+      : { 'index.html': page(`Plan ${nonce}`, `plan ${nonce}`) }
+  )
+  const second = (await fling('deploy', plan, '--name', name, '--path', 'PAY-2')) as {
+    status: string
+    hints?: { code: string }[]
+  }
+  check(second.status === 'live', `the second Path: ${JSON.stringify(second)}`)
+  check(
+    second.hints?.some(h => h.code === 'paths_index_missing'),
+    `a second Path under a home page without a Paths block hints paths_index_missing: ${JSON.stringify(second.hints)}`
+  )
+  if (ctx.markdown) {
+    await eventually(
+      '/PAY-2/ serves the rendered Markdown',
+      `${siteUrl}PAY-2/`,
+      r =>
+        r.status === 200 &&
+        /<h1[^>]*>Plan /.test(r.text) &&
+        r.text.includes('<strong>ship</strong>'),
+      wait
+    )
+    const raw = await get(`${siteUrl}PAY-2/index.md?raw=1`)
+    check(
+      raw.status === 200 && raw.text.startsWith(`# Plan ${nonce}`),
+      `?raw=1 gives the Markdown source: ${raw.status} ${raw.text.slice(0, 80)}`
+    )
+    step(
+      '/PAY-2/ is a Path of Markdown: served rendered (GitHub-flavoured), the source with ?raw=1'
+    )
+  } else {
+    await eventually(
+      '/PAY-2/ serves its page',
+      `${siteUrl}PAY-2/`,
+      r => r.text.includes(`plan ${nonce}`),
+      wait
+    )
+  }
+
+  // Roll one Path back alone: the other Path and the site's own pages stay.
+  const weekDir = siteDir(ctx.work, 'path-week-2', {
+    'index.html': page('week', `week two ${nonce}`),
+  })
+  await fling('deploy', weekDir, '--name', name, '--path', '30-10-26')
+  await eventually(
+    '/30-10-26/ serves its second version',
+    `${siteUrl}30-10-26/`,
+    r => r.text.includes(`week two ${nonce}`),
+    wait
+  )
+  const versions = (await fling('versions', name, '--path', '30-10-26')) as {
+    currentVersionId: string
+    versions: { id: string }[]
+  }
+  check(
+    versions.versions.length === 2 && versions.currentVersionId !== weekV1,
+    `the Path's own versions: ${JSON.stringify(versions)}`
+  )
+  await fling('rollback', name, weekV1, '--path', '30-10-26')
+  await eventually(
+    '/30-10-26/ serves its first version again',
+    `${siteUrl}30-10-26/`,
+    r => r.text.includes(`week ${nonce}`) && !r.text.includes(`week two ${nonce}`),
+    wait
+  )
+  const other = await get(`${siteUrl}PAY-2/`)
+  const root = await get(siteUrl)
+  check(
+    other.status === 200 && root.text.includes(`changelog ${nonce}`),
+    `rolling back /30-10-26/ left the rest: /PAY-2/ ${other.status}, / ${root.status}`
+  )
+  step(
+    'rolled /30-10-26/ back to its first version alone: /PAY-2/ and the site’s own pages unchanged'
+  )
+
+  const listed = (await fling('paths', name)) as CliPathList
+  const folders = listed.paths.map(p => p.folder).sort()
+  check(
+    JSON.stringify(folders) === JSON.stringify(['30-10-26', 'PAY-2']),
+    `fling paths: ${JSON.stringify(listed)}`
+  )
+  step(`fling paths ${name}: /30-10-26/ and /PAY-2/`)
+
+  // The site's own home page with a Paths block lists the Paths, and keeps up as they change.
+  const home = siteDir(ctx.work, 'path-home', {
+    'index.html': `<!doctype html><html><head><title>Home</title></head><body><h1>home ${nonce}</h1>\n<!-- fling:paths -->\n</body></html>\n`,
+    'notes.html': page('notes', `notes ${nonce}`),
+  })
+  await fling('deploy', home, '--name', name)
+  const lists = (r: Fetched, folder: string) =>
+    r.text.includes(`home ${nonce}`) && r.text.includes(`data-folder="${folder}"`)
+  await eventually(
+    'the home page lists both Paths',
+    siteUrl,
+    r => lists(r, '30-10-26') && lists(r, 'PAY-2'),
+    wait
+  )
+  const third = siteDir(ctx.work, 'path-third', { 'index.html': page('third', `third ${nonce}`) })
+  await fling('deploy', third, '--name', name, '--path', 'PAY-3')
+  await eventually('the home page lists the third Path', siteUrl, r => lists(r, 'PAY-3'), wait)
+  const data = await eventually(
+    '/_fling-paths.json lists the three Paths',
+    `${siteUrl}_fling-paths.json`,
+    r => r.status === 200 && r.text.includes('"PAY-3"'),
+    wait
+  )
+  check(
+    ['30-10-26', 'PAY-2', 'PAY-3'].every(f => data.text.includes(`"${f}"`)),
+    `/_fling-paths.json: ${data.text.slice(0, 300)}`
+  )
+  step(
+    'the site’s index.html with <!-- fling:paths --> lists its Paths, and the third one once published'
+  )
+
+  // Deleting a Path: its folder 404s and the listing drops it.
+  await fling('paths', 'delete', name, 'PAY-3', '--yes')
+  await eventually('/PAY-3/ is gone', `${siteUrl}PAY-3/`, r => r.status === 404, wait)
+  await eventually(
+    'the home page drops the deleted Path',
+    siteUrl,
+    r => lists(r, 'PAY-2') && !lists(r, 'PAY-3'),
+    wait
+  )
+  step('deleted /PAY-3/: it 404s and the home page no longer lists it')
 }
 
 async function pullStep(ctx: {

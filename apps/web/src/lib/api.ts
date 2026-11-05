@@ -55,6 +55,9 @@ import {
   OAuthDecisionSchema,
   type OAuthRequestInfo,
   OAuthRequestInfoSchema,
+  type PathDetail,
+  PathDetailSchema,
+  PathListSchema,
   type ResponseExportFormat,
   type ResponsesExport,
   ResponsesExportSchema,
@@ -67,6 +70,8 @@ import {
   type SiteDetail,
   SiteDetailSchema,
   SiteListSchema,
+  type SitePath,
+  SitePathSchema,
   type SiteRoleInput,
   type Thumbnail,
   ThumbnailSchema,
@@ -182,6 +187,7 @@ const ShareResponseParser: Parser<{ shareUrl: string }> = {
 }
 
 const site = (name: string) => `/api/sites/${encodeURIComponent(name)}`
+const path = (name: string, folder: string) => `${site(name)}/paths/${encodeURIComponent(folder)}`
 const group = (slug: string) => `/api/groups/${encodeURIComponent(slug)}`
 
 export const api = {
@@ -209,9 +215,36 @@ export const api = {
     return url
   },
   getSite: (name: string): Promise<SiteDetail> => request(site(name), SiteDetailSchema),
-  /** The files in one version of a site, sorted by path. */
-  versionFiles: (name: string, versionId: string): Promise<VersionFiles> =>
-    request(`${site(name)}/versions/${encodeURIComponent(versionId)}/files`, VersionFilesSchema),
+  /** The files in one version of a site, or of its Path at `folder`, sorted by path. */
+  versionFiles: (name: string, versionId: string, folder?: string): Promise<VersionFiles> =>
+    request(
+      `${site(name)}/versions/${encodeURIComponent(versionId)}/files${
+        folder ? `?path=${encodeURIComponent(folder)}` : ''
+      }`,
+      VersionFilesSchema
+    ),
+  /** The site's Paths, by folder (`paths` capability). */
+  async listPaths(name: string): Promise<SitePath[]> {
+    const { paths } = await request(`${site(name)}/paths`, PathListSchema)
+    return paths
+  },
+  /** One Path with its versions, newest first. */
+  getPath: (name: string, folder: string): Promise<PathDetail> =>
+    request(path(name, folder), PathDetailSchema),
+  /** A Path's owners or publishers (each the whole new list), or archiving it. */
+  updatePath: (
+    name: string,
+    folder: string,
+    body: { owners?: SiteRoleInput; publishers?: SiteRoleInput; archived?: boolean }
+  ): Promise<SitePath> => request(path(name, folder), SitePathSchema, { method: 'PATCH', body }),
+  /** Serve an earlier version of the Path; the rest of the site is untouched. */
+  setPathVersion: (name: string, folder: string, versionId: string): Promise<SitePath> =>
+    request(`${path(name, folder)}/current`, SitePathSchema, {
+      method: 'POST',
+      body: { versionId },
+    }),
+  deletePath: (name: string, folder: string) =>
+    request(path(name, folder), ignoreBody, { method: 'DELETE' }),
   /** Keep a thumbnail of the home page, a PNG taken of `versionId` (`thumbnails` capability). */
   putThumbnail: (name: string, versionId: string, png: Blob): Promise<Thumbnail> =>
     request(`${site(name)}/thumbnail?version=${encodeURIComponent(versionId)}`, ThumbnailSchema, {

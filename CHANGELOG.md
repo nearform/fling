@@ -13,6 +13,47 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Paths: one site, a folder per ticket.** A one-folder path publish (`fling deploy ./plan
+  --name payments-plans --path PAY-412`, `path` on `fling_publish`) now publishes that folder as a
+  Path: its own versions, rollback, owners and publishers, served at `/PAY-412/`, with the site's
+  access. Publishing a Path never changes the site's own pages or another Path, so teammates
+  publishing different Paths never collide, and each rolls back alone. Whoever makes a Path owns
+  it; the site's owners own it too, and a site publisher can't replace someone else's Path
+  (`path_not_yours`). `fling paths <site>`, `--path` on `versions`, `rollback`, `files`, `owners`
+  and `publishers`, `fling_paths` and `path` on `fling_info`, `fling_rollback` and `fling_files`,
+  `/api/sites/<name>/paths`, and a Paths section and Path page in the web UI. Comments on a Path's
+  pages go to its owners. Forms stay the site's: a Path publish carrying a forms config is refused,
+  and the site's forms reach a Path's pages through their `paths` patterns. The `paths` capability.
+- **The site's home page lists its Paths.** A site with Paths and no index.html of its own gets a
+  listing of them with search, sort and "2 hours ago" dates for the last week; an index.html of its own lists them wherever it puts a
+  Paths block (`<!-- fling:paths -->`, or a template repeated per Path), and the data is at
+  `/_fling-paths.json`. `fling paths init --template plans|docs|reports|minimal` and
+  `fling_paths_template` write a starter page; `fling paths check` and `fling_paths_check` check
+  one. Publish results (and `fling deploy --json`, which now gives the `versionId`) carry hints: `paths_index_missing` when a site has several Paths and a home
+  page that doesn't list them, `paths_block_hidden` when a publish sends files under a Path's
+  folder, which the Path hides. The skill offers a team site when it sees one coming, and asks
+  first.
+- **Markdown is served as pages.** `.md` files are rendered as GitHub-flavoured Markdown when a
+  version goes live, and served rendered; `?raw=1` serves the source, a page of its own on the review page (a comment on it reopens there). A folder's `index.md`, else
+  `README.md`, else its only Markdown file, is its home page. The `markdown` capability.
+- **Retention.** `VERSION_RETENTION` (default 0: keep every version) keeps that many complete
+  versions of each site and Path besides the current one. An hourly maintenance run marks the
+  rest and deletes them at least an hour later, unless one is published again or rolled back to
+  meanwhile; it also deletes deploys staged and never finalized for a day, and replaced rendered
+  home pages.
+- **One kind of partial publish.** A publish can no longer replace a nested folder of a site and
+  carry the rest forward: `path` is one top-level folder, a Path, and `reports/2026` is refused.
+  A publish on a pulled version (`base`, after `fling pull` or `fling_read_files`) still sends only
+  what changed, for the site or, with `path`, for one Path; `fling pull --path F` pulls that Path.
+- Upgrade note: on AWS, the module adds an hourly EventBridge Scheduler schedule and its role
+  (`<namespace>-<env>-<name>-maintain`), so `terraform apply` creates them. Versions published
+  before this release keep serving Markdown as it is until they are published again. A folder
+  that was path-published before is the site's own folder: publish it with `--path` once to make
+  it a Path, which then hides the site's copy. Rolling back to an earlier release stops serving
+  Paths (their folders serve the site's own copy, or 404) until you roll forward again; nothing is
+  lost. A CLI or MCP server from before this release that path-publishes a nested folder gets a
+  400; one folder works as a Path.
+
 ## 0.9.0 (2026-11-03)
 
 - **The CLI says when a newer Fling release is out.** After a command, when the server it used

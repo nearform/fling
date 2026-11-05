@@ -1,7 +1,8 @@
 /**
- * The files in one version of a site: path, size and type, with a warning when there is no root
- * index.html (the root URL 404s — the most common "why is my link broken?"). Paths link to the
- * live file only for the version being served (`siteUrl` set); older versions aren't served.
+ * The files in one version of a site, or of one of its Paths (`folder`): path, size and type, with
+ * a warning when there is no root index.html (the root URL 404s — the most common "why is my link
+ * broken?"). Paths link to the live file only for the version being served (`siteUrl` set: the
+ * Path's URL for a Path, whose files are listed under it); older versions aren't served.
  */
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import { useVersionFiles } from '../hooks/queries'
@@ -13,13 +14,16 @@ export function VersionFiles({
   name,
   versionId,
   siteUrl,
+  folder,
 }: {
   name: string
   versionId: string
-  /** set for the served version: paths become links to the live files */
+  /** a version of the site's Path at this folder */
+  folder?: string
+  /** set for the served version (the site's or the Path's URL): paths become links to the live files */
   siteUrl?: string
 }) {
-  const query = useVersionFiles(name, versionId, true)
+  const query = useVersionFiles(name, versionId, true, folder)
 
   if (query.isPending) {
     return (
@@ -42,10 +46,10 @@ export function VersionFiles({
         {!hasRootIndex(files) && (
           <span
             className="badge badge-sm tone-warning gap-1"
-            title="The site's root URL has no page to serve. Each file still works at its own path."
+            title={`The ${folder ? 'Path' : 'site'}'s root URL has no page to serve. Each file still works at its own path.`}
           >
             <ExclamationTriangleIcon className="h-3 w-3" />
-            Root will 404 — no index.html
+            {folder ? `/${folder}/ will 404 — no index.html` : 'Root will 404 — no index.html'}
           </span>
         )}
         {generatedIndex && (

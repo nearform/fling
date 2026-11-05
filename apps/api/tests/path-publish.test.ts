@@ -125,6 +125,28 @@ describe('path publish', () => {
     expect(refused.body.error.code).toBe('secret_detected')
   })
 
+  it('forms are the site’s: a Path publish carrying a config is refused, null is fine', async () => {
+    const { env, alice } = await world()
+    const page = [file('wk44/index.html', '<h1>wk44</h1>')]
+    const forms = {
+      title: 'Notes',
+      forms: [
+        {
+          id: 'note',
+          title: 'Note',
+          kind: 'page',
+          paths: ['**'],
+          schema: { type: 'object', properties: { note: { type: 'string' } } },
+        },
+      ],
+    }
+    const refused = await deploy(env, alice.key, 'team', page, { path: 'wk44', forms })
+    expect(refused.status).toBe(400)
+    expect(refused.body.error.message).toMatch(/Forms belong to the site/)
+    const done = await deploy(env, alice.key, 'team', page, { path: 'wk44', forms: null })
+    expect(done.status).toBe(200)
+  })
+
   it('on a base: sends only what changed, carries the rest of the Path, and removes', async () => {
     const { env, alice } = await world()
     const first = await deploy(env, alice.key, 'team', week, { path: 'wk44' })

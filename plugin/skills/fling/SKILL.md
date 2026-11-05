@@ -215,23 +215,58 @@ Claude Desktop extension.
 - As a publisher, the user can't change who can open the site, its settings or owners, nor restore
   an archived site by publishing (`owner_only`): suggest asking one of its owners.
 
-## Publishing one folder (path publish)
+## Team sites: one site, a Path per ticket
 
-- To add or replace **one part of a shared site** without republishing the rest, publish into a
-  folder: one report per week under a team changelog site (`changelog/30-10-26/`), release notes
-  per version, a page per meeting. `fling_publish { name, path: "30-10-26", files }` (file paths
-  relative to the folder, its page `index.html`), `fling_deploy { path: "./report", name,
-  sitePath: "30-10-26" }`, or `fling deploy ./report --name changelog --path 30-10-26 --yes`.
-  Every other file of the site stays as it was; the result's URL is the folder's.
-- Use it only for an existing site the user publishes to (theirs, or one they are a publisher of),
-  and confirm the site and folder with them. For a site's first version, or to change pages outside
-  the folder, publish the whole site.
-- `base_changed`: someone else published the site meanwhile. The CLI retries once by itself; with
-  the MCP tools, publish again. `too_large`: the site has more than 1,000 files outside the folder;
-  publish the whole site instead. A Fling that can't do it says so: never fall back to publishing
-  just the folder as the whole site.
-- `fling_info` shows which folder each version went to; `fling_rollback` to the version before
-  removes it.
+A **Path** is a top-level folder of a site (`/PAY-412/`) with its own versions, rollback, owners
+and publishers. Who can open it is the site's, so access is set once for the team. Publishing a
+Path never touches the site's own pages or anyone else's Path, so teammates (and agents)
+publishing different Paths never collide.
+
+- **Publish one**: `fling_publish { name, path: "PAY-412", files }` (file paths relative to the
+  folder, its page `index.html` or a Markdown file), `fling_deploy { path: "./plan", name,
+  sitePath: "PAY-412" }`, or `fling deploy ./plan --name payments-plans --path PAY-412 --yes`. The
+  first publish makes the Path, and the user owns it. The result's URL is the Path's. A path is
+  one folder: `reports/2026` is refused; publish `reports` with `2026/` inside it.
+- **When to suggest a team site**, and ask before setting one up: the user talks about publishing
+  plans, specs or reports per ticket, per person or per agent into one place; says "for the team"
+  or "one site for the project"; names tickets (`PAY-412`, `#1234`); keeps publishing different
+  top-level folders of one site; the site's name ends in `-plans`, `-specs` or `-reports`; or a
+  publish result has the `paths_index_missing` hint. Ask, for example: "This looks like a team site
+  with a folder per ticket. Shall I set it up so each ticket is its own Path, with its own history
+  and owner, and the home page lists them?" Never change a site the user didn't ask to change.
+- **The home page**: ask whether they want the default listing or their own page.
+  - **Default**: nothing to do. A site with Paths and no index.html of its own lists them, with
+    search and sort; a site whose first publish is a Path gets that listing as its home page.
+  - **Their own page**: `fling_paths_template { template: "plans" | "docs" | "reports" | "minimal",
+    title? }` (or `fling paths init --template plans`) gives a starter index.html with a Paths
+    block. Adapt it to their wording and look as much as they like, keeping the block: the bare
+    `<!-- fling:paths -->` marker, or a `<!-- fling:paths -->`…`<!-- /fling:paths -->` pair whose
+    contents repeat per Path with `{{href}}`, `{{folder}}`, `{{title}}`, `{{date}}`. Keep dates in
+    `<time datetime="{{updated}}">{{date}}</time>`, so they read "2 hours ago" for a week. Check it
+    with `fling_paths_check { html }` (or `fling paths check`), then publish it as the site's root
+    (no `path`).
+  - An index.html **without** a block shows no listing: that is what `paths_index_missing` says.
+    Offer one of the two above.
+- **Then**: set access and publishers once for a group (`fling_set_audience`,
+  `fling_set_publishers`, offering an existing group first), and publish each item with
+  `path: <ticket>`. Name the folder after the ticket (`PAY-412`, `gh-1234`), from the branch when
+  there is one; never after a person.
+- **Managing Paths**: `fling_paths { name }` (or `fling paths <site>`) lists them. `fling_info`,
+  `fling_rollback` and `fling_files` take `path` for one Path, and so do `fling versions`,
+  `rollback`, `files`, `owners` and `publishers` (`--path`). A Path's owners (and the site's) change
+  it; its publishers publish it. Publishing to someone else's Path is `path_not_yours`: ask one of
+  its owners to add the user as a publisher.
+- `paths_block_hidden`: the site's own files under a folder that is a Path are hidden by it.
+  Publish them to the Path instead, or leave them out.
+- `base_changed` on a Path: another publish to it went live first. The CLI retries once; with the
+  MCP tools, publish again.
+
+## Markdown
+
+Markdown files (`.md`) are served as pages, rendered as GitHub-flavoured Markdown: tables, task
+lists, code blocks. A folder's `index.md`, else its `README.md`, else its only `.md` file, is its
+home page. Add `?raw=1` to a page's URL for the source. So a plan written as Markdown can be
+published as it is: no need to convert it to HTML.
 
 ## Changing an existing site (pull)
 
@@ -244,6 +279,10 @@ Claude Desktop extension.
   inline and the `versionId`; follow `cursor` for more, or name the files you need in `paths`. Then
   `fling_publish { name, base: <versionId>, files: [only the changed or new files], remove: [files
   to delete] }`: every other file is kept as it is.
+- One Path: `fling_pull { name, path: "PAY-412" }` (or `fling pull <site> <dir> --path PAY-412`)
+  pulls just that Path, and deploying the folder publishes it back to the Path on the version
+  pulled. `fling_read_files { name, path }` names the files within the Path; publish them back with
+  `fling_publish { name, path, base, files, remove }`.
 - Anyone signed in who can open a site may pull it; only its owners and publishers may publish it.
 - `base_changed`: someone published the site after you pulled it. Never force over it without
   asking: pull (or read) it again, redo the change on the new version and publish that. Only if
@@ -288,7 +327,9 @@ a form instead (`fling_comments_list` says so when the comments look like that).
    (each saying where), the pages each form applies to, and globs that match nothing.
 4. **Publish it**: `fling_publish` / `fling_deploy` with `forms`, or save it as `fling.forms.json`
    at the top of the folder (`fling forms init` writes one; never served as a file). Publishing the
-   whole site again without it removes the forms; a `path` publish or one on a `base` keeps them.
+   whole site again without it removes the forms; one on a `base` keeps them. Forms are the site's:
+   a `path` publish leaves them alone and refuses a forms config, so publish forms with the site's
+   root, with `paths` patterns that reach the Path's pages (`PAY-412/**`).
 
 The file:
 

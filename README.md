@@ -77,19 +77,32 @@ instance only, never guests. A site always keeps at least one person as an owner
 when whoever created it is away or leaves. Naming a group trusts whoever manages it. People given a
 role are told by email, where the instance sends it.
 
-**Path publish.** A deploy can replace just one folder of a site and keep the rest: `fling deploy
-./report --name changelog --path 30-10-26` serves the report at `<changelog>/30-10-26/` while every
-other page stays as it was (`path` on the MCP tools). One report a week under a shared changelog
-site, each by whichever owner or publisher wrote it, is the use it is for. If someone else publishes
-the site meanwhile, the deploy runs again on top of theirs; rolling back removes the folder. The
-rest of the site is copied into the new version, up to 1,000 files.
+**Paths: one site, a folder per ticket.** A Path is a top-level folder of a site with its own
+versions, rollback, owners and publishers: `fling deploy ./plan --name payments-plans --path
+PAY-412` publishes the plan at `<payments-plans>/PAY-412/` and makes you its owner, and nothing
+else on the site changes (`path` on the MCP tools). Access is the site's, so a team sets it once;
+teammates and their agents publish their own Paths without colliding, and each rolls back alone
+(`fling rollback payments-plans <version> --path PAY-412`). The site's home page lists its Paths,
+with search and sort: by default when it has no index.html of its own, or wherever its own
+index.html puts a Paths block (`<!-- fling:paths -->`; `fling paths init --template plans` writes
+a starter). `fling paths <site>`, `fling_paths` and the site page list them. Comments on a Path's
+pages go to its owners.
+
+**Markdown.** `.md` files are served as pages, rendered as GitHub-flavoured Markdown, with their
+source at `?raw=1`; a folder's `index.md` or `README.md` is its home page. A plan written in
+Markdown is published as it is.
+
+**Retention.** An instance can keep only the newest versions of each site and Path
+(`VERSION_RETENTION`); older ones are deleted an hour after they are marked, unless they are
+published again or rolled back to meanwhile. By default every version is kept.
 
 **Pull.** Anyone signed in who can open a site can download it to change it: `fling pull changelog`
 writes its files to `./changelog`, and `fling deploy changelog` publishes the folder on the version
 pulled, uploading only what changed. If someone else published the site since, the deploy stops
 rather than overwrite their work: pull again and redo the change, or `--force` to replace theirs.
 Agents do the same with `fling_pull`, or read the files inline with `fling_read_files` and publish
-only the files they change (`base` on `fling_publish`). The site page shows the command to whoever
+only the files they change (`base` on `fling_publish`). With `--path` (or `path`), the same for one
+Path. The site page shows the command to whoever
 may pull.
 
 **Review.** Anyone signed in can review a site they can open: `<app>/review/<name>` shows the site

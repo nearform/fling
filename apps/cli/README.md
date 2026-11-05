@@ -145,7 +145,9 @@ What you can fling:
 - **A single `.html`/`.htm` file**, served as the site's `index.html`.
 - **A `.zip`**: extracted (paths that would escape the folder are refused), `__MACOSX/` and dotfiles
   skipped (dotfiles such as `.env` are listed), and a single top-level folder unwrapped.
-- **Any other file** (`.pdf`, `.svg`, `.png`, `.md`…), served next to a small generated `index.html`
+- **A single Markdown file** (`.md`, `.markdown`), on a Fling that renders Markdown (the
+  `markdown` capability): its rendered page is the site's home page.
+- **Any other file** (`.pdf`, `.svg`, `.png`…), served next to a small generated `index.html`
   that shows it (images, PDF, video, audio) or links to it.
 
 A file's default site name comes from its name, without the extension or a browser's ` (1)`
@@ -156,21 +158,23 @@ does; see below).
 
 - Re-fling to update. Identical content is a no-op, and content you deployed before is restored
   instantly without uploading.
-- **Publish one folder of a site** with `--path` (and `--name`): `fling deploy ./report --name
-  changelog --path 30-10-26` serves the report at `https://changelog.<sites domain>/30-10-26/` and
-  keeps every other file of the site. Only the folder's files are uploaded; the server copies the
-  rest into the new version (at most 1,000 files, else `too_large`: deploy the whole site). If
-  someone else publishes the site in between, the deploy runs once more on top of theirs. `fling
-  versions` shows where each one went (PATH), and rolling back removes it. On a Fling without path
-  publishing (`pathPublish`) the CLI refuses rather than replace the whole site.
+- **Publish one folder of a site as its Path** with `--path` (and `--name`): `fling deploy ./plan
+  --name payments-plans --path PAY-412` serves the plan at `https://payments-plans.<sites
+  domain>/PAY-412/`. A Path is one top-level folder with its own versions, rollback, owners and
+  publishers; publishing it never touches the rest of the site or its other Paths, so teammates
+  publishing different Paths never collide. The first publish makes the Path, with you as its
+  owner. `--path` takes one folder: nested folders (`reports/2026`) are refused, so publish them as
+  part of their top-level folder. A folder pulled with `fling pull --path` deploys back to its
+  Path. On a Fling without path publishing (`pathPublish`) the CLI refuses rather than replace the
+  whole site. See [Paths](#paths).
 - **Change a site you can open** with `fling pull <name> [dir]`: it downloads the current version
   into `dir` (default `./<name>`) with a site link, `.fling-site.json`, naming the server, the site
   and the version pulled. `fling deploy <dir>` then publishes to that site on that version and
   uploads only what changed (`3 changed, 1 removed`). If someone published the site since you
   pulled, it stops (`base_changed`) rather than overwrite their work: pull again into another
   folder and redo your change, or `fling deploy <dir> --force` to replace what they published.
-  `--path <folder>` pulls one folder of the site; `--version-id <id>` another version (owners and
-  publishers). Anyone signed in who can open the site may pull it; only its owners and publishers
+  `--path <folder>` pulls one of the site's Paths, its files at the top of `dir`; `--version-id
+  <id>` another version (owners and publishers). Anyone signed in who can open the site may pull it; only its owners and publishers
   may deploy. A folder that isn't empty needs `--force`. On a Fling without the `pull` capability
   the CLI says so.
 - **Fling never publishes dotfiles, gitignored files, secret files (keys, certs, credentials) or
@@ -252,15 +256,15 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 |---|---|
 | `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
 | `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
-| `fling info <name>` / `fling versions <name>` | details and version history, with who published each version and, for a path publish, the folder (PATH) |
+| `fling info <name>` / `fling versions <name> [--path <folder>]` | details and version history, with who published each version; `--path`: a Path's own versions |
 | `fling pull <name> [dir] [--path <folder>] [--version-id <id>] [--force]` | download a site's files to change them; `fling deploy <dir>` publishes on the version pulled |
-| `fling files <name> [versionId]` | the files in the live version (or an earlier one) |
-| `fling rollback <name> <versionId>` | serve an earlier version |
+| `fling files <name> [versionId] [--path <folder>]` | the files in the live version (or an earlier one), or a Path's |
+| `fling rollback <name> <versionId> [--path <folder>]` | serve an earlier version (of the site, or of one Path) |
 | `fling share <name> [--refresh] [--revoke]` | public share link: print or create it, rotate it, or remove it |
 | `fling visibility <name> private\|public` | require sign-in, or not (private again: the access it had) |
 | `fling access <name> [--only-me \| --members \| --public] [--add <emails>] [--remove <emails>] [--group <slugs>] [--remove-group <slugs>] [--clear]` | who can open a site: only you, listed people and groups, everyone signed in, or anyone |
-| `fling owners <name> [--add <emails>] [--remove <emails>] [--set <emails>] [--group <slugs>] [--remove-group <slugs>]` | who owns a site, or change it |
-| `fling publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …]` | who publishes a site without owning it, or change it |
+| `fling owners <name> [--add <emails>] [--remove <emails>] [--set <emails>] [--group <slugs>] [--remove-group <slugs>] [--path <folder>]` | who owns a site (or a Path), or change it |
+| `fling publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …] [--path <folder>]` | who publishes a site (or a Path) without owning it, or change it |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
 | `fling rm <name> [--yes]` | delete permanently |
 
@@ -338,6 +342,46 @@ admin for an admin's view), and `fling info` its Owners, Publishers and You. As 
 commands print `{ name, role, owners, publishers }`, each list `{ emails: [{ email, known, guest?
 }], groups: [{ slug, name, size }] }`.
 
+### Paths
+
+A **Path** is a top-level folder of a site published on its own, such as one plan per ticket on a
+team's site: `fling deploy ./plan --name payments-plans --path PAY-412`. Each Path has its own
+versions, rollback, owners and publishers, and is served at `<site>/<folder>/`. Who can open it is
+the site's. Its owners and publishers, and the site's owners, can publish it, roll it back and
+change it; the site's publishers can make new Paths. On a Fling with Paths (the `paths`
+capability):
+
+```sh
+fling paths payments-plans                        # its Paths: folder, title, version, state, can you publish, updated
+fling versions payments-plans --path PAY-412      # the Path's own versions (* = live)
+fling files payments-plans --path PAY-412         # the files of its live version (or give a version id)
+fling rollback payments-plans <versionId> --path PAY-412   # roll back only the Path
+fling owners payments-plans --path PAY-412 --add cat@example.com
+fling publishers payments-plans --path PAY-412 --add bob@example.com
+fling paths archive payments-plans PAY-412        # take it off the site (404), keep its versions; `paths unarchive` brings it back
+fling paths delete payments-plans PAY-412         # delete it and its versions (asks first unless --yes)
+fling pull payments-plans --path PAY-412          # its files, to change and deploy back to the Path
+```
+
+**The home page.** A site's home page (its root `index.html`) can list its Paths, three ways:
+
+- **Default**: with no `index.html` of its own, the site's home page is a listing of its live
+  Paths. A site whose first publish is a Path gets one. Nothing to do.
+- **Custom**: your own `index.html` with a Paths block, which Fling fills with the live Paths
+  whenever one changes (and serves as JSON at `/_fling-paths.json`). `fling paths init [dir]
+  --template plans|docs|reports|minimal [--title T]` writes a starter (it never replaces an
+  `index.html` without `--force`); adapt it, keeping the block, check it with `fling paths check
+  [dir|file]` (errors exit 1, warnings are printed), then deploy the folder as the site root,
+  without `--path`. The block is the bare marker `<!-- fling:paths -->` (Fling's default list,
+  styled by your page) or a template, `<!-- fling:paths sort=updated --> <a href="{{href}}">{{title}}</a>
+  <!-- fling:empty --> None yet. <!-- /fling:paths -->`, whose item repeats per Path with
+  `{{href}} {{folder}} {{title}} {{updated}} {{date}} {{version}}`. Options: `sort=updated|oldest|folder|folder-desc`,
+  `nocontrols`, `nostyle`; `<!-- fling:paths-controls -->` places the search and sort controls.
+- **None**: an `index.html` without a Paths block lists no Paths, and a deploy says so.
+
+With `--json`, `fling paths` prints `{ name, paths: [{ folder, title, url, currentVersionId,
+archived, owners?, publishers?, canPublish, createdAt, updatedAt }] }`.
+
 ### Groups
 
 A group is a named list of people, such as a team, that anyone signed in can use in a site's
@@ -397,8 +441,10 @@ fling responses my-app --format csv -o labels.csv          # the export: json, j
 - `fling deploy` checks the file against the folder's pages and stops on errors. After the deploy
   it lists each form and the pages it applies to (`forms` in `--json`). Without the file, it ends
   with one line on adding a form (`formsHint` in `--json`; `--quiet` leaves it out).
-- Without the file, deploying a whole site removes its forms. A `--path` deploy keeps them, and so
-  does a pulled folder, unless it was pulled with a `fling.forms.json` you have since deleted.
+- Without the file, deploying a whole site removes its forms. A pulled folder keeps them, unless it
+  was pulled with a `fling.forms.json` you have since deleted. Forms are the site's: a `--path`
+  deploy leaves them as they are and refuses a folder with `fling.forms.json`. Deploy the forms with
+  the site's root, with `paths` patterns that reach the Path's pages (`PAY-412/**`).
 - `fling pull` writes the site's `fling.forms.json` back into the folder.
 - On a form with `"visibility": "own"`, reviewers see only their own answers; the site's owners see
   everyone's.
@@ -474,14 +520,14 @@ accepts).
 The MCP tools:
 
 - `fling_deploy`: a folder, `.html`, `.zip` or other file on this computer, by path or just its
-  name (looked up like the CLI does). `sitePath` (with `name`) publishes it into that folder of the
-  site and keeps the rest, like `--path`. A folder pulled with `fling pull` or `fling_pull` deploys
+  name (looked up like the CLI does). `sitePath` (with `name`) publishes it as that Path of the
+  site, the rest untouched, like `--path`. A folder pulled with `fling pull` or `fling_pull` deploys
   on the version pulled, like the CLI; `force: true` publishes over whatever is live.
 - `fling_pull`: downloads a site into a folder on this computer (default
   `~/Documents/Claude/fling/<name>`) to change it and deploy it again with `fling_deploy`.
 - `fling_read_files`: a site's files inline, a page at a time, for reading without a download.
 - `fling_publish`: files passed inline, for content Claude wrote in the conversation. It has the same
-  definition as the remote connector's tool; `path` publishes them into that folder of the site;
+  definition as the remote connector's tool; `path` publishes them as that Path of the site;
   `base` (a version from `fling_read_files`) sends only the files that changed, and `remove` names
   files to delete.
 - `fling_find_files`: recent `.html`/`.zip` files and folders with an `index.html` in those folders,
@@ -493,6 +539,10 @@ The MCP tools:
   current), read when called. `{use: <server>}` makes one current, the same as `fling use`.
 - `fling_doctor`: the checks of `fling doctor`, read-only, as lines and data. Claude calls it when
   something about Fling doesn't work (sign-in, tools missing, versions) and tells you the fixes.
+- `fling_paths` (a site's Paths, and what its home page does with them) where a Fling has Paths,
+  and `fling_paths_template` and `fling_paths_check` (a starter home page with a Paths block, and
+  its check), which need no Fling. `fling_info`, `fling_files` and `fling_rollback` take `path` to
+  act on one Path.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
   `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms

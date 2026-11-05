@@ -1,6 +1,7 @@
 /**
  * Site management: ls, info, versions, rollback, share, visibility, access, owners, publishers,
- * archive/unarchive, rm.
+ * archive/unarchive, rm. `versions`, `files`, `rollback`, `owners` and `publishers` take `--path`
+ * to act on one of the site's Paths instead (commands/paths.ts).
  */
 import {
   ACCESS_LABELS,
@@ -31,15 +32,20 @@ import {
   audienceWarnings,
   deleteSite,
   getAudience,
+  getPath,
+  getPathRoles,
   getRoles,
   getSite,
   groupsEnabled,
   listShared,
   listSites,
+  pathVersionFiles,
   type RoleList,
   rollback,
+  rollbackPath,
   setAccess,
   setAudience,
+  setPathRoles,
   setRoles,
   setVisibility,
   share,
@@ -47,6 +53,7 @@ import {
   versionFiles,
 } from '../sites.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
+import { pathFolder, pathsClient } from './paths.ts'
 
 export async function runList(
   ctx: CommandContext,
@@ -148,7 +155,12 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
   )
 }
 
-export async function runVersions(ctx: CommandContext, name: string): Promise<void> {
+export async function runVersions(
+  ctx: CommandContext,
+  name: string,
+  opts: { path?: string } = {}
+): Promise<void> {
+  if (opts.path !== undefined) return runPathVersions(ctx, name, pathFolder(opts.path))
   const site = await getSite(requireClient(ctx), name)
   ctx.out.data(
     { name: site.name, currentVersionId: site.currentVersionId, versions: site.versions },
@@ -165,14 +177,46 @@ export async function runVersions(ctx: CommandContext, name: string): Promise<vo
   )
 }
 
+/** `versions --path`: the Path's own versions, newest first (* = the one it serves). */
+async function runPathVersions(ctx: CommandContext, name: string, folder: string): Promise<void> {
+  const path = await getPath(await pathsClient(ctx), name, folder)
+  ctx.out.data(
+    {
+      name,
+      path: path.folder,
+      currentVersionId: path.currentVersionId,
+      versions: path.versions,
+    },
+    () =>
+      renderTable(path.versions, [
+        { header: '', value: v => (v.id === path.currentVersionId ? '*' : ' ') },
+        { header: 'VERSION', value: v => v.id },
+        { header: 'FILES', value: v => v.fileCount },
+        { header: 'SIZE', value: v => formatBytes(v.totalBytes) },
+        { header: 'BY', value: v => v.publishedBy ?? '-' },
+        { header: 'CREATED', value: v => formatDate(v.createdAt) },
+      ])
+  )
+}
+
 export async function runFiles(
   ctx: CommandContext,
   name: string,
-  versionId?: string
+  versionId?: string,
+  opts: { path?: string } = {}
 ): Promise<void> {
-  const result = await versionFiles(requireClient(ctx), name, versionId)
+  const folder = opts.path === undefined ? undefined : pathFolder(opts.path)
+  const result =
+    folder === undefined
+      ? await versionFiles(requireClient(ctx), name, versionId)
+      : await pathVersionFiles(await pathsClient(ctx), name, folder, versionId)
+  // A Path's files are named within its folder, so its home page is its own index.html too.
   if (!result.files.some(f => f.path === 'index.html')) {
-    ctx.log.warn('No index.html at the root — the site root URL will 404')
+    ctx.log.warn(
+      folder === undefined
+        ? 'No index.html at the root — the site root URL will 404'
+        : `No index.html in /${folder}/ — it will 404`
+    )
   }
   ctx.out.data(result, () => {
     const n = result.files.length
@@ -192,8 +236,18 @@ export async function runFiles(
 export async function runRollback(
   ctx: CommandContext,
   name: string,
-  versionId: string
+  versionId: string,
+  opts: { path?: string } = {}
 ): Promise<void> {
+  if (opts.path !== undefined) {
+    const folder = pathFolder(opts.path)
+    const path = await rollbackPath(await pathsClient(ctx), name, folder, versionId)
+    ctx.log.success(
+      `/${folder}/ of ${name} now serves version ${path.currentVersionId ?? versionId} (the rest of the site untouched)`
+    )
+    ctx.out.data(path, () => path.url)
+    return
+  }
   const site = await rollback(requireClient(ctx), name, versionId)
   ctx.log.success(`${name} now serves version ${site.currentVersionId ?? versionId}`)
   ctx.out.data(site, () => site.url)
@@ -352,8 +406,10 @@ export async function runRoles(
     set?: string[]
     group?: string[]
     removeGroup?: string[]
+    path?: string
   }
 ): Promise<void> {
+  if (opts.path !== undefined) return runPathRoles(ctx, which, name, pathFolder(opts.path), opts)
   const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'siteRoles')
   if (instance && !siteRolesEnabled(instance)) {
     throw new CliError(`${instance.name} has no site owners and publishers yet`, {
@@ -377,6 +433,42 @@ export async function runRoles(
   ctx.out.data(
     { name: site.name, role: site.role, owners: site.owners, publishers: site.publishers },
     () => describeRoles(site)
+  )
+}
+
+/**
+ * `owners|publishers <name> --path <folder>`: a Path's owners and publishers, who may publish it,
+ * roll it back and change it, besides the site's owners.
+ */
+async function runPathRoles(
+  ctx: CommandContext,
+  which: RoleList,
+  name: string,
+  folder: string,
+  opts: {
+    add?: string[]
+    remove?: string[]
+    set?: string[]
+    group?: string[]
+    removeGroup?: string[]
+  }
+): Promise<void> {
+  const client = await pathsClient(ctx)
+  const change = {
+    ...(opts.set ? { set: splitEmails(opts.set) } : {}),
+    add: splitEmails(opts.add ?? []),
+    remove: splitEmails(opts.remove ?? []),
+    addGroups: splitGroups(opts.group ?? []),
+    removeGroups: splitGroups(opts.removeGroup ?? []),
+  }
+  const changed = changesAudience(change)
+  const path = changed
+    ? await setPathRoles(client, name, folder, which, change)
+    : await getPathRoles(client, name, folder)
+  if (changed) ctx.log.success(`The ${which} of /${folder}/ of ${name} changed`)
+  ctx.out.data(
+    { name, path: path.folder, owners: path.owners, publishers: path.publishers },
+    () => `/${path.folder}/: ${describeRoles(path)}`
   )
 }
 

@@ -33,6 +33,7 @@ import {
   MAX_FILES,
   MAX_PATH_LENGTH,
   type Manifest,
+  markdownHomePages,
   NEVER_PUBLISHED_NOTE,
   renderHtmlListing,
   SECRET_SCAN_MAX_FILE_BYTES,
@@ -302,8 +303,13 @@ function checkLimits(files: { path: string; size: number }[], dir: string): void
   }
 }
 
-export const hasRootIndex = (local: Pick<LocalManifest, 'files'>) =>
-  local.files.some(f => f.path === 'index.html')
+/**
+ * Whether the folder has a home page: an index.html, or, on a Fling that renders Markdown
+ * (`markdown`), the Markdown that stands in for one (`index.md`, `README.md`, a lone `.md`).
+ */
+export const hasRootIndex = (local: { files: readonly { path: string }[] }, markdown = false) =>
+  local.files.some(f => f.path === 'index.html') ||
+  (markdown && markdownHomePages(local.files.map(f => f.path)).has(''))
 
 export const htmlPages = (local: Pick<LocalManifest, 'files'>) =>
   local.files.filter(f => isHtmlPath(f.path) && f.path !== 'index.html')

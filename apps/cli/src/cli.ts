@@ -13,6 +13,7 @@ import {
   SITE_SORTS,
   type SiteSort,
 } from '@fling/shared'
+import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import chalk from 'chalk'
 import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
@@ -34,6 +35,14 @@ import {
   runNotificationsSent,
   runNotificationsSet,
 } from './commands/notifications.ts'
+import {
+  pathsHomeChoice,
+  runPathArchive,
+  runPathDelete,
+  runPaths,
+  runPathsCheck,
+  runPathsInit,
+} from './commands/paths.ts'
 import { runPull } from './commands/pull.ts'
 import { runSetup } from './commands/setup.ts'
 import {
@@ -163,7 +172,7 @@ program
   )
   .option(
     '--path <folder>',
-    'publish as the Path at this top-level folder of the site (e.g. PAY-412, served at <site>/PAY-412/), with its own versions and owners; the rest of the site is untouched; needs --name'
+    'publish the folder as the Path at this top-level folder of the site (e.g. PAY-412, served at <site>/PAY-412/), with its own versions, owners and publishers; the rest of the site is untouched; one folder, not nested; needs --name (see `paths`)'
   )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
   .option(
@@ -321,19 +330,31 @@ program
   .command('versions <name>')
   .helpGroup('Sites:')
   .description("list a site's versions (* = live)")
-  .action(action((ctx, name: string) => runVersions(ctx, name)))
+  .option('--path <folder>', "one of the site's Paths (e.g. PAY-412): list its own versions")
+  .action(action((ctx, name: string, opts: { path?: string }) => runVersions(ctx, name, opts)))
 program
   .command('files <name> [versionId]')
   .helpGroup('Sites:')
   .description("list the files in a site's live version (or in versionId)")
+  .option('--path <folder>', "one of the site's Paths (e.g. PAY-412): the files of its version")
   .action(
-    action((ctx, name: string, versionId: string | undefined) => runFiles(ctx, name, versionId))
+    action((ctx, name: string, versionId: string | undefined, opts: { path?: string }) =>
+      runFiles(ctx, name, versionId, opts)
+    )
   )
 program
   .command('rollback <name> <versionId>')
   .helpGroup('Sites:')
   .description('serve an earlier version again')
-  .action(action((ctx, name: string, versionId: string) => runRollback(ctx, name, versionId)))
+  .option(
+    '--path <folder>',
+    "one of the site's Paths (e.g. PAY-412): roll back only it (ids from `versions --path`)"
+  )
+  .action(
+    action((ctx, name: string, versionId: string, opts: { path?: string }) =>
+      runRollback(ctx, name, versionId, opts)
+    )
+  )
 program
   .command('share <name>')
   .helpGroup('Sites:')
@@ -417,6 +438,10 @@ for (const [which, does] of [
       'add these groups (see `fling groups`); whoever manages a group decides who is in it'
     )
     .option('--remove-group <slugs...>', 'take these groups out')
+    .option(
+      '--path <folder>',
+      `one of the site's Paths (e.g. PAY-412): its own ${which}, besides the site's owners`
+    )
     .action(
       action(
         (
@@ -428,6 +453,7 @@ for (const [which, does] of [
             set?: string[]
             group?: string[]
             removeGroup?: string[]
+            path?: string
           }
         ) => runRoles(ctx, which, name, opts)
       )
@@ -450,6 +476,70 @@ program
   .description('delete a site and all its versions (asks first unless --yes)')
   .option('-y, --yes', 'do not ask for confirmation')
   .action(action((ctx, name: string, opts: { yes?: boolean }) => runRemove(ctx, name, opts)))
+
+// ---- paths ---------------------------------------------------------------------------------
+
+const paths = program
+  .command('paths')
+  .helpGroup('Paths:')
+  .description(
+    "a site's top-level folders published on their own (`deploy --path`), each with its own versions and owners (default: list)"
+  )
+paths
+  .command('list <name>', { isDefault: true })
+  .alias('ls')
+  .description(
+    "list a site's Paths (`paths <name>`): folder, title, version, state, whether you can publish, updated"
+  )
+  .action(action((ctx, name: string) => runPaths(ctx, name)))
+paths
+  .command('archive <name> <folder>')
+  .description('take a Path off the site (404) but keep its versions; undo with `paths unarchive`')
+  .action(action((ctx, name: string, folder: string) => runPathArchive(ctx, name, folder)))
+paths
+  .command('unarchive <name> <folder>')
+  .description('bring an archived Path back')
+  .action(action((ctx, name: string, folder: string) => runPathArchive(ctx, name, folder, true)))
+paths
+  .command('delete <name> <folder>')
+  .alias('rm')
+  .description('delete a Path and all its versions (asks first unless --yes)')
+  .option('-y, --yes', 'do not ask for confirmation')
+  .action(
+    action((ctx, name: string, folder: string, opts: { yes?: boolean }) =>
+      runPathDelete(ctx, name, folder, opts)
+    )
+  )
+paths
+  .command('init [dir]')
+  .description(
+    'write a starter home page (index.html) listing the Paths into dir (default: .), to deploy as the site root'
+  )
+  .addOption(
+    new Option('-t, --template <name>', 'how it lists them')
+      .choices(PATHS_TEMPLATE_NAMES)
+      .default('minimal')
+  )
+  .option('--title <title>', "the page's title and heading")
+  .option('--force', 'replace an existing index.html')
+  .addHelpText(
+    'after',
+    () =>
+      `\nTemplates:\n${PATHS_TEMPLATE_NAMES.map(n => `  ${n.padEnd(8)} ${PATHS_TEMPLATE_DESCRIPTIONS[n]}`).join('\n')}\n\n${pathsHomeChoice(BIN_NAME).join('\n')}`
+  )
+  .action(
+    action(
+      (
+        ctx,
+        dir: string | undefined,
+        opts: { template?: string; title?: string; force?: boolean }
+      ) => runPathsInit(ctx, dir, opts)
+    )
+  )
+paths
+  .command('check [path]')
+  .description("check a home page's Paths block: a folder's index.html (default: .) or a file")
+  .action(action((ctx, path: string | undefined) => runPathsCheck(ctx, path)))
 
 // ---- groups --------------------------------------------------------------------------------
 

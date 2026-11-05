@@ -67,6 +67,24 @@ describe('prepareInput', () => {
     await p.cleanup()
   })
 
+  it('a Markdown file goes alone where the Fling renders Markdown, else beside a generated page', async () => {
+    const root = await tempDir()
+    await writeTree(root, { 'Plan.md': '# Plan', 'notes.markdown': '# Notes' })
+    for (const file of ['Plan.md', 'notes.markdown']) {
+      const rendered = await prepareInput(join(root, file), { markdown: true })
+      expect(await listTree(rendered.dir)).toEqual([file])
+      await rendered.cleanup()
+    }
+    const wrapped = await prepareInput(join(root, 'Plan.md'))
+    expect(await listTree(wrapped.dir)).toEqual(['Plan.md', 'index.html'])
+    await wrapped.cleanup()
+    const svg = await writeTree(root, { 'a.svg': '<svg/>' }).then(() =>
+      prepareInput(join(root, 'a.svg'), { markdown: true })
+    )
+    expect(await listTree(svg.dir)).toEqual(['a.svg', 'index.html'])
+    await svg.cleanup()
+  })
+
   it('a .zip is extracted: single top folder unwrapped, __MACOSX and dotfiles skipped', async () => {
     const root = await tempDir()
     const zip = zipSync({

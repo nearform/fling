@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { probeUrl } from '@fling/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApiClient } from '../src/api.ts'
 import { runDeploy } from '../src/commands/deploy.ts'
@@ -273,6 +274,7 @@ describe('fling [dir] command', () => {
     await runDeploy(json.ctx, dir, {})
     expect(JSON.parse(json.out.content())).toEqual({
       status: 'unchanged',
+      versionId: VERSION,
       site: site(),
       access: 'members',
       reviewUrl: `${SERVER}/review/my-app`,
@@ -751,9 +753,19 @@ describe('fling deploy --path', () => {
     const store = await loggedInStore()
     await store.putServer(SERVER, { instance: PATH_INSTANCE })
     const { ctx, out, log } = await testContext({ store, fetch: m.fetch })
+    const probed: string[] = []
+    ctx.waitReady = async (url, paths) => {
+      probed.push(probeUrl(url, paths))
+      return { ready: true, waitedMs: 0 }
+    }
     await runDeploy(ctx, dir, opts)
-    return { bodies, finalizes, text: out.content(), log: log.lines.join('\n'), waited: m.calls }
+    return { bodies, finalizes, probed, text: out.content(), log: log.lines.join('\n') }
   }
+
+  it('waits for the Path’s own page, not one inside it', async () => {
+    const { probed } = await pathDeploy({ name: 'my-app', path: '30-10-26' })
+    expect(probed).toEqual([`${site().url}30-10-26/index.html`])
+  })
 
   it('sends the folder and every file under it, and links to the folder', async () => {
     const { bodies, text, log } = await pathDeploy({ name: 'my-app', path: '/30-10-26/' })

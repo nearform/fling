@@ -35,12 +35,13 @@ There are two local runtimes, and each serves the whole product:
 
 | Runtime | Start | App | Sites |
 |---|---|---|---|
-| Core on Node (AWS flavoured: memory table, fs blobs, the real CloudFront Function) | `pnpm dev`, plus `pnpm --filter @fling/web dev` for the UI | <http://fling.lvh.me:47100> (API :47101) | `http://<name>.fling.lvh.me:47102` |
+| Core on Node (AWS flavoured: a table in a JSON file, fs blobs, the real CloudFront Function) | `pnpm dev`, plus `pnpm --filter @fling/web dev` for the UI | <http://fling.lvh.me:47100> (API :47101) | `http://<name>.fling.lvh.me:47102` |
 | Cloudflare Worker under `wrangler dev` (local D1, R2, KV) | `pnpm --filter "@fling/web..." build`, then `pnpm --filter @fling/platform-cloudflare dev` | <http://flingcf.lvh.me:47103> | `http://<name>.flingcf.lvh.me:47103` |
 
 `lvh.me` resolves to 127.0.0.1. Both runtimes run pending data migrations on start, as a deploy
-does. Node keeps its state in `.fling-dev/` and wrangler in `platforms/cloudflare/.wrangler/`.
-Delete either folder to start over.
+does. Both keep their state across restarts: Node in `.fling-dev/` (the table in `table.json`, the
+blobs beside it, and the session secrets in `dev-secrets.json`, so you stay signed in) and wrangler
+in `platforms/cloudflare/.wrangler/`. Delete either folder to start over.
 
 **Pages on site hosts.** The sites' 404 page and the review shell (`/_fling/review.html`, the page
 review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
@@ -68,8 +69,10 @@ me tab) lists what was shared with it. Owners and publishers work the same way: 
 publishers <site> --add b@example.test` lets the other address deploy the site and roll it back
 (the site page shows it the read-only Owners and publishers section, and no Access or danger zone),
 and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. `pnpm cli deploy <folder>
---name <site> --path 30-10-26` publishes the folder at `http://<site>.fling.lvh.me:47102/30-10-26/`
-and keeps the rest of the site; `pnpm cli versions <site>` shows the PATH it went to. `pnpm cli
+--name <site> --path PAY-412` publishes the folder as the Path `http://<site>.fling.lvh.me:47102/PAY-412/`,
+leaving the rest of the site as it is; `pnpm cli paths <site>` lists the Paths, `pnpm cli versions
+<site> --path PAY-412` shows that Path's own versions, and `pnpm cli paths init <folder> --template
+plans` writes a home page that lists them. `pnpm cli
 pull <site> /tmp/<site>` downloads a site (the signed links point at `/dev-download` on the API, or
 `/blob-download` on the Worker); change a file there and `pnpm cli deploy /tmp/<site>` publishes it
 on the version pulled, while a second pulled copy deployed after it is refused with
@@ -107,11 +110,14 @@ Where forms are stored:
   `sites/<siteId>/_forms/<versionId>.json` (`formsKey`, `apps/api/src/blobs/types.ts`), outside
   every version's files, so the edge never serves it. Publication writes it when the deploy is made
   (`formsForDeploy`, `apps/api/src/forms.ts`): the request's `forms` when it sends them, none when
-  it sends `null`, and otherwise the base's for a layered publish (a path publish, or a deploy of a
-  pulled folder) and none for a whole-site deploy. A version is named by its files alone, so an
+  it sends `null`, and otherwise the base's for a deploy of a pulled folder (a publish on a base)
+  and none for any other deploy. Forms are the site's: a Path publish
+  writes none and refuses a `forms` config (`preparePath`, `apps/api/src/publication.ts`), and the
+  site's forms reach a Path's pages through their `paths` patterns (`PAY-412/**`), though a
+  form's progress counts only the site's own pages. A version is named by its files alone, so an
   `unchanged` or `repointed` deploy that sends `forms` rewrites that version's blob in place. The
   CLI sends the folder's file when there is one. Without it, a whole-site deploy sends `null`, and
-  a layered one sends nothing (the site keeps its forms) unless the folder was pulled with a
+  a deploy on a base sends nothing (the site keeps its forms) unless the folder was pulled with a
   `fling.forms.json` that has since been deleted, which sends `null`.
 - **Responses** are comment records, v2 (`CommentRecord`, `apps/api/src/store/types.ts`): `response`
   (`{ formId, data, versionId }`), `respondent` (the author's email, which `Store.updateResponse`

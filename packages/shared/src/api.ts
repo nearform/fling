@@ -104,8 +104,8 @@ export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
 /**
  * One of a site's Paths (`paths` capability; paths.ts in the API): a top-level folder with its own
  * versions, owners and publishers, served at `url`. Its owners and publishers (who may change it,
- * besides the site's owners) are given to those on the site (`site.read`); `canPublish` says
- * whether the caller may publish to it.
+ * besides the site's owners) are given to those on the site (`site.read`) and to its owners;
+ * `canPublish` and `canManage` say what the caller may do to it.
  */
 export const SitePathSchema = z.object({
   folder: z.string(),
@@ -118,6 +118,8 @@ export const SitePathSchema = z.object({
   publishers: SiteRoleMembersSchema.optional(),
   createdBy: z.string().optional(),
   canPublish: z.boolean(),
+  /** the caller may change its owners and publishers, archive and delete it */
+  canManage: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -252,7 +254,7 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  *
  * `forms` (`forms` capability; forms.ts) is the new version's forms config, from `fling.forms.json`
  * (never itself a file of the site), or `null` for none. Omitted, a publish on a base keeps the
- * base's forms, and any other deploy has none. A Path's version has its own, as a site's does.
+ * base's forms, and any other deploy has none. A Path's version keeps its own, beside it.
  */
 export const DeployRequestSchema = z
   .object({

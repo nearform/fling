@@ -18,6 +18,7 @@ import { MemoryMailer } from '@fling/api/mail/memory'
 import { MemoryRouteTable } from '@fling/api/route-table/memory'
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { Records } from '@fling/api/store/records'
+import { FileTable } from '@fling/api/table/file'
 import { MemoryTable } from '@fling/api/table/memory'
 import {
   blobsConformance,
@@ -34,6 +35,31 @@ const APP_ORIGIN = 'https://app.example.test'
 tableConformance('MemoryTable', () => new MemoryTable())
 
 storeConformance('Records on MemoryTable', () => new Records(new MemoryTable()))
+
+/** A FileTable on a new file, and a second one loading what the first saved: dev's restart. */
+const fileTable = () =>
+  new FileTable(join(mkdtempSync(join(tmpdir(), 'fling-table-')), 'table.json'))
+
+tableConformance('FileTable', fileTable)
+
+tableConformance('FileTable reloaded', () => {
+  const file = join(mkdtempSync(join(tmpdir(), 'fling-table-')), 'table.json')
+  const first = new FileTable(file)
+  return new Proxy(first, {
+    // every read goes to a fresh FileTable on the same file, so what passes was saved
+    get(target, prop) {
+      if (prop === 'get' || prop === 'query' || prop === 'scan') {
+        const reloaded = new FileTable(file)
+        const method = reloaded[prop as 'get'] as (...args: unknown[]) => unknown
+        return method.bind(reloaded)
+      }
+      const value = Reflect.get(target, prop)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+})
+
+storeConformance('Records on FileTable', () => new Records(fileTable()))
 
 migrationsConformance('MemoryTable', async () => new MemoryTable())
 

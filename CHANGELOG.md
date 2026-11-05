@@ -13,6 +13,12 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **ChatGPT connects.** Add your Fling as a connector in ChatGPT, as in Claude: the remote MCP
+  server now accepts ChatGPT's client (its Client ID Metadata Document, which prefers
+  `private_key_jwt` but also supports public clients) and its redirect, which is on the default
+  `OAUTH_REDIRECT_ALLOWLIST`. Upgrade note: an instance that sets `OAUTH_REDIRECT_ALLOWLIST` must add
+  `https://chatgpt.com/connector_platform_oauth_redirect` to it.
+
 ## 0.10.1 (2026-11-05)
 
 - **Security updates to dependencies.** The web UI runs on React Router 7.18, and the tests on

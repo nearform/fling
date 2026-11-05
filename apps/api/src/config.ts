@@ -219,6 +219,9 @@ export interface ConfigSetting {
 export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   'https://claude.ai/api/mcp/auth_callback',
   'https://claude.com/api/mcp/auth_callback',
+  // ChatGPT's connectors: its stable redirect, used with authorization servers that return `iss`
+  // (RFC 9207), as this one does.
+  'https://chatgpt.com/connector_platform_oauth_redirect',
   'loopback',
 ]
 

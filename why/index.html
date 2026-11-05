@@ -414,7 +414,40 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   .preview .pv-hero { transition: background-color 350ms var(--ease-out); }
 }
 
-/* ---------- 10 · your cloud ---------- */
+/* ---------- 10 · team sites ---------- */
+.team { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
+.team .term pre { min-block-size: 0; padding-block: 0.9rem 1rem; font-size: clamp(0.7rem, 0.64rem + 0.3vw, 0.85rem); line-height: 1.55; white-space: pre; overflow-x: auto; }
+.team-body { padding: 1rem 1.1rem 1.1rem; display: grid; gap: 0.7rem; }
+.team-title { font-size: 1.25rem; letter-spacing: -0.02em; }
+.team-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.team-controls input, .team-controls select {
+  font-family: var(--font); font-size: max(16px, 0.9rem); color: var(--ink);
+  padding: 0.4rem 0.7rem; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2);
+}
+.team-controls input { flex: 1 1 10rem; }
+.team-controls select { cursor: pointer; }
+.team-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.team-rows li {
+  display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 0.8rem; align-items: center;
+  padding: 0.55rem 0.8rem; border-radius: 12px; background: var(--bg-2);
+}
+.team-rows b { font-size: 0.95rem; }
+.team-rows .mono { grid-row: 2; font-size: 0.78rem; color: var(--accent); }
+.team-rows time { grid-row: 1 / span 2; grid-column: 2; color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.team-count { color: var(--muted); font-size: 0.78rem; font-family: var(--mono); }
+@media (prefers-reduced-motion: no-preference) { .team-rows li.enter { animation: drop 300ms var(--ease-out) both; } }
+.flow { display: grid; gap: 0.7rem; }
+.flow ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr)); }
+.flow li { display: grid; grid-template-columns: auto 1fr; gap: 0.2rem 0.6rem; align-content: start; align-items: center; padding: 0.8rem 1rem; }
+.flow li b { font-size: 1rem; }
+.flow li p { grid-column: 1 / -1; }
+.flow li p { color: var(--muted); font-size: 0.92rem; }
+.step-n {
+  inline-size: 1.8rem; block-size: 1.8rem; border-radius: 50%; display: grid; place-items: center;
+  background: var(--ink); color: var(--bg); font-weight: 800; font-size: 0.85rem;
+}
+
+/* ---------- 11 · your cloud ---------- */
 .clouds { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr)); }
 .seg { display: inline-flex; border: 2px solid var(--outline); border-radius: 999px; overflow: clip; inline-size: fit-content; }
 .seg button { border: 0; background: var(--card); padding: 0.5rem 1rem; cursor: pointer; font-weight: 700; }
@@ -440,7 +473,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 .deploy-links { display: flex; flex-wrap: wrap; gap: 0.7rem; }
 .deploy-links a { text-decoration: none; }
 
-/* ---------- 11 · start ---------- */
+/* ---------- 12 · start ---------- */
 .start .inner { justify-items: center; text-align: center; }
 .cmds { display: grid; gap: 0.7rem; inline-size: min(720px, 100%); text-align: start; }
 .cmd {
@@ -726,7 +759,60 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 10 · your cloud -->
+  <!-- 10 · team sites -->
+  <section class="slide" id="team-sites" data-label="Team sites">
+    <div class="inner">
+      <div class="team">
+        <div style="display:grid; gap: var(--gap)">
+          <p class="eyebrow reveal">Team sites</p>
+          <h2 class="reveal">One site for the team. <span class="rainbow-text">A folder per ticket.</span></h2>
+          <p class="lead reveal">Each plan or spec is a Path named after its ticket, such as <span class="mono">PAY-412</span>, published by whoever wrote it, person or agent. Plans written in Markdown are served rendered, GitHub-flavoured.</p>
+          <ul class="facts reveal">
+            <li>Each Path has its own versions, restore and owner.</li>
+            <li>Access is set once, for the site: give it to a group and every Path follows.</li>
+            <li>Teammates publishing different Paths never collide.</li>
+            <li>The home page lists the Paths with search and sort, on its own or wherever your index.html puts a Paths block.</li>
+          </ul>
+        </div>
+        <div style="display:grid; gap: var(--gap)">
+          <div class="preview team-home reveal">
+            <div class="mock-bar"><span id="ts-host">payments-plans.… · /</span></div>
+            <div class="team-body">
+              <b class="team-title">payments-plans</b>
+              <div class="team-controls">
+                <input type="search" id="ts-q" placeholder="Search" aria-label="Search the Paths" autocomplete="off" spellcheck="false" />
+                <select id="ts-sort" aria-label="Sort the Paths">
+                  <option value="updated">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="folder">A–Z</option>
+                </select>
+              </div>
+              <ul class="team-rows" id="ts-rows"></ul>
+              <p class="team-count" id="ts-count" aria-live="polite"></p>
+            </div>
+          </div>
+          <div class="term reveal">
+            <div class="term-bar"><i></i><i></i><i></i><span>zsh</span></div>
+            <pre><span class="p">$ </span>fling deploy ./plan --name payments-plans --path PAY-412
+<span class="ok">  ✔ Deployed payments-plans to /PAY-412/ (1 file, 6 KB)</span>
+<span class="c">  Share for feedback: </span><span class="u" id="ts-review">https://&lt;your Fling&gt;/review/payments-plans</span>
+<span class="c">  Site: </span><span class="u" id="ts-site">https://payments-plans.…/PAY-412/</span></pre>
+          </div>
+        </div>
+      </div>
+      <div class="flow reveal">
+        <h3>In a coding workflow</h3>
+        <ol>
+          <li class="card"><span class="step-n" aria-hidden="true">1</span><b>The agent writes the plan</b><p>As Markdown, in <span class="mono">plan/plan.md</span>, for ticket PAY-412.</p></li>
+          <li class="card"><span class="step-n" aria-hidden="true">2</span><b>It flings it to its Path</b><p>The plan is live, rendered, at <span class="mono">/PAY-412/</span> of the team's site.</p></li>
+          <li class="card"><span class="step-n" aria-hidden="true">3</span><b>The team comments</b><p>On the review page, pinned to the exact spot.</p></li>
+          <li class="card"><span class="step-n" aria-hidden="true">4</span><b>The agent revises</b><p>It reads the comments, changes the plan and flings a new version of the same Path.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11 · your cloud -->
   <section class="slide" id="your-cloud" data-label="Your cloud">
     <div class="inner">
       <p class="eyebrow reveal">Yours, not ours</p>
@@ -756,7 +842,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     </div>
   </section>
 
-  <!-- 11 · start -->
+  <!-- 12 · start -->
   <section class="slide start" id="start" data-label="Start">
     <div class="inner">
       <svg class="big-f reveal" viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="rb2" x1="0" y1="0" x2=".35" y2="1"><stop offset="0" stop-color="#ff375f"/><stop offset=".2" stop-color="#ff9f0a"/><stop offset=".4" stop-color="#ffd60a"/><stop offset=".6" stop-color="#30d158"/><stop offset=".8" stop-color="#0a84ff"/><stop offset="1" stop-color="#bf5af2"/></linearGradient></defs><polygon points="12.65,6 30.65,6 29.27,12 17.77,12 16.96,15.5 24.96,15.5 23.69,21 15.69,21 13.85,29 7.35,29" fill="#1c1c3a"/><polygon points="11.15,4.5 29.15,4.5 27.77,10.5 16.27,10.5 15.46,14 23.46,14 22.19,19.5 14.19,19.5 12.35,27.5 5.85,27.5" fill="url(#rb2)" stroke="#1c1c3a" stroke-width="1.4" stroke-linejoin="round"/></svg>
@@ -847,7 +933,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   }
   document.addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.target.closest && e.target.closest('input')) return;
+    if (e.target.closest && e.target.closest('input, select')) return;
     var k = e.key;
     if (k === 'ArrowDown' || k === 'ArrowRight' || k === 'PageDown' || k === 'j') { e.preventDefault(); go(current() + 1); }
     else if (k === 'ArrowUp' || k === 'ArrowLeft' || k === 'PageUp' || k === 'k') { e.preventDefault(); go(current() - 1); }
@@ -1274,7 +1360,53 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   }
   renderVersions();
 
-  /* ---- 10 · clouds and brand ---- */
+  /* ---- 10 · team sites: a home page whose Paths filter and sort ---- */
+  var tsPaths = [
+    { folder: 'PAY-412', title: 'Checkout retries', ago: '2 h ago', at: 3 },
+    { folder: 'PAY-415', title: 'Refund webhooks', ago: 'yesterday', at: 2 },
+    { folder: 'gh-1234', title: 'Rate-limit the API', ago: '3 days ago', at: 1 }
+  ];
+  var tsQ = $('#ts-q'), tsSort = $('#ts-sort'), tsRows = $('#ts-rows');
+  // As the Paths block searches: every term appears in the folder or the title.
+  function renderPaths(animate) {
+    var terms = tsQ.value.toLowerCase().split(/\s+/).filter(Boolean), sort = tsSort.value;
+    var list = tsPaths.filter(function (p) {
+      var hay = (p.folder + ' ' + p.title).toLowerCase();
+      return terms.every(function (t) { return hay.indexOf(t) >= 0; });
+    }).sort(function (a, b) {
+      if (sort === 'folder') return a.folder.localeCompare(b.folder, 'en', { numeric: true, sensitivity: 'base' });
+      return sort === 'oldest' ? a.at - b.at : b.at - a.at;
+    });
+    tsRows.innerHTML = '';
+    list.forEach(function (p) {
+      var li = document.createElement('li');
+      if (animate) li.className = 'enter';
+      var b = document.createElement('b'); b.textContent = p.title;
+      var f = document.createElement('span'); f.className = 'mono'; f.textContent = '/' + p.folder + '/';
+      var t = document.createElement('time'); t.textContent = p.ago;
+      li.appendChild(b); li.appendChild(f); li.appendChild(t); tsRows.appendChild(li);
+    });
+    $('#ts-count').textContent = list.length === tsPaths.length ? tsPaths.length + ' Paths' : list.length + ' of ' + tsPaths.length + ' Paths match';
+  }
+  tsQ.addEventListener('input', function () { renderPaths(false); });
+  tsSort.addEventListener('change', function () { renderPaths(true); });
+  renderPaths(false);
+  starters['team-sites'] = async function () {
+    $('#ts-host').textContent = 'payments-plans.' + sites + ' · /';
+    $('#ts-review').textContent = fling + '/review/payments-plans';
+    $('#ts-site').textContent = 'https://payments-plans.' + sites + '/PAY-412/';
+    if (reduce) return;
+    await sleep(1200);
+    for (var ch of 'refund') {
+      if (document.activeElement === tsQ || document.activeElement === tsSort) return;
+      tsQ.value += ch; renderPaths(false); await sleep(110);
+    }
+    await sleep(1600);
+    if (document.activeElement === tsQ || document.activeElement === tsSort) return;
+    tsQ.value = ''; renderPaths(false);
+  };
+
+  /* ---- 11 · clouds and brand ---- */
   var stacks = {
     aws: [['API', 'Lambda'], ['Sites at the edge', 'CloudFront'], ['Routes', 'CloudFront KeyValueStore'], ['Records', 'DynamoDB'], ['Files', 'S3'], ['Live review', 'API Gateway WebSockets'], ['Email', 'SES']],
     cf: [['API, UI and sites', 'one Worker'], ['Records', 'D1'], ['Files', 'R2'], ['Routes', 'Workers KV'], ['Live review', 'Durable Objects'], ['Email', 'Email Service']]
@@ -1307,7 +1439,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
     $('#swatches').appendChild(s);
   });
 
-  /* ---- 11 · copy buttons ---- */
+  /* ---- 12 · copy buttons ---- */
   $$('.copy').forEach(function (b) {
     b.addEventListener('click', function () {
       var text = b.previousElementSibling.textContent;

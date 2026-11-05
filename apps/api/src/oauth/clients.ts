@@ -160,6 +160,8 @@ export async function registerClient(deps: Deps, body: unknown) {
 const CIMD_MAX_BYTES = 16 * 1024
 const CIMD_TIMEOUT_MS = 5000
 const CIMD_CACHE_MS = 5 * 60 * 1000
+/** Who is asking, for the client's server and its bot rules. */
+const CIMD_USER_AGENT = 'Fling-OAuth (client metadata)'
 const cimdCache = new Map<string, { client: ResolvedClient; until: number }>()
 
 /** A client_id that is a CIMD URL: https, a real path, no IP literal / localhost / credentials. */
@@ -181,16 +183,26 @@ async function fetchCimd(deps: Deps, url: URL): Promise<ResolvedClient | null> {
   const doFetch = deps.fetch ?? fetch
   let doc: Record<string, unknown>
   try {
+    // `manual`, not `error`: Workers refuse `redirect: 'error'`. A redirect is not the document,
+    // so anything but a 200 is a failure either way.
     const res = await doFetch(id, {
-      headers: { accept: 'application/json' },
-      redirect: 'error',
+      headers: { accept: 'application/json', 'user-agent': CIMD_USER_AGENT },
+      redirect: 'manual',
       signal: AbortSignal.timeout(CIMD_TIMEOUT_MS),
     })
-    if (!res.ok) return null
+    if (res.status !== 200) {
+      console.warn(
+        JSON.stringify({ level: 'warn', msg: 'cimd_fetch', clientId: id, status: res.status })
+      )
+      return null
+    }
     const text = await res.text()
     if (text.length > CIMD_MAX_BYTES) return null
     doc = JSON.parse(text)
-  } catch {
+  } catch (error) {
+    console.warn(
+      JSON.stringify({ level: 'warn', msg: 'cimd_fetch', clientId: id, error: String(error) })
+    )
     return null
   }
   if (!doc || typeof doc !== 'object' || doc.client_id !== id) return null

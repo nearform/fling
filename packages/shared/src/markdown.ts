@@ -37,7 +37,7 @@ const escapeHtml = (text: string): string =>
 const fileName = (path: string): string => path.slice(path.lastIndexOf('/') + 1)
 
 /** The heading's visible text: inline Markdown flattened, HTML tags dropped. */
-const plainText = (tokens: readonly Token[]): string =>
+export const plainText = (tokens: readonly Token[]): string =>
   tokens
     .map(token => {
       if (token.type === 'html') return ''
@@ -47,7 +47,7 @@ const plainText = (tokens: readonly Token[]): string =>
     .join('')
 
 /** GitHub-style heading ids: lower case, punctuation dropped, spaces to `-`, repeats numbered. */
-const slugger = () => {
+export const slugger = () => {
   const seen = new Map<string, number>()
   return (text: string): string => {
     const base = text

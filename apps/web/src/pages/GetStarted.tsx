@@ -1,6 +1,17 @@
-import { DEFAULT_INSTALL_COMMAND, instanceSiteUrl, REPO_SLUG } from '@fling/shared'
-import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/outline'
+import {
+  DEFAULT_INSTALL_COMMAND,
+  GUIDE_FACTS,
+  GUIDE_ROUTE,
+  instanceSiteUrl,
+  REPO_SLUG,
+} from '@fling/shared'
+import {
+  ArrowDownTrayIcon,
+  ArrowTopRightOnSquareIcon,
+  BookOpenIcon,
+} from '@heroicons/react/24/outline'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { CommandLine } from '../components/CopyButton'
 import { PageHeader } from '../components/PageHeader'
 import { useInstance } from '../hooks/instance'
@@ -78,18 +89,26 @@ export default function GetStarted() {
         title="Get started"
         description="Put a folder of static files online in one command, from your terminal, Claude Code or Claude."
         actions={
-          whyUrl && (
-            <a
-              href={whyUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-ghost btn-sm gap-1.5"
-            >
-              Why Fling?
-              <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" aria-hidden />
-              <span className="sr-only">(opens in a new tab)</span>
-            </a>
-          )
+          <>
+            {instance?.capabilities.guide === true && (
+              <Link to={GUIDE_ROUTE} className="btn btn-ghost btn-sm gap-1.5">
+                <BookOpenIcon className="h-4 w-4" aria-hidden />
+                The guide
+              </Link>
+            )}
+            {whyUrl && (
+              <a
+                href={whyUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-ghost btn-sm gap-1.5"
+              >
+                Why Fling?
+                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" aria-hidden />
+                <span className="sr-only">(opens in a new tab)</span>
+              </a>
+            )}
+          </>
         }
       />
       <div className="space-y-4">
@@ -124,8 +143,8 @@ export default function GetStarted() {
             <li>“Which of my Fling sites can I archive?”</li>
           </ul>
           <p className="text-xs text-muted">
-            Claude sends the files it made straight to Fling, up to 4 MB in one go (bigger sites in
-            parts). See or disconnect it under Connections.
+            Claude sends the files it made straight to Fling, up to {GUIDE_FACTS['max-inline']} in
+            one go (bigger sites in parts). See or disconnect it under Connections.
           </p>
         </Step>
         <Step n={6} title="Fling files from your computer (Claude Desktop)">
@@ -180,8 +199,9 @@ export default function GetStarted() {
               files that contain secrets; it stops and tells you which file and line.
             </li>
             <li>
-              <strong className="font-medium text-base-content">Limits:</strong> 100 MB per fling,
-              25 MB per file. Add a <code>.flingignore</code> to skip more files.
+              <strong className="font-medium text-base-content">Limits:</strong>{' '}
+              {GUIDE_FACTS['max-deploy']} per fling, {GUIDE_FACTS['max-file']} per file. Add a{' '}
+              <code>.flingignore</code> to skip more files.
             </li>
           </ul>
         </section>

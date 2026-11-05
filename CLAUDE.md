@@ -11,7 +11,8 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
 - Deploying an instance: [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md),
   [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md).
 - Area rules: [.claude/rules/](.claude/rules/), each loaded when you touch the paths it names
-  (persistence and migrations, access and auth, config and branding, site routing, testing).
+  (persistence and migrations, access and auth, config and branding, site routing, testing, the
+  guide).
 
 ## Layout
 
@@ -24,7 +25,7 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
 | `packages/conformance` | Suites every adapter must pass (Table, Blobs, RouteTable, Store, migrations) |
 | `packages/e2e` | The one scenario every platform passes, locally (`pnpm e2e`) and as the post-deploy smoke test |
 | `edge` | The CloudFront Function, generated around `site-routing.ts` |
-| `apps/web` | React UI and the sites' 404 page, themed from the instance metadata |
+| `apps/web` | React UI, the user guide (`/guide`, `content/guide/`) and the sites' 404 page, themed from the instance metadata |
 | `apps/cli` | The CLI, the local MCP server and the Claude Desktop extension (`.mcpb`) |
 | `plugin` | The Claude Code plugin (skill and MCP config) |
 
@@ -77,7 +78,8 @@ Fling runs on several clouds and is not tied to any one instance. Every change k
   the file that owns it.
 - Prose is British English (behaviour, colour), plain and direct. Formatting is Biome's
   (`pnpm lint:fix`).
-- When behaviour changes, update its docs in the same change: README, CONTEXT.md,
+- When behaviour changes, update its docs in the same change: the Guide
+  (`apps/web/content/guide/`, kept true by `/doc-sync`), README, CONTEXT.md,
   `docs/development.md`, the deploy guides, `apps/cli/README.md`, the plugin's `SKILL.md`, and a
   `CHANGELOG.md` bullet under Unreleased.
 

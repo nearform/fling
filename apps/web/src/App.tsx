@@ -1,5 +1,6 @@
 import { SIGN_IN_LINK_PAGE } from '@fling/shared'
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { ImpersonationBanner } from './components/ImpersonationBanner'
 import Layout from './components/Layout'
@@ -27,6 +28,9 @@ import Review from './pages/Review'
 import SignInLink from './pages/SignInLink'
 import Site from './pages/Site'
 import Sites from './pages/Sites'
+
+// The guide is a reader's whole bundle of pages: loaded when someone opens it.
+const Guide = lazy(() => import('./pages/guide/Guide'))
 
 const queryClient: QueryClient = new QueryClient({
   queryCache: new QueryCache({
@@ -121,6 +125,15 @@ export default function App() {
             <Route element={<Authenticated bare />}>
               <Route path="review/:name" element={<Review />} />
             </Route>
+            {/* The user guide: readable signed out, in its own shell */}
+            <Route
+              path="guide/*"
+              element={
+                <Suspense fallback={<div className="min-h-screen app-canvas" />}>
+                  <Guide />
+                </Suspense>
+              }
+            />
             {/* OAuth consent: signed-in, but outside the app shell */}
             <Route path="authorize" element={<Authorize />} />
             <Route path="login" element={<Login />} />

@@ -168,7 +168,28 @@ export const CORE_CAPABILITIES = {
    * lists, taken by its owners' and publishers' browsers (thumbnails.ts)
    */
   thumbnails: true,
+  /** the user guide in the web app at `/guide` (guide.ts), readable signed out */
+  guide: true,
 } as const
+
+/**
+ * The capabilities an instance switches on or off in its configuration (apps/api/src/instance.ts),
+ * on top of CORE_CAPABILITIES. With them, every capability name a client may meet.
+ */
+export const CONFIGURED_CAPABILITIES = [
+  'comments',
+  'forms',
+  'live',
+  'notifications',
+  'email',
+  'invites',
+] as const
+
+/** Every capability name an instance may advertise. */
+export const CAPABILITY_NAMES: readonly string[] = [
+  ...Object.keys(CORE_CAPABILITIES),
+  ...CONFIGURED_CAPABILITIES,
+]
 
 /** The access level the instance gives a new site when its first deploy names none. */
 export const defaultAccessOf = (

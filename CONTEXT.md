@@ -380,6 +380,17 @@ instance as a public site named `why-fling` (`WHY_SITE_NAME`, `packages/shared/s
 while it is public and live, `GET /api/why` gives its URL and the Get started page links to it, in a
 new tab.
 
+**Guide** — the user guide every instance serves at `/guide` in its web app, readable signed out:
+how to use each feature from an assistant, the command line and the web app. Its pages are Markdown
+in `apps/web/content/guide/<part>/<page>.md` (parts in `GUIDE_PARTS`, frontmatter and placeholders
+in `packages/shared/src/guide.ts`), bundled into the app, so an instance shows the guide of its own
+release. A page writes `{{instance:…}}` for anything instance-specific and `{{fact:…}}` for a number
+or name the code owns (`packages/shared/src/guide-facts.ts`); `requires` hides it, or a passage of
+it, on an instance without a capability. Each page names the code it describes (`sources`) and the
+commit it was last checked at (`verified`); `scripts/docs-stale.mjs` and the Stop hook in
+`.claude/settings.json` flag a page when that code changes, and `/doc-sync` brings it back in line.
+The `guide` capability; `fling setup` and both MCP servers point people at it.
+
 **Policy** — who may do what to a site: `can(actor, action, site)` in `apps/api/src/policy.ts`, a
 pure function every site route and MCP tool goes through. Actors resolve to a set of roles on the
 site (`rolesOf`), and may do what any of them allows: **owner** and **publisher** (its owners and

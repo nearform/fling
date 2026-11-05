@@ -22,6 +22,11 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
   `https://chatgpt.com/connector_platform_oauth_redirect`,
   `https://www.cursor.com/agents/mcp/oauth/callback` and
   `https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-*` to it.
+- **The guide.** Every instance serves a user guide at `/guide`: how to connect Claude, ChatGPT or Gemini,
+  use the CLI and the web app, publish, share, run team sites with Paths, and collect feedback, with
+  the instance's own address in every command and only the features it has. It is readable signed
+  out, searchable, and linked from the side nav, Get started, the end of `fling setup` and both MCP
+  servers' instructions.
 
 ## 0.10.1 (2026-11-05)
 

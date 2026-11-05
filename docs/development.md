@@ -185,10 +185,35 @@ A feature is written once in the core and must work on every platform:
 6. **Platforms.** If the feature needs a new port operation, extend the conformance suite first,
    then every adapter: memory, DynamoDB/S3 and D1/R2/KV.
 7. **Proof.** Add API tests, add a step to the e2e scenario, and run `pnpm gate`.
-8. **Docs.** Update CONTEXT.md for new terms, the README for user-visible behaviour, and the AWS deploy
+8. **Guide.** Describe the feature for users in the [Guide](#keeping-the-guide-true): a new page,
+   or a section on the page it changes, by assistant, command line and web app.
+9. **Docs.** Update CONTEXT.md for new terms, the README for user-visible behaviour, and the AWS deploy
    guide's Instance configuration table for new configuration. Add a bullet under `## Unreleased`
    in the root [CHANGELOG.md](../CHANGELOG.md), with an upgrade note if it asks anything of users
    or operators.
+
+## Keeping the guide true
+
+The user guide at `/guide` is written in `apps/web/content/guide/`, one Markdown file per page, in
+the register of its `VOICE.md`. Each page's frontmatter names the code it describes and the commit
+it was last checked against:
+
+```yaml
+sources: [apps/cli/src/commands/deploy.ts, apps/api/src/publication.ts]
+verified: 2a22b5f
+```
+
+- `node scripts/docs-stale.mjs` lists the pages whose sources changed since `verified` (a commit
+  that also edits the page counts as a check); `--changed` looks only at the working tree.
+- In Claude Code, a Stop hook (`.claude/settings.json`) runs it with `--changed` and names the
+  pages your change touches. `/doc-sync` checks each claim against the code, fixes the wrong ones
+  and moves `verified` on.
+- `apps/web/tests/guide.test.ts` (part of the gate) checks every page's frontmatter, placeholders,
+  facts, capability gates, links and anchors.
+- See a page as an instance shows it: `pnpm dev`, `pnpm --filter @fling/web dev`, then
+  `http://fling.lvh.me:47100/guide`.
+
+`docs-stale` needs the full history, so it is not in the gate.
 
 ## Adding a data migration
 

@@ -23,6 +23,10 @@ content is a no-op; older content is restored instantly.
 
 Not for servers or anything needing a backend at runtime — Fling serves files only.
 
+When the user asks how to do something with Fling rather than to do it, answer, then point them at
+their Fling's guide, `https://<their Fling>/guide` (the MCP server's instructions name it): every
+feature, by assistant, command line and web app.
+
 ## Which Fling
 
 The user may be signed in to several Flings (each has its own sites, sign-in and sites domain).

@@ -4,7 +4,7 @@ part: run
 order: 10
 summary: What an instance is, AWS or Cloudflare, and how its name, sign-in and brand are set.
 sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
-verified: 60d6113
+verified: 3fb5f62
 ---
 
 Fling is open source. Anyone can run their own, on their own cloud account, under their own

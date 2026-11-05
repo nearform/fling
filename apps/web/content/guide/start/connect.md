@@ -5,7 +5,7 @@ order: 20
 summary: Add your Fling as a connector, so your assistant can publish what it makes for you.
 requires: [remoteMcp]
 sources: [apps/api/src/config.ts, apps/api/src/mcp/**, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
-verified: 60d6113
+verified: 3fb5f62
 ---
 
 Connect {{instance:name}} to your assistant once, and it can publish the pages, reports and

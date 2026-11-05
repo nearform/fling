@@ -1,8 +1,10 @@
 /**
- * Local dev: the API on :47101 (Records on a memory table, fs blobs under `.fling-dev/` or
- * FS_ROOT, memory route table; pending data migrations run first, as a deploy runs them) and the
- * sites on :47102 — `http://<label>.fling.lvh.me:47102/…` runs the real CloudFront Function
- * (edge/build.mjs, via the @fling/edge harness) against the same in-memory route table, then
+ * Local dev: the API on :47101 (Records on a table kept in `<root>/table.json`, the routes in that
+ * table too, fs blobs, all under `.fling-dev/` or FS_ROOT, so restarts keep users, sites, API keys
+ * and, with the session secrets in `<root>/dev-secrets.json`, sign-ins; delete the folder to start
+ * afresh; pending data migrations run first, as a deploy runs them) and the sites on :47102 —
+ * `http://<label>.fling.lvh.me:47102/…` runs the real CloudFront Function (edge/build.mjs, via the
+ * @fling/edge harness) against the same route table, then
  * serves the rewritten object from the blobs. Missing objects get apps/web/dist-404/404.html with
  * a 404 (its `__APP_ORIGIN__` filled in, as the deploy does), and /_fling/review.html is
  * apps/web/dist-review/review-shell.html, filled in the same way; /_fling/robots.txt (every sites
@@ -14,6 +16,7 @@
  * (packages/e2e) runs it as the AWS-flavoured local runtime.
  */
 import { randomBytes } from 'node:crypto'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -30,9 +33,9 @@ import { admitTicket } from './live.ts'
 import { MemoryLiveHub } from './live-memory.ts'
 import { MIGRATIONS, runMigrations } from './migrations/index.ts'
 import { drain } from './notifications/drain.ts'
-import { MemoryRouteTable } from './route-table/memory.ts'
+import { TableRouteTable } from './route-table/table.ts'
 import { Records } from './store/records.ts'
-import { MemoryTable } from './table/memory.ts'
+import { FileTable } from './table/file.ts'
 
 const API_PORT = Number(process.env.PORT ?? 47101)
 const SITES_PORT = Number(process.env.SITES_PORT ?? 47102)
@@ -42,7 +45,21 @@ const notFoundPage = resolve(repoRoot, 'apps/web/dist-404/404.html')
 const reviewShell = resolve(repoRoot, 'apps/web/dist-review/review-shell.html')
 const robotsTxt = resolve(repoRoot, 'apps/web/sites-robots.txt')
 
-const devSecret = () => randomBytes(32).toString('base64url')
+/** The dev secrets, made once per root and kept, so sessions and site passes survive a restart. */
+const devSecrets = ((): { session: string; siteHmac: string } => {
+  const file = resolve(fsRoot, 'dev-secrets.json')
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'))
+  } catch {
+    const made = {
+      session: randomBytes(32).toString('base64url'),
+      siteHmac: randomBytes(32).toString('base64url'),
+    }
+    mkdirSync(fsRoot, { recursive: true })
+    writeFileSync(file, JSON.stringify(made), { mode: 0o600 })
+    return made
+  }
+})()
 const appOrigin = `http://fling.lvh.me:${process.env.UI_PORT ?? 47100}`
 const env = {
   APP_ENV: 'development',
@@ -56,15 +73,14 @@ const env = {
   SITE_SCHEME: 'http',
   SITE_COOKIE_DOMAIN: 'fling.lvh.me',
   ...process.env,
-  // Fresh per process is fine: the memory store forgets every session on restart anyway.
-  SESSION_SECRET: process.env.SESSION_SECRET ?? devSecret(),
-  SITE_HMAC_KEY: process.env.SITE_HMAC_KEY ?? devSecret(),
+  SESSION_SECRET: process.env.SESSION_SECRET ?? devSecrets.session,
+  SITE_HMAC_KEY: process.env.SITE_HMAC_KEY ?? devSecrets.siteHmac,
 }
 
 const base = loadBaseConfig(env)
 const config: Config = { ...base, secrets: secretsFromEnv(env) }
-const routeTable = new MemoryRouteTable()
-const table = new MemoryTable()
+const table = new FileTable(resolve(fsRoot, 'table.json'))
+const routeTable = new TableRouteTable(table)
 const migrated = await runMigrations(table, { migrations: MIGRATIONS })
 console.log(
   `fling migrations: ${migrated.migrations.map(m => `${m.id} ${m.status}`).join(', ') || 'none'}`

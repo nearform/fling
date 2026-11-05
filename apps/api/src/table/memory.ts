@@ -36,7 +36,7 @@ function scanKey(cursor: string) {
 
 export class MemoryTable implements Table {
   /** pk → sk → item */
-  private items = new Map<string, Map<string, TableItem>>()
+  protected items = new Map<string, Map<string, TableItem>>()
 
   constructor(private now: () => number = Date.now) {}
 

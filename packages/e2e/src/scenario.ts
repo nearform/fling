@@ -2383,12 +2383,6 @@ async function rolesStep(ctx: {
   }
 }
 
-/**
- * A public site of its own (removed with the others at the end): the member, made a publisher,
- * publishes `/30-10-26/` (or the owner does, without a second user); the folder serves the new
- * page while `/` and the other files still serve the first version; versions show where and by
- * whom; rolling back removes the folder's new page.
- */
 /** A grey PNG of `width` × `height`: a stand-in for the thumbnail a browser draws. */
 function greyPng(width: number, height: number): Uint8Array<ArrayBuffer> {
   const chunk = (type: string, data: Buffer) => {
@@ -2512,6 +2506,12 @@ async function thumbnailStep(ctx: {
   step('a thumbnail of a version that is no longer current is a 409')
 }
 
+/**
+ * A public site of its own (removed with the others at the end), with a copy of `/30-10-26/` of
+ * its own: the member, made a publisher, publishes `/30-10-26/` (or the owner does, without a
+ * second user), which makes it a Path. The folder serves the Path's page, hiding the site's copy,
+ * while `/` and the other files are the site's first version, still current.
+ */
 async function pathPublishStep(ctx: {
   name: string
   nonce: string
@@ -2552,53 +2552,42 @@ async function pathPublishStep(ctx: {
     'index.html': page('week', `week ${nonce}`),
     'chart.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>\n',
   })
-  const layered = (await asPublisher('deploy', week, '--name', name, '--path', '30-10-26')) as {
+  const published = (await asPublisher('deploy', week, '--name', name, '--path', '30-10-26')) as {
     status: string
     path?: string
     url?: string
     site: CliSite
   }
   check(
-    layered.status === 'live' &&
-      layered.path === '30-10-26' &&
-      layered.url === `${siteUrl}30-10-26/`,
-    `path publish: ${JSON.stringify(layered)}`
+    published.status === 'live' &&
+      published.path === '30-10-26' &&
+      published.url === `${siteUrl}30-10-26/` &&
+      published.site.currentVersionId === v1,
+    `path publish: ${JSON.stringify(published)}`
   )
   await eventually(
-    'the folder serves the new page',
+    "the folder serves the Path's page",
     `${siteUrl}30-10-26/`,
     r => r.text.includes(`week ${nonce}`),
     { timeoutMs: ctx.propagationMs }
   )
-  const home = await get(siteUrl)
   const notes = await get(`${siteUrl}notes.html`)
   const chart = await get(`${siteUrl}30-10-26/chart.svg`)
-  check(
-    home.text.includes(`changelog ${nonce}`) &&
-      notes.text.includes(`notes ${nonce}`) &&
-      chart.status === 200,
-    `after the path publish: / ${home.status}, notes.html ${notes.status}, chart.svg ${chart.status}`
+  await eventually(
+    '/ is still the site’s own',
+    siteUrl,
+    r => r.text.includes(`changelog ${nonce}`),
+    {
+      timeoutMs: ctx.propagationMs,
+    }
   )
-  const versions = (await fling('versions', name)) as {
-    versions: { id: string; path?: string; base?: string; publishedBy?: string }[]
-  }
-  const current = versions.versions.find(v => v.id === layered.site.currentVersionId)
   check(
-    current?.path === '30-10-26' && current.base === v1 && current.publishedBy === publisher.email,
-    `versions after the path publish: ${JSON.stringify(versions)}`
+    notes.text.includes(`notes ${nonce}`) && chart.status === 200,
+    `after the path publish: notes.html ${notes.status}, chart.svg ${chart.status}`
   )
   step(
-    `${publisher.email} published /30-10-26/ of ${name}: the folder is new, / and notes.html are as they were`
+    `${publisher.email} published the Path /30-10-26/ of ${name}: it hides the site's copy, and the site's version is as it was`
   )
-
-  await fling('rollback', name, v1)
-  await eventually(
-    "rollback removes the folder's new page",
-    `${siteUrl}30-10-26/`,
-    r => r.text.includes(`draft week ${nonce}`),
-    { timeoutMs: ctx.propagationMs }
-  )
-  step('rolling back to the base removes the path publish')
 }
 
 async function pullStep(ctx: {

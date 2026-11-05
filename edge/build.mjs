@@ -66,6 +66,11 @@ function bundle(supported) {
 }
 
 const RESTRICTED = Object.fromEntries(UNSUPPORTED.map(f => [f, false]))
+/**
+ * CloudFront Functions take at most 10 KB of code. Fail the build with room to spare, rather than
+ * the deploy's `update-function`.
+ */
+export const SITE_ROUTER_MAX_BYTES = 9800
 const LACKS = 'the source uses syntax cloudfront-js-2.0 lacks (see UNSUPPORTED in edge/build.mjs)'
 
 function minify(body, supported) {
@@ -126,7 +131,14 @@ export function buildSiteRouter() {
     throw new Error('site-router: minifying renamed `handler`')
   }
   checkAwaits(code)
-  return `${HEADER}\n${imports.join('\n')}\n${code}\n`
+  const out = `${HEADER}\n${imports.join('\n')}\n${code}\n`
+  const bytes = Buffer.byteLength(out)
+  if (bytes > SITE_ROUTER_MAX_BYTES) {
+    throw new Error(
+      `site-router: ${bytes} bytes, over ${SITE_ROUTER_MAX_BYTES} (CloudFront takes 10 KB)`
+    )
+  }
+  return out
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

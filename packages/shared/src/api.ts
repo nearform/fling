@@ -80,9 +80,8 @@ export const VersionSchema = z.object({
   /** who published it (email); absent on versions published before it was recorded */
   publishedBy: z.string().optional(),
   /**
-   * A path publish (`pathPublish` capability): the folder it replaced (`30-10-26`, shown as
-   * `/30-10-26/`), and the version it carried the rest of the site forward from (absent when the
-   * site had none)
+   * A Path's version: the Path's folder (`PAY-412`, shown as `/PAY-412/`). A publish on a base:
+   * the version it built on, carrying its other files forward
    */
   path: z.string().optional(),
   base: z.string().optional(),
@@ -199,20 +198,22 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  * POST /api/sites/:name/deploys. `access` (and, for `groups` and `people`, `audience`) is who can
  * open a new site: it applies only while the site has never been live, so a re-deploy never
  * changes it. Without it a new site gets the instance's default (`defaultAccess` in the metadata).
- * `path` (`pathPublish` capability; publish-path.ts) replaces only that folder: every file in the
- * manifest is under it (`<path>/…`), and the current version's other files are carried forward.
+ * `path` (`pathPublish` capability; publish-path.ts) publishes the Path at that top-level folder
+ * (`paths` capability), making it on first use: every file in the manifest is under it
+ * (`<path>/…`), and they are the Path's whole new version. The site's own files and other Paths
+ * are untouched.
  *
- * `base` (`pull` capability) publishes on top of a version the client pulled: refused with 409
- * `base_changed` unless it is still the site's current version, when the deploy is made and when
- * it goes live. The files the base already has (same path and SHA-256) are not uploaded: the
- * server copies them forward. Without `partial`, the manifest is the whole new version; with
- * `partial: true` it holds only the files that changed or are new, and `remove` lists the base's
- * files to leave out. `partial` needs `base`, `remove` needs `partial`, and `base` goes without
- * `path`.
+ * `base` (`pull` capability) publishes on top of a version the client pulled, of the site or,
+ * with `path`, of that Path: refused with 409 `base_changed` unless it is still current, when the
+ * deploy is made and when it goes live. The files the base already has (same path and SHA-256) are
+ * not uploaded: the server copies them forward. Without `partial`, the manifest is the whole new
+ * version; with `partial: true` it holds only the files that changed or are new, and `remove`
+ * lists the base's files to leave out (under `<path>/` for a Path). `partial` needs `base`, and
+ * `remove` needs `partial`.
  *
  * `forms` (`forms` capability; forms.ts) is the new version's forms config, from `fling.forms.json`
- * (never itself a file of the site), or `null` for none. Omitted, a path publish or a publish on a
- * base keeps the base's forms, and any other deploy has none.
+ * (never itself a file of the site), or `null` for none. Omitted, a publish on a base keeps the
+ * base's forms, and any other deploy has none. A Path's versions have none.
  */
 export const DeployRequestSchema = z
   .object({
@@ -234,7 +235,6 @@ export const DeployRequestSchema = z
     }
     if (req.partial && req.base === undefined) issue('`partial` needs `base`')
     if (req.remove !== undefined && !req.partial) issue('`remove` needs `partial: true`')
-    if (req.base !== undefined && req.path !== undefined) issue('Pass `base` or `path`, not both')
   })
 export type DeployRequest = z.infer<typeof DeployRequestSchema>
 

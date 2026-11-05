@@ -296,6 +296,27 @@ export function rolesOf(actor: Actor, site: PolicySite): Role[] {
 /** The actor's strongest role on this site (`rolesOf`). */
 export const roleOf = (actor: Actor, site: PolicySite): Role => rolesOf(actor, site)[0] as Role
 
+/**
+ * What policy asks about a Path (PathRecord): the site, as far as access goes (who sees it), with
+ * the Path's own owners and publishers, where the site's owners are owners too. So publishing to a
+ * Path, rolling it back, changing its owners or deleting it are the site actions asked of this,
+ * and the site's publishers do none of them to a Path that isn't theirs. Making a new Path is
+ * `site.deploy` on the site itself.
+ */
+export function pathPolicySite(
+  site: PolicySite,
+  path: Pick<SiteRecord, 'owners' | 'publishers'>
+): PolicySite {
+  return {
+    ...site,
+    owners: {
+      emails: [...site.owners.emails, ...path.owners.emails],
+      groups: [...site.owners.groups, ...path.owners.groups],
+    },
+    publishers: path.publishers,
+  }
+}
+
 export function can(actor: Actor, action: Action, site: PolicySite): boolean {
   const access = accessOf(site)
   return rolesOf(actor, site).some(role => RULES[action](role, access))

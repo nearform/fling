@@ -186,8 +186,8 @@ async function publishResult(
       : status === 'repointed'
         ? `Restored previously published version ${outcome.versionId}`
         : outcome.base !== undefined
-          ? `Published ${outcome.fileCount} changed or added file${outcome.fileCount === 1 ? '' : 's'} on version ${outcome.base} (the rest of the site kept as it was) as version ${outcome.versionId}`
-          : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}${outcome.path === undefined ? '' : ` to /${outcome.path}/ (the rest of the site kept as it was)`}`
+          ? `Published ${outcome.fileCount} changed or added file${outcome.fileCount === 1 ? '' : 's'} on version ${outcome.base} (the rest kept as it was) as version ${outcome.versionId}`
+          : `Published ${outcome.fileCount} file${outcome.fileCount === 1 ? '' : 's'}${outcome.path === undefined ? '' : ` to the Path /${outcome.path}/ (the rest of the site untouched)`}`
   const extra = outcome.generatedIndex ? ' (with a generated index.html listing the pages)' : ''
   const warnings = outcome.warnings.length ? `\nWarnings:\n- ${outcome.warnings.join('\n- ')}` : ''
   const privacy = accessAfterPublish(deps, site, outcome.first === true, asked)

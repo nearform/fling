@@ -163,12 +163,12 @@ describe('changes against the pull', () => {
     expect(describeChanges(plan.changes)).toBe('1 changed, 1 added, 1 removed')
   })
 
-  it('a folder’s pull deploys that folder, removing the pulled files that are gone', () => {
+  it('a Path’s pull deploys the whole folder to that Path, on the version pulled', () => {
     const plan = onLink(
       { ...link, path: 'w', files: { 'w/index.html': sha('a'), 'w/x.html': sha('x') } },
       local({ 'index.html': 'a' })
     )
-    expect(plan).toMatchObject({ base: BASE, partial: true, within: 'w', remove: ['w/x.html'] })
+    expect(plan).toEqual({ base: BASE, path: 'w', changes: expect.anything() })
     expect(describeChanges(plan.changes)).toBe('1 removed')
   })
 })
@@ -253,7 +253,7 @@ describe('deploying a pulled folder', () => {
     expect((await readSiteLink(dir))?.versionId).toBe(NEXT)
   })
 
-  it('after a folder’s pull, sends that folder’s files and removals (partial)', async () => {
+  it('after a Path’s pull, publishes the folder to that Path on the version pulled', async () => {
     const dir = join(await tempDir(), 'week')
     await pullSite(client(mockFetch(pullRoutes()).fetch), {
       name: 'my-app',
@@ -270,7 +270,8 @@ describe('deploying a pulled folder', () => {
     await runDeploy(ctx, dir, {})
     const post = m.calls.find(c => c.method === 'POST')
     const body = JSON.parse(String(post?.init.body))
-    expect(body).toMatchObject({ base: BASE, partial: true, remove: [] })
+    expect(body).toMatchObject({ base: BASE, path: '30-10-26' })
+    expect(body.partial).toBeUndefined()
     expect(body.manifest.files.map((f: { path: string }) => f.path)).toEqual([
       '30-10-26/index.html',
     ])

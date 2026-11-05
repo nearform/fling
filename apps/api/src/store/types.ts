@@ -204,6 +204,13 @@ export interface SiteRecord {
    * Writing it leaves `updatedAt` alone: a new picture is not a change to the site.
    */
   thumbnail?: { versionId: string; updatedAt: string }
+  /** it has live Paths (PathRecord): the edge looks a request's first folder up (`p`) */
+  paths?: true
+  /**
+   * Its rendered home page and Paths listing (`sites/<id>/_rendered/<home>.html|json`, paths.ts):
+   * the hash they are named by, while it has live Paths and its home page lists them.
+   */
+  home?: string
   createdAt: string
   updatedAt: string
 }
@@ -335,10 +342,18 @@ export interface NameClaim {
   createdAt: string
 }
 
+/**
+ * A version's life: `pending` (staged, uploading) → `complete` (published; can be current) →
+ * `pruning` (past retention, marked for deletion: no longer offered, and revived to `complete` if
+ * it is published again meanwhile) → `sweeping` (its files are being deleted; then the record goes).
+ */
+export type VersionStatus = 'pending' | 'complete' | 'pruning' | 'sweeping'
+
 export interface VersionRecord {
+  /** the site's id, or a Path's storage id (`PathRecord.id`) for a Path's version */
   siteId: string
   id: string
-  status: 'pending' | 'complete'
+  status: VersionStatus
   fileCount: number
   totalBytes: number
   /** settings requested with the deploy, applied when it goes live */
@@ -347,12 +362,49 @@ export interface VersionRecord {
   /** who published it: the email of whoever made it live (absent on versions published before it was recorded) */
   publishedBy?: string
   /**
-   * A path publish: the folder it replaced (normalised, `30-10-26`), and the version whose other
-   * files it carried forward (absent when the site had no current version)
+   * A Path's version: the Path's folder (`PAY-412`). A publish on a base: the version whose
+   * other files it carried forward
    */
   path?: string
   base?: string
+  /** when retention marked it `pruning` */
+  prunedAt?: string
+  /** its Markdown files have rendered pages (`.rendered/<path>.html`), which the edge serves */
+  markdown?: true
+  /**
+   * Its home page, for a site with Paths (paths.ts): `block`, its root index.html has a Paths
+   * block to fill in; `none`, it has no home page, so the default one lists the Paths. Absent: its
+   * own home page, served as it is.
+   */
+  home?: 'block' | 'none'
+  /** its home page's title (`<title>`, or a rendered Markdown home page's first heading) */
+  title?: string
   createdAt: string
+}
+
+/**
+ * A Path: a top-level folder of a site with its own versions, owners and publishers, served at
+ * `/<folder>/` of the site from its own current version (`path:<siteId>/<folder>` in the route
+ * table). Its access is the site's. Kept in the site's partition (`SITE#<siteId>/PATH#<folder>`);
+ * its versions are ordinary versions in the partition of its storage id `id`, and its files are at
+ * `sites/<id>/<versionId>/<path>`, relative to the folder.
+ */
+export interface PathRecord {
+  siteId: string
+  folder: string
+  /** random storage id: the Path's versions' partition and blob prefix */
+  id: string
+  currentVersionId: string | null
+  /** whoever created it, at first; its owners act on it like a site's on a site */
+  owners: SiteRoleList
+  publishers: SiteRoleList
+  /** hidden from the site (its route removed) and from the Paths listing; kept */
+  archived: boolean
+  /** its current version's index.html `<title>`, for the Paths listing */
+  title: string
+  createdBy: string
+  createdAt: string
+  updatedAt: string
 }
 
 /**
@@ -675,6 +727,36 @@ export interface Store extends NotificationStore {
   putVersion(site: SiteRef, version: VersionRecord): Promise<void>
   /** In version-id byte order. */
   listVersions(site: SiteRef): Promise<VersionRecord[]>
+  /**
+   * Move a version from status `from` to the version given (both of its copies), only while it is
+   * still `from`: false when it is not (gone, or moved on meanwhile).
+   */
+  moveVersion(site: SiteRef, from: VersionStatus, version: VersionRecord): Promise<boolean>
+  /** Delete a version's record (both copies). Its files are the caller's. */
+  deleteVersion(site: SiteRef, id: string): Promise<void>
+
+  // --- Paths ---
+  getPath(siteId: string, folder: string): Promise<PathRecord | null>
+  /** The site's Paths, archived ones included, by folder (byte order). */
+  listPaths(siteId: string): Promise<PathRecord[]>
+  /** Create a Path; false when the folder has one already. */
+  createPath(path: PathRecord): Promise<boolean>
+  /** Write a Path; with `ifCurrentVersion`, only while that is still its current version (ConditionFailed otherwise). */
+  putPath(path: PathRecord, opts?: { ifCurrentVersion?: string }): Promise<void>
+  /** Delete a Path's record and its versions' records. Its files are the caller's. */
+  deletePath(site: SiteRef, path: PathRecord): Promise<void>
+  /**
+   * Note that `versionId` is staged for the site's Path at `folder`, until `expiresAt`: finalizing
+   * names only the site and the version (`POST …/deploys/:versionId/finalize`).
+   */
+  notePathDeploy(
+    siteId: string,
+    versionId: string,
+    folder: string,
+    expiresAt: string
+  ): Promise<void>
+  /** The folders a version is staged for (`notePathDeploy`), by folder. */
+  pathDeploys(siteId: string, versionId: string): Promise<string[]>
 
   // --- comments ---
   /** Store a new comment (its id is unique: false if one has it already). */

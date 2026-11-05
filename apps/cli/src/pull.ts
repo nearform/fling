@@ -8,9 +8,8 @@
  * the hash of every file pulled. It is a dotfile, so the manifest walker never publishes it. A
  * deploy of the folder reads it (`onLink`): it publishes to that site on that server, on the
  * version pulled as its base, so the server refuses it (409 `base_changed`) if someone published
- * since rather than overwrite their work. A whole-site pull deploys the whole folder (the server
- * uploads only what changed); a pull of one folder (`path`) deploys that folder's files and removes
- * the pulled files that are gone, keeping the rest of the site.
+ * since rather than overwrite their work. The whole folder is deployed (the server uploads only
+ * what changed): to the site, or after a pull of one of its Paths (`path`), to that Path.
  *
  * A version with forms (forms.ts) comes with its config: the pull writes it as `fling.forms.json`
  * at the top of the folder and records its hash in the link (`forms`), so a deploy after it was
@@ -45,7 +44,7 @@ const SiteLinkSchema = z.object({
   name: z.string(),
   /** the version pulled, or the one the last deploy made */
   versionId: z.string(),
-  /** a pull of one folder of the site: the folder is this folder */
+  /** a pull of one of the site's Paths (its folder): the folder is that Path */
   path: z.string().optional(),
   /** every file pulled (or deployed), by site path: its SHA-256 */
   files: z.record(z.string(), z.string()),
@@ -89,9 +88,8 @@ const siteFiles = (link: Pick<SiteLink, 'path'>, local: Hashed) =>
   )
 
 /**
- * How to deploy a linked folder: on the version pulled, the whole site (complete) or, after a
- * pull of one folder, that folder's files with the pulled ones that are gone removed (partial);
- * and what changed, for the summary.
+ * How to deploy a linked folder: all of it, on the version pulled, to the site or (after a pull
+ * of one of its Paths, `path`) to that Path; and what changed, for the summary.
  */
 export function onLink(link: SiteLink, local: Hashed) {
   const now = siteFiles(link, local)
@@ -104,9 +102,7 @@ export function onLink(link: SiteLink, local: Hashed) {
   for (const path of Object.keys(link.files)) if (!(path in now)) changes.removed.push(path)
   return {
     base: link.versionId,
-    ...(link.path === undefined
-      ? {}
-      : { partial: true, within: link.path, remove: changes.removed }),
+    ...(link.path === undefined ? {} : { path: link.path }),
     changes,
   }
 }

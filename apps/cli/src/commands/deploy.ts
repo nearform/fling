@@ -17,15 +17,16 @@
  * instance's default, and the CLI says who that is. A site that has been live keeps its access
  * (`fling access` changes it).
  *
- * `--path <folder>` (a path publish, `pathPublish` capability) publishes into that folder of the
- * site named by `--name`, keeping the rest of the site: `fling ./report --name changelog --path
- * 30-10-26` serves the report at `<changelog>/30-10-26/`. It needs `--name`, so a folder never
+ * `--path <folder>` (a path publish, `pathPublish` capability) publishes the folder as the Path at
+ * that top-level folder of the site named by `--name` (the rest of the site untouched): `fling
+ * ./plan --name payments-plans --path PAY-412` serves the plan at `<payments-plans>/PAY-412/`. It
+ * needs `--name`, so a folder never
  * lands in a site picked from the directory's name, and refuses an instance without the
  * capability (an older server would ignore `path` and replace the whole site). A generated listing
  * is the folder's own index.html.
  *
  * A folder pulled with `fling pull` (its site link, `.fling-site.json`; pull.ts) deploys to the
- * site and the Fling it was pulled from, on the version pulled: only what changed is uploaded, the
+ * site (or the Path) and the Fling it was pulled from, on the version pulled: only what changed is uploaded, the
  * summary says what changed against the pull, and the link then names the new version. If someone
  * published the site since, it stops (`base_changed`) rather than replace their work; `--force`
  * publishes the folder without a base, over whatever is live. `--name` naming another site, a
@@ -55,8 +56,9 @@ import {
   formsSummaryLines,
   type InstanceMetadata,
   isValidSiteName,
+  MAX_PATH_FOLDER_LENGTH,
   needsAudience,
-  normalizePublishPath,
+  normalizePathFolder,
   parseAccessLevel,
   privateAudience,
   responsesPageUrl,
@@ -266,10 +268,10 @@ async function linkedTo(
 /** `--path`, normalised; it needs `--name`. */
 function publishFolder(ctx: CommandContext, opts: DeployCommandOptions): string | undefined {
   if (opts.path === undefined) return undefined
-  const folder = normalizePublishPath(opts.path)
+  const folder = normalizePathFolder(opts.path)
   if (folder === null) {
     throw new CliError(`Invalid --path "${opts.path}"`, {
-      hint: 'Use a folder of the site, like 30-10-26 or reports/2026 (no dotfiles).',
+      hint: `Use one top-level folder of the site, like PAY-412 (no dotfiles, at most ${MAX_PATH_FOLDER_LENGTH} characters): it becomes that folder's Path. Nested folders go inside it.`,
     })
   }
   if (opts.name === undefined) {
@@ -333,7 +335,7 @@ async function deployPrepared(
   const forms = await planForms({
     dir: prepared.dir,
     pages: local.files.map(f => inFolder(f.path)),
-    layered: opts.folder !== undefined || onBase !== null,
+    layered: onBase !== null,
     pulledWithForms: onBase !== null && link?.forms !== undefined,
     instance,
     bin: ctx.binName,
@@ -345,13 +347,10 @@ async function deployPrepared(
       dir: prepared.dir,
       name,
       manifest: local,
-      path: opts.folder,
+      path: opts.folder ?? onBase?.path,
       ...(onBase
         ? {
             base: onBase.base,
-            ...(onBase.partial
-              ? { partial: true, remove: onBase.remove, within: onBase.within }
-              : {}),
           }
         : {}),
       spa: opts.spa ? true : undefined,

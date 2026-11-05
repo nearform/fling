@@ -17,7 +17,7 @@ import {
   NameCheckSchema,
   NotificationPreferencesUpdateSchema,
   NotificationSettingsSchema,
-  normalizePublishPath,
+  normalizePathFolder,
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
   PullResponseSchema,
@@ -231,10 +231,8 @@ apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
 // Pull (the `pull` capability): a version's files with signed download URLs (pull.ts).
 apiRoutes.get('/sites/:name/pull', async c => {
   const rawPath = c.req.query('path')
-  const path = rawPath === undefined ? undefined : normalizePublishPath(rawPath)
-  if (path === null) {
-    throw badRequest('path must be a folder of the site, like 30-10-26 or reports/2026')
-  }
+  const path = rawPath === undefined ? undefined : normalizePathFolder(rawPath)
+  if (path === null) throw badRequest('path must be one of the site’s Paths, like PAY-412')
   const versionId = c.req.query('version') || undefined
   const pulled = await pull(c.get('deps'), c.get('user'), c.req.param('name'), {
     ...(versionId ? { versionId } : {}),

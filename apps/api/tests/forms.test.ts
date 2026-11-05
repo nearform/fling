@@ -119,12 +119,13 @@ describe('the forms config', () => {
     expect(await env.store.findSite('bad')).toBeNull()
   })
 
-  it('is kept by a path publish, replaced when sent, and removed with null', async () => {
+  it('is kept by a publish on a base, replaced when sent, and removed with null', async () => {
     const { env, alice, v1 } = await world()
     const site = await env.store.findSite('evals')
     const id = site?.id as string
-    const week = await deploy(env, alice.key, 'evals', [file('week/index.html', '<h1>w</h1>')], {
-      path: 'week',
+    const week = await deploy(env, alice.key, 'evals', [file('w/week/index.html', '<h1>w</h1>')], {
+      base: v1,
+      partial: true,
     })
     expect(week.status).toBe(200)
     expect(week.body.versionId).not.toBe(v1)
@@ -136,9 +137,10 @@ describe('the forms config', () => {
       env,
       alice.key,
       'evals',
-      [file('week/index.html', '<h1>w2</h1>')],
+      [file('w/week/index.html', '<h1>w2</h1>')],
       {
-        path: 'week',
+        base: week.body.versionId,
+        partial: true,
         forms: { ...FORMS, title: 'Evals' },
       }
     )
@@ -148,8 +150,9 @@ describe('the forms config', () => {
 
     // The same files with `forms: null`: unchanged, and the live version has no forms now.
     const same = await api(env, alice.key, 'POST', '/api/sites/evals/deploys', {
-      manifest: { files: [file('week/index.html', '<h1>w2</h1>').meta] },
-      path: 'week',
+      manifest: { files: [file('w/week/index.html', '<h1>w2</h1>').meta] },
+      base: renamed.body.versionId,
+      partial: true,
       forms: null,
     })
     expect((await json(same)).status).toBe('unchanged')

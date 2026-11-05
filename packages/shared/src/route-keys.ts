@@ -5,6 +5,11 @@
 export const siteKvsKey = (label: string) => `site:${label}`
 /** `share:<token>` → routing for a share link; served without auth. */
 export const shareKvsKey = (token: string) => `share:${token}`
+/**
+ * `path:<siteId>/<folder>` → where a Path of a site is served from (`{id, v}`, KvsPathValueSchema
+ * in kvs.ts). Keyed by the site's id, so a share host and a renamed site find the same Paths.
+ */
+export const pathKvsKey = (siteId: string, folder: string) => `path:${siteId}/${folder}`
 /** HMAC key the edge uses to verify the `fling_site` cookie. */
 export const SITE_HMAC_KVS_KEY = 'cfg:site-hmac'
 /**
@@ -35,6 +40,14 @@ export const SITE_PASS_PATH = '/_fling-pass'
  * headers to what S3 serves). Not under `/_fling/`, for the same reason as SITE_PASS_PATH.
  */
 export const SITE_VERSION_PATH = '/_fling-version'
+/**
+ * A site with Paths: its live Paths as JSON, the data its home page's Paths block lists
+ * (paths-index.ts). Rewritten to the rendered listing, only while the route value names one (`i`).
+ */
+export const PATHS_JSON_PATH = '/_fling-paths.json'
+/** The object key of a site's rendered home page (`html`) or Paths listing (`json`). */
+export const renderedObjectKey = (siteId: string, sha: string, ext: 'html' | 'json') =>
+  `sites/${siteId}/_rendered/${sha}.${ext}`
 /** The version a sites host serves (`x-fling-version: <versionId>`). */
 export const SITE_VERSION_HEADER = 'x-fling-version'
 /** The site pass cookie (host-only, on a restricted site's host). */

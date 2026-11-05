@@ -70,6 +70,8 @@
 import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
+  PATHS_JSON_PATH,
+  pathKvsKey,
   REVIEW_SHELL,
   ROBOTS_TXT,
   revokedKvsKey,
@@ -154,6 +156,12 @@ interface RouteValue {
   spa?: boolean
   /** 1: restricted, the site wants a site pass */
   r?: number
+  /** 1: the site has live Paths (`path:<id>/<folder>`) */
+  p?: number
+  /** the rendered home page and Paths listing (`sites/<id>/_rendered/<i>.html|json`) */
+  i?: string
+  /** 1: the version's Markdown files have rendered pages (`.rendered/<path>.html`) */
+  m?: number
 }
 
 // Any path segment starting with a dot (incl. `.`/`..` traversal and `.env`, `.git/…`,
@@ -480,16 +488,72 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     return { action: 'respond', status: 204, statusDescription: 'No Content', headers: headers }
   }
 
+  // A rendered home page (the site's index.html with its Paths block filled in, or the default
+  // one listing the Paths) stands in for the version's own, and the listing's data beside it.
+  if (site.i && (uri === '/' || uri === '/index.html')) {
+    return served(`/sites/${site.id}/_rendered/${site.i}.html`, site.v)
+  }
+  if (site.i && uri === PATHS_JSON_PATH)
+    return served(`/sites/${site.id}/_rendered/${site.i}.json`, site.v)
+
+  // A Path: the first folder of the request, when the site has one by that name, is served from
+  // the Path's own current version. It is matched decoded, so no spelling of the folder reaches
+  // the site's own copy of it.
+  if (site.p) {
+    const slash = uri.indexOf('/', 1)
+    const raw = slash === -1 ? uri.slice(1) : uri.slice(1, slash)
+    if (raw && (slash !== -1 || raw.indexOf('.') === -1)) {
+      let folder = ''
+      try {
+        folder = decodeURIComponent(raw)
+      } catch (_e) {
+        return rewrite(MISSING_KEY)
+      }
+      const found = await ctx.getRoute(pathKvsKey(site.id, folder))
+      const mounted = parseRoute(found)
+      if (mounted && mounted.id && mounted.v) {
+        if (slash === -1) return redirect(301, `${uri}/${req.query}`, false)
+        const rest = uri.slice(slash)
+        let inner = rest
+        if (inner.endsWith('/')) {
+          inner += 'index.html'
+        } else if (inner.slice(inner.lastIndexOf('/') + 1).indexOf('.') === -1) {
+          return redirect(301, `${uri}/${req.query}`, false)
+        }
+        return served(
+          `/sites/${mounted.id}/${mounted.v}${markdown(inner, mounted, req)}`,
+          mounted.v
+        )
+      }
+    }
+  }
+
   let path = uri
   if (path.endsWith('/')) {
     path += 'index.html'
   } else if (path.slice(path.lastIndexOf('/') + 1).indexOf('.') === -1) {
     if (!site.spa) return redirect(301, `${uri}/${req.query}`, false)
     path = '/index.html'
+    if (site.i) return served(`/sites/${site.id}/_rendered/${site.i}.html`, site.v)
   }
-  const served = rewrite(`/sites/${site.id}/${site.v}${path}`)
-  served.headers[SITE_VERSION_HEADER] = site.v
-  return served
+  return served(`/sites/${site.id}/${site.v}${markdown(path, site, req)}`, site.v)
+}
+
+/**
+ * A Markdown file of a version whose Markdown was rendered: its rendered page, unless the request
+ * asks for the source (`?raw=1`).
+ */
+function markdown(path: string, route: RouteValue, req: SiteRequest): string {
+  if (!route.m || !/\.(md|markdown)$/i.test(path) || queryParam(req.query, 'raw') !== null)
+    return path
+  return `/.rendered${path}.html`
+}
+
+/** Serve an object of version `v` (`x-fling-version` says which). */
+function served(uri: string, v: string): SiteRewrite {
+  const decision = rewrite(uri)
+  decision.headers[SITE_VERSION_HEADER] = v
+  return decision
 }
 
 /**

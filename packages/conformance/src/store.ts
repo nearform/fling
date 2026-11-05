@@ -15,6 +15,7 @@ import type {
   GrantRecord,
   GroupRecord,
   LiveConnectionRecord,
+  PathRecord,
   RefreshTokenRecord,
   SiteRecord,
   Store,
@@ -827,6 +828,117 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.listVersions(s)).toEqual([])
         expect(await store.listVersions(neighbour)).toEqual([kept])
         expect(await store.findSite(neighbour.name)).toEqual(neighbour)
+      })
+    })
+
+    describe('version lifecycle', () => {
+      it('moveVersion moves only from the status named, both copies', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const v = { ...version(s.id), status: 'complete' as const }
+        await store.putVersion(s, v)
+        const marked = { ...v, status: 'pruning' as const, prunedAt: LATER }
+        expect(await store.moveVersion(s, 'complete', marked)).toBe(true)
+        expect(await store.getVersion(s, v.id)).toEqual(marked)
+        expect(await store.listVersions(s)).toEqual([marked])
+        // Moved on meanwhile: refused, nothing written.
+        expect(await store.moveVersion(s, 'complete', { ...v, status: 'sweeping' })).toBe(false)
+        expect(await store.getVersion(s, v.id)).toEqual(marked)
+        expect(await store.moveVersion(s, 'complete', version(s.id))).toBe(false)
+      })
+
+      it('deleteVersion removes one version and leaves the rest', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const gone = version(s.id)
+        const kept = version(s.id)
+        await store.putVersion(s, gone)
+        await store.putVersion(s, kept)
+        await store.deleteVersion(s, gone.id)
+        expect(await store.getVersion(s, gone.id)).toBeNull()
+        expect(await store.listVersions(s)).toEqual([kept])
+        await store.deleteVersion(s, gone.id)
+      })
+    })
+
+    describe('Paths', () => {
+      const path = (siteId: string, folder: string, owner: string): PathRecord => ({
+        siteId,
+        folder,
+        id: uid(),
+        currentVersionId: 'v1',
+        owners: { emails: [owner], groups: [] },
+        publishers: { emails: [], groups: [] },
+        archived: false,
+        title: `Plan ${folder}`,
+        createdBy: owner,
+        createdAt: NOW,
+        updatedAt: NOW,
+      })
+
+      it('create once per folder, get, list by folder byte order, only the site’s own', async () => {
+        const store = await factory()
+        const s = site(email())
+        const other = site(s.email)
+        await store.createSite(s)
+        await store.createSite(other)
+        const folders = ['PAY-2', 'PAY-10', 'my docs', 'Ünïcode']
+        const made = folders.map(f => path(s.id, f, s.email))
+        for (const p of made) expect(await store.createPath(p)).toBe(true)
+        await store.createPath(path(other.id, 'PAY-2', s.email))
+        expect(await store.createPath(path(s.id, 'PAY-2', email()))).toBe(false)
+        expect(await store.getPath(s.id, 'PAY-2')).toEqual(made[0])
+        expect(await store.getPath(s.id, 'missing')).toBeNull()
+        expect((await store.listPaths(s.id)).map(p => p.folder)).toEqual(byteOrder(folders, f => f))
+      })
+
+      it('putPath with ifCurrentVersion writes only while that version is current', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const p = path(s.id, 'PAY-1', s.email)
+        await store.createPath(p)
+        const next = { ...p, currentVersionId: 'v2', updatedAt: LATER }
+        await store.putPath(next, { ifCurrentVersion: 'v1' })
+        expect(await store.getPath(s.id, 'PAY-1')).toEqual(next)
+        await expect(
+          store.putPath({ ...p, currentVersionId: 'v3' }, { ifCurrentVersion: 'v1' })
+        ).rejects.toBeInstanceOf(ConditionFailed)
+        expect(await store.getPath(s.id, 'PAY-1')).toEqual(next)
+      })
+
+      it('notes the folders a version is staged for, until they expire', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        await store.notePathDeploy(s.id, 'v1', 'PAY-2', EXPIRES)
+        await store.notePathDeploy(s.id, 'v1', 'PAY-1', EXPIRES)
+        await store.notePathDeploy(s.id, 'v10', 'PAY-3', EXPIRES)
+        await store.notePathDeploy(s.id, 'v1', 'old', '2000-01-01T00:00:00.000Z')
+        expect(await store.pathDeploys(s.id, 'v1')).toEqual(['PAY-1', 'PAY-2'])
+        expect(await store.pathDeploys(s.id, 'v2')).toEqual([])
+      })
+
+      it('deletePath removes it and its versions; deleteSite removes its Paths and theirs', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.createSite(s)
+        const a = path(s.id, 'a', s.email)
+        const b = path(s.id, 'b', s.email)
+        await store.createPath(a)
+        await store.createPath(b)
+        const pathRef = (p: PathRecord) => ({ id: p.id, email: s.email })
+        await store.putVersion(pathRef(a), version(a.id))
+        await store.putVersion(pathRef(b), version(b.id))
+        await store.deletePath(s, a)
+        expect(await store.getPath(s.id, 'a')).toBeNull()
+        expect(await store.listVersions(pathRef(a))).toEqual([])
+        expect(await store.listVersions(pathRef(b))).toHaveLength(1)
+        await store.deleteSite(s)
+        expect(await store.listPaths(s.id)).toEqual([])
+        expect(await store.listVersions(pathRef(b))).toEqual([])
       })
     })
 

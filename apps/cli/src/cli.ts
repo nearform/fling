@@ -163,7 +163,7 @@ program
   )
   .option(
     '--path <folder>',
-    'publish into this folder of the site (e.g. 30-10-26, served at <site>/30-10-26/) and keep the rest of the site; needs --name'
+    'publish as the Path at this top-level folder of the site (e.g. PAY-412, served at <site>/PAY-412/), with its own versions and owners; the rest of the site is untouched; needs --name'
   )
   .option('--spa', 'single-page app: serve index.html for unknown paths')
   .option(
@@ -219,7 +219,7 @@ program
     '--version-id <id>',
     'another version than the live one (owners and publishers; ids from `versions`)'
   )
-  .option('--path <folder>', 'only this folder of the site (e.g. 30-10-26), at the top of dir')
+  .option('--path <folder>', 'only this Path of the site (e.g. PAY-412), at the top of dir')
   .option('--force', 'write into dir even if it is not empty')
   .action(
     action(

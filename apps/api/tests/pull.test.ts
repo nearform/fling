@@ -79,12 +79,36 @@ describe('pull', () => {
     })
   })
 
-  it('`path` keeps one folder’s files, with their site paths; a bad path is a 400', async () => {
+  it('`path` pulls that Path, with site paths; read-files names them within it; else 404 or 400', async () => {
     const { env, alice } = await world()
+    // The site's own copy of the folder is not a Path.
+    expect((await pull(env, alice.key, '?path=30-10-26')).status).toBe(404)
+    const week = [file('30-10-26/index.html', '<h1>path week</h1>')]
+    const staged = await json(
+      await api(env, alice.key, 'POST', '/api/sites/team/deploys', {
+        manifest: { files: week.map(f => f.meta) },
+        path: '30-10-26',
+      })
+    )
+    await upload(env, staged.uploads, week)
+    await api(env, alice.key, 'POST', `/api/sites/team/deploys/${staged.versionId}/finalize`)
     const body = await json(await pull(env, alice.key, '?path=/30-10-26/'))
-    expect(body.path).toBe('30-10-26')
+    expect(body).toMatchObject({ path: '30-10-26', versionId: staged.versionId })
     expect(body.files.map((f: { path: string }) => f.path)).toEqual(['30-10-26/index.html'])
-    expect((await pull(env, alice.key, '?path=../x')).status).toBe(400)
+    const bytes = await (await env.app.request(body.files[0].url)).text()
+    expect(bytes).toBe('<h1>path week</h1>')
+    const { accessToken } = await connect(env, ALICE)
+    const read = await callTool(env, accessToken, 'fling_read_files', {
+      name: 'team',
+      path: '30-10-26',
+    })
+    expect(read.structuredContent.files.map((f: { path: string }) => f.path)).toEqual([
+      'index.html',
+    ])
+    expect(read.content[0]?.text).toContain('path "30-10-26"')
+    for (const bad of ['../x', 'a/b']) {
+      expect((await pull(env, alice.key, `?path=${bad}`)).status).toBe(400)
+    }
   })
 
   it('anyone who can see the site pulls its current version; nobody else, as if it were missing', async () => {

@@ -1,5 +1,11 @@
 import { parseLabel } from '@fling/shared/hosts'
-import { revokedKvsKey, SITE_HMAC_KVS_KEY, shareKvsKey, siteKvsKey } from '@fling/shared/kvs'
+import {
+  pathKvsKey,
+  revokedKvsKey,
+  SITE_HMAC_KVS_KEY,
+  shareKvsKey,
+  siteKvsKey,
+} from '@fling/shared/kvs'
 import {
   revocationMac,
   SITE_COOKIE_TTL_SECONDS,
@@ -12,7 +18,7 @@ import {
   verifySitePass,
 } from '@fling/shared/site-cookie'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildReadableSiteRouter } from '../build.mjs'
+import { buildReadableSiteRouter, SITE_ROUTER_MAX_BYTES } from '../build.mjs'
 import {
   type CloudFrontRequest,
   type CloudFrontResponse,
@@ -45,6 +51,11 @@ const store = new Map<string, string>([
   [siteKvsKey('s'), JSON.stringify({ id: 'S9', v: 'V9', vis: 'public', spa: false })],
   [shareKvsKey(TOKEN), JSON.stringify({ id: 'S1', v: 'V1', vis: 'private', spa: false })],
   [siteKvsKey('team'), JSON.stringify({ id: 'S7', v: 'V7', vis: 'private', spa: false, r: 1 })],
+  [
+    siteKvsKey('team-plans'),
+    JSON.stringify({ id: 'S8', v: 'V8', vis: 'private', spa: false, p: 1, i: 'R8' }),
+  ],
+  [pathKvsKey('S8', 'PAY-412'), JSON.stringify({ id: 'P8', v: 'W8' })],
   [
     shareKvsKey('r'.repeat(20)),
     JSON.stringify({ id: 'S7', v: 'V7', vis: 'private', spa: false, r: 1 }),
@@ -475,6 +486,29 @@ describe('path rewriting', () => {
   })
 })
 
+describe('Paths', () => {
+  const TEAM = 'team-plans.fling.example.test'
+  const at = (path: string) => asRequest({ host: TEAM, path, cookieHeader: validCookie() })
+
+  it("serves a Path from its own version, behind the site's access checks", async () => {
+    expect((await at('/PAY-412/')).uri).toBe('/sites/P8/W8/index.html')
+    expect((await at('/PAY%2D412/notes.md')).uri).toBe('/sites/P8/W8/notes.md')
+    expect((await asResponse({ host: TEAM, path: '/PAY-412/' })).statusCode).toBe(302)
+  })
+
+  it("serves the rendered home page, and the site's own files elsewhere", async () => {
+    expect((await at('/')).uri).toBe('/sites/S8/_rendered/R8.html')
+    expect((await at('/_fling-paths.json')).uri).toBe('/sites/S8/_rendered/R8.json')
+    expect((await at('/assets/site.css')).uri).toBe('/sites/S8/V8/assets/site.css')
+  })
+
+  it('adds the slash to a bare Path', async () => {
+    const res = await asResponse({ host: TEAM, path: '/PAY-412', cookieHeader: validCookie() })
+    expect(res.statusCode).toBe(301)
+    expect(res.headers?.location?.value).toBe('/PAY-412/')
+  })
+})
+
 describe('the version a host serves', () => {
   it('answers /_fling-version with the version as a response, so its header reaches the browser', async () => {
     for (const [args, v] of [
@@ -567,8 +601,9 @@ describe('label parsing parity with shared/hosts.ts', () => {
 })
 
 describe('deployable source', () => {
-  it('is under the 10 KB CloudFront Functions limit', () => {
+  it("is under the 10 KB CloudFront Functions limit, with the build's margin", () => {
     expect(Buffer.byteLength(renderSiteRouter({ appOrigin: APP }))).toBeLessThan(10 * 1024)
+    expect(Buffer.byteLength(SITE_ROUTER_SOURCE)).toBeLessThanOrEqual(SITE_ROUTER_MAX_BYTES)
   })
 
   it('is minified from the readable bundle, which keeps its whitespace and names', () => {

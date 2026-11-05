@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.11.0 (2026-11-05)
+
 - **ChatGPT, the Gemini app and Cursor's web agents connect.** Add your Fling as a connector in
   ChatGPT or Gemini, as in Claude. The remote MCP server accepts ChatGPT's client (its Client ID
   Metadata Document, which prefers `private_key_jwt` but also supports public clients), and the

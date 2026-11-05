@@ -317,6 +317,59 @@ describe('authorize', () => {
     expect(bad.headers.get('location')).toMatch(/error=invalid_redirect_uri/)
   })
 
+  it('connects ChatGPT: its CIMD document prefers private_key_jwt but supports none', async () => {
+    const cimd = 'https://chatgpt.com/oauth/client.json'
+    const callback = 'https://chatgpt.com/connector_platform_oauth_redirect'
+    // The document as chatgpt.com serves it.
+    env.deps.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          client_id: cimd,
+          client_uri: 'https://chatgpt.com/',
+          redirect_uris: [callback],
+          token_endpoint_auth_method: 'private_key_jwt',
+          token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+          client_name: 'ChatGPT',
+          token_endpoint_auth_signing_alg: 'RS256',
+          jwks_uri: 'https://chatgpt.com/oauth/jwks.json',
+        })
+      )
+    const a = await authorizeAndApprove(env, { clientId: cimd, redirectUri: callback })
+    const info = await token(env, {
+      grant_type: 'authorization_code',
+      code: a.code,
+      code_verifier: a.verifier,
+      client_id: cimd,
+      redirect_uri: callback,
+    })
+    expect(info.status).toBe(200)
+  })
+
+  it('refuses a CIMD client that cannot be public (no `none` among its methods)', async () => {
+    const cimd = 'https://client.example/meta.json'
+    env.deps.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          client_id: cimd,
+          redirect_uris: [CLAUDE_CALLBACK],
+          token_endpoint_auth_method: 'private_key_jwt',
+          token_endpoint_auth_methods_supported: ['private_key_jwt'],
+        })
+      )
+    const res = await env.app.request(
+      authorizeUrl({
+        response_type: 'code',
+        client_id: cimd,
+        redirect_uri: CLAUDE_CALLBACK,
+        code_challenge: pkce().challenge,
+        code_challenge_method: 'S256',
+      })
+    )
+    expect(res.headers.get('location')).toMatch(/error=invalid_client/)
+  })
+
   it('rejects a CIMD document whose client_id does not match its URL', async () => {
     const cimd = 'https://client.example/meta.json'
     env.deps.fetch = async () =>

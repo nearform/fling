@@ -1,8 +1,8 @@
 /**
  * OAuth clients: Dynamic Client Registration (RFC 7591, public clients only) and Client ID
  * Metadata Documents (draft-ietf-oauth-client-id-metadata-document; the client_id is an https URL
- * we fetch). Claude uses CIMD when the AS metadata advertises it (and `none` auth), else DCR; we
- * support both.
+ * we fetch). Claude and ChatGPT use CIMD when the AS metadata advertises it (and `none` auth),
+ * else DCR; we support both. Every client is public: PKCE, no secret.
  *
  * Redirect URIs must be on OAUTH_REDIRECT_ALLOWLIST (exact URLs, or `loopback` for any
  * http://localhost|127.0.0.1|[::1] port) AND match one the client registered/declared exactly —
@@ -183,8 +183,15 @@ async function fetchCimd(deps: Deps, url: URL): Promise<ResolvedClient | null> {
   if (!Array.isArray(uris) || uris.length === 0 || uris.some(u => typeof u !== 'string')) {
     return null
   }
+  // A public client (PKCE, no secret): its preferred method, or one it lists as supported. ChatGPT
+  // prefers private_key_jwt and also supports `none`, the only method this server advertises.
   const method = doc.token_endpoint_auth_method
-  if (method !== undefined && method !== 'none') return null
+  const supported = doc.token_endpoint_auth_methods_supported
+  const publicClient =
+    method === undefined ||
+    method === 'none' ||
+    (Array.isArray(supported) && supported.includes('none'))
+  if (!publicClient) return null
   const clientUri = str(doc.client_uri, 500)
   const client: ResolvedClient = {
     clientId: id,

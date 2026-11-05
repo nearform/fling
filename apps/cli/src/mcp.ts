@@ -57,6 +57,7 @@ import {
   isSecretPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
+  MAX_PATH_FOLDER_LENGTH,
   MCP_READ_MAX_BYTES,
   type McpToolDef,
   type McpWording,
@@ -66,7 +67,7 @@ import {
   NOT_READY_NOTE,
   NOTIFICATIONS_NOTE,
   needsAudience,
-  normalizePublishPath,
+  normalizePathFolder,
   PATH_PUBLISH_NOTE,
   PullResponseSchema,
   pageOfFiles,
@@ -395,10 +396,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
    * replace the whole site with the folder.
    */
   async function publishFolder(target: Target, raw: string) {
-    const folder = normalizePublishPath(raw)
+    const folder = normalizePathFolder(raw)
     if (folder === null) {
       throw new CliError(
-        `Invalid path "${raw}": use a folder of the site, like "30-10-26" or "reports/2026" (no dotfiles)`
+        `Invalid path "${raw}": use one top-level folder of the site, like "PAY-412" (no dotfiles, at most ${MAX_PATH_FOLDER_LENGTH} characters)`
       )
     }
     const instance = await loadInstanceWith(store, target.config, fetchImpl, 'pathPublish')
@@ -501,11 +502,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     if (opts.access) await requireAccessLevels(t)
     const link = opts.link ?? null
     if ((link && !opts.force) || opts.base !== undefined) await requirePull(t)
-    if (opts.base !== undefined && opts.folder !== undefined) {
-      throw new CliError('Pass `base` or `path`, not both')
-    }
     const folder = opts.folder === undefined ? undefined : await publishFolder(t, opts.folder)
-    // Where the files land in the site: a path publish's folder, or the folder a pull was of.
+    // Where the files land in the site: a path publish's Path, or the Path a pull was of.
     const shownFolder = folder ?? link?.path
     const inFolder = (file: string) => (shownFolder === undefined ? file : `${shownFolder}/${file}`)
     const top = folder === undefined ? 'at the root' : `in /${folder}/`
@@ -542,7 +540,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     }
     const onBase = link && !opts.force ? onLink(link, local) : null
     const changes = link ? onLink(link, local).changes : null
-    const layered = folder !== undefined || onBase !== null || opts.base !== undefined
+    const layered = onBase !== null || opts.base !== undefined
     let instance = await t.instance()
     const forms = await planForms({
       dir,
@@ -562,13 +560,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         dir,
         name: opts.name,
         manifest: local,
-        path: folder,
+        path: folder ?? onBase?.path,
         ...(onBase
           ? {
               base: onBase.base,
-              ...(onBase.partial
-                ? { partial: true, remove: onBase.remove, within: onBase.within }
-                : {}),
             }
           : opts.base !== undefined
             ? { base: opts.base, partial: true, remove: opts.remove ?? [] }
@@ -612,8 +607,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           : changes && link
             ? `Deployed ${describeChanges(changes)} since version ${link.versionId}${link.path === undefined ? '' : ` in /${link.path}/`} (uploaded ${result.uploaded})`
             : opts.base !== undefined
-              ? `Published ${result.fileCount} changed or added file${result.fileCount === 1 ? '' : 's'} on version ${opts.base} (the rest of the site kept as it was)`
-              : `Deployed ${result.fileCount} files${folder === undefined ? '' : ` to /${folder}/ (the rest of the site kept as it was)`} (uploaded ${result.uploaded})`
+              ? `Published ${result.fileCount} changed or added file${result.fileCount === 1 ? '' : 's'} on version ${opts.base} (the rest kept as it was)`
+              : `Deployed ${result.fileCount} files${folder === undefined ? '' : ` to the Path /${folder}/ (the rest of the site untouched)`} (uploaded ${result.uploaded})`
     const warnings = result.warnings.length ? `\nWarnings:\n- ${result.warnings.join('\n- ')}` : ''
     const edge =
       result.status === 'unchanged'
@@ -754,7 +749,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           .max(1024)
           .optional()
           .describe(
-            'Publish into this folder of the site only, e.g. "30-10-26" (served at <site>/30-10-26/), keeping every other file of the site. Needs `name`. Omit to replace the whole site'
+            'Publish as the Path at this top-level folder of the site, e.g. "PAY-412" (served at <site>/PAY-412/); the rest of the site is untouched. Needs `name`. Omit to publish the site itself'
           ),
         spa,
         access,
@@ -870,7 +865,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           .min(1)
           .max(1024)
           .optional()
-          .describe('Only this folder of the site, e.g. "30-10-26"'),
+          .describe('Only this Path of the site, e.g. "PAY-412"'),
         force: z.boolean().optional().describe('Write into the folder even if it is not empty'),
         server: serverArg,
       },
@@ -879,10 +874,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     args =>
       run('fling_pull', args.server, async t => {
         await requirePull(t)
-        const path = args.path === undefined ? undefined : normalizePublishPath(args.path)
+        const path = args.path === undefined ? undefined : normalizePathFolder(args.path)
         if (path === null) {
           throw new CliError(
-            `Invalid path "${args.path}": use a folder of the site, like "30-10-26" (no dotfiles)`
+            `Invalid path "${args.path}": use one of the site's Paths, like "PAY-412"`
           )
         }
         const dir =
@@ -912,14 +907,18 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   server.registerTool(mcpTools.readFiles.name, serverTool(mcpTools.readFiles), args =>
     run(mcpTools.readFiles.name, args.server, async t => {
       await requirePull(t)
-      const path = args.path === undefined ? undefined : normalizePublishPath(args.path)
-      if (path === null) throw new CliError(`Invalid path "${args.path}"`)
+      const path = args.path === undefined ? undefined : normalizePathFolder(args.path)
+      if (path === null)
+        throw new CliError(`Invalid path "${args.path}": use one of the site's Paths`)
       const pulled = await t.client.request(
         'GET',
         `/api/sites/${encodeURIComponent(args.name)}/pull`,
         { schema: PullResponseSchema, query: { version: args.versionId, path } }
       )
-      const { page, tooLarge, missing, nextCursor } = pageOfFiles(pulled.files, {
+      // A Path's files, named within it as fling_publish with `path` takes them.
+      const prefix = path === undefined ? '' : `${path}/`
+      const within = pulled.files.map(f => ({ ...f, path: f.path.slice(prefix.length) }))
+      const { page, tooLarge, missing, nextCursor } = pageOfFiles(within, {
         paths: args.paths,
         cursor: args.cursor,
         budget: MCP_READ_MAX_BYTES,
@@ -938,6 +937,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       const result = {
         name: args.name,
         versionId: pulled.versionId,
+        ...(path === undefined ? {} : { path }),
         files,
         missing,
         ...(nextCursor ? { nextCursor } : {}),

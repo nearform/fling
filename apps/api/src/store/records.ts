@@ -266,6 +266,7 @@ import {
   type NotifyStats,
   type OAuthClientRecord,
   type OAuthRequestRecord,
+  type PathRecord,
   type PendingNotificationRecord,
   type RefreshTokenRecord,
   type ResponseUpdate,
@@ -306,6 +307,11 @@ const key = {
   siteDirectory: (name: string) => ({ pk: 'SITES', sk: `SITE#${name}` }),
   siteGrant: (email: string, siteId: string) => ({ pk: userPk(email), sk: `SHARED#${siteId}` }),
   version: (siteId: string, id: string) => ({ pk: sitePk(siteId), sk: `VERSION#${id}` }),
+  path: (siteId: string, folder: string) => ({ pk: sitePk(siteId), sk: `PATH#${folder}` }),
+  pathDeploy: (siteId: string, versionId: string, folder: string) => ({
+    pk: sitePk(siteId),
+    sk: `PATHDEPLOY#${versionId}#${folder}`,
+  }),
   group: (id: string) => ({ pk: groupPk(id), sk: 'GROUP' }),
   groupDirectory: (id: string) => ({ pk: 'GROUPS', sk: `GROUP#${id}` }),
   groupOwned: (email: string, id: string) => ({ pk: userPk(email), sk: `OWNS#${id}` }),
@@ -821,8 +827,13 @@ export class Records implements Store {
   }
 
   async deleteSite(site: SiteRecord) {
-    // The partition first (versions, and anything else a site will own), so an interrupted
-    // delete leaves the site findable and the delete can be repeated.
+    // Its Paths' versions, then the partition (versions, Paths and anything else a site owns), so
+    // an interrupted delete leaves the site findable and the delete can be repeated.
+    for (const path of await this.listPaths(site.id)) {
+      const versions = await this.table.query(sitePk(path.id))
+      const legacy = await this.table.query(userPk(site.email), { skPrefix: `VERSION#${path.id}#` })
+      await this.deleteAll([...versions.items, ...legacy.items])
+    }
     const owned = await this.table.query(sitePk(site.id))
     const legacy = await this.table.query(userPk(site.email), {
       skPrefix: `VERSION#${site.id}#`,
@@ -1019,6 +1030,73 @@ export class Records implements Store {
       byId.set(v.id, newerVersion(byId.get(v.id) ?? null, v) as VersionRecord)
     }
     return [...byId.values()].sort((a, b) => compareSk(a.id, b.id))
+  }
+
+  async moveVersion(site: SiteRef, from: VersionRecord['status'], version: VersionRecord) {
+    return unless(
+      this.table.transact([
+        {
+          put: encode('version', key.version(site.id, version.id), version),
+          cond: fieldEquals('status', from),
+        },
+        { put: encode('version', key.legacyVersion(site.email, site.id, version.id), version) },
+      ])
+    )
+  }
+
+  async deleteVersion(site: SiteRef, id: string) {
+    await this.table.transact([
+      { delete: key.version(site.id, id) },
+      { delete: key.legacyVersion(site.email, site.id, id) },
+    ])
+  }
+
+  // --- Paths ---
+
+  getPath(siteId: string, folder: string) {
+    return this.read<PathRecord>('path', key.path(siteId, folder))
+  }
+
+  listPaths(siteId: string) {
+    return this.list<PathRecord>('path', sitePk(siteId), 'PATH#')
+  }
+
+  createPath(path: PathRecord) {
+    return unless(
+      this.table.put(encode('path', key.path(path.siteId, path.folder), path), ifAbsent)
+    )
+  }
+
+  async putPath(path: PathRecord, opts: { ifCurrentVersion?: string } = {}) {
+    const item = encode('path', key.path(path.siteId, path.folder), path)
+    if (opts.ifCurrentVersion === undefined) return this.table.put(item)
+    await this.table.put(item, fieldEquals('currentVersionId', opts.ifCurrentVersion))
+  }
+
+  async deletePath(site: SiteRef, path: PathRecord) {
+    // Its versions first (both copies), so an interrupted delete leaves the Path findable and the
+    // delete can be repeated.
+    const versions = await this.table.query(sitePk(path.id))
+    const legacy = await this.table.query(userPk(site.email), { skPrefix: `VERSION#${path.id}#` })
+    await this.deleteAll([...versions.items, ...legacy.items])
+    await this.table.delete(
+      key.path(path.siteId, path.folder).pk,
+      key.path(path.siteId, path.folder).sk
+    )
+  }
+
+  async notePathDeploy(siteId: string, versionId: string, folder: string, expiresAt: string) {
+    const item = { siteId, versionId, folder, expiresAt }
+    await this.table.put(encode('pathdeploy', key.pathDeploy(siteId, versionId, folder), item))
+  }
+
+  async pathDeploys(siteId: string, versionId: string) {
+    const items = await this.list<{ folder: string }>(
+      'pathdeploy',
+      sitePk(siteId),
+      `PATHDEPLOY#${versionId}#`
+    )
+    return items.map(i => i.folder)
   }
 
   // --- comments ---

@@ -192,12 +192,13 @@ const listHtml = z
 
 const siteName = z.string().min(1).max(200).describe('Site name, e.g. "q3-report"')
 
-/** A path publish (publish-path.ts): the folder to replace, keeping the rest of the site. */
+/** A path publish (publish-path.ts): the Path at one top-level folder of the site. */
 export const PATH_PUBLISH_NOTE =
-  'With `path` (e.g. "30-10-26"), only that folder of the site is replaced: the files go to ' +
-  '<site>/30-10-26/… (give their paths relative to the folder, its page being "index.html") and every other ' +
-  "file of the site stays as it is. Use it to add one report, release note or week's page to a shared site " +
-  'without republishing the rest; rolling back removes it again.'
+  'With `path` (one top-level folder, e.g. "PAY-412"), the files are published as that folder\'s Path: they go to ' +
+  '<site>/PAY-412/… (give their paths relative to the folder, its page being "index.html"), and the rest of the ' +
+  'site is untouched. A Path has its own versions, rollback, owners and publishers, and is made on first use ' +
+  "(you own it). Use it for one plan, spec, report or week's page on a shared team site; teammates publishing " +
+  "other Paths never collide. The site's home page can list its Paths (fling_paths_template)."
 
 /** Changing an existing site from what is live (pull.ts in apps/api; the `pull` capability). */
 export const PULL_NOTE =
@@ -228,7 +229,7 @@ const publishPath = z
   .max(1024)
   .optional()
   .describe(
-    'Publish into this folder of the site only, e.g. "30-10-26" or "reports/2026" (served at <site>/30-10-26/), keeping every other file. File paths are relative to it. Omit to replace the whole site'
+    'Publish as the Path at this top-level folder of the site, e.g. "PAY-412" (served at <site>/PAY-412/); the rest of the site is untouched. File paths are relative to it. Omit to publish the site itself'
   )
 
 const sitePath = z
@@ -453,7 +454,7 @@ export function mcpToolsFor(w: McpWording) {
           .min(1)
           .max(1024)
           .optional()
-          .describe('Only the files under this folder of the site, e.g. "30-10-26"'),
+          .describe('The files of this Path of the site, e.g. "PAY-412" (paths relative to it)'),
         cursor: z
           .string()
           .max(20)
@@ -579,7 +580,7 @@ export function mcpToolsFor(w: McpWording) {
       title: 'Finish a chunked upload',
       description:
         'Publish everything sent with fling_upload_file as the new version of the site and return its URL. The site ' +
-        `becomes exactly the uploaded files (with \`path\` or \`base\`, plus the rest of the site). ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
+        `becomes exactly the uploaded files (with \`path\`, that Path does; with \`base\`, plus the rest of that version). ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
         'again with `listHtml`. The result includes `warnings`.',
       inputSchema: {
         uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),

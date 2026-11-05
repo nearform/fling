@@ -137,13 +137,12 @@ const MAX_LISTING_BYTES = 1024 * 1024
 /**
  * What's kept at manifestKey(): the deploy manifest plus, once finalized, whether the root
  * index.html is Fling's generated "List HTML files" page (absent on versions finalized earlier).
- * A version layered on a base (a path publish, or a publish on a pulled version) keeps the whole
- * merged version, with `layer`: the version it builds on, the paths it copies from it at finalize
- * rather than have uploaded, and for a path publish the folder it replaced.
+ * A version published on a base (after a pull) keeps the whole merged version, with `layer`: the
+ * version it builds on, and the paths it copies from it at finalize rather than have uploaded.
  */
 export type StoredManifest = Manifest & {
   generatedIndex?: boolean
-  layer?: { path?: string; base: string; kept: string[] }
+  layer?: { base: string; kept: string[] }
 }
 
 /** Is the version's root index.html the generated listing page? Reads it (it's small) to check. */
@@ -262,7 +261,11 @@ export async function rolesView(
   return { owners, publishers }
 }
 
-/** Make the route table reflect the site: live (not archived, has a version) → keys present, else gone. */
+/**
+ * Make the route table reflect the site: live (not archived, has a version) → keys present, else
+ * gone. The value says whether the current version's Markdown has rendered pages (`m`: read from
+ * the version), whether the site has live Paths (`p`) and its rendered home page (`i`; paths.ts).
+ */
 export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken?: string) {
   const { routeTable } = deps
   const label = siteLabel(site.name)
@@ -274,12 +277,16 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
     if (site.shareToken) await routeTable.delete(shareKvsKey(site.shareToken))
     return
   }
+  const version = await deps.store.getVersion(site, site.currentVersionId)
   const value: KvsSiteValue = {
     id: site.id,
     v: site.currentVersionId,
     vis: site.visibility,
     spa: site.spa,
     ...(isRestricted(site) ? { r: 1 as const } : {}),
+    ...(site.paths ? { p: 1 as const } : {}),
+    ...(site.paths && site.home ? { i: site.home } : {}),
+    ...(version?.markdown ? { m: 1 as const } : {}),
   }
   const json = JSON.stringify(value)
   await routeTable.put(siteKvsKey(label), json)

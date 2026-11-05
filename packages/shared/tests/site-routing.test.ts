@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
 import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
+  PATHS_JSON_PATH,
+  pathKvsKey,
   REVIEW_SHELL,
   ROBOTS_TXT,
   revokedKvsKey,
@@ -42,6 +44,18 @@ const routes = new Map([
   ['site:pub', JSON.stringify({ id: 'S1', v: 'V1', vis: 'public', spa: false })],
   ['site:priv', JSON.stringify({ id: 'S2', v: 'V2', vis: 'private', spa: true })],
   [`share:${'t'.repeat(20)}`, JSON.stringify({ id: 'S2', v: 'V2', vis: 'private', spa: false })],
+  ['site:team', JSON.stringify({ id: 'S5', v: 'V5', vis: 'public', spa: false, p: 1, i: 'R5' })],
+  [
+    `share:${'u'.repeat(20)}`,
+    JSON.stringify({ id: 'S5', v: 'V5', vis: 'public', spa: false, p: 1 }),
+  ],
+  ['site:teamspa', JSON.stringify({ id: 'S6', v: 'V6', vis: 'public', spa: true, p: 1, i: 'R6' })],
+  [pathKvsKey('S5', 'PAY-1'), JSON.stringify({ id: 'P1', v: 'W1', m: 1 })],
+  ['site:docs', JSON.stringify({ id: 'S4', v: 'V4', vis: 'public', spa: false, m: 1 })],
+  [pathKvsKey('S5', 'my docs'), JSON.stringify({ id: 'P2', v: 'W2' })],
+  [pathKvsKey('S6', 'PAY-1'), JSON.stringify({ id: 'P3', v: 'W3' })],
+  // A Path's key on a site without `p` is never read.
+  [pathKvsKey('S1', 'PAY-1'), JSON.stringify({ id: 'P9', v: 'W9' })],
 ])
 const SHARE = `s--${'t'.repeat(20)}.sites.example.test`
 const NOINDEX = { 'x-robots-tag': 'noindex' }
@@ -272,6 +286,111 @@ describe('the version a host serves', () => {
     ]) {
       expect((await routeSiteRequest(r, ctx())).headers[VERSION]).toBeUndefined()
     }
+  })
+})
+
+describe('Paths', () => {
+  const TEAM = 'team.sites.example.test'
+  const at = (uri: string, host = TEAM) => routeSiteRequest(req({ host, uri }), ctx())
+
+  it("serves a Path's files from its own version, saying that version", async () => {
+    expect(await at('/PAY-1/')).toEqual({
+      action: 'rewrite',
+      uri: '/sites/P1/W1/index.html',
+      headers: served('W1'),
+    })
+    expect(await at('/PAY-1/plan/notes.css')).toMatchObject({ uri: '/sites/P1/W1/plan/notes.css' })
+    expect(await at('/PAY-1/plan/')).toMatchObject({ uri: '/sites/P1/W1/plan/index.html' })
+  })
+
+  it('matches the folder decoded, and passes the rest on as received', async () => {
+    expect(await at('/PAY%2D1/a%20b.html')).toMatchObject({ uri: '/sites/P1/W1/a%20b.html' })
+    expect(await at('/my%20docs/')).toMatchObject({ uri: '/sites/P2/W2/index.html' })
+    expect(await at('/%E0%A4%A/x.html')).toEqual({
+      action: 'rewrite',
+      uri: MISSING_KEY,
+      headers: NOINDEX,
+    })
+  })
+
+  it('adds the slash to a Path and its extensionless folders', async () => {
+    for (const uri of ['/PAY-1', '/PAY-1/plan']) {
+      expect(await at(uri)).toMatchObject({ status: 301, headers: { location: `${uri}/` } })
+    }
+  })
+
+  it("serves the site's own files outside its Paths", async () => {
+    expect(await at('/other/a.html')).toMatchObject({ uri: '/sites/S5/V5/other/a.html' })
+    expect(await at('/style.css')).toMatchObject({ uri: '/sites/S5/V5/style.css' })
+  })
+
+  it("looks up only the request's first folder, and only on a site with Paths", async () => {
+    const lookups: string[] = []
+    await routeSiteRequest(req({ host: TEAM, uri: '/PAY-1/a/b.html' }), ctx(lookups))
+    expect(lookups).toEqual(['site:team', pathKvsKey('S5', 'PAY-1')])
+    const none: string[] = []
+    await routeSiteRequest(req({ uri: '/PAY-1/a.html' }), ctx(none))
+    expect(none).toEqual(['site:pub'])
+    const file: string[] = []
+    await routeSiteRequest(req({ host: TEAM, uri: '/app.js' }), ctx(file))
+    expect(file).toEqual(['site:team'])
+  })
+
+  it('serves Paths on a share host of the site', async () => {
+    const share = `s--${'u'.repeat(20)}.sites.example.test`
+    expect(await at('/PAY-1/', share)).toMatchObject({ uri: '/sites/P1/W1/index.html' })
+  })
+
+  it("serves the rendered home page and Paths listing in place of the version's own", async () => {
+    for (const uri of ['/', '/index.html']) {
+      expect(await at(uri)).toEqual({
+        action: 'rewrite',
+        uri: '/sites/S5/_rendered/R5.html',
+        headers: served('V5'),
+      })
+    }
+    expect(await at(PATHS_JSON_PATH)).toMatchObject({ uri: '/sites/S5/_rendered/R5.json' })
+    // Without a rendered page, the version's own.
+    const share = `s--${'u'.repeat(20)}.sites.example.test`
+    expect(await at('/', share)).toMatchObject({ uri: '/sites/S5/V5/index.html' })
+    expect(await at(PATHS_JSON_PATH, share)).toMatchObject({
+      uri: `/sites/S5/V5${PATHS_JSON_PATH}`,
+    })
+  })
+
+  it('falls back to the rendered home page on an SPA, and serves its Paths first', async () => {
+    const host = 'teamspa.sites.example.test'
+    expect(await at('/some/route', host)).toMatchObject({ uri: '/sites/S6/_rendered/R6.html' })
+    expect(await at('/PAY-1/', host)).toMatchObject({ uri: '/sites/P3/W3/index.html' })
+  })
+})
+
+describe('Markdown', () => {
+  const at = (uri: string, host = 'docs.sites.example.test', query = '') =>
+    routeSiteRequest(req({ host, uri, query }), ctx())
+
+  it('serves a Markdown file as its rendered page, and the source with ?raw=1', async () => {
+    expect(await at('/plan.md')).toEqual({
+      action: 'rewrite',
+      uri: '/sites/S4/V4/.rendered/plan.md.html',
+      headers: served('V4'),
+    })
+    expect(await at('/a/Notes.MARKDOWN')).toMatchObject({
+      uri: '/sites/S4/V4/.rendered/a/Notes.MARKDOWN.html',
+    })
+    expect(await at('/plan.md', undefined, '?raw=1')).toMatchObject({ uri: '/sites/S4/V4/plan.md' })
+  })
+
+  it('serves the source where the version has no rendered pages', async () => {
+    expect(await at('/plan.md', 'pub.sites.example.test')).toMatchObject({
+      uri: '/sites/S1/V1/plan.md',
+    })
+  })
+
+  it("renders a Path's Markdown by the Path's own version", async () => {
+    expect(await at('/PAY-1/plan.md', 'team.sites.example.test')).toMatchObject({
+      uri: '/sites/P1/W1/.rendered/plan.md.html',
+    })
   })
 })
 

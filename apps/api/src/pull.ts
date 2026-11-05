@@ -12,9 +12,13 @@
  * size): the API answers with each file's path, size, type and SHA-256, and a short-lived signed GET
  * for its bytes (`Blobs.presignGet`). The version's forms config (forms.ts) comes with them, so
  * the client can write `fling.forms.json` back into the folder.
+ *
+ * With `path`, the pull is of that Path of the site (paths.ts): its version (the current one
+ * unless `versionId` names another), on the same terms with the Path's roles (`pathPolicySite`)
+ * for other versions. Its files are the Path's, named within it (`pullable`) and, in the API's
+ * answer, by site path (`<path>/…`).
  */
 import {
-  isUnderPath,
   type ManifestFile,
   PULL_URL_TTL_SECONDS,
   type PullResponse,
@@ -24,7 +28,8 @@ import { manifestKey } from './blobs/types.ts'
 import { readForms } from './forms.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { notFound } from './lib/errors.ts'
-import { can } from './policy.ts'
+import { pathRef } from './paths.ts'
+import { can, pathPolicySite } from './policy.ts'
 import { requireSiteAs, type StoredManifest } from './sites.ts'
 import type { SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
@@ -35,36 +40,49 @@ const byPath = (a: { path: string }, b: { path: string }) =>
   a.path < b.path ? -1 : a.path > b.path ? 1 : 0
 
 /**
- * The version of the site named `name` the user may pull (the current one unless `versionId` names
- * another) and its files, sorted by path; with `path`, only those under that folder.
+ * The version the user may pull of the site named `name`, or with `path` of that Path (the current
+ * one unless `versionId` names another), where its files are stored (`storage`), and its files,
+ * sorted by path (a Path's named within it).
  */
 export async function pullable(
   deps: Deps,
   user: User,
   name: string,
   opts: { versionId?: string; path?: string } = {}
-): Promise<{ site: SiteRecord; versionId: string; files: ManifestFile[] }> {
+): Promise<{ site: SiteRecord; storage: string; versionId: string; files: ManifestFile[] }> {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.pull')
-  const versionId = opts.versionId ?? site.currentVersionId
-  const current = versionId !== null && versionId === site.currentVersionId && !site.archived
-  if (!versionId || (!current && !can(actor, 'version.read', site))) {
+  const what = opts.path === undefined ? `"${name}"` : `/${opts.path}/ of "${name}"`
+  const path = opts.path === undefined ? null : await deps.store.getPath(site.id, opts.path)
+  if (opts.path !== undefined && !path) throw notFound(`${what} is not a Path`)
+  const target = path
+    ? {
+        ref: pathRef(site, path),
+        storage: path.id,
+        current: path.currentVersionId,
+        archived: path.archived || site.archived,
+        policy: pathPolicySite(site, path),
+      }
+    : {
+        ref: site,
+        storage: site.id,
+        current: site.currentVersionId,
+        archived: site.archived,
+        policy: site,
+      }
+  const versionId = opts.versionId ?? target.current
+  const current = versionId !== null && versionId === target.current && !target.archived
+  if (!versionId || (!current && !can(actor, 'version.read', target.policy))) {
     throw notFound(
-      opts.versionId ? `No version ${opts.versionId} for "${name}"` : `"${name}" is not live`
+      opts.versionId ? `No version ${opts.versionId} for ${what}` : `${what} is not live`
     )
   }
-  const version = current ? null : await deps.store.getVersion(site, versionId)
+  const version = current ? null : await deps.store.getVersion(target.ref, versionId)
   if (!current && version?.status !== 'complete') {
-    throw notFound(`No version ${versionId} for "${name}"`)
+    throw notFound(`No version ${versionId} for ${what}`)
   }
-  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
-  if (!manifest) throw notFound(`The files of version ${versionId} of "${name}" are gone`)
-  const { path } = opts
-  const files = (
-    path === undefined ? manifest.files : manifest.files.filter(f => isUnderPath(f.path, path))
-  )
-    .slice()
-    .sort(byPath)
-  return { site, versionId, files }
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(target.storage, versionId))
+  if (!manifest) throw notFound(`The files of version ${versionId} of ${what} are gone`)
+  return { site, storage: target.storage, versionId, files: manifest.files.slice().sort(byPath) }
 }
 
 /** GET /api/sites/:name/pull — the files to download, each with a signed URL, and the forms. */
@@ -74,15 +92,16 @@ export async function pull(
   name: string,
   opts: { versionId?: string; path?: string } = {}
 ): Promise<PullResponse> {
-  const { site, versionId, files } = await pullable(deps, user, name, opts)
+  const { storage, versionId, files } = await pullable(deps, user, name, opts)
   const expiresAt = new Date(deps.clock.now().getTime() + PULL_URL_TTL_SECONDS * 1000)
-  const forms = await readForms(deps, site.id, versionId)
+  const forms = await readForms(deps, storage, versionId)
+  const prefix = opts.path === undefined ? '' : `${opts.path}/`
   const signed = await mapLimit(files, PRESIGN_CONCURRENCY, async f => ({
-    path: f.path,
+    path: `${prefix}${f.path}`,
     size: f.size,
     contentType: f.contentType,
     sha256: f.sha256,
-    url: await deps.blobs.presignGet(siteObjectKey(site.id, versionId, f.path), {
+    url: await deps.blobs.presignGet(siteObjectKey(storage, versionId, f.path), {
       expiresIn: PULL_URL_TTL_SECONDS,
     }),
   }))

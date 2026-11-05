@@ -92,12 +92,19 @@ export interface ReadFile {
 /** The text of a fling_read_files result (both servers); the structured data has the contents. */
 export function describeReadFiles(
   name: string,
-  result: { versionId: string; files: readonly ReadFile[]; missing: string[]; nextCursor?: string }
+  result: {
+    versionId: string
+    path?: string
+    files: readonly ReadFile[]
+    missing: string[]
+    nextCursor?: string
+  }
 ): string {
   const read = result.files.filter(f => !f.tooLarge)
   const big = result.files.filter(f => f.tooLarge)
+  const of = result.path === undefined ? name : `the Path /${result.path}/ of ${name}`
   const lines = [
-    `${read.length} file(s) of ${name}, version ${result.versionId}: ${read.map(f => f.path).join(', ') || '(none)'}.`,
+    `${read.length} file(s) of ${of}, version ${result.versionId}${result.path === undefined ? '' : ' (paths within the Path)'}: ${read.map(f => f.path).join(', ') || '(none)'}.`,
   ]
   if (big.length) {
     lines.push(
@@ -111,7 +118,9 @@ export function describeReadFiles(
     )
   }
   lines.push(
-    `To change the site, call fling_publish with base "${result.versionId}" and only the files you changed or added (and \`remove\` for files to delete): every other file is kept.`
+    result.path === undefined
+      ? `To change the site, call fling_publish with base "${result.versionId}" and only the files you changed or added (and \`remove\` for files to delete): every other file is kept.`
+      : `To change the Path, call fling_publish with path "${result.path}", base "${result.versionId}" and only the files you changed or added (and \`remove\` for files to delete), named within the Path: every other file of it is kept.`
   )
   return lines.join('\n')
 }

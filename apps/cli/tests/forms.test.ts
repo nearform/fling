@@ -143,7 +143,7 @@ describe('deploy with forms', () => {
     expect(JSON.parse(json.out.content()).formsHint).toMatch(/fling forms init/)
   })
 
-  it('a path publish without the file sends nothing, keeping the site’s forms', async () => {
+  it('a path publish without the file gives the Path’s version no forms', async () => {
     const dir = await folder()
     const m = deployRoutes({
       'GET /api/sites/my-app/forms': () =>
@@ -153,10 +153,9 @@ describe('deploy with forms', () => {
       ...FORMS_INSTANCE,
       capabilities: { ...FORMS_INSTANCE.capabilities, pathPublish: true },
     }
-    const { ctx, log } = await testContext({ store: await storeWith(instance), fetch: m.fetch })
+    const { ctx } = await testContext({ store: await storeWith(instance), fetch: m.fetch })
     await runDeploy(ctx, dir, { name: 'my-app', path: 'week' })
-    expect(m.bodies[0]).not.toHaveProperty('forms')
-    expect(log.lines.join('\n')).toContain('Labels · Label this page (label)')
+    expect(m.bodies[0].forms).toBeNull()
   })
 
   it('a Fling without forms: no forms sent, no hint, and a forms file is refused', async () => {

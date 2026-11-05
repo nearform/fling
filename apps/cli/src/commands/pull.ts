@@ -8,7 +8,7 @@
  * `fling deploy` in the folder then publishes on the version pulled (commands/deploy.ts).
  */
 import { relative, resolve } from 'node:path'
-import { normalizePublishPath } from '@fling/shared'
+import { normalizePathFolder } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
@@ -38,10 +38,10 @@ export async function runPull(
   }
   let path: string | undefined
   if (opts.path !== undefined) {
-    const folder = normalizePublishPath(opts.path)
+    const folder = normalizePathFolder(opts.path)
     if (folder === null) {
       throw new CliError(`Invalid --path "${opts.path}"`, {
-        hint: 'Use a folder of the site, like 30-10-26 or reports/2026 (no dotfiles).',
+        hint: 'Use one of the site’s Paths, like PAY-412: `fling paths <site>` lists them.',
       })
     }
     path = folder

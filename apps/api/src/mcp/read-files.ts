@@ -27,12 +27,13 @@ export async function readFiles(
 ): Promise<{
   name: string
   versionId: string
+  path?: string
   files: ReadFile[]
   missing: string[]
   nextCursor?: string
 }> {
   const path = opts.path === undefined ? undefined : normalizeFolder(opts.path)
-  const { site, versionId, files } = await pullable(deps, user, name, {
+  const { site, storage, versionId, files } = await pullable(deps, user, name, {
     ...(opts.versionId ? { versionId: opts.versionId } : {}),
     ...(path === undefined ? {} : { path }),
   })
@@ -42,7 +43,7 @@ export async function readFiles(
     budget: MCP_READ_MAX_BYTES,
   })
   const read = await mapLimit(page, READ_CONCURRENCY, async f => {
-    const bytes = await deps.blobs.get(siteObjectKey(site.id, versionId, f.path))
+    const bytes = await deps.blobs.get(siteObjectKey(storage, versionId, f.path))
     if (!bytes) throw conflict(`"${f.path}" of version ${versionId} is missing`, 'missing_file')
     const { path: p, size, contentType, sha256 } = f
     return { path: p, size, contentType, sha256, ...encodeForAgent(f.path, bytes) }
@@ -57,6 +58,7 @@ export async function readFiles(
   return {
     name: site.name,
     versionId,
+    ...(path === undefined ? {} : { path }),
     files: [...read, ...big].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
     missing,
     ...(nextCursor ? { nextCursor } : {}),

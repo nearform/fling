@@ -9,13 +9,13 @@
  * file's part count in the store; fling_upload_finish concatenates and decodes each file, then
  * publishes like fling_publish and deletes the staging area.
  *
- * With `path` (a path publish, publication.ts) the files are the folder's, given relative to it:
- * the listing page, if asked for, is the folder's own index.html, and every path is prefixed with
- * the folder before publishBytes, which carries the rest of the site forward.
+ * With `path` (a path publish, publication.ts) the files are the Path's, given relative to its
+ * folder: the listing page, if asked for, is the Path's own index.html, and every path is prefixed
+ * with the folder before publishBytes, which publishes them as the Path's new version.
  *
- * With `base` (a version fling_read_files returned) the files are only those changed or added,
- * `remove` names the ones to delete, and publishBytes keeps the rest of that version (the partial
- * form of a publish on a base). The site already has its pages, so there is no listing decision.
+ * With `base` (a version fling_read_files returned, of the site or with `path` of that Path) the
+ * files are only those changed or added, `remove` names the ones to delete, and publishBytes
+ * keeps the rest of that version (the partial form of a publish on a base). The site already has its pages, so there is no listing decision.
  *
  * Forms (forms.ts): `forms` is the new version's forms config (null: none; omitted, as
  * DeployRequest.forms). A `fling.forms.json` among the files, at the top of the folder published,
@@ -32,9 +32,10 @@ import {
   isHtmlPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
+  MAX_PATH_FOLDER_LENGTH,
   MCP_UPLOAD_MAX_FILES,
   MCP_UPLOAD_TTL_SECONDS,
-  normalizePublishPath,
+  normalizePathFolder,
   renderHtmlListing,
   type Site,
   type Visibility,
@@ -137,12 +138,12 @@ export function normalizePath(raw: string): string {
   return path
 }
 
-/** A path publish's folder, normalised; 400 `invalid_path` unless it is a valid site folder. */
+/** A path publish's folder (a Path), normalised; 400 `invalid_path` unless it is one folder. */
 export function normalizeFolder(raw: string): string {
-  const path = normalizePublishPath(raw)
+  const path = normalizePathFolder(raw)
   if (path === null) {
     throw badRequest(
-      `Invalid path "${raw}": use a folder of the site, like "30-10-26" or "reports/2026" (no dotfiles)`,
+      `Invalid path "${raw}": use one top-level folder of the site, like "PAY-412" (no dotfiles, at most ${MAX_PATH_FOLDER_LENGTH} characters)`,
       'invalid_path'
     )
   }
@@ -169,9 +170,6 @@ export async function publishFiles(
 ): Promise<PublishOutcome> {
   const { base } = opts
   const remove = base === undefined ? [] : [...new Set((opts.remove ?? []).map(normalizePath))]
-  if (base !== undefined && opts.path !== undefined) {
-    throw badRequest('Pass `base` or `path`, not both', 'bad_request')
-  }
   if (opts.remove?.length && base === undefined) {
     throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
   }
@@ -238,7 +236,7 @@ export async function publishFiles(
     {
       principal: opts.principal,
       path: folder,
-      ...(base === undefined ? {} : { base, remove }),
+      ...(base === undefined ? {} : { base, remove: remove.map(sitePath) }),
       spa: opts.spa,
       visibility: opts.visibility,
       access: opts.access,
@@ -278,9 +276,6 @@ export async function beginUpload(
   } & AccessOptions
 ): Promise<UploadRecord> {
   const path = opts.path === undefined ? undefined : normalizeFolder(opts.path)
-  if (opts.base !== undefined && path !== undefined) {
-    throw badRequest('Pass `base` or `path`, not both', 'bad_request')
-  }
   if (opts.remove?.length && opts.base === undefined) {
     throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
   }

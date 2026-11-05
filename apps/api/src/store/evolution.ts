@@ -29,6 +29,8 @@ export type Kind =
   | 'membership'
   | 'groupsite'
   | 'version'
+  | 'path'
+  | 'pathdeploy'
   | 'comment'
   | 'live'
   | 'liveref'

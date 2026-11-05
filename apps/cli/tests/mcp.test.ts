@@ -522,7 +522,9 @@ describe('MCP server', () => {
       },
     })
     expect(res.isError).toBeFalsy()
-    expect(text(res)).toMatch(/^Deployed 1 files to \/30-10-26\/ \(the rest of the site kept/)
+    expect(text(res)).toMatch(
+      /^Deployed 1 files to the Path \/30-10-26\/ \(the rest of the site untouched/
+    )
     expect(text(res)).toContain('https://changelog.sites.example.test/30-10-26/')
     expect(bodies[0].path).toBe('30-10-26')
     expect(bodies[0].manifest.files.map((f: { path: string }) => f.path)).toEqual([
@@ -531,13 +533,18 @@ describe('MCP server', () => {
 
     const deployed = await client.callTool({
       name: 'fling_deploy',
-      arguments: { path: 'week', name: 'changelog', sitePath: 'reports/2026' },
+      arguments: { path: 'week', name: 'changelog', sitePath: 'reports' },
     })
     expect(deployed.isError).toBeFalsy()
     expect(bodies[1].manifest.files.map((f: { path: string }) => f.path)).toEqual([
-      'reports/2026/index.html',
+      'reports/index.html',
     ])
-    expect(dataOf(deployed).path).toBe('reports/2026')
+    expect(dataOf(deployed).path).toBe('reports')
+    const nested = await client.callTool({
+      name: 'fling_deploy',
+      arguments: { path: 'week', name: 'changelog', sitePath: 'reports/2026' },
+    })
+    expect(text(nested)).toMatch(/one top-level folder/)
 
     const unnamed = await client.callTool({
       name: 'fling_deploy',

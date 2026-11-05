@@ -38,6 +38,7 @@ const freshness = GuideFrontmatterSchema.pick({ sources: true, verified: true })
  *   listFiles(): string[],
  *   readFile(file: string): string,
  *   resolveCommit(ref: string): string | null,
+ *   isAncestor(sha: string): boolean,
  *   commitsSince(sha: string): CommitChanges[],
  *   workingChanges(): FileChange[],
  * }} DocsGit
@@ -105,6 +106,11 @@ export function checkDocs(git, opts = {}) {
     const full = git.resolveCommit(verified)
     if (!full) {
       errors.push({ doc, message: `verified is not a known commit: ${verified}` })
+      continue
+    }
+    // A commit from a branch that was rebased away exists only on the machine that made it.
+    if (!git.isAncestor(full)) {
+      errors.push({ doc, message: `verified is not in this branch's history: ${verified}` })
       continue
     }
 

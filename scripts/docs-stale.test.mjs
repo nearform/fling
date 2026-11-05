@@ -20,11 +20,18 @@ const page = (fields = {}) => {
 }
 
 /** A repo with `files`, page text, known commits and the history since `aaaaaaa`. */
-function fakeGit({ text = page(), commits = [], working = [], known = ['aaaaaaa'] } = {}) {
+function fakeGit({
+  text = page(),
+  commits = [],
+  working = [],
+  known = ['aaaaaaa'],
+  ancestor = true,
+} = {}) {
   return {
     listFiles: () => [PAGE, 'apps/cli/src/commands/deploy.ts', 'apps/web/content/guide/VOICE.md'],
     readFile: () => text,
     resolveCommit: ref => (known.includes(ref) ? `${ref}${'0'.repeat(33)}` : null),
+    isAncestor: () => ancestor,
     commitsSince: () => commits,
     workingChanges: () => working,
   }
@@ -72,11 +79,12 @@ test('--changed looks at the working tree, and an edited page is taken as checke
   )
 })
 
-test('structural errors fail: bad frontmatter, a dead glob, an unknown commit', () => {
+test('structural errors fail: bad frontmatter, a dead glob, an unknown or unmerged commit', () => {
   for (const [git, message] of [
     [fakeGit({ text: 'no frontmatter' }), /frontmatter/],
     [fakeGit({ text: page({ sources: '[gone/**]' }) }), /matches no files: gone/],
     [fakeGit({ known: [] }), /not a known commit/],
+    [fakeGit({ ancestor: false }), /not in this branch's history/],
     [fakeGit({ text: page({ verified: '' }) }), /verified/],
   ]) {
     const report = checkDocs(git)

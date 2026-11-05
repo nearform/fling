@@ -13,12 +13,15 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
-- **ChatGPT and Cursor's web agents connect.** Add your Fling as a connector in ChatGPT, as in Claude: the remote MCP
-  server now accepts ChatGPT's client (its Client ID Metadata Document, which prefers
-  `private_key_jwt` but also supports public clients) and its redirect, which is on the default
-  `OAUTH_REDIRECT_ALLOWLIST` with Cursor's web callback. Upgrade note: an instance that sets
-  `OAUTH_REDIRECT_ALLOWLIST` must add `https://chatgpt.com/connector_platform_oauth_redirect` and
-  `https://www.cursor.com/agents/mcp/oauth/callback` to it.
+- **ChatGPT, the Gemini app and Cursor's web agents connect.** Add your Fling as a connector in
+  ChatGPT or Gemini, as in Claude. The remote MCP server accepts ChatGPT's client (its Client ID
+  Metadata Document, which prefers `private_key_jwt` but also supports public clients), and the
+  default `OAUTH_REDIRECT_ALLOWLIST` adds ChatGPT's, Cursor's web and the Gemini app's redirects.
+  The Gemini app's redirect names the user, so an entry ending in `*` now allows a last path segment
+  after it. Upgrade note: an instance that sets `OAUTH_REDIRECT_ALLOWLIST` must add
+  `https://chatgpt.com/connector_platform_oauth_redirect`,
+  `https://www.cursor.com/agents/mcp/oauth/callback` and
+  `https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-*` to it.
 
 ## 0.10.1 (2026-11-05)
 

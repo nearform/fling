@@ -347,6 +347,42 @@ describe('authorize', () => {
     expect(info.status).toBe(200)
   })
 
+  it("connects the Gemini app: a redirect per user, under Google's prefix", async () => {
+    const gemini =
+      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111-fling_test'
+    const reg = await env.app.request('/oauth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Gemini', redirect_uris: [gemini] }),
+    })
+    expect(reg.status).toBe(201)
+    const clientId = (await json(reg)).client_id as string
+    const a = await authorizeAndApprove(env, { clientId, redirectUri: gemini })
+    const info = await token(env, {
+      grant_type: 'authorization_code',
+      code: a.code,
+      code_verifier: a.verifier,
+      client_id: clientId,
+      redirect_uri: gemini,
+    })
+    expect(info.status).toBe(200)
+
+    // Only the last segment varies: no other path, segment, query or host gets in.
+    for (const uri of [
+      'https://oauth-redirect.googleusercontent.com/r/other-111',
+      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111/more',
+      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111?x=1',
+      'https://evil.example/r/user_bound_custom-mcp-111',
+    ]) {
+      const bad = await env.app.request('/oauth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ redirect_uris: [uri] }),
+      })
+      expect(bad.status, uri).toBe(400)
+    }
+  })
+
   it('refuses a CIMD client that cannot be public (no `none` among its methods)', async () => {
     const cimd = 'https://client.example/meta.json'
     env.deps.fetch = async () =>

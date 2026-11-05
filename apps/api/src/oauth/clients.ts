@@ -4,8 +4,8 @@
  * we fetch). Claude and ChatGPT use CIMD when the AS metadata advertises it (and `none` auth),
  * else DCR; we support both. Every client is public: PKCE, no secret.
  *
- * Redirect URIs must be on OAUTH_REDIRECT_ALLOWLIST (exact URLs, or `loopback` for any
- * http://localhost|127.0.0.1|[::1] port) AND match one the client registered/declared exactly —
+ * Redirect URIs must be on OAUTH_REDIRECT_ALLOWLIST (exact URLs, a prefix ending in `*` for a
+ * last segment that names the user, or `loopback` for any http://localhost|127.0.0.1|[::1] port) AND match one the client registered/declared exactly —
  * except that loopback URIs match with the port ignored (RFC 8252 §7.3; Claude Code declares
  * `http://localhost/callback` and binds a random port).
  */
@@ -42,7 +42,22 @@ export function redirectAllowed(cfg: Pick<Config, 'oauthRedirectAllowlist'>, uri
   const url = parseUrl(uri)
   if (!url || url.hash || url.username || url.password) return false
   if (cfg.oauthRedirectAllowlist.includes(uri)) return true
+  if (cfg.oauthRedirectAllowlist.some(entry => prefixAllows(entry, uri, url))) return true
   return cfg.oauthRedirectAllowlist.includes('loopback') && isLoopbackUrl(url)
+}
+
+/**
+ * An allowlist entry ending in `*` allows any URI that starts with what comes before it and ends
+ * there: the rest is one run of letters, digits, `_`, `.` and `-` in the last path segment, with
+ * no query. For clients whose redirect names the user (the Gemini app's
+ * `…/r/user_bound_custom-mcp-<user>-<host>`). The `*` must follow a path on an https host.
+ */
+function prefixAllows(entry: string, uri: string, url: URL): boolean {
+  if (!entry.endsWith('*') || url.search) return false
+  const prefix = entry.slice(0, -1)
+  const base = parseUrl(prefix)
+  if (!base || base.protocol !== 'https:' || base.pathname === '/') return false
+  return uri.startsWith(prefix) && /^[A-Za-z0-9_.-]+$/.test(uri.slice(prefix.length))
 }
 
 /** Exact match, or loopback-with-any-port. */

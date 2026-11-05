@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.11.1 (2026-11-05)
+
 - **Connectors that identify themselves by a document connect on Cloudflare.** Fling fetches a
   client's metadata document (how Claude Code and ChatGPT sign in) in a way the Workers runtime
   allows, and logs why a fetch failed.

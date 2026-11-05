@@ -222,6 +222,10 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   // ChatGPT's connectors: its stable redirect, used with authorization servers that return `iss`
   // (RFC 9207), as this one does.
   'https://chatgpt.com/connector_platform_oauth_redirect',
+  // Cursor's web app and background agents (its desktop app and CLI use loopback).
+  'https://www.cursor.com/agents/mcp/oauth/callback',
+  // Desktop and command-line clients on this computer: Claude Code, Cursor, Gemini CLI, Codex,
+  // VS Code, MCP Inspector.
   'loopback',
 ]
 

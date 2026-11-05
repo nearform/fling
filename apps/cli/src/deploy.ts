@@ -20,6 +20,7 @@ import {
   FinalizeResponseSchema,
   type FormsConfig,
   isValidSiteName,
+  type PublishHint,
   SITE_NAME_MAX,
   type Site,
   slugify,
@@ -162,8 +163,10 @@ export interface DeployResult {
   warnings: string[]
   /** this deploy made the site live for the first time: a new site, its access just set */
   first: boolean
-  /** a path publish: the folder it replaced */
+  /** a path publish: the Path it published */
   path?: string
+  /** for the publisher to act on (PublishHintSchema) */
+  hints: PublishHint[]
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
@@ -236,6 +239,7 @@ async function deployOnce(
       site: res.site,
       uploaded: 0,
       first: false,
+      hints: res.hints ?? [],
     }
   }
 
@@ -271,6 +275,7 @@ async function deployOnce(
     site: fin.site,
     uploaded: uploads.length,
     first: fin.first === true,
+    hints: fin.hints ?? [],
   }
 }
 

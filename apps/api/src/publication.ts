@@ -110,6 +110,7 @@ import {
   MAX_PATHS_PER_SITE,
   type ManifestFile,
   NEVER_PUBLISHED_NOTE,
+  type PublishHint,
   SECRET_SCAN_MAX_FILE_BYTES,
   type SecretFinding,
   SITE_NAME_MAX,
@@ -130,7 +131,7 @@ import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { pathRef, refreshHome, syncPathRoute } from './paths.ts'
+import { isLivePath, makePathCurrent, pathRef, refreshHome } from './paths.ts'
 import {
   type Action,
   type Actor,
@@ -145,6 +146,7 @@ import {
 import { renderVersion } from './rendering.ts'
 import {
   type AccessFields,
+  actorOn,
   applySettings,
   auditAdmin,
   detectGeneratedIndex,
@@ -180,6 +182,8 @@ export type Published = {
   site: Site
   /** this deploy made the site live for the first time: a new site, with its access just set */
   first?: boolean
+  /** for the publisher to act on (PublishHintSchema) */
+  hints?: PublishHint[]
 }
 
 // --- admission ----------------------------------------------------------------------------------
@@ -676,7 +680,9 @@ async function preparePath(
     if (!path) throw conflict(`${displayPublishPath(folder)} changed meanwhile: publish again`)
   }
   const policySite = pathPolicySite(site, path)
-  if (!can(actor, 'site.deploy', policySite)) {
+  // The Path's roles may name groups the site's don't.
+  const pathActor = await actorOn(deps, actor, policySite)
+  if (!can(pathActor, 'site.deploy', policySite)) {
     throw new ApiError(
       403,
       'path_not_yours',
@@ -684,7 +690,7 @@ async function preparePath(
     )
   }
   if (path.archived) {
-    if (!can(actor, 'site.archive', policySite)) {
+    if (!can(pathActor, 'site.archive', policySite)) {
       throw new ApiError(
         400,
         'owner_only',
@@ -711,10 +717,18 @@ async function preparePath(
   const versionId = computeVersionId(files)
   const ref = pathRef(site, path)
   const forms = await formsForDeploy(deps, path.id, req, layer?.base ?? null)
-  const result = (status: 'unchanged' | 'repointed'): Prepared => ({
-    kind: 'done',
-    result: { status, versionId, site: toSite(deps, actor, site) },
-  })
+  const result = async (status: 'unchanged' | 'repointed'): Promise<Prepared> => {
+    const hints = await pathHints(deps, site)
+    return {
+      kind: 'done',
+      result: {
+        status,
+        versionId,
+        site: toSite(deps, actor, site),
+        ...(hints.length ? { hints } : {}),
+      },
+    }
+  }
   if (path.currentVersionId === versionId) {
     if (forms !== undefined) await writeForms(deps, path.id, versionId, forms)
     if (path.archived) await makePathCurrent(deps, site, path, versionId, null)
@@ -767,39 +781,6 @@ const retryLater = (folder: string) =>
     'retry_later'
   )
 
-/**
- * Point the Path at a complete version (unarchiving it), then its route and the site's home page.
- * The Path is written only while its current version is still the one read: a publish meanwhile
- * wins, and this is 409 `base_changed`.
- */
-async function makePathCurrent(
-  deps: Deps,
-  site: SiteRecord,
-  path: PathRecord,
-  versionId: string,
-  title: string | null,
-  base: string | null = path.currentVersionId
-) {
-  const before = base
-  path.currentVersionId = versionId
-  path.archived = false
-  if (title !== null) path.title = title
-  path.updatedAt = deps.clock.now().toISOString()
-  try {
-    await deps.store.putPath(path, before === null ? {} : { ifCurrentVersion: before })
-  } catch (err) {
-    if (err instanceof ConditionFailed) {
-      throw conflict(
-        `${displayPublishPath(path.folder)} of "${site.name}" changed while publishing: publish it again`,
-        'base_changed'
-      )
-    }
-    throw err
-  }
-  await syncPathRoute(deps, site, path)
-  await refreshHome(deps, site)
-}
-
 /** A staged Path version passed its checks: render it, mark it complete and make it current. */
 async function goLivePath(
   deps: Deps,
@@ -836,7 +817,13 @@ async function goLivePath(
     }
     throw err
   }
-  return { status: 'live', versionId: version.id, site: toSite(deps, actor, site) }
+  const hints = await pathHints(deps, site)
+  return {
+    status: 'live',
+    versionId: version.id,
+    site: toSite(deps, actor, site),
+    ...(hints.length ? { hints } : {}),
+  }
 }
 
 /**
@@ -896,7 +883,8 @@ async function finalizePath(
     const ref = pathRef(site, path)
     const version = await store.getVersion(ref, versionId)
     if (!version) continue
-    if (!can(actor, 'site.deploy', pathPolicySite(site, path))) continue
+    const policySite = pathPolicySite(site, path)
+    if (!can(await actorOn(deps, actor, policySite), 'site.deploy', policySite)) continue
     if (version.status === 'complete') {
       if (path.currentVersionId === version.id || !version.base) {
         return goLivePath(deps, user, actor, site, path, version, [])
@@ -1003,12 +991,49 @@ async function goLive(
     await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
   }
   if (site.paths) await refreshHome(deps, site)
+  const hints = site.paths ? await pathHints(deps, site, files) : []
   return {
     status: 'live',
     versionId: version.id,
     site: toSite(deps, actor, site),
     ...(first ? { first } : {}),
+    ...(hints.length ? { hints } : {}),
   }
+}
+
+/**
+ * The hints a publish to a site with Paths gets (PublishHintSchema): the site's own files it sent
+ * under a live Path's folder, which the Path hides (`paths_block_hidden`); and, with two or more
+ * live Paths, a home page that doesn't list them (`paths_index_missing`: its current version has
+ * an index.html without a Paths block, `VersionRecord.home`).
+ */
+async function pathHints(
+  deps: Deps,
+  site: SiteRecord,
+  sent: readonly ManifestFile[] = []
+): Promise<PublishHint[]> {
+  const live = (await deps.store.listPaths(site.id)).filter(isLivePath)
+  const hints: PublishHint[] = []
+  const hidden = live
+    .map(p => p.folder)
+    .filter(folder => sent.some(f => f.path.startsWith(`${folder}/`)))
+  if (hidden.length > 0) {
+    hints.push({
+      code: 'paths_block_hidden',
+      message: `The site's own files under ${hidden.map(displayPublishPath).join(', ')} are hidden: ${hidden.length === 1 ? 'that folder is a Path' : 'those folders are Paths'}, served from ${hidden.length === 1 ? 'its' : 'their'} own versions. Publish to ${hidden.length === 1 ? 'it' : 'them'} with path, or leave the files out.`,
+      folders: hidden,
+    })
+  }
+  if (live.length >= 2 && site.currentVersionId) {
+    const version = await deps.store.getVersion(site, site.currentVersionId)
+    if (version && !version.home) {
+      hints.push({
+        code: 'paths_index_missing',
+        message: `"${site.name}" has ${live.length} Paths and its home page doesn't list them. Offer the user a home page that does: fling_paths_template gives a starter index.html with a Paths block (or \`fling paths init\`), to adapt and publish as the site's root.`,
+      })
+    }
+  }
+  return hints
 }
 
 /** S3's `x-amz-checksum-sha256` wants base64; manifests carry hex. */

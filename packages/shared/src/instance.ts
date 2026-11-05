@@ -147,8 +147,16 @@ export const CORE_CAPABILITIES = {
   accessLevels: true,
   /** a site's owners and publishers, people and groups (site-roles.ts), set with `owners`/`publishers` */
   siteRoles: true,
-  /** a deploy can replace one folder of a site and keep the rest (`DeployRequest.path`) */
+  /** a deploy can publish one top-level folder of a site, as its Path (`DeployRequest.path`) */
   pathPublish: true,
+  /**
+   * Paths: top-level folders of a site with their own versions, rollback, owners and publishers
+   * (`/api/sites/:name/paths…`, `fling paths`, `fling_paths`); a home page with a Paths block lists
+   * them, as does `/_fling-paths.json`
+   */
+  paths: true,
+  /** Markdown files are served rendered as pages (GitHub-flavoured), their source at `?raw=1` */
+  markdown: true,
   /**
    * whoever can see a site signed in may download its files (`GET /api/sites/:name/pull`,
    * `fling pull`, `fling_read_files`), and a deploy can build on the version pulled, sending only

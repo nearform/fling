@@ -16,6 +16,7 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describePublishHints,
   describeReadFiles,
   describeResponses,
   describeRoles,
@@ -207,12 +208,13 @@ async function publishResult(
     : ''
   return {
     text:
-      `${head}${formsText}${privacy}${edge.note}${warnings}` +
+      `${head}${formsText}${privacy}${edge.note}${warnings}${describePublishHints(outcome.hints)}` +
       `\nTo check exactly which files the site has, call fling_files with name "${site.name}".` +
       (forms && !forms.summary ? `\n${FORMS_HINT}` : ''),
     data: {
       status,
       name: site.name,
+      ...(outcome.hints?.length ? { hints: outcome.hints } : {}),
       url: site.url,
       ...(review ? { reviewUrl: review } : {}),
       visibility: site.visibility,

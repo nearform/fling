@@ -36,6 +36,7 @@ import {
   MCP_UPLOAD_MAX_FILES,
   MCP_UPLOAD_TTL_SECONDS,
   normalizePathFolder,
+  type PublishHint,
   renderHtmlListing,
   type Site,
   type Visibility,
@@ -110,8 +111,10 @@ export type PublishOutcome =
       warnings: string[]
       /** every path published (picks the URL the readiness wait polls) */
       paths: string[]
-      /** a path publish: the folder (normalised) */
+      /** a path publish: the Path's folder (normalised) */
       path?: string
+      /** for the publisher to act on (PublishHintSchema) */
+      hints?: PublishHint[]
       /** a publish on a base: the version it built on */
       base?: string
     }

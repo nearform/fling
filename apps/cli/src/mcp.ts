@@ -40,6 +40,7 @@ import {
   describeGroup,
   describeGroups,
   describeNotificationSettings,
+  describePublishHints,
   describeReadFiles,
   describeResponses,
   describeRoles,
@@ -648,7 +649,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     return {
       kind: 'deployed',
       summary:
-        `${head}${access}${warnings}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
+        `${head}${access}${warnings}${describePublishHints(result.hints)}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".` +
         (formsHint ? `\n${formsHint}` : ''),
       data: {

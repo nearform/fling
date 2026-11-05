@@ -179,6 +179,107 @@ describe('Paths', () => {
   })
 })
 
+describe('publish hints', () => {
+  it('paths_index_missing from the second Path on a home page without a block; paths_block_hidden', async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    await deploy(env, alice.key, 'plain', [file('index.html', '<h1>plain</h1>')])
+    const first = await deploy(env, alice.key, 'plain', plan('PAY-1'), { path: 'PAY-1' })
+    expect(first.body.hints).toBeUndefined()
+    const second = await deploy(env, alice.key, 'plain', plan('PAY-2'), { path: 'PAY-2' })
+    expect(second.body.hints?.map((h: { code: string }) => h.code)).toEqual(['paths_index_missing'])
+    const hidden = await deploy(env, alice.key, 'plain', [
+      file('index.html', '<h1>plain</h1><!-- fling:paths -->'),
+      file('PAY-1/old.html', 'old'),
+    ])
+    expect(hidden.body.hints).toEqual([
+      expect.objectContaining({ code: 'paths_block_hidden', folders: ['PAY-1'] }),
+    ])
+  })
+})
+
+describe('the Path routes', () => {
+  it('list and detail: viewers see live Paths only; versions to those on the Path', async () => {
+    const { env, alice, bob } = await world()
+    const outsider = await createUser(env, 'dan@example.test')
+    await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await deploy(env, bob.key, 'team', plan('PAY-1', 'v2'), { path: 'PAY-1' })
+    const listed = await json(await api(env, alice.key, 'GET', '/api/sites/team/paths'))
+    expect(listed.paths).toEqual([
+      expect.objectContaining({
+        folder: 'PAY-1',
+        title: 'Plan PAY-1',
+        url: 'https://team.fling.test/PAY-1/',
+        canPublish: true,
+        owners: expect.objectContaining({ emails: [expect.objectContaining({ email: BOB })] }),
+      }),
+    ])
+    const seen = await json(await api(env, outsider.key, 'GET', '/api/sites/team/paths'))
+    expect(seen.paths[0]).toMatchObject({ folder: 'PAY-1', canPublish: false })
+    expect(seen.paths[0].owners).toBeUndefined()
+    const detail = await json(await api(env, bob.key, 'GET', '/api/sites/team/paths/PAY-1'))
+    expect(detail.versions).toHaveLength(2)
+    expect((await api(env, outsider.key, 'GET', '/api/sites/team/paths/PAY-1')).status).toBe(404)
+    expect((await api(env, alice.key, 'GET', '/api/sites/team/paths/nope')).status).toBe(404)
+  })
+
+  it('rolling back one Path leaves the site and the other Paths as they are', async () => {
+    const { env, bob, carol } = await world()
+    const first = await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await deploy(env, bob.key, 'team', plan('PAY-1', 'v2'), { path: 'PAY-1' })
+    await deploy(env, carol.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
+    const res = await api(env, bob.key, 'POST', '/api/sites/team/paths/PAY-1/current', {
+      versionId: first.body.versionId,
+    })
+    expect(res.status).toBe(200)
+    expect(await get(env, 'team', '/PAY-1/')).toContain('<h1>PAY-1</h1>')
+    expect(await get(env, 'team', '/PAY-2/')).toContain('<h1>PAY-2</h1>')
+    expect(await get(env, 'team', '/')).toContain('<h1>home</h1>')
+    // Carol publishes the site but not Bob's Path.
+    const refused = await api(env, carol.key, 'POST', '/api/sites/team/paths/PAY-1/current', {
+      versionId: first.body.versionId,
+    })
+    expect(refused.status).toBe(404)
+  })
+
+  it('its owner adds a publisher; archiving takes it off the site and the listing', async () => {
+    const { env, alice, bob, carol } = await world()
+    await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    const shared = await api(env, bob.key, 'PATCH', '/api/sites/team/paths/PAY-1', {
+      publishers: { emails: [CAROL] },
+    })
+    expect(shared.status).toBe(200)
+    expect(
+      (await deploy(env, carol.key, 'team', plan('PAY-1', 'carol'), { path: 'PAY-1' })).status
+    ).toBe(200)
+    expect(
+      (await api(env, carol.key, 'PATCH', '/api/sites/team/paths/PAY-1', { archived: true })).status
+    ).toBe(404)
+    const archived = await api(env, alice.key, 'PATCH', '/api/sites/team/paths/PAY-1', {
+      archived: true,
+    })
+    expect(archived.status).toBe(200)
+    expect(await get(env, 'team', '/PAY-1/')).toBe(404)
+    expect(await get(env, 'team', '/')).not.toContain('Plan PAY-1')
+    await api(env, alice.key, 'PATCH', '/api/sites/team/paths/PAY-1', { archived: false })
+    expect(await get(env, 'team', '/PAY-1/')).toContain('carol')
+  })
+
+  it('deleting a Path removes its route and files; deleting the site removes every Path', async () => {
+    const { env, alice, bob } = await world()
+    await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await deploy(env, bob.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
+    const site = await env.store.findSite('team')
+    const one = await env.store.getPath(site?.id as string, 'PAY-1')
+    expect((await api(env, bob.key, 'DELETE', '/api/sites/team/paths/PAY-1')).status).toBe(204)
+    expect(await get(env, 'team', '/PAY-1/')).toBe(404)
+    expect(await env.blobs.get(`sites/${one?.id}/${one?.currentVersionId}/index.html`)).toBeNull()
+    expect(await env.store.getPath(site?.id as string, 'PAY-1')).toBeNull()
+    expect((await api(env, alice.key, 'DELETE', '/api/sites/team')).status).toBe(204)
+    expect([...env.routeTable.data.keys()].filter(k => k.startsWith('path:'))).toEqual([])
+  })
+})
+
 describe('Markdown', () => {
   it('is served rendered, with the source at ?raw=1, and README.md stands in for index.html', async () => {
     const env = setup()

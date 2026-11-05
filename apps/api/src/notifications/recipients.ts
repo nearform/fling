@@ -8,7 +8,8 @@
  * hears once. Someone given a role on a site hears of it the same way (`site.owner_added`,
  * `site.publisher_added`): by address, else through the first added group they are in, unless the
  * role already reached them. A new thread goes to every owner of the site, the members of its owner groups
- * included. Replies go to the thread's author and everyone who replied before, not to the site's
+ * included; one on a page of a live Path (paths.ts) goes to the Path's owners instead, as it is
+ * theirs to answer. Replies go to the thread's author and everyone who replied before, not to the site's
  * owners as such, so an owner in the thread gets `comment.reply` only.
  */
 import type { NotificationEventRecord } from '../store/types.ts'
@@ -19,6 +20,22 @@ export interface Recipient {
   email: string
   /** kept on the pending notification, for the send-time checks and the email */
   data: Record<string, unknown>
+}
+
+/** The owners of the live Path a page (`/PAY-412/plan.html`) is under; null when it is the site's. */
+async function pathOwning(deps: Deps, siteId: string, paths: true | undefined, page: string) {
+  if (!paths) return null
+  const folder = page.split('/')[1]
+  if (!folder || page.split('/').length < 3) return null
+  let name: string
+  try {
+    name = decodeURIComponent(folder)
+  } catch {
+    return null
+  }
+  const path = await deps.store.getPath(siteId, name)
+  if (!path || path.archived || !path.currentVersionId) return null
+  return path.owners.emails.length + path.owners.groups.length > 0 ? path.owners : null
 }
 
 const byEmail = (a: Recipient, b: Recipient) => (a.email < b.email ? -1 : a.email > b.email ? 1 : 0)
@@ -76,8 +93,9 @@ export async function recipientsOf(
       const data = event.data as unknown as CommentEventData
       const site = await deps.store.findSite(data.siteName)
       if (site?.id !== event.siteId) break
-      for (const email of site.owners.emails) add(email, { ...data })
-      for (const groupId of [...site.owners.groups].sort()) {
+      const owners = (await pathOwning(deps, site.id, site.paths, data.path)) ?? site.owners
+      for (const email of owners.emails) add(email, { ...data })
+      for (const groupId of [...owners.groups].sort()) {
         for (const email of await deps.store.listGroupMembers(groupId)) add(email, { ...data })
       }
       break

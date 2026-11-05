@@ -192,6 +192,12 @@ const listHtml = z
 
 const siteName = z.string().min(1).max(200).describe('Site name, e.g. "q3-report"')
 
+/** A publish result's hints (PublishHintSchema in api.ts) as the tools' text says them; '' without any. */
+export function describePublishHints(hints: readonly { message: string }[] | undefined): string {
+  if (!hints?.length) return ''
+  return `\nWorth doing:\n- ${hints.map(h => h.message).join('\n- ')}`
+}
+
 /** A path publish (publish-path.ts): the Path at one top-level folder of the site. */
 export const PATH_PUBLISH_NOTE =
   'With `path` (one top-level folder, e.g. "PAY-412"), the files are published as that folder\'s Path: they go to ' +

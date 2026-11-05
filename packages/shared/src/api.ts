@@ -102,6 +102,45 @@ export type SiteDetail = z.infer<typeof SiteDetailSchema>
 export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
 
 /**
+ * One of a site's Paths (`paths` capability; paths.ts in the API): a top-level folder with its own
+ * versions, owners and publishers, served at `url`. Its owners and publishers (who may change it,
+ * besides the site's owners) are given to those on the site (`site.read`); `canPublish` says
+ * whether the caller may publish to it.
+ */
+export const SitePathSchema = z.object({
+  folder: z.string(),
+  /** the `<title>` of its index.html, '' without one */
+  title: z.string(),
+  url: z.string(),
+  currentVersionId: z.string().nullable(),
+  archived: z.boolean(),
+  owners: SiteRoleMembersSchema.optional(),
+  publishers: SiteRoleMembersSchema.optional(),
+  createdBy: z.string().optional(),
+  canPublish: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+export type SitePath = z.infer<typeof SitePathSchema>
+
+/** GET /api/sites/:name/paths: the site's Paths, by folder. */
+export const PathListSchema = z.object({ paths: z.array(SitePathSchema) })
+
+/** GET /api/sites/:name/paths/:folder: the Path, with its versions (newest first). */
+export const PathDetailSchema = SitePathSchema.extend({ versions: z.array(VersionSchema) })
+export type PathDetail = z.infer<typeof PathDetailSchema>
+
+/**
+ * PATCH /api/sites/:name/paths/:folder: `owners` and `publishers` replace those lists (the Path's
+ * owners, or the site's); `archived` takes it off the site, or puts it back.
+ */
+export const UpdatePathRequestSchema = z.object({
+  owners: OwnersInputSchema.optional(),
+  publishers: PublishersInputSchema.optional(),
+  archived: z.boolean().optional(),
+})
+
+/**
  * A restricted site someone else owns that the caller may see, because its audience names them or
  * a group they are in (GET /api/shared, `audiences` capability). What a viewer needs to open it and
  * nothing of the owner's: no versions, share link or audience.
@@ -213,7 +252,7 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  *
  * `forms` (`forms` capability; forms.ts) is the new version's forms config, from `fling.forms.json`
  * (never itself a file of the site), or `null` for none. Omitted, a publish on a base keeps the
- * base's forms, and any other deploy has none. A Path's versions have none.
+ * base's forms, and any other deploy has none. A Path's version has its own, as a site's does.
  */
 export const DeployRequestSchema = z
   .object({
@@ -245,11 +284,34 @@ export const UploadSchema = z.object({
   headers: z.record(z.string(), z.string()),
 })
 
+/**
+ * Something the publisher (often an agent) may want to act on, besides the result
+ * (`paths` capability): `paths_index_missing`, the site has several Paths and its home page
+ * doesn't list them (offer a Paths index: paths-templates.ts); `paths_block_hidden`, the site's
+ * own files under these folders are hidden by its Paths of the same name (`folders`).
+ */
+export const PublishHintSchema = z.object({
+  code: z.enum(['paths_index_missing', 'paths_block_hidden']),
+  message: z.string(),
+  folders: z.array(z.string()).optional(),
+})
+export type PublishHint = z.infer<typeof PublishHintSchema>
+
 export const DeployResponseSchema = z.discriminatedUnion('status', [
   /** content identical to the current version — nothing happened */
-  z.object({ status: z.literal('unchanged'), versionId: z.string(), site: SiteSchema }),
+  z.object({
+    status: z.literal('unchanged'),
+    versionId: z.string(),
+    site: SiteSchema,
+    hints: z.array(PublishHintSchema).optional(),
+  }),
   /** this content was deployed before — site now points at that version again */
-  z.object({ status: z.literal('repointed'), versionId: z.string(), site: SiteSchema }),
+  z.object({
+    status: z.literal('repointed'),
+    versionId: z.string(),
+    site: SiteSchema,
+    hints: z.array(PublishHintSchema).optional(),
+  }),
   /** new content — PUT every upload, then POST /api/sites/:name/deploys/:versionId/finalize */
   z.object({
     status: z.literal('upload'),
@@ -266,6 +328,7 @@ export const FinalizeResponseSchema = z.object({
   site: SiteSchema,
   /** this deploy made the site live for the first time (a new site, its access just set) */
   first: z.boolean().optional(),
+  hints: z.array(PublishHintSchema).optional(),
 })
 
 /** POST /api/sites/:name/current  { versionId } */

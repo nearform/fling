@@ -25,14 +25,32 @@
 import { createHash } from 'node:crypto'
 import {
   cacheControlFor,
+  displayPublishPath,
   type KvsPathValue,
+  type PathDetail,
   pathKvsKey,
   renderedObjectKey,
+  type SitePath,
+  type SiteRoleInput,
   siteObjectKey,
+  sitePrefix,
+  type VersionFiles,
 } from '@fling/shared'
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
-import { syncRouteTable } from './sites.ts'
-import type { PathRecord, SiteRecord, SiteRef } from './store/types.ts'
+import { manifestKey } from './blobs/types.ts'
+import { conflict, notFound } from './lib/errors.ts'
+import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
+import {
+  actorOn,
+  applyRoles,
+  detectGeneratedIndex,
+  requireSiteAs,
+  rolesView,
+  type StoredManifest,
+  syncRouteTable,
+  toSite,
+} from './sites.ts'
+import type { PathRecord, SiteRecord, SiteRef, User } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
@@ -132,4 +150,218 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
     throw err
   }
   await syncRouteTable(deps, site)
+}
+
+/**
+ * Point the Path at a complete version (unarchiving it), then its route and the site's home page.
+ * The Path is written only while its current version is still `base` (the one read): a change
+ * meanwhile wins, and this is 409 `base_changed`.
+ */
+export async function makePathCurrent(
+  deps: Deps,
+  site: SiteRecord,
+  path: PathRecord,
+  versionId: string,
+  title: string | null,
+  base: string | null = path.currentVersionId
+) {
+  path.currentVersionId = versionId
+  path.archived = false
+  if (title !== null) path.title = title
+  path.updatedAt = deps.clock.now().toISOString()
+  await putPathOn(deps, site, path, base)
+  await syncPathRoute(deps, site, path)
+  await refreshHome(deps, site)
+}
+
+/** Write the Path while its current version is still `base`; else 409 `base_changed`. */
+async function putPathOn(deps: Deps, site: SiteRecord, path: PathRecord, base: string | null) {
+  try {
+    await deps.store.putPath(path, base === null ? {} : { ifCurrentVersion: base })
+  } catch (err) {
+    if (err instanceof ConditionFailed) {
+      throw conflict(
+        `${displayPublishPath(path.folder)} of "${site.name}" changed meanwhile: try again`,
+        'base_changed'
+      )
+    }
+    throw err
+  }
+}
+
+// --- the Path routes (/api/sites/:name/paths…) -------------------------------------------------
+
+/**
+ * The site named `name`, its Path at `folder` and the user resolved against the Path
+ * (`pathPolicySite`), if they may see the site and do every one of `actions` to the Path; else
+ * 404, as for a Path that isn't there.
+ */
+export async function requirePath(
+  deps: Deps,
+  user: User,
+  name: string,
+  folder: string,
+  ...actions: Action[]
+): Promise<{ site: SiteRecord; path: PathRecord; actor: Actor; siteActor: Actor }> {
+  const { site, actor: siteActor } = await requireSiteAs(deps, user, name, 'site.view')
+  const path = await deps.store.getPath(site.id, folder)
+  const policySite = path ? pathPolicySite(site, path) : site
+  const actor = path ? await actorOn(deps, siteActor, policySite) : siteActor
+  if (!path || !actions.every(a => can(actor, a, policySite))) {
+    throw notFound(`"${name}" has no Path ${displayPublishPath(folder)}`)
+  }
+  return { site, path, actor, siteActor }
+}
+
+/** The Path as the API shows it to `actor` (SitePathSchema). */
+async function toSitePath(
+  deps: Deps,
+  site: SiteRecord,
+  siteActor: Actor,
+  path: PathRecord
+): Promise<SitePath> {
+  const policySite = pathPolicySite(site, path)
+  const actor = await actorOn(deps, siteActor, policySite)
+  const onSite = can(siteActor, 'site.read', site)
+  return {
+    folder: path.folder,
+    title: path.title,
+    url: `${toSite(deps, siteActor, site).url}${encodeURIComponent(path.folder)}/`,
+    currentVersionId: path.currentVersionId,
+    archived: path.archived,
+    ...(onSite ? { ...(await rolesView(deps, path)), createdBy: path.createdBy } : {}),
+    canPublish: can(actor, 'site.deploy', policySite),
+    createdAt: path.createdAt,
+    updatedAt: path.updatedAt,
+  }
+}
+
+/**
+ * GET /api/sites/:name/paths: whoever sees the site sees its live Paths (as its home page lists
+ * them); those on the site (`site.read`) see the archived and unpublished ones too, with roles.
+ */
+export async function listPathsOf(deps: Deps, user: User, name: string): Promise<SitePath[]> {
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.view')
+  const onSite = can(actor, 'site.read', site)
+  const paths = (await deps.store.listPaths(site.id)).filter(p => onSite || isLivePath(p))
+  return Promise.all(paths.map(p => toSitePath(deps, site, actor, p)))
+}
+
+/** GET /api/sites/:name/paths/:folder: the Path and its versions (`version.list` on it). */
+export async function pathDetail(
+  deps: Deps,
+  user: User,
+  name: string,
+  folder: string
+): Promise<PathDetail> {
+  const { site, path, siteActor } = await requirePath(deps, user, name, folder, 'version.list')
+  const versions = await deps.store.listVersions(pathRef(site, path))
+  return {
+    ...(await toSitePath(deps, site, siteActor, path)),
+    versions: versions
+      .filter(v => v.status === 'complete')
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(v => ({
+        id: v.id,
+        fileCount: v.fileCount,
+        totalBytes: v.totalBytes,
+        ...(v.publishedBy ? { publishedBy: v.publishedBy } : {}),
+        path: path.folder,
+        ...(v.base ? { base: v.base } : {}),
+        createdAt: v.createdAt,
+      })),
+  }
+}
+
+/** POST /api/sites/:name/paths/:folder/current: make an earlier version current again. */
+export async function rollbackPath(
+  deps: Deps,
+  user: User,
+  name: string,
+  folder: string,
+  versionId: string
+): Promise<SitePath> {
+  const { site, path, siteActor } = await requirePath(deps, user, name, folder, 'site.rollback')
+  const version = await deps.store.getVersion(pathRef(site, path), versionId)
+  if (version?.status !== 'complete') {
+    throw notFound(`No version ${versionId} of ${displayPublishPath(folder)} of "${name}"`)
+  }
+  await makePathCurrent(deps, site, path, versionId, version.title ?? '')
+  return toSitePath(deps, site, siteActor, path)
+}
+
+/**
+ * PATCH /api/sites/:name/paths/:folder: its owners and publishers (`site.owners` /
+ * `site.publishers` on the Path: its owners and the site's), and archiving (`site.archive`).
+ */
+export async function updatePath(
+  deps: Deps,
+  user: User,
+  name: string,
+  folder: string,
+  patch: { owners?: SiteRoleInput; publishers?: SiteRoleInput; archived?: boolean }
+): Promise<SitePath> {
+  const actions: Action[] = [
+    ...(patch.owners === undefined ? [] : (['site.owners'] as const)),
+    ...(patch.publishers === undefined ? [] : (['site.publishers'] as const)),
+    ...(patch.archived === undefined ? [] : (['site.archive'] as const)),
+  ]
+  const { site, path, siteActor } = await requirePath(
+    deps,
+    user,
+    name,
+    folder,
+    ...(actions.length ? actions : (['site.owners'] as const))
+  )
+  const base = path.currentVersionId
+  if (patch.owners !== undefined || patch.publishers !== undefined) {
+    await applyRoles(deps, path, patch)
+  }
+  if (patch.archived !== undefined) path.archived = patch.archived
+  path.updatedAt = deps.clock.now().toISOString()
+  await putPathOn(deps, site, path, base)
+  await syncPathRoute(deps, site, path)
+  await refreshHome(deps, site)
+  return toSitePath(deps, site, siteActor, path)
+}
+
+/** DELETE /api/sites/:name/paths/:folder: the Path, its versions and files (`site.delete` on it). */
+export async function deletePathOf(deps: Deps, user: User, name: string, folder: string) {
+  const { site, path } = await requirePath(deps, user, name, folder, 'site.delete')
+  await removePath(deps, site, path)
+  await refreshHome(deps, site)
+}
+
+/** Take a Path off its site: its route key, files and records. */
+export async function removePath(deps: Deps, site: SiteRecord, path: PathRecord) {
+  await deps.routeTable.delete(pathKvsKey(site.id, path.folder))
+  await deps.blobs.deletePrefix(sitePrefix(path.id))
+  await deps.store.deletePath(site, path)
+}
+
+/** GET /api/sites/:name/versions/:versionId/files?path=: one (complete) version of the Path. */
+export async function pathVersionFiles(
+  deps: Deps,
+  user: User,
+  name: string,
+  folder: string,
+  versionId: string
+): Promise<VersionFiles> {
+  const { site, path } = await requirePath(deps, user, name, folder, 'version.read')
+  const what = `${displayPublishPath(folder)} of "${name}"`
+  const version = await deps.store.getVersion(pathRef(site, path), versionId)
+  if (version?.status !== 'complete') throw notFound(`No version ${versionId} of ${what}`)
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(path.id, versionId))
+  if (!manifest) throw notFound(`Manifest for version ${versionId} of ${what} is gone`)
+  const files = manifest.files
+    .map(f => ({ path: f.path, size: f.size, contentType: f.contentType }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+  return {
+    versionId,
+    files,
+    totalBytes: files.reduce((n, f) => n + f.size, 0),
+    generatedIndex:
+      manifest.generatedIndex ??
+      (await detectGeneratedIndex(deps, path.id, versionId, manifest.files)),
+  }
 }

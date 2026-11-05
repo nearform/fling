@@ -106,6 +106,7 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
 import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
+import { refreshHome, removePath } from './paths.ts'
 import {
   type Action,
   type Actor,
@@ -252,7 +253,7 @@ async function peopleOf(
 /** The site's owners and publishers as the API reports them (`peopleOf`). */
 export async function rolesView(
   deps: Deps,
-  site: SiteRecord
+  site: Pick<SiteRecord, 'owners' | 'publishers'>
 ): Promise<{ owners: SiteRoleMembers; publishers: SiteRoleMembers }> {
   const [owners, publishers] = await Promise.all([
     peopleOf(deps, site.owners),
@@ -969,6 +970,8 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
   site.currentVersionId = versionId
   await save(deps, site)
+  // The home page is the version's: with Paths, render it again.
+  if (site.paths) await refreshHome(deps, site)
   return toSite(deps, actor, site)
 }
 
@@ -1084,7 +1087,7 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
 }
 
 /**
- * Delete a site: its route-table keys, files, versions, record and name claim. The site comes from
+ * Delete a site: its route-table keys, its Paths (paths.ts), files, versions, record and name claim. The site comes from
  * the name claim (requireSite → findSite), so the `site:<name>` key removed here is always this
  * site's; a stale record of another user's for the same name can never reach it.
  */
@@ -1092,6 +1095,7 @@ export async function deleteSite(deps: Deps, user: User, name: string) {
   const site = await requireSite(deps, user, name, 'site.delete')
   await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
   if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
+  for (const path of await deps.store.listPaths(site.id)) await removePath(deps, site, path)
   await deps.blobs.deletePrefix(sitePrefix(site.id))
   await deps.store.deleteSite(site)
 }

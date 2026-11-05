@@ -30,6 +30,7 @@ import {
   PRINCIPAL_ROLES,
   type Principal,
   type PrincipalRole,
+  pathPolicySite,
   principalRole,
   ROLES,
   type Role,
@@ -460,6 +461,41 @@ describe('owners and publishers', () => {
     // An admin's key or token reads, and publishes only as a publisher.
     expect(can(adminToken, 'site.deploy', published)).toBe(true)
     expect(can(adminToken, 'site.settings', published)).toBe(false)
+  })
+})
+
+describe('pathPolicySite', () => {
+  const PATH_OWNER = 'path-owner@example.test'
+  const PATH_PUBLISHER = 'path-publisher@example.test'
+  const site = siteWith('restricted')
+  const path = {
+    owners: { emails: [PATH_OWNER], groups: [] },
+    publishers: { emails: [PATH_PUBLISHER], groups: ['g1'] },
+  }
+  const on = pathPolicySite(site, path)
+  const user = (email: string, groups: string[] = []) => ({ kind: 'user', email, groups }) as const
+
+  it('the Path’s owners and the site’s change it; its publishers publish; the site’s publishers do neither', () => {
+    for (const action of [
+      'site.deploy',
+      'site.rollback',
+      'site.owners',
+      'site.archive',
+      'site.delete',
+    ] as const) {
+      expect(can(user(OWNER), action, on)).toBe(true)
+      expect(can(user(PATH_OWNER), action, on)).toBe(true)
+      expect(can(user(PUBLISHER), action, on)).toBe(false)
+    }
+    expect(can(user(PATH_PUBLISHER), 'site.deploy', on)).toBe(true)
+    expect(can(user('m@example.test', ['g1']), 'site.deploy', on)).toBe(true)
+    expect(can(user(PATH_PUBLISHER), 'site.owners', on)).toBe(false)
+  })
+
+  it('who sees it is the site’s: access is not the Path’s', () => {
+    expect(can(user(VIEWER), 'site.view', on)).toBe(true)
+    expect(can(user('m@example.test'), 'site.view', on)).toBe(false)
+    expect(can({ kind: 'share', token: TOKEN }, 'site.view', on)).toBe(true)
   })
 })
 

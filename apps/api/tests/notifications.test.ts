@@ -373,6 +373,32 @@ describe('comments', () => {
     expect(carol).toBeDefined()
   })
 
+  it('a new thread on a Path’s page goes to the Path’s owners, not the site’s', async () => {
+    const { env, alice, bob, carol } = await world()
+    await api(env, alice.key, 'PATCH', '/api/sites/q3-report', { publishers: { emails: [BOB] } })
+    const plan = [file('PAY-1/index.html', '<h1>plan</h1>')]
+    const staged = await json(
+      await api(env, bob.key, 'POST', '/api/sites/q3-report/deploys', {
+        manifest: { files: plan.map(f => f.meta) },
+        path: 'PAY-1',
+      })
+    )
+    await upload(env, staged.uploads, plan)
+    await api(env, bob.key, 'POST', `/api/sites/q3-report/deploys/${staged.versionId}/finalize`)
+    await settle(env)
+    env.mailer.clear()
+    await comment(env, carol.key, { body: 'On the plan', path: '/PAY-1/' })
+    await settle(env)
+    expect(subjects(env, BOB)).toEqual(['Acme Fling: Carol commented on q3-report'])
+    expect(subjects(env, ALICE)).toEqual([])
+    // Elsewhere on the site, the site's owners.
+    env.mailer.clear()
+    await comment(env, carol.key, { body: 'On the home page' })
+    await settle(env)
+    expect(subjects(env, ALICE)).toEqual(['Acme Fling: Carol commented on q3-report'])
+    expect(subjects(env, BOB)).toEqual([])
+  })
+
   it('folds a burst into one email, then waits out the cool-down', async () => {
     const { env, bob, carol } = await world()
     await comment(env, bob.key, { body: 'One' })

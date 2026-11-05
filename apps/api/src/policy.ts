@@ -303,10 +303,10 @@ export const roleOf = (actor: Actor, site: PolicySite): Role => rolesOf(actor, s
  * and the site's publishers do none of them to a Path that isn't theirs. Making a new Path is
  * `site.deploy` on the site itself.
  */
-export function pathPolicySite(
-  site: PolicySite,
+export function pathPolicySite<S extends PolicySite>(
+  site: S,
   path: Pick<SiteRecord, 'owners' | 'publishers'>
-): PolicySite {
+): S {
   return {
     ...site,
     owners: {

@@ -388,6 +388,7 @@ async function deployPrepared(
   }
 
   for (const warning of result.warnings) if (warning !== NO_INDEX_WARNING) ctx.log.warn(warning)
+  for (const hint of result.hints) ctx.log.info(hint.message)
   const summary = changes
     ? `${describeChanges(changes)} since ${link?.versionId}`
     : `${result.fileCount} files, ${formatBytes(result.totalBytes)}`

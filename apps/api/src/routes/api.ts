@@ -20,6 +20,8 @@ import {
   normalizePathFolder,
   OAuthDecisionSchema,
   OAuthRequestInfoSchema,
+  PathDetailSchema,
+  PathListSchema,
   PullResponseSchema,
   ResponseExportFormatSchema,
   ResponsesExportSchema,
@@ -32,12 +34,14 @@ import {
   ShareResponseSchema,
   SiteDetailSchema,
   SiteListSchema,
+  SitePathSchema,
   SiteSchema,
   SiteWithAudienceSchema,
   splitEmails,
   ThumbnailSchema,
   UpdateCommentRequestSchema,
   UpdateGroupRequestSchema,
+  UpdatePathRequestSchema,
   UpdateSiteRequestSchema,
   VersionFilesSchema,
   WhySiteSchema,
@@ -55,6 +59,7 @@ import { issueLiveTicket } from '../live.ts'
 import type { Acting } from '../notifications/notify.ts'
 import * as notifications from '../notifications/settings.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
+import * as paths from '../paths.ts'
 import { canInstance, userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
 import { pull } from '../pull.ts'
@@ -219,6 +224,17 @@ apiRoutes.get('/sites/:name', async c => {
 })
 
 apiRoutes.get('/sites/:name/versions/:versionId/files', async c => {
+  const folder = pathParam(c.req.query('path'))
+  if (folder !== undefined) {
+    const files = await paths.pathVersionFiles(
+      c.get('deps'),
+      c.get('user'),
+      c.req.param('name'),
+      folder,
+      c.req.param('versionId')
+    )
+    return c.json(VersionFilesSchema.parse(files))
+  }
   const files = await sites.versionFiles(
     c.get('deps'),
     c.get('user'),
@@ -310,6 +326,59 @@ apiRoutes.post('/sites/:name/unarchive', async c => {
 
 apiRoutes.delete('/sites/:name', async c => {
   await sites.deleteSite(c.get('deps'), c.get('user'), c.req.param('name'))
+  return c.body(null, 204)
+})
+
+// --- Paths (the `paths` capability; paths.ts) ---
+
+/** A Path's folder from the URL or a query; 400 unless it is one (normalizePathFolder). */
+function pathParam(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  const folder = normalizePathFolder(raw)
+  if (folder === null) throw badRequest('path must be one of the site’s Paths, like PAY-412')
+  return folder
+}
+
+apiRoutes.get('/sites/:name/paths', async c => {
+  const list = await paths.listPathsOf(c.get('deps'), c.get('user'), c.req.param('name'))
+  return c.json(PathListSchema.parse({ paths: list }))
+})
+
+apiRoutes.get('/sites/:name/paths/:folder', async c => {
+  const folder = pathParam(c.req.param('folder')) as string
+  const detail = await paths.pathDetail(c.get('deps'), c.get('user'), c.req.param('name'), folder)
+  return c.json(PathDetailSchema.parse(detail))
+})
+
+apiRoutes.patch('/sites/:name/paths/:folder', async c => {
+  const folder = pathParam(c.req.param('folder')) as string
+  const patch = await jsonBody(c, UpdatePathRequestSchema)
+  const path = await paths.updatePath(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    folder,
+    patch
+  )
+  return c.json(SitePathSchema.parse(path))
+})
+
+apiRoutes.post('/sites/:name/paths/:folder/current', async c => {
+  const folder = pathParam(c.req.param('folder')) as string
+  const { versionId } = await jsonBody(c, RollbackRequestSchema)
+  const path = await paths.rollbackPath(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    folder,
+    versionId
+  )
+  return c.json(SitePathSchema.parse(path))
+})
+
+apiRoutes.delete('/sites/:name/paths/:folder', async c => {
+  const folder = pathParam(c.req.param('folder')) as string
+  await paths.deletePathOf(c.get('deps'), c.get('user'), c.req.param('name'), folder)
   return c.body(null, 204)
 })
 

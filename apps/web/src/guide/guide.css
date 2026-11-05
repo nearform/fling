@@ -1,0 +1,227 @@
+/* The Guide's reader: the nav column, the page's measure and its prose. Colours, borders and
+   radii come from theme.css's tokens, so the guide follows the instance's brand and the theme. */
+
+.guide-side {
+  inline-size: 17rem;
+}
+.guide-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 0.75rem 2rem;
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+.guide-nav-part {
+  margin: 0 0 0.25rem;
+  padding-inline: 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.guide-nav-list {
+  display: grid;
+  gap: 1px;
+}
+.guide-nav-list .nav-item {
+  font-size: 14px;
+}
+
+.guide-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: center;
+  gap: 3rem;
+  padding: clamp(1.25rem, 4vw, 3rem) clamp(1rem, 4vw, 3rem) 4rem;
+}
+@media (min-width: 80rem) {
+  .guide-body {
+    grid-template-columns: minmax(0, 46rem) 13rem;
+  }
+}
+.guide-main {
+  inline-size: min(46rem, 100%);
+  margin-inline: auto;
+}
+.guide-kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+.guide-title {
+  margin: 0 0 1.5rem;
+  font-size: clamp(1.75rem, 1.4rem + 1.2vw, 2.25rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.guide-toc {
+  display: none;
+  position: sticky;
+  inset-block-start: 5rem;
+  align-self: start;
+  font-size: 0.85rem;
+}
+@media (min-width: 80rem) {
+  .guide-toc {
+    display: block;
+  }
+}
+.guide-toc ul {
+  display: grid;
+  gap: 0.35rem;
+  padding-inline-start: 0.625rem;
+  border-inline-start: 1px solid var(--border-default);
+}
+.guide-toc a {
+  color: var(--text-secondary);
+}
+.guide-toc a:hover {
+  color: var(--text-primary);
+}
+
+/* The page */
+.guide-prose {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+.guide-prose > * + * {
+  margin-block-start: 1em;
+}
+.guide-prose :is(h2, h3) {
+  position: relative;
+  color: var(--text-primary);
+  scroll-margin-block-start: 5rem;
+  text-wrap: balance;
+}
+.guide-prose h2 {
+  margin-block-start: 2.25em;
+  font-size: 1.4rem;
+  padding-block-start: 1rem;
+  border-block-start: 1px solid var(--border-subtle);
+}
+.guide-prose h3 {
+  margin-block-start: 1.75em;
+  font-size: 1.1rem;
+}
+.guide-anchor {
+  position: absolute;
+  inset-inline-start: -1.1em;
+  color: var(--text-muted);
+  opacity: 0;
+  text-decoration: none;
+}
+.guide-prose :is(h2, h3):hover .guide-anchor,
+.guide-anchor:focus-visible {
+  opacity: 1;
+}
+.guide-prose strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.guide-prose a:not(.guide-anchor) {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.guide-prose :is(ul, ol) {
+  padding-inline-start: 1.4em;
+}
+.guide-prose ul {
+  list-style: disc;
+}
+.guide-prose ol {
+  list-style: decimal;
+}
+.guide-prose li + li {
+  margin-block-start: 0.35em;
+}
+.guide-prose :not(pre) > code {
+  font-size: 0.875em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.guide-prose pre {
+  position: relative;
+  padding: 0.85rem 4.5rem 0.85rem 1rem;
+  border-radius: var(--radius-panel);
+  background: var(--surface-inset);
+  border: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+.guide-copy {
+  position: absolute;
+  inset-block-start: 0.45rem;
+  inset-inline-end: 0.45rem;
+}
+.guide-prose table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: 0.925rem;
+  display: block;
+  overflow-x: auto;
+}
+.guide-prose :is(th, td) {
+  text-align: start;
+  padding: 0.45rem 0.75rem 0.45rem 0;
+  border-block-end: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.guide-prose th {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.guide-prose blockquote {
+  padding-inline-start: 1rem;
+  border-inline-start: 3px solid var(--border-default);
+}
+.guide-callout {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-panel);
+  background: var(--tone-primary-surface);
+  border: 1px solid var(--tone-primary-border);
+}
+.guide-callout[data-kind="warning"] {
+  background: var(--surface-inset);
+  border-color: var(--color-warning);
+}
+.guide-callout > * + * {
+  margin-block-start: 0.5em;
+}
+
+.guide-pager {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 1rem;
+  margin-block-start: 3.5rem;
+  padding-block-start: 1.5rem;
+  border-block-start: 1px solid var(--border-subtle);
+}
+.guide-pager-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+  color: var(--text-primary);
+}
+.guide-pager-link:hover {
+  background: var(--surface-nav-hover);
+}
+.guide-pager-next {
+  justify-content: end;
+  text-align: end;
+}

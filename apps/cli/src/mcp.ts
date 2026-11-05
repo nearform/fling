@@ -57,6 +57,7 @@ import {
   type FormsSummary,
   formsSummaryLines,
   formsTemplate,
+  GUIDE_NOTE,
   type InstanceMetadata,
   isSecretPath,
   isValidSitePath,
@@ -264,6 +265,7 @@ export const mcpLocalInstructions = (
         ]
       : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
+    ...[GUIDE_NOTE(w)].filter(p => p !== undefined),
   ].join('\n\n')
 
 type DeployOutcome =

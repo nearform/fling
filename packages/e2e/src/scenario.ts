@@ -53,6 +53,7 @@ import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
 import {
   defaultAccessOf,
+  GUIDE_ROUTE,
   INSTANCE_METADATA_PATH,
   type InstanceMetadata,
   InstanceMetadataSchema,
@@ -402,6 +403,19 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `downloads/fling.mcpb: ${mcpb.status} ${mcpb.headers.get('content-type')}, not a zip`
     )
     step(`Claude Desktop extension: ${mcpb.status === 200 ? 'a zip' : 'none built (404)'}`)
+
+    // The user guide: a deep link into it loads the web app, signed out, on an instance with one
+    // that serves its web app (the local Node runtime serves only the API).
+    const servesApp = (await (await fetch(`${appOrigin}/`)).text()).includes('<div id="root"')
+    if (meta.capabilities.guide === true && servesApp) {
+      const guide = await fetch(`${appOrigin}${GUIDE_ROUTE}/start/connect`, { redirect: 'manual' })
+      const html = await guide.text()
+      check(
+        guide.status === 200 && html.includes('<div id="root"'),
+        `${GUIDE_ROUTE}/start/connect: ${guide.status}, not the web app`
+      )
+      step(`the guide: ${GUIDE_ROUTE}/start/connect loads the web app, signed out`)
+    }
 
     const who = (await fling('whoami')) as { email?: string }
     check(who.email === opts.session.email, `whoami: ${JSON.stringify(who)}`)

@@ -1,5 +1,6 @@
-import type { InstanceMetadata, Me } from '@fling/shared'
+import { GUIDE_ROUTE, type InstanceMetadata, type Me } from '@fling/shared'
 import {
+  BookOpenIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   GlobeAltIcon,
@@ -45,23 +46,28 @@ export const ADMIN_NAV_ITEM: NavItem = {
   match: '/admin',
 }
 
+/** The Guide, last, for everyone (guests too) on an instance with the `guide` capability. */
+export const GUIDE_NAV_ITEM: NavItem = { to: GUIDE_ROUTE, label: 'Guide', icon: BookOpenIcon }
+
 /** Groups, after Sites, on an instance with the `groups` capability. */
 export const GROUPS_NAV_ITEM: NavItem = { to: '/groups', label: 'Groups', icon: UserGroupIcon }
 
 /**
  * The side nav's items for this user: everyone's (with Groups where the instance has them), then
- * Admin for admins, then Get started. A guest gets Sites alone: they review what is shared with
- * them, and have no groups, connections or sites of their own to get started with.
+ * Admin for admins, then Get started, then the Guide where the instance has one. A guest gets
+ * Sites and the Guide: they review what is shared with them, and have no groups, connections or
+ * sites of their own to get started with.
  */
 export function navItemsFor(
   me: Me | null | undefined,
   instance?: Pick<InstanceMetadata, 'capabilities'> | null
 ): NavItem[] {
   const [first, ...rest] = NAV_ITEMS
-  if (me?.guest) return first ? [first] : []
+  const guide = instance?.capabilities.guide === true ? [GUIDE_NAV_ITEM] : []
+  if (me?.guest) return first ? [first, ...guide] : guide
   const items =
     instance?.capabilities.groups === true && first ? [first, GROUPS_NAV_ITEM, ...rest] : NAV_ITEMS
-  return [...items, ...(showsAdmin(me) ? [ADMIN_NAV_ITEM] : []), GET_STARTED_NAV_ITEM]
+  return [...items, ...(showsAdmin(me) ? [ADMIN_NAV_ITEM] : []), GET_STARTED_NAV_ITEM, ...guide]
 }
 
 /** `/` matches only itself; every other path matches itself and its descendants. */

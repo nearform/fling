@@ -33,6 +33,7 @@ import {
 } from './forms.ts'
 import { FORM_TEMPLATE_DESCRIPTIONS, FORM_TEMPLATE_NAMES } from './forms-templates.ts'
 import { GROUP_MEMBERS_MAX, GROUP_NAME_MAX, GROUP_SLUG_RULES } from './groups.ts'
+import { instanceGuideUrl } from './guide.ts'
 import { SITE_NAME_MAX } from './hosts.ts'
 import {
   defaultAccessOf,
@@ -101,6 +102,8 @@ export interface McpWording {
    * address in an audience or a group is invited as a guest, a reviewer.
    */
   invites?: boolean
+  /** The instance's user guide (`https://fling.example.test/guide`), when it has one. */
+  guide?: string
 }
 
 const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
@@ -129,8 +132,15 @@ export function mcpWording(
     reviewPattern: instance.appOrigin ? reviewUrl(instance.appOrigin, '<name>') : GENERIC_REVIEW,
     defaultAccess: defaultAccessOf(instance),
     invites: instance.capabilities?.invites === true,
+    ...(instanceGuideUrl(instance) ? { guide: instanceGuideUrl(instance) } : {}),
   }
 }
+
+/** What the servers say about the instance's user guide, when it has one. */
+export const GUIDE_NOTE = (w: McpWording) =>
+  w.guide
+    ? `When the user asks how to do something with ${w.name} (connect an assistant, share a site, team sites, comments), answer, then point them at its guide, ${w.guide}, which covers every feature by assistant, command line and web app.`
+    : undefined
 
 /**
  * Which addresses an audience or a group takes, for copy: ones that can sign in, and on an
@@ -1276,6 +1286,7 @@ export const mcpRemoteInstructions = (
     ...(opts.comments ? [COMMENTS_NOTE(w, { forms: opts.forms })] : []),
     ...(opts.comments && opts.forms ? [FORMS_NOTE(w)] : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
+    ...[GUIDE_NOTE(w)].filter(p => p !== undefined),
   ].join('\n\n')
 
 /** What the servers say about notifications, when the instance has them. */

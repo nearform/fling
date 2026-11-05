@@ -568,8 +568,9 @@ message to check the setup on its own.
 
 ## Outside invitations
 
-By default only the people the email policy admits (`ALLOWED_EMAIL_DOMAINS`, `ALLOWED_EMAILS`) and
-`ADMIN_EMAILS` can sign in. `INVITES=on` lets people from outside in by invitation:
+By default only the people the email policy admits (`ALLOWED_EMAIL_DOMAINS`, `ALLOWED_EMAILS`) can
+sign in; admins (`ADMIN_EMAILS`) are among them. `INVITES=on` lets people from outside in by
+invitation:
 
 - **Sharing invites a guest.** Anyone signed in who adds an outside address to a site's audience or
   to a group invites that person as a guest: a reviewer who sees and comments on what is shared with

@@ -1,4 +1,5 @@
 import {
+  CAPABILITY_NAMES,
   CORE_CAPABILITIES,
   INSTANCE_METADATA_PATH,
   InstanceMetadataSchema,
@@ -54,6 +55,11 @@ describe('GET /.well-known/fling', () => {
       // The release this build is: the root package.json's version, which `pnpm release` sets.
       release: rootPackage.version,
     })
+  })
+
+  it('advertises exactly the capability names clients know (CAPABILITY_NAMES)', async () => {
+    const body = await (await setup().app.request(INSTANCE_METADATA_PATH)).json()
+    expect(Object.keys(body.capabilities).sort()).toEqual([...CAPABILITY_NAMES].sort())
   })
 
   it('publishes the access level new sites get: only you, unless SITE_DEFAULT_ACCESS says members', async () => {

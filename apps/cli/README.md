@@ -53,6 +53,9 @@ This does everything a new machine needs:
    attached to the CLI's GitHub Release (the server's copy if that download fails). Running setup
    again updates an older extension in place.
 
+When it finishes, setup prints the address of the server's user guide (`<server>/guide`): how
+every feature works from an assistant, the command line and the web app.
+
 On a terminal it asks before installing the plugin and before step 3. With `--yes` it does them
 without asking. Refreshing an installed plugin needs no question.
 

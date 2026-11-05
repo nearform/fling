@@ -19,6 +19,7 @@
  * plugin refresh, which leaves the installed plugin working and is only reported.
  */
 import { intro, outro, spinner } from '@clack/prompts'
+import { instanceGuideUrl } from '@fling/shared'
 import chalk from 'chalk'
 import {
   claudeCodeStatus,
@@ -101,11 +102,16 @@ export async function runSetup(
   results.claudeDesktop = await stepClaudeDesktop(after, deps, ask, fancy)
 
   const failed = Object.values(results).includes('failed')
+  const guide = instanceGuideUrl(
+    login.serverUrl ? (await ctx.store.resolve({ serverUrl: login.serverUrl })).instance : undefined
+  )
   if (fancy)
     outro(
       failed
         ? chalk.yellow('Setup finished with problems — see above, then run `fling setup` again.')
-        : `You're set. Try ${chalk.bold(`${ctx.binName} deploy ./dist`)}, or ask Claude to “fling this”.`,
+        : `You're set. Try ${chalk.bold(`${ctx.binName} deploy ./dist`)}, or ask Claude to “fling this”.${
+            guide ? `\nHow everything works: ${chalk.underline(guide)}` : ''
+          }`,
       { output: process.stderr }
     )
   ctx.out.data(results, () => '')

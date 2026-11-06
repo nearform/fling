@@ -5,7 +5,7 @@ order: 30
 summary: See how the instance is configured; changing it is a deploy.
 audience: admin
 sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts]
-verified: 998e984
+verified: 98b7f5e
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its

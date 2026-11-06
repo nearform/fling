@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearCimdCache } from '../src/oauth/clients.ts'
 import { APP_ORIGIN, cookiesOf, createUser, type Env, json, setup } from './helpers.ts'
 import {
@@ -347,16 +347,27 @@ describe('authorize', () => {
     expect(info.status).toBe(200)
   })
 
-  it("connects the Gemini app: a redirect per user, under Google's prefix", async () => {
-    const gemini =
-      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111-fling_test'
+  it("connects the Gemini app: six redirects per user, on each of Google's relays", async () => {
+    const segment = 'user_bound_custom-mcp-111-fling_test'
+    const geminis = ['oauth-redirect-sandbox', 'oauth-redirect-test', 'oauth-redirect'].flatMap(
+      host => ['r', 'a'].map(path => `https://${host}.googleusercontent.com/${path}/${segment}`)
+    )
     const reg = await env.app.request('/oauth/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ client_name: 'Gemini', redirect_uris: [gemini] }),
+      body: JSON.stringify({
+        client_name: 'Google',
+        redirect_uris: geminis,
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'client_secret_post',
+      }),
     })
     expect(reg.status).toBe(201)
-    const clientId = (await json(reg)).client_id as string
+    const body = await json(reg)
+    expect(body.token_endpoint_auth_method).toBe('none')
+    const clientId = body.client_id as string
+    const gemini = `https://oauth-redirect.googleusercontent.com/a/${segment}`
     const a = await authorizeAndApprove(env, { clientId, redirectUri: gemini })
     const info = await token(env, {
       grant_type: 'authorization_code',
@@ -368,18 +379,25 @@ describe('authorize', () => {
     expect(info.status).toBe(200)
 
     // Only the last segment varies: no other path, segment, query or host gets in.
-    for (const uri of [
-      'https://oauth-redirect.googleusercontent.com/r/other-111',
-      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111/more',
-      'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-111?x=1',
-      'https://evil.example/r/user_bound_custom-mcp-111',
-    ]) {
-      const bad = await env.app.request('/oauth/register', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ redirect_uris: [uri] }),
-      })
-      expect(bad.status, uri).toBe(400)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (const uri of [
+        `https://oauth-redirect.googleusercontent.com/x/${segment}`,
+        `https://oauth-redirect.googleusercontent.com/r/${segment}/more`,
+        `https://oauth-redirect.googleusercontent.com/r/${segment}?x=1`,
+        `https://evil.googleusercontent.com/r/${segment}`,
+        `https://evil.example/r/${segment}`,
+      ]) {
+        const bad = await env.app.request('/oauth/register', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ redirect_uris: [geminis[0], uri] }),
+        })
+        expect(bad.status, uri).toBe(400)
+        expect(warn, uri).toHaveBeenLastCalledWith(expect.stringContaining(JSON.stringify(uri)))
+      }
+    } finally {
+      warn.mockRestore()
     }
   })
 

@@ -5,7 +5,7 @@ order: 10
 summary: See who has signed in, act as someone to help them, and invite people from outside.
 audience: admin
 sources: [apps/web/src/pages/AdminUsers.tsx, apps/web/src/pages/AdminInvitations.tsx, apps/web/src/components/ImpersonationBanner.tsx, apps/web/src/lib/admin.ts, apps/api/src/admin.ts, apps/api/src/invitations.ts, apps/api/src/policy.ts, apps/api/src/audit.ts, apps/api/src/config.ts]
-verified: 998e984
+verified: 98b7f5e
 ---
 
 As an admin of {{instance:name}} you can see everyone who has signed in, and act as one of them to

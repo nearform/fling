@@ -13,6 +13,15 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **The Gemini app connects.** Gemini registers six redirects at once, on Google's production,
+  sandbox and test relays and under both `/r/` and `/a/`, and the default
+  `OAUTH_REDIRECT_ALLOWLIST` allowed only one of them, so registration failed with "The Google
+  redirect URL was rejected". The default now allows all six. A refused registration logs
+  `oauth_register_refused` with the redirect URI. Upgrade note: if you set
+  `OAUTH_REDIRECT_ALLOWLIST`, replace its `https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-*`
+  entry with `https://oauth-redirect.googleusercontent.com/r/*`, `…/a/*`, and the same two for
+  `oauth-redirect-sandbox.googleusercontent.com` and `oauth-redirect-test.googleusercontent.com`.
+
 ## 0.11.1 (2026-11-05)
 
 - **Connectors that identify themselves by a document connect on Cloudflare.** Fling fetches a

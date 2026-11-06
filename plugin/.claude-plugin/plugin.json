@@ -1,7 +1,7 @@
 {
   "name": "fling",
   "displayName": "Fling",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Fling a folder of static files (a build output, an HTML report, a prototype) at your Fling server and get a stable URL back. Skill + MCP server.",
   "author": { "name": "Fling contributors", "url": "https://github.com/nearform/fling" },
   "homepage": "https://github.com/nearform/fling",

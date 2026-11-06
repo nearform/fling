@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.11.2 (2026-11-06)
+
 - **The Gemini app connects.** Gemini registers six redirects at once, on Google's production,
   sandbox and test relays and under both `/r/` and `/a/`, and the default
   `OAUTH_REDIRECT_ALLOWLIST` allowed only one of them, so registration failed with "The Google

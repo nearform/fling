@@ -109,6 +109,15 @@ export async function registerClient(deps: Deps, body: unknown) {
   }
   for (const uri of uris) {
     if (typeof uri !== 'string' || uri.length > 500 || !redirectAllowed(deps.config, uri)) {
+      // The client only says "rejected": this names the URI, so an operator can allow it.
+      console.warn(
+        JSON.stringify({
+          level: 'warn',
+          msg: 'oauth_register_refused',
+          clientName: String(meta.client_name ?? '').slice(0, 100),
+          redirectUri: String(uri).slice(0, 200),
+        })
+      )
       throw new RegistrationError(
         'invalid_redirect_uri',
         `Redirect URI not allowed: ${String(uri).slice(0, 200)}`

@@ -225,8 +225,11 @@ export const DEFAULT_OAUTH_REDIRECT_ALLOWLIST = [
   'https://chatgpt.com/connector_platform_oauth_redirect',
   // Cursor's web app and background agents (its desktop app and CLI use loopback).
   'https://www.cursor.com/agents/mcp/oauth/callback',
-  // The Gemini app's custom connectors: one redirect per user and server.
-  'https://oauth-redirect.googleusercontent.com/r/user_bound_custom-mcp-*',
+  // The Gemini app's custom connectors register a redirect per user and server on each of Google's
+  // OAuth relays (production, sandbox, test), under both /r/ and /a/, and all six must pass.
+  ...['oauth-redirect', 'oauth-redirect-sandbox', 'oauth-redirect-test'].flatMap(host =>
+    ['r', 'a'].map(path => `https://${host}.googleusercontent.com/${path}/*`)
+  ),
   // Desktop and command-line clients on this computer: Claude Code, Cursor, Gemini CLI, Codex,
   // VS Code, MCP Inspector.
   'loopback',

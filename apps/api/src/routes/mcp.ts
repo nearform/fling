@@ -1,18 +1,22 @@
 /**
  * `/mcp` — the remote MCP endpoint (Streamable HTTP, stateless: no sessions, JSON responses, no
  * SSE — a Lambda can't hold a stream open). Auth: `Authorization: Bearer <token>` where the token
- * is an OAuth access token from /oauth/token (aud = this resource, grant still active) or a CLI
- * API key (`fling_…`, handy for testing). Anything else → 401 with a `WWW-Authenticate` pointing
+ * is an OAuth access token from /oauth/token (aud = this resource, grant still active), one from
+ * the outside authorization server when `MCP_AUTHORIZATION_SERVER` is set (oauth/external.ts), or
+ * a CLI API key (`fling_…`, handy for testing). Anything else → 401 with a `WWW-Authenticate` pointing
  * at the protected-resource metadata, which is how MCP clients discover the OAuth server. Either
  * way the user must still have standing (auth/standing.ts); a guest gets only the tools for
  * reviewing what is shared with them.
  */
+
+import { userSlugFromEmail } from '@fling/shared'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { type Context, Hono } from 'hono'
 import { API_KEY_PREFIX, validateApiKey } from '../auth/api-keys.ts'
 import { principalOf } from '../auth/middleware.ts'
 import { asRequestUser, withStanding } from '../auth/standing.ts'
 import { createRemoteMcpServer } from '../mcp/server.ts'
+import { verifyExternalToken } from '../oauth/external.ts'
 import { resourceMetadataUrl, SCOPE, verifyAccessToken } from '../oauth/tokens.ts'
 import type { User } from '../store/types.ts'
 import type { AppEnv } from '../types.ts'
@@ -57,7 +61,29 @@ async function authenticate(c: Context<AppEnv>): Promise<User | Response> {
     return user
   }
   const claims = await verifyAccessToken(config, token, clock.now())
-  if (!claims) return invalid()
+  if (!claims) {
+    const external = await verifyExternalToken(c.get('deps'), token, clock.now())
+    if (!external) return invalid()
+    // The outside server vouches for who it is; standing still decides whether they may use
+    // Fling, and someone who never signed in here becomes a user, as a sign-in would make them.
+    const known = await withStanding({ config, store }, { email: external.email })
+    if (!known) return invalid()
+    const stored =
+      (await store.getUser(external.email)) ??
+      (await store.upsertUser(
+        {
+          email: external.email,
+          name: external.email.split('@')[0] ?? external.email,
+          picture: null,
+          preferredSlug: userSlugFromEmail(external.email),
+        },
+        clock.now().toISOString()
+      ))
+    const user = await withStanding({ config, store }, stored)
+    if (!user) return invalid()
+    c.set('via', 'oauth')
+    return user
+  }
   // Revocation is immediate: the grant must still exist.
   const grant = await store.getGrant(claims.email, claims.grantId)
   if (!grant || Date.parse(grant.expiresAt) <= clock.now().getTime()) {

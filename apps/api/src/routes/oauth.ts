@@ -66,7 +66,9 @@ function protectedResource(c: Context<AppEnv>) {
   cacheable(c)
   return c.json({
     resource: mcpResource(config),
-    authorization_servers: [config.appOrigin],
+    // With an outside authorization server, clients are sent there; this instance's own still
+    // answers the connections it made.
+    authorization_servers: [config.mcpAuthorizationServer ?? config.appOrigin],
     scopes_supported: [SCOPE],
     bearer_methods_supported: ['header'],
     resource_name: 'Fling',

@@ -284,6 +284,11 @@ link** instead: with the `invites` capability the login page offers the provider
 them, "Email me a sign-in link". A user is their email, whichever provider they use; the issuer's
 `sub` is not stored.
 
+**Outside authorization server** — an OAuth server, named by `MCP_AUTHORIZATION_SERVER`, that
+MCP clients sign in at instead of Fling's own (`apps/api/src/oauth/external.ts`). `/mcp` accepts
+its JWT access tokens bound to `<APP_ORIGIN>/mcp`, for the person its `email` names; standing still
+decides whether they may use Fling.
+
 **Standing** — whether someone may be signed in, and as what (`standingOf`,
 `apps/api/src/auth/standing.ts`): `member` when the email policy admits them, they are an admin
 or they hold a live member invitation; `guest` with a live guest invitation while some audience

@@ -13,6 +13,11 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **The remote MCP server can trust an outside authorization server.** Set
+  `MCP_AUTHORIZATION_SERVER` to its issuer and MCP clients sign in there: the protected-resource
+  metadata names it, and `/mcp` accepts its access tokens for this instance's resource, for anyone
+  with standing. Connections made with Fling's own server keep working.
+
 ## 0.11.2 (2026-11-06)
 
 - **The Gemini app connects.** Gemini registers six redirects at once, on Google's production,

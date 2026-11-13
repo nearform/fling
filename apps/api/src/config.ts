@@ -119,6 +119,12 @@ const envSchema = z.object({
   FS_ROOT: optionalString,
   DEV_LOGIN: flag,
   OAUTH_REDIRECT_ALLOWLIST: z.preprocess(blank, z.string().optional()),
+  /**
+   * Another OAuth authorization server whose access tokens `/mcp` accepts and that the
+   * protected-resource metadata names (instead of this instance's own). Unset: only this
+   * instance's own server.
+   */
+  MCP_AUTHORIZATION_SERVER: z.preprocess(blank, z.url().optional()),
   OIDC_ISSUER: z.preprocess(blank, z.url().optional()),
   OIDC_CLIENT_ID: optionalString,
   OIDC_DISPLAY_NAME: z.preprocess(blank, z.string().min(1).max(60).optional()),
@@ -164,6 +170,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   OIDC_SCOPES: 'sign_in',
   OIDC_ASSUME_EMAIL_VERIFIED: 'sign_in',
   OAUTH_REDIRECT_ALLOWLIST: 'sign_in',
+  MCP_AUTHORIZATION_SERVER: 'sign_in',
   DEV_LOGIN: 'sign_in',
   APP_ORIGIN: 'sites',
   SITES_DOMAIN: 'sites',
@@ -392,6 +399,11 @@ export interface Config {
   secureCookies: boolean
   /** OAuth redirect URI allowlist (exact URLs and/or `loopback`) */
   oauthRedirectAllowlist: string[]
+  /**
+   * `MCP_AUTHORIZATION_SERVER`, no trailing slash: an outside authorization server whose tokens
+   * `/mcp` also accepts (oauth/external.ts), and the one MCP clients are sent to.
+   */
+  mcpAuthorizationServer?: string
   oidc: OidcConfig
   /** Every env key, its effective value and whether the env set it (`GET /api/admin/settings`). */
   settings: ConfigSetting[]
@@ -415,6 +427,13 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
   }
   if (Boolean(e.OIDC_ISSUER) !== Boolean(e.OIDC_CLIENT_ID)) {
     throw new Error('OIDC_ISSUER and OIDC_CLIENT_ID go together')
+  }
+  if (
+    production &&
+    e.MCP_AUTHORIZATION_SERVER &&
+    !e.MCP_AUTHORIZATION_SERVER.startsWith('https://')
+  ) {
+    throw new Error('MCP_AUTHORIZATION_SERVER must be an https URL in production')
   }
   if (production && e.OIDC_ISSUER && !e.OIDC_ISSUER.startsWith('https://')) {
     throw new Error('OIDC_ISSUER must be an https URL in production')
@@ -475,6 +494,9 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
           .map(s => s.trim())
           .filter(Boolean)
       : DEFAULT_OAUTH_REDIRECT_ALLOWLIST,
+    ...(e.MCP_AUTHORIZATION_SERVER
+      ? { mcpAuthorizationServer: e.MCP_AUTHORIZATION_SERVER.replace(/\/+$/, '') }
+      : {}),
     oidc: definedOnly({
       issuer: e.OIDC_ISSUER,
       clientId: e.OIDC_CLIENT_ID,

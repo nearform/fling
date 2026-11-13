@@ -23,7 +23,7 @@
     "@aws-sdk/signature-v4a": "^3.1138.0",
     "@fling/api": "workspace:*",
     "@fling/shared": "workspace:*",
-    "hono": "^4.13.5"
+    "hono": "^4.13.16"
   },
   "devDependencies": {
     "@fling/conformance": "workspace:*",

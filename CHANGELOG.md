@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.12.0 (2026-11-13)
+
 - **The remote MCP server can trust an outside authorization server.** Set
   `MCP_AUTHORIZATION_SERVER` to its issuer and MCP clients sign in there: the protected-resource
   metadata names it, and `/mcp` accepts its access tokens for this instance's resource, for anyone

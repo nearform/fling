@@ -21,6 +21,8 @@ output "deploy" {
       SITES_DISTRIBUTION_ID = aws_cloudfront_distribution.sites.id
       APP_ORIGIN            = local.url
     },
+    # With site servers only: the deploy publishes the server status function when it is named.
+    { for k, v in { SERVER_STATUS_FUNCTION = one(aws_cloudfront_function.server_status[*].name) } : k => v if v != null },
     # Only when set, so an empty var.instance leaves the output as it was.
     { for k, v in { INSTANCE = var.instance } : k => v if length(v) > 0 },
   )

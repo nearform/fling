@@ -43,7 +43,7 @@ DynamoDB $TABLE, SSM parameters $SSM_PREFIX*
 | Who | Owns |
 | --- | --- |
 | Terraform ([`infra`](infra), from your root module) | Buckets, table, distributions, DNS, certificate, roles, the function's configuration and environment, which secrets exist |
-| This repo, `deploy.yml` (on each release) | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` and `_fling/review.html` in the sites bucket, the site router's code |
+| This repo, `deploy.yml` (on each release) | The Lambda code (with the instance values in `instance.json`), the UI files, `downloads/fling.mcpb` in the UI bucket, `_fling/404.html` and `_fling/review.html` in the sites bucket, the site router's code, and with site servers the server status function's |
 | The API at runtime | Table items, KeyValueStore keys, site files under `sites/`, chunked MCP upload staging under `uploads/` |
 
 ## Infrastructure: the Terraform module
@@ -158,6 +158,7 @@ the grants, then turn it on). If your own resources sit at other addresses, add 
 | `LAMBDA_FUNCTION` | `aws_lambda_function.api` | Updated with `lambda.zip`, invoked for migrations |
 | `UI_BUCKET`, `SITES_BUCKET` | the buckets | The UI is synced to the first; the error page goes in the second |
 | `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/dist/site-router.js` (built by `edge/build.mjs`) |
+| `SERVER_STATUS_FUNCTION` | `aws_cloudfront_function.server_status` | With `servers.enabled` only: updated and published with `edge/dist/server-status.js`, before the API |
 | `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` | the distributions | Invalidated after a deploy |
 | `APP_ORIGIN` | `https://<hostname>` | The smoke test's target and the Claude Desktop extension's default server |
 | `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
@@ -203,10 +204,10 @@ Values reach the function two ways, and the function's own environment wins:
 | `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
 | `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
 | `SERVERS_MAX_SITES` | no (`50`) | The most sites that may have a server at once; one more is refused with `too_many_servers`. |
-| `SERVER_TIMEOUT_SECONDS` | no (`30`) | The wall-time limit of one request to a site server, a stream included, from 1 to 900. An admin may raise it for one site. |
-| `SERVER_CPU_MS` | no (`1000`) | CPU time one request may use, where the platform measures it. An admin may raise it for one site. |
+| `SERVER_TIMEOUT_SECONDS` | no (`30`) | The wall-time limit of one request to a site server, a stream included, from 1 to 900. An admin may raise it for one site. AWS: at most 120 (how long CloudFront waits on an origin); a higher value runs as 120, and an admin's raise past it is refused with `limit_too_high`. |
+| `SERVER_CPU_MS` | no (`1000`) | CPU time one request may use. Cloudflare only (the Worker Loader's `cpuMs`); AWS has no equivalent. An admin may raise it for one site. |
 | `SERVER_RPS` | no (`100`) | Requests per second one site's server is given before it is throttled. An admin may raise it for one site. AWS: rounded up to a step Lambda takes (100 to 1000 by 100, then by 1000, at most 10000). |
-| `SERVER_ENVIRONMENTS` | no (`2`) | How many copies of one site's server may run at once, where the platform counts them. An admin may raise it for one site. AWS: at least 2, and `SERVERS_MAX_SITES` × this × 2 vCPU must fit the account's quota (see [Site servers](#site-servers)). |
+| `SERVER_ENVIRONMENTS` | no (`2`) | How many copies of one site's server may run at once. AWS only (the `live` endpoint's `maxEnvironments`); Cloudflare has no equivalent. An admin may raise it for one site. AWS: at least 2, and `SERVERS_MAX_SITES` × this × 2 vCPU must fit the account's quota (see [Site servers](#site-servers)). |
 | `SERVER_BODY_BYTES` | no (`10485760`) | The largest request body a site server is sent. An admin may raise it for one site. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
@@ -434,6 +435,10 @@ the deploy role over OIDC:
    `__APP_ORIGIN__` and `__SITE_SCHEME__`, updates the CloudFront Function (keeping its KeyValueStore association) and publishes it to LIVE.
 5. Invalidates `/index.html` on the app distribution and `/_fling/*` on the sites distribution.
 
+With site servers (`SERVER_STATUS_FUNCTION` in the config), before step 1 it updates the server
+status function with `edge/dist/server-status.js`, runs it in CloudFront on a server's 404 (it must
+come out as 404) and publishes it. It changes nothing but a stand-in answer, so it goes first.
+
 Site content is never touched by a deploy. Terraform ignores the code, so a plan after a deploy
 reads "No changes".
 
@@ -658,11 +663,23 @@ What Terraform builds:
   with their revisions.
 - **`site-secrets-key`** in SSM (see [Secrets](#secrets)).
 - **`/api/*` on the sites distribution**: every method, CachingDisabled, AllViewerExceptHostHeader,
-  the site router at viewer-request, and a response headers policy that removes
+  the site router at viewer-request, the server status function at viewer-response (below), and
+  a response headers policy that removes
   `lambda-web-logstream` (it names the function and the revision). The router switches a server's
   requests to the site's endpoint with an inline origin access control config (`originType:
   lambda`, `always-amz-auth`); no OAC resource is needed. It sets `x-forwarded-host` to the site's
-  host, since the function sees its endpoint's domain as `Host`.
+  host, since the function sees its endpoint's domain as `Host`, and waits up to 120 s for its
+  answer (`readTimeout`, the most CloudFront allows without a quota increase; the distribution's
+  origins wait 30 s).
+- **The server status function** (`<…>-server-status`, viewer-response on `/api/*` only). The
+  sites distribution's custom error responses turn every 403 and 404 from an origin into the
+  sites' 404 page, and a viewer-response function doesn't run on an answer of 400 or more, so
+  the server runtime sends a server's 403 or 404 as `300` with `x-fling-status: 403|404`, and this
+  function puts the real status back and removes the header. `300` is below 400, isn't a redirect
+  to Fetch without a `Location`, may carry a body, and if the function were ever skipped a client
+  would still see neither a success nor a redirect. Any answer without the header, a server's own
+  `300` among them, goes out unchanged. Terraform creates it with a pass-through placeholder; the
+  deploy publishes its code.
 - **Egress `none`** (`servers.egress`, the default): a VPC with two subnets, no internet or NAT
   gateway and a security group with no rules, and a network connector into it
   (`aws_lambdacore_network_connector`, up to ten minutes to create) that every revision names. The
@@ -686,7 +703,9 @@ What the API does ([`src/servers/`](src/servers/)):
   revision weights move to it. A rollback moves them back. The kill switch (an admin's stop,
   archiving) sets `live`'s `rateLimit` to 0 (503 EndpointDisabled).
 - **Limits**: the wall time and the body size are enforced by the server runtime; Lambda's
-  `timeoutSeconds` (3 to 900) is a backstop. `SERVER_RPS` is `live`'s `rateLimit`,
+  `timeoutSeconds` (3 to 900) is a backstop. The wall time is at most 120 s, how long CloudFront
+  waits: the adapter says so (`maxTimeoutSeconds`), the core runs a longer `SERVER_TIMEOUT_SECONDS`
+  as 120 and refuses an admin's raise past it (400 `limit_too_high`). `SERVER_RPS` is `live`'s `rateLimit`,
   `SERVER_ENVIRONMENTS` its `maxEnvironments`. `SERVER_CPU_MS` has no AWS equivalent.
 - **Logs**: what a server prints, and the request line the server runtime prints for each request
   (method, path, status, time to headers, viewer id, version), are read back from
@@ -704,13 +723,14 @@ ask for more.
 
 **Known limits on AWS.**
 
-- The sites distribution's custom error responses turn every 403 and 404 into the sites' 404
-  page, and they apply to every origin: a server's own 403 or 404 reaches the browser as that page.
-  Answer with another status (400, 409, 410, 422) where the body matters.
-- CloudFront waits as long as the sites origin's response timeout (30 s) for the first byte, so a
-  server whose time limit an admin raised past 30 s is cut there.
-- A site secret can't be called `AWS_*`, `LAMBDA_*`, `FLING_*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`
-  or `_HANDLER`: going live with one is refused with 400 `invalid_secret_name`.
+- A request to a site server takes at most 120 s, a stream included, and CloudFront cuts a stream
+  that is silent for 120 s.
+- A site server's 403 or 404 reaches the browser through the server status function: between
+  first applying `servers.enabled` and the next deploy, which publishes its code, it arrives as
+  `300` with `x-fling-status`. Deploy after turning servers on.
+- A site secret can't have one of Fling's reserved names (`AWS_*`, `LAMBDA_*`, `FLING_*`,
+  `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER`, `FILES`), on any platform:
+  setting one, or declaring one in `fling.json`, is refused with 400 `invalid_secret_name`.
 
 ## Rollback
 

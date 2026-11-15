@@ -44,6 +44,21 @@ describe('site secrets as the site page lists them', () => {
     expect(stillAwaited(res, awaiting)).toEqual(['TOKEN'])
   })
 
+  it("takes what the waiting version declares and still needs from the API's answer", () => {
+    const res = {
+      secrets: [{ name: 'A', setBy: 'ada@example.com', setAt: at }],
+      declared: [],
+      missing: [],
+      waiting: { versionId: 'v2', declared: ['A', 'B'], missing: ['B'] },
+    }
+    const awaiting = { versionId: 'v2', secrets: ['B'] }
+    expect(secretRows(res, awaiting).map(r => [r.name, r.set !== null, r.waiting])).toEqual([
+      ['A', true, true],
+      ['B', false, true],
+    ])
+    expect(stillAwaited(res, awaiting)).toEqual(['B'])
+  })
+
   it('lists nothing when there are none', () => {
     expect(secretRows({ secrets: [], declared: [], missing: [] })).toEqual([])
   })
@@ -116,6 +131,7 @@ describe('what setting or removing a secret did', () => {
     })
     expect(o).toMatchObject({ tone: 'error', logs: ['boom'] })
     expect(o.text).toContain('no answer')
+    expect(o.text).toContain('It still waits')
   })
 
   it('names what a waiting version still needs', () => {

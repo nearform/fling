@@ -1,7 +1,13 @@
 /**
  * The ports a platform implements to run site servers: `SiteServers` (ready a version's server,
- * probe it, run it, retire it) and `ServerLogs` (keep and read what servers print and the request
- * log Fling writes for every invoke). The core decides everything else, once (servers/index.ts):
+ * probe it, hand it the site's requests, run it, retire it) and `ServerLogs` (keep and read what
+ * servers print and the request log Fling writes for every invoke).
+ *
+ * Going live is activate (ready the version, returning the route value's `t`), probe (the core
+ * judges the answer), then `goLive`, only on a platform whose edge reaches one place for every
+ * version (AWS: the live endpoint's revision weights move to the probed revision); then the core
+ * writes the route. Where the route value itself names what runs (Cloudflare's run, the local
+ * runtime's version), the route is the switch and `goLive` is absent. The core decides everything else, once (servers/index.ts):
  * admission, the server mark, the route flag, secrets, the start probe's rules, policy, limits.
  *
  * A site server is the version's `_fling/server.mjs` (SERVER_BUNDLE): one ES module that imports
@@ -63,10 +69,18 @@ export type ProbeResult =
 
 export interface SiteServers {
   /**
+   * The longest time per request the platform can serve, in seconds, when it is less than
+   * SERVER_TIMEOUT_SECONDS allows (AWS: 120, CloudFront's wait on an origin). The core runs no
+   * server with a longer limit (`limitsOf`) and refuses an admin's raise past it.
+   */
+  readonly maxTimeoutSeconds?: number
+  /**
    * Ready a version's server to be probed and go live. Idempotent: activating a version that is
    * ready already (a rollback) costs nothing more. Returns what the route value carries for the
-   * edge (`t`): the host the server is reached at, or null when the platform's own sites host runs
-   * it. AWS: the zip, the revision, waiting for it to be Active; Cloudflare: nothing to prepare.
+   * sites host (`t`), or null when it needs nothing. AWS: the zip, the revision, waiting for it to
+   * be Active, and the live endpoint's domain as the target, where CloudFront sends the request;
+   * Cloudflare: the options sealed into R2 and the run's name (a keyed hash of them) as the target,
+   * which the sites host loads the isolate by; the local runtime: null.
    */
   activate(
     site: ServerSite,
@@ -84,7 +98,8 @@ export interface SiteServers {
   goLive?(site: ServerSite, version: ServerVersion): Promise<void>
   /**
    * The live version's options changed (a secret set or removed, an admin's limits): it runs with
-   * these from now on. Cloudflare: a fresh isolate; AWS: a new revision of the same version.
+   * these from now on, at the target it returns (the core rewrites `t` when it moved). Cloudflare:
+   * a fresh isolate, under a new run name; AWS: a new revision of the same version, live at once.
    */
   reconfigure(
     site: ServerSite,

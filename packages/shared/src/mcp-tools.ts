@@ -525,7 +525,7 @@ export const SERVERS_NOTE = (w: McpWording, opts: { local?: boolean } = {}) =>
     : `fling_publish takes a server already in one file, ${SERVER_BUNDLE}, importing only node:* and ${SERVER_HELPER_MODULE}: start from fling_server_template, and pass ${SERVER_CONFIG_FILE} among the files (or as \`siteServer\`). `) +
   `${SERVER_CONFIG_FILE} declares the secrets it needs and a health path. Never ask for, or pass, a secret's value: ` +
   'ask the user to set it themselves (`fling secrets set <site> NAME`, or the Secrets section of the site page); a deploy ' +
-  'that waits for secrets goes live as soon as the last is set. A public site with a server asks first: tell the user ' +
+  'that waits for secrets goes live as soon as the last is set; if its server then fails to start it keeps waiting, and each later secret set or removed tries it again. A public site with a server asks first: tell the user ' +
   `anyone could call its ${SERVER_PREFIX}* and use its secrets, and only with their yes repeat the call with \`confirmPublicServer: true\`. ` +
   'If a publish answers server_failed_to_start, read the log lines it returns, fix the server and publish again; ' +
   'fling_logs reads the log of a live one.'

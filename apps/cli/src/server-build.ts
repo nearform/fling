@@ -27,6 +27,8 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import {
   CLI_PACKAGE,
+  isReservedSecretName,
+  RESERVED_SECRET_NAMES_TEXT,
   SERVER_BUNDLE,
   SERVER_BUNDLE_MAX_BYTES,
   SERVER_CONFIG_FILE,
@@ -110,6 +112,15 @@ export async function readServerConfig(
     throw new CliError(`${SERVER_CONFIG_FILE}${where}: ${issue?.message ?? 'invalid'}`, {
       hint: 'It takes "server" (the entry), "secrets" (names like SLACK_WEBHOOK_URL) and "health" (a path under /api/).',
     })
+  }
+  const reserved = parsed.data.secrets.filter(isReservedSecretName)
+  if (reserved.length > 0) {
+    throw new CliError(
+      `${SERVER_CONFIG_FILE} declares ${reserved.join(', ')}, which no site secret can be called`,
+      {
+        hint: `${RESERVED_SECRET_NAMES_TEXT} are Fling's and the platform's: rename ${reserved.length === 1 ? 'it' : 'them'} in ${SERVER_CONFIG_FILE} and in the server.`,
+      }
+    )
   }
   return {
     ...(typeof server === 'string' ? { server: server.replace(/^\.\//, '') } : {}),

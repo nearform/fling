@@ -344,6 +344,13 @@ describe('site secrets', () => {
     expect(
       (await json(await api(env, alice.key, 'GET', '/api/sites/srv'))).awaitingSecrets
     ).toEqual({ versionId, secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'] })
+    expect(
+      (await json(await api(env, alice.key, 'GET', '/api/sites/srv/secrets'))).waiting
+    ).toEqual({
+      versionId,
+      declared: ['SLACK_WEBHOOK_URL', 'TOKEN'],
+      missing: ['SLACK_WEBHOOK_URL', 'TOKEN'],
+    })
     // One of two: it still waits, and says for what.
     const first = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/SLACK_WEBHOOK_URL', {
       value: 'https://hooks.slack.com/services/T/B/X',
@@ -378,6 +385,7 @@ describe('site secrets', () => {
       declared: ['SLACK_WEBHOOK_URL', 'TOKEN'],
       missing: [],
     })
+    expect(JSON.parse(text).waiting).toBeUndefined()
   })
 
   it('a newer publish ends the wait: only the latest waits for secrets', async () => {
@@ -397,21 +405,59 @@ describe('site secrets', () => {
     void versionId
   })
 
-  it('a waiting publish whose server then fails to start says so, and waits no more', async () => {
+  it('a waiting publish whose server then fails to start says so, and each later change tries it again', async () => {
     const alice = await createUser(env, ALICE)
     const refused = await json(
       await deploy(alice.key, 'srv', site(), { server: { secrets: ['A'] } })
     )
+    const versionId = refused.error.versionId
     servers.answer = { ok: false, error: 'exited with code 1', logs: ['A is not a URL'] }
     const set = await json(
       await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'a' })
     )
     expect(set.deployed).toMatchObject({
-      versionId: refused.error.versionId,
+      versionId,
       error: 'server_failed_to_start',
       logs: ['A is not a URL'],
     })
     expect(await route('srv')).toBeNull()
+    // Still waiting: the fix may be another secret.
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toEqual({
+      versionId,
+      secrets: ['A'],
+    })
+    // Removing a secret it doesn't declare tries it again too; still failing, still waiting.
+    await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/EXTRA', { value: 'x' })
+    const removed = await json(await api(env, alice.key, 'DELETE', '/api/sites/srv/secrets/EXTRA'))
+    expect(removed.deployed).toMatchObject({ versionId, error: 'server_failed_to_start' })
+    expect((await env.store.findSite('srv'))?.server?.awaiting?.versionId).toBe(versionId)
+    // The right value: it goes live, and the wait is over.
+    servers.answer = { ok: true, status: 200, logs: [] }
+    const fixed = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'https://a.test' })
+    )
+    expect(fixed.deployed).toEqual({ versionId, url: expect.stringContaining('srv') })
+    expect(await route('srv')).toMatchObject({ v: versionId, f: 1 })
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
+  })
+
+  it('removing a secret the waiting publish declares says it still needs it', async () => {
+    const alice = await createUser(env, ALICE)
+    await deploy(alice.key, 'srv', site(), { server: { secrets: ['A', 'B'] } })
+    await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'a' })
+    const removed = await json(await api(env, alice.key, 'DELETE', '/api/sites/srv/secrets/A'))
+    expect(removed).toMatchObject({ name: 'A', missing: ['A', 'B'] })
+    expect(removed.deployed).toBeUndefined()
+  })
+
+  it('a waiting publish refused for another reason waits no more', async () => {
+    const alice = await createUser(env, ALICE)
+    await deploy(alice.key, 'srv', site(), { server: { secrets: ['A'] } })
+    env.config.servers = { ...env.config.servers, publish: { kind: 'admins' } }
+    const set = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'a' })
+    )
+    expect(set.deployed).toMatchObject({ error: 'servers_not_allowed' })
     expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
   })
 
@@ -487,6 +533,18 @@ describe('site secrets', () => {
     await deploy(alice.key, 'srv', site())
     const bad = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/lower', { value: 'x' })
     expect((await json(bad)).error.code).toBe('invalid_secret_name')
+    for (const reserved of ['PORT', 'FILES', 'HOST', 'AWS_REGION', 'FLING_X', 'LAMBDA_TASK_ROOT']) {
+      const res = await api(env, alice.key, 'PUT', `/api/sites/srv/secrets/${reserved}`, {
+        value: 'x',
+      })
+      expect(res.status).toBe(400)
+      expect((await json(res)).error.code).toBe('invalid_secret_name')
+    }
+    const declared = await deploy(alice.key, 'srv', site(`${FETCH_SERVER}//3`), {
+      server: { secrets: ['PORT'] },
+    })
+    expect(declared.status).toBe(400)
+    expect((await json(declared)).error.code).toBe('invalid_secret_name')
     const big = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/BIG', {
       value: 'x'.repeat(8 * 1024 + 1),
     })
@@ -632,6 +690,28 @@ describe('the kill switch', () => {
     expect(audit.find(e => e.action === 'site.change')).toMatchObject({ change: 'site.server' })
     await browser(boss.session, 'PUT', '/api/admin/sites/srv/server', { stopped: false })
     expect((await route('srv')).x).toBeUndefined()
+  })
+
+  it('refuses a time per request past what the platform serves, and runs a longer one as its most', async () => {
+    const alice = await createUser(env, ALICE)
+    const boss = await createUser(env, BOSS)
+    Object.assign(servers, { maxTimeoutSeconds: 120 })
+    await deploy(alice.key, 'srv', site())
+    const over = await browser(boss.session, 'PUT', '/api/admin/sites/srv/server', {
+      limits: { timeoutSeconds: 121 },
+    })
+    expect(over.status).toBe(400)
+    expect((await json(over)).error.code).toBe('limit_too_high')
+    expect((await env.store.findSite('srv'))?.server?.limits).toBeUndefined()
+    const ok = await browser(boss.session, 'PUT', '/api/admin/sites/srv/server', {
+      limits: { timeoutSeconds: 120 },
+    })
+    expect(await json(ok)).toMatchObject({ limits: { timeoutSeconds: 120 } })
+    // The instance's own SERVER_TIMEOUT_SECONDS past it runs as the most.
+    env.config.servers.limits = { ...env.config.servers.limits, timeoutSeconds: 600 }
+    await deploy(alice.key, 'other', site(`${FETCH_SERVER}//2`))
+    const other = [...servers.options.entries()].at(-1)?.[1]
+    expect(other?.limits.timeoutSeconds).toBe(120)
   })
 
   it("shows the site's server on its page and its review: stopped, the limits and the raised ones", async () => {

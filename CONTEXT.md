@@ -48,8 +48,10 @@ live with one unset is 409 `secrets_missing`. Setting or removing one redeploys:
 reconfigured and probed again (servers/api.ts).
 
 **Waiting for secrets** — a pending version a publish could not take live only for unset secrets
-(`SiteServerState.awaiting`, publication.ts): setting the last of them publishes it. Only the latest
-publish waits; staging another version, or any version going live, ends the wait.
+(`SiteServerState.awaiting`, publication.ts): setting the last of them publishes it. If its server
+then fails to start, it keeps waiting, and every later secret set or removed tries it again
+(servers/api.ts). Only the latest publish waits; staging another version, or any version going
+live, ends the wait, and so does any other refusal.
 
 **Start probe** — the one request a server answers before its version goes live (servers/index.ts
 `startServer`): its health path must answer 2xx, else any answer from `/api/` will do. No answer is
@@ -182,8 +184,10 @@ Function makes itself carry the header; the files S3 serves keep the browser's d
 (`strict-origin-when-cross-origin`, which sends the origin cross-site).
 
 **Site page** — `/sites/<name>` on the app origin (`apps/web/src/pages/Site.tsx`): everything about
-one of your sites (overview, access, owners and publishers, versions, archive and delete), in
-sections under `components/site/`; the lists of people and groups share `components/PeoplePicker.tsx`. The site list links each row to it.
+one of your sites: the overview, then tabs (`?tab=`, `apps/web/src/lib/site-tabs.ts`): Access (who can open it,
+owners and publishers; the one it opens on), Versions (and its Paths), Server (the site server,
+secrets and logs) and Settings (archive and delete), each in sections under `components/site/`,
+and a tab the viewer has nothing in left out; the lists of people and groups share `components/PeoplePicker.tsx`. The site list links each row to it.
 Its overview shows the site's **preview** while it is live.
 
 **Preview** — the home page of a live site as a desktop browser shows it (1280 × 800,

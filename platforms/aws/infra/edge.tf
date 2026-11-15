@@ -88,6 +88,31 @@ resource "aws_cloudfront_function" "site_router" {
   }
 }
 
+# A site server's own 403 or 404, put back (viewer-response on the sites distribution's /api/*, with
+# site servers only). The Web Function entry sends them as 300 with x-fling-status naming the real
+# status, since the custom error responses below would put the error page in their place. Its code
+# is edge/dist/server-status.js (built by edge/build.mjs), published by the deploy workflow like the
+# site router's; until then this placeholder passes every answer through.
+resource "aws_cloudfront_function" "server_status" {
+  count = local.servers_on ? 1 : 0
+
+  name    = "${local.name}-server-status"
+  comment = "${var.name} (${var.env}): site servers' 403 and 404, restored. Code deployed by ${var.github.owner}/${var.github.repo}."
+  runtime = "cloudfront-js-2.0"
+  publish = true
+
+  code = <<-EOT
+    // Placeholder until the first deploy publishes edge/src/server-status.js.
+    function handler(event) {
+      return event.response;
+    }
+  EOT
+
+  lifecycle {
+    ignore_changes = [code]
+  }
+}
+
 # The SPA on the app hostname: a path without a file extension is a client-side route, so it gets
 # index.html. Hashed assets and other files are served as they are.
 resource "aws_cloudfront_function" "spa" {
@@ -264,11 +289,19 @@ resource "aws_cloudfront_distribution" "sites" {
         event_type   = "viewer-request"
         function_arn = aws_cloudfront_function.site_router.arn
       }
+
+      # A server's 403 or 404 arrives as 300 + x-fling-status, out of the custom error responses'
+      # reach; this puts the real status back. Any other answer passes through unchanged.
+      function_association {
+        event_type   = "viewer-response"
+        function_arn = aws_cloudfront_function.server_status[0].arn
+      }
     }
   }
 
   # A missing file (404, as CloudFront may list the bucket) or anything S3 refuses (403), on any site or
   # an unknown host (the router sends those to a key that does not exist): the error page, as a 404.
+  # Distribution-wide, so a site server's own 403 and 404 travel as 300 (server_status above).
   dynamic "custom_error_response" {
     for_each = [403, 404]
 

@@ -4,12 +4,19 @@
  * version declares in its `fling.json` that aren't set, with a warning; and a publish waiting for
  * secrets (`awaitingSecrets`), with those it still needs. A value is set through a password field
  * and never shown or read back. Setting or removing one restarts the live server with the secrets
- * as they are now, and setting the last one a waiting publish needs takes it live: the section
- * says what happened (the live server started, a version went live, the server's log when it
+ * as they are now, and setting the last one a waiting publish needs takes it live (a server
+ * that fails to start then keeps it waiting, tried again at each change): the section says what
+ * happened (the live server started, a version went live, the server's log when it
  * didn't start, or what is still missing). Secrets belong to the site, not a version, so a
  * rollback runs with today's.
  */
-import { SITE_SECRET_NAME_RE, type SiteDetail, type SiteSecretsResponse } from '@fling/shared'
+import {
+  isReservedSecretName,
+  RESERVED_SECRET_NAMES_TEXT,
+  SITE_SECRET_NAME_RE,
+  type SiteDetail,
+  type SiteSecretsResponse,
+} from '@fling/shared'
 import {
   ArrowTopRightOnSquareIcon,
   CheckCircleIcon,
@@ -69,6 +76,17 @@ export function SiteSecrets({
             Version <code className="text-xs">{shortVersion(awaiting.versionId)}</code> is waiting
             to go live until {awaited.length === 1 ? 'this secret is' : 'these secrets are'} set:{' '}
             {names(awaited)}. It goes live as soon as the last one is.
+          </span>
+        </div>
+      )}
+
+      {awaiting && awaited.length === 0 && (
+        <div className="alert alert-info alert-soft text-sm" role="status">
+          <ClockIcon className="size-5" aria-hidden="true" />
+          <span>
+            Version <code className="text-xs">{shortVersion(awaiting.versionId)}</code> is waiting
+            to go live: its server didn’t start with the secrets as they are. Setting or removing a
+            secret tries it again.
           </span>
         </div>
       )}
@@ -289,7 +307,9 @@ function SetSecretModal({
   }
   const naming = secret === ''
   const chosen = naming ? name.trim() : secret
-  const badName = naming && chosen !== '' && !SITE_SECRET_NAME_RE.test(chosen)
+  const badShape = naming && chosen !== '' && !SITE_SECRET_NAME_RE.test(chosen)
+  const reservedName = naming && !badShape && isReservedSecretName(chosen)
+  const badName = badShape || reservedName
 
   return (
     <Modal
@@ -339,9 +359,14 @@ function SetSecretModal({
               autoCapitalize="characters"
               onChange={e => setName(e.target.value.toUpperCase())}
             />
-            {badName && (
+            {badShape && (
               <span className="block text-xs text-error">
                 Capital letters, digits and _, not starting with a digit, at most 64.
+              </span>
+            )}
+            {reservedName && (
+              <span className="block text-xs text-error">
+                {RESERVED_SECRET_NAMES_TEXT} are Fling’s and the platform’s: choose another name.
               </span>
             )}
           </label>

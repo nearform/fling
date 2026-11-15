@@ -15,9 +15,16 @@
 // and any `x-fling-viewer` it sent, with `x-fling-viewer` set from the decision and
 // `x-fling-site` (`<siteId>/<v>[/private]`, serverSiteHeader); to the decision's `target` when it
 // names one (the site's Web Function endpoint, signed by origin access control, with the site's
-// host as `x-forwarded-host`), else to the distribution's own origin.
+// host as `x-forwarded-host`, waiting up to EDGE_SERVER_READ_TIMEOUT_SECONDS for its answer), else
+// to the distribution's own origin. A server's 403 or 404 comes back as a stand-in status that
+// server-status.js, the /api/* behaviour's viewer-response function, puts back.
 
-import { SERVER_SITE_HEADER, SITE_HMAC_KVS_KEY, VIEWER_HEADER } from '@fling/shared/route-keys'
+import {
+  EDGE_SERVER_READ_TIMEOUT_SECONDS,
+  SERVER_SITE_HEADER,
+  SITE_HMAC_KVS_KEY,
+  VIEWER_HEADER,
+} from '@fling/shared/route-keys'
 import { routeSiteRequest, serverSiteHeader } from '@fling/shared/site-routing'
 import cf from 'cloudfront'
 import crypto from 'crypto'
@@ -107,6 +114,9 @@ async function handler(event) {
           signingProtocol: 'sigv4',
           originType: 'lambda',
         },
+        // The distribution's origins wait 30 s; a server may be given longer (the entry enforces
+        // the site's own limit, at most this).
+        timeouts: { readTimeout: EDGE_SERVER_READ_TIMEOUT_SECONDS },
       })
     }
     return request

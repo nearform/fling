@@ -474,11 +474,12 @@ npm dependencies into one module, `_fling/server.mjs`; the server's source, `fli
 |---|---|
 | `fling dev [dir] [--as <email> [--guest]] [--port <n>] [--spa]` | serve the folder as its site will be, at `http://localhost:47180`, with the server rebuilt on save; secrets from `.env`, `.env.local` overriding, only the names `fling.json` declares |
 | `fling secrets set <name> <SECRET>` | set a site secret from stdin (`< file`, or typed at a prompt), never from the command line; `--from .env A B` reads only the names you list. Prints what it did: the live server restarted, the waiting version live, or a start that failed with its log |
-| `fling secrets ls <name>` / `fling secrets rm <name> <SECRET>` | names, who set each and when (never values), and the declared ones not set |
+| `fling secrets ls <name>` / `fling secrets rm <name> <SECRET>` | names, who set each and when (never values), the declared ones not set, and the version waiting for secrets with what it still needs; `rm` tries a waiting version again, as `set` does |
 | `fling logs <name> [--since 1h\|1d\|<ISO time>] [-f, --follow]` | the server's request lines and what it printed; `--follow` polls every 2 seconds |
 
 A deploy whose secrets aren't all set uploads and waits: it names the secrets, and the version goes
-live as soon as the last one is set. A server on a public site asks first (`--yes` in scripts), on
+live as soon as the last one is set. If its server then fails to start, it keeps waiting, and each
+later `fling secrets set` or `rm` tries it again. A server on a public site asks first (`--yes` in scripts), on
 `fling deploy` and on `fling access --public` or `fling visibility public`.
 
 ## Notifications

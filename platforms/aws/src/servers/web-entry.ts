@@ -12,6 +12,10 @@
  *     environment (the execution role's credentials among it) is removed before the bundle loads;
  *   - each response goes out with serverCacheControl's Cache-Control, private unless
  *     SERVER_SITE_HEADER says the site is public;
+ *   - a server's 403 or 404 goes out as SERVER_STAND_IN_STATUS with SERVER_STATUS_HEADER naming
+ *     it (@fling/shared/route-keys), which the /api/* behaviour's viewer-response function puts
+ *     back, so the sites distribution's error page never takes its place; the request line has
+ *     the real status. A server can't set SERVER_STATUS_HEADER itself;
  *   - the wall time (FLING_TIMEOUT_SECONDS, streams included: 504 before the headers, the stream
  *     cut after) and the request body (FLING_BODY_BYTES: 413) are enforced here, to the second and
  *     the byte, whatever Lambda's own timeout steps are;
@@ -34,7 +38,13 @@ import { createConnection, createServer as createNetServer } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { CLI_PACKAGE } from '@fling/shared/distribution'
-import { SERVER_SITE_HEADER, VIEWER_HEADER } from '@fling/shared/route-keys'
+import {
+  isStoodInStatus,
+  SERVER_SITE_HEADER,
+  SERVER_STAND_IN_STATUS,
+  SERVER_STATUS_HEADER,
+  VIEWER_HEADER,
+} from '@fling/shared/route-keys'
 import {
   parseServerSiteHeader,
   parseViewerHeader,
@@ -199,8 +209,15 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         first(answer.headers['cache-control']),
         site?.private ?? true
       )
-      res.writeHead(answer.statusCode ?? 502, answer.statusMessage, headers)
-      log(answer.statusCode ?? 502)
+      const status = answer.statusCode ?? 502
+      delete headers[SERVER_STATUS_HEADER]
+      if (isStoodInStatus(status)) {
+        headers[SERVER_STATUS_HEADER] = String(status)
+        res.writeHead(SERVER_STAND_IN_STATUS, headers)
+      } else {
+        res.writeHead(status, answer.statusMessage, headers)
+      }
+      log(status)
       answer.pipe(res)
       answer.on('error', () => res.destroy())
     }

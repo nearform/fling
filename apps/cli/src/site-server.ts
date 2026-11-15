@@ -183,7 +183,9 @@ export function describeSecretOutcome(
     logs = deployed.logs ?? logs
     lines.push(`Version ${deployed.versionId} did not go live: ${deployed.message}`)
     lines.push(
-      `It no longer waits for secrets: fix what the log shows, then deploy again (\`fling dev\` runs it locally first).`
+      deployed.error === 'server_failed_to_start'
+        ? `It still waits: set or remove a secret (\`fling secrets set ${site} NAME\`) and it is tried again, or fix the server and deploy again (\`fling dev\` runs it locally first).`
+        : 'It has stopped waiting for secrets: fix what the message says, then deploy again.'
     )
   }
   if (missing?.length) {

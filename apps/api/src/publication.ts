@@ -89,7 +89,8 @@
  * 422 `server_failed_to_start`) before the version is complete and the route changes; a repointed
  * version starts it the same way. A pending version refused only for `secrets_missing` waits for
  * them (`SiteServerState.awaiting`, until another version is staged or goes live): setting the last
- * one publishes it (servers/api.ts).
+ * one publishes it, and if its server then fails to start, each later secret set or removed tries
+ * again (servers/api.ts).
  *
  * Forms (forms.ts): a deploy's `forms` (the folder's `fling.forms.json`) is the version's forms
  * config, a blob beside its manifest written when the deploy is made (`formsForDeploy`). Omitted,
@@ -656,7 +657,7 @@ const isSecretsMissing = (err: unknown): err is ApiError & { extra: { secrets: s
 
 /**
  * A pending version refused only for unset secrets waits for them (`SiteServerState.awaiting`):
- * setting the last one takes it live (servers/api.ts).
+ * setting the last one takes it live, or tries to, again at every later change (servers/api.ts).
  */
 async function awaitSecrets(deps: Deps, site: SiteRecord, versionId: string, secrets: string[]) {
   site.server = { ...site.server, awaiting: { versionId, secrets } }

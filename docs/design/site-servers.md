@@ -65,7 +65,8 @@ secret('OPENAI_KEY')          // process.env lookup that throws a clear error wh
 | `node:http` servers; Express where Cloudflare's Node compatibility allows (the Guide lists what is known to work) | `child_process`, a writable filesystem |
 | `node:crypto`, `Buffer`, streams | WebSockets (Web Functions refuse upgrades) |
 | Pure-JS npm packages | State kept in memory: an isolate or environment can go at any time |
-| Secrets as `env.NAME` and `process.env.NAME` | |
+| Secrets as `env.NAME` and `process.env.NAME` | Secrets by a reserved name (`RESERVED_SECRET_NAMES`: `AWS_*`, `LAMBDA_*`, `FLING_*`, `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER`, `FILES`), refused with 400 `invalid_secret_name` on every platform |
+| Timers and I/O within a request | On Cloudflare, timers or I/O at the module's top level: the isolate refuses them while it loads, so the start fails |
 
 ## 3. A worked example
 
@@ -269,14 +270,16 @@ $ fling secrets rm workshop-quote SLACK_WEBHOOK_URL
 - **The version declares them**: `"secrets": [...]` in `fling.json`. A publish or rollback to a
   version whose secrets aren't all set is 409 `secrets_missing`, naming them. A publish then waits
   for them: the version stays pending, and setting the last one takes it live, as if the publish
-  were retried (the start probe included). Only the latest publish waits; staging another version
-  of the site, or any version going live, ends the wait. A rollback is retried by hand.
+  were retried (the start probe included). If the server then fails to start, the version keeps
+  waiting: every later set or remove tries it again, since the fix is often another secret. Only
+  the latest publish waits; staging another version of the site, or any version going live, ends
+  the wait, as does any other refusal. A rollback is retried by hand.
 - **Setting one redeploys**, like `wrangler secret put`. The live version's server runs with the
   secrets as they now are and is probed again; a failed probe is reported in the answer, and the
   secret stays set (that version keeps serving with it, so the fix is another set or a rollback).
-  The answer to a set says what happened: `live` (the live server's probe), `deployed` (the
-  waiting publish, live at its URL or refused with the server's log), `missing` (what the waiting
-  publish still needs).
+  The answer to a set or a remove says what happened: `live` (the live server's probe),
+  `deployed` (the waiting publish, live at its URL or refused with the server's log), `missing`
+  (what the waiting publish still needs).
 - **Owners and publishers set them**, from stdin or with `--from .env NAME…`, which reads only the
   keys named, never as a command-line value. `fling deploy` never uploads `.env`: a local file
   doesn't silently become production secrets. Path publishers can't set them.
@@ -385,10 +388,10 @@ Defaults per server, raised by admins.
 
 | Limit | Default | Why |
 |---|---|---|
-| Wall time per request | 30 s | The Web Functions default. Long enough for an LLM call, short enough to stop a stuck loop. One limit for everything, streamed responses included. On Cloudflare a Fling timer |
-| CPU per request (Cloudflare) | 1 s | Normal API work takes milliseconds; this stops miners. AWS has only the wall time |
-| Requests per site | 100 rps | AWS `rateLimit` steps by 100; a rate-limit binding keyed by site on Cloudflare |
-| Environments per site (AWS) | 2 | The minimum `maxEnvironments`; each takes up to 64 concurrent requests |
+| Wall time per request | 30 s | The Web Functions default. Long enough for an LLM call, short enough to stop a stuck loop. One limit for everything, streamed responses included. On Cloudflare a Fling timer. On AWS at most 120 s, CloudFront's longest wait on an origin (`readTimeout`): the adapter advertises it (`SiteServers.maxTimeoutSeconds`), the core runs a longer setting as 120 s and refuses a raise past it with 400 `limit_too_high` |
+| CPU per request (Cloudflare only, `SERVER_CPU_MS`) | 1 s | Normal API work takes milliseconds; this stops miners. AWS has only the wall time |
+| Requests per site | 100 rps | AWS `rateLimit` steps by 100; on Cloudflare a rate-limit binding keyed by site, `SERVER_RPS` × 10 per 10 s window and counted per location, so approximate |
+| Environments per site (AWS only, `SERVER_ENVIRONMENTS`) | 2 | The minimum `maxEnvironments`; each takes up to 64 concurrent requests. Cloudflare has no environments to count |
 | Request body | 10 MB | Form posts and small uploads |
 | Bundle | 5 MB | Well under both platforms' caps |
 | Secrets per site | 20, 8 KB each | Enough for real apps, too small to be storage |
@@ -428,6 +431,22 @@ adapter and `sites.ts`. If the terms turn bad, the fallback is Workers for Platf
 namespace, with the bundle uploaded at activate. The `servers` capability is off by default on
 Cloudflare instances until the beta ends; an operator turns it on with `SERVERS`.
 
+What differs on Cloudflare:
+
+- **The module loads inside a request.** The isolate refuses timers and I/O at the module's top
+  level, so a bundle that starts a timer or fetches something while it loads fails its start
+  probe. Start them in the first request.
+- **The run is the target.** activate seals the options into R2 and returns the run's name (a
+  keyed hash of them), which the core keeps as the route value's `t`; the sites host loads the
+  isolate by it, whichever Worker isolate activated it.
+- **Requests per site are approximate.** The rate limit binding counts per location over a 10 s
+  window (`SERVER_RPS` × 10 per 10 s), not per second across the world.
+- **No environments.** `SERVER_ENVIRONMENTS` has no meaning here; `SERVER_CPU_MS` is the
+  isolate's `limits.cpuMs`, which AWS has no equivalent for. A request Cloudflare stops at it
+  answers 502 `server_cpu_limit`.
+- **The clock stands still.** `Date.now()` advances during a request only across I/O, so a busy
+  loop timed by it never ends; the CPU limit stops it.
+
 ## 15. AWS: a Lambda Web Function per site, a revision per version
 
 Classic Lambda function URLs behind CloudFront OAC need the browser to send a SHA-256 of every POST
@@ -455,8 +474,23 @@ cf.updateRequestOrigin({
     enabled: true, signingBehavior: 'always-amz-auth',
     signingProtocol: 'sigv4', originType: 'lambda',
   },
+  timeouts: { readTimeout: 120 }, // CloudFront's most; the entry enforces the site's limit
 })
 ```
+
+Two things CloudFront decides for the whole sites distribution, and how Fling keeps out of them:
+
+- **The wait.** The distribution's origins wait 30 s; the router asks for 120 s on every invoke,
+  the most CloudFront allows without a quota increase. That caps `SERVER_TIMEOUT_SECONDS` on AWS:
+  the adapter advertises 120 (`SiteServers.maxTimeoutSeconds`), the core runs a longer setting as
+  120 and refuses an admin's raise past it (400 `limit_too_high`).
+- **The error page.** The distribution's custom error responses turn every origin 403 and 404 into
+  the sites' 404 page, and a viewer-response function never runs on an answer of 400 or more. So
+  the Web Function entry sends a server's 403 or 404 as `300` with `x-fling-status: <real>`, and a
+  viewer-response function on `/api/*` only (`edge/src/server-status.js`) puts the status back
+  and removes the header. 300 is below 400, isn't a redirect without a `Location`, may carry a
+  body, and if the restore were ever skipped a client still sees neither a success nor a
+  redirect. A server's own 300 has no header and passes through unchanged.
 
 **The API creates Web Functions at publish time, inside an IAM fence.** Terraform defines the
 fence and the shared parts; the API creates each site's function, endpoint and revisions.
@@ -545,7 +579,7 @@ published through the real CLI and API, routed by the real decision and served b
 | Browser-sent `x-fling-viewer` | Dropped |
 | `node:crypto`; `node:http` server in the isolate | Work |
 | Outbound fetch with `globalOutbound: null` | Blocked |
-| 5 s busy loop, `cpuMs: 50` | Not cut off locally |
+| 5 s busy loop, `cpuMs: 50` | Not cut off locally; on a real account stopped ("exceeded CPU time limit", 502 `server_cpu_limit`) |
 | New version / rollback | New isolate / previous isolate, still warm |
 | Members site: no cookie / member cookie | 302 / 200 with the viewer |
 | Server reads `data/rates.json` by import and by `FILES` | Both work; `FILES` refuses `_fling/`, dotfiles, outside the version |
@@ -558,8 +592,6 @@ Still to check, none of which changes the author contract:
   `always-amz-auth`, Terraform provider support for `lambda-web`, Region availability, and about
   50 revisions kept per function (a rollback past that recreates the revision from the stored
   bundle). Decides whether publishing needs 202 and polling.
-- **Cloudflare CPU limit:** does `limits.cpuMs` stop a busy loop on a real account? Local workerd
-  doesn't enforce it.
 - **Secret scanner:** how often do minified npm bundles trip it? Bundle the top 200 packages and
   see.
 

@@ -9,6 +9,8 @@
  *   - the instance runs no servers (`SERVERS=off`, or a platform without a SiteServers adapter),
  *     or `SERVERS` doesn't name the publisher (`canPublishServer`) → 403 `servers_not_allowed`;
  *   - a bundle over SERVER_BUNDLE_MAX_BYTES → 413 `too_large`;
+ *   - `fling.json` declares a secret by a reserved name (RESERVED_SECRET_NAMES) → 400
+ *     `invalid_secret_name`;
  *   - the site has a Path at `api`, which the server's `/api/*` would hide → 409 `path_conflict`;
  *   - the site has no server yet and SERVERS_MAX_SITES sites have one → 409 `too_many_servers`;
  *   - the site is (or the deploy makes it) public and the deploy doesn't say
@@ -49,7 +51,7 @@ import { ApiError, conflict, forbidden } from '../lib/errors.ts'
 import { canPublishServer, type Principal } from '../policy.ts'
 import type { ServerMark, SiteRecord, User, VersionRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { secretValues } from './secrets.ts'
+import { checkSecretName, secretValues } from './secrets.ts'
 import type { ServerOptions, ServerSite, ServerVersion, SiteServers } from './types.ts'
 
 /** The module a server imports Fling's helpers from: the CLI package's `/server`. */
@@ -157,6 +159,7 @@ export async function admitServer(
       `${SERVER_BUNDLE} is ${(bundle.size / 1024 / 1024).toFixed(1)} MB; a server's bundle is at most ${SERVER_BUNDLE_MAX_BYTES / 1024 / 1024} MB`
     )
   }
+  for (const name of opts.server?.secrets ?? []) checkSecretName(name)
   const { site } = opts
   if (site && (await deps.store.getPath(site.id, SERVER_PATH_FOLDER))) {
     throw conflict(
@@ -199,9 +202,15 @@ export function checkBundle(bytes: Uint8Array) {
   )
 }
 
-/** The limits a site's server runs with: the instance's, with any an admin raised for the site. */
+/**
+ * The limits a site's server runs with: the instance's, with any an admin raised for the site,
+ * the time per request no more than the platform serves (`SiteServers.maxTimeoutSeconds`).
+ */
 export function limitsOf(deps: Deps, site: Pick<SiteRecord, 'server'>): ServerLimits {
-  return { ...deps.config.servers.limits, ...site.server?.limits }
+  const limits = { ...deps.config.servers.limits, ...site.server?.limits }
+  const max = deps.servers?.maxTimeoutSeconds
+  if (max !== undefined && limits.timeoutSeconds > max) limits.timeoutSeconds = max
+  return limits
 }
 
 /** How a version's server runs: its declared secrets' values, the egress, the limits. */
@@ -219,7 +228,8 @@ export async function optionsFor(
 
 /**
  * 409 `secrets_missing`. A pending version (a publish) waits for them: setting the last one takes
- * it live (servers/api.ts). A complete one (a rollback) is rolled back to again.
+ * it live, and a start that fails then is tried again at each later secret change (servers/api.ts).
+ * A complete one (a rollback) is rolled back to again.
  */
 const secretsMissing = (
   site: SiteRecord,

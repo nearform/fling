@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "The CloudFront Function (cloudfront-js-2.0) that routes sites hosts to S3 objects: a thin shell around the shared routing decision (@fling/shared/site-routing), bundled by build.mjs. index.mjs runs the bundle in Node for tests and local dev.",
+  "description": "The CloudFront Functions (cloudfront-js-2.0): the site router, which routes sites hosts to S3 objects or site servers (a thin shell around the shared routing decision, @fling/shared/site-routing), and the server status function, which puts a site server's own 403 or 404 back. Bundled by build.mjs; index.mjs runs the bundles in Node for tests and local dev.",
   "type": "module",
   "main": "./index.mjs",
   "types": "./index.d.mts",

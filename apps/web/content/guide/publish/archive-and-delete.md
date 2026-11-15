@@ -3,7 +3,7 @@ title: Archive or delete a site
 part: publish
 order: 70
 summary: Take a site offline and keep it, or remove it for good.
-sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteDangerZone.tsx, apps/web/src/pages/Sites.tsx]
+sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteDangerZone.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/site-tabs.ts]
 verified: 60d6113
 ---
 
@@ -53,7 +53,7 @@ fling rm old-prototype           # asks first; --yes skips the question
 
 ## In the web app
 
-Open the site from **Sites** and scroll to **Danger zone**.
+Open the site from **Sites** and choose its **Settings** tab, with the **Danger zone**.
 
 <!-- requires: archive -->
 - **Archive…** asks you to confirm, then takes the site offline. It moves to the **Archived** tab
@@ -63,7 +63,7 @@ Open the site from **Sites** and scroll to **Danger zone**.
 
 ## When it goes wrong
 
-- **There is no Danger zone on the site's page.** You publish the site but don't own it. Ask one
+- **There is no Settings tab on the site's page.** You publish the site but don't own it. Ask one
   of its owners: see [Owners and publishers](/guide/share/owners-and-publishers).
 <!-- requires: archive -->
 - **`owner_only` when you publish.** The site is archived, and only an owner can bring it back.

@@ -13,6 +13,12 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **The site page has tabs.** Under the overview, **Access** (who can open the site, its owners
+  and publishers) is the one it opens on; **Versions** has its versions and Paths, **Server** its
+  site server, secrets and logs, and **Settings** archive and delete. A tab you have nothing in is
+  left out, a publish waiting for secrets marks the Server tab, and `?tab=` in the address opens
+  one directly.
+
 ## 0.12.0 (2026-11-13)
 
 - **The remote MCP server can trust an outside authorization server.** Set

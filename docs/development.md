@@ -67,7 +67,7 @@ same way (`pnpm cli groups create team --add b@example.test`, then `pnpm cli acc
 team`). Signed in as the other address, `pnpm cli ls --shared` (or the Sites page's Shared with
 me tab) lists what was shared with it. Owners and publishers work the same way: `pnpm cli
 publishers <site> --add b@example.test` lets the other address deploy the site and roll it back
-(the site page shows it the read-only Owners and publishers section, and no Access or danger zone),
+(the site page shows it the read-only Owners and publishers section, and no Access section or Settings tab),
 and `pnpm cli owners <site> --add b@example.test` makes it a co-owner. `pnpm cli deploy <folder>
 --name <site> --path PAY-412` publishes the folder as the Path `http://<site>.fling.lvh.me:47102/PAY-412/`,
 leaving the rest of the site as it is; `pnpm cli paths <site>` lists the Paths, `pnpm cli versions

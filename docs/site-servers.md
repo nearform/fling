@@ -320,6 +320,30 @@ without the page, and use its secrets through it. The CLI asks you to confirm, o
 and on `fling access … --public` or `fling visibility … public` for a site with a server; `--yes`
 confirms in scripts, and without a terminal the CLI refuses rather than guess.
 
+### Pull a site with a server
+
+`fling pull` (and `fling_pull`) of a version with a server brings down its files with the built
+bundle, `_fling/server.mjs`, and writes the version's `fling.json` beside them: the secrets and
+health path its deploy declared, with no `"server"` entry, since there is no source to bundle.
+Deploying the pulled folder publishes that bundle as it is, with the same secrets declared.
+
+```text
+$ fling pull workshop-quote
+  ✓ Pulled workshop-quote into workshop-quote (5 files, 467 KB, version f12ba1d8273dc664)
+  Its server's config is in fling.json. _fling/server.mjs is the server's built bundle, not its source: the folder deploys again as it is, but the server is changed from its source (server.ts and the rest, in the author's own repository), which Fling never stores.
+```
+
+**The folder holds the bundle, never the source.** Fling stores only what was published:
+`server.ts`, `server/` and the rest stay in the author's own repository. Change the pages in a
+pulled folder; change the server where its source lives, and deploy from there.
+
+**Publishing on a base keeps the base's server config.** A publish on the version pulled (`fling
+deploy` of the pulled folder, or `fling_read_files` then `fling_publish` with `base`) whose
+`_fling/server.mjs` is the base's byte for byte, and that sends no `fling.json`, keeps the secrets
+and health path the base version declared. A publish that sends one (`fling.json` in the folder or
+among the files, or `siteServer`) uses that one. `fling_read_files` returns the config as `server`
+in its result; it is not one of the files.
+
 ## Logs: fling logs
 
 ```sh

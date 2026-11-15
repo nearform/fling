@@ -14,6 +14,12 @@
  * A version with forms (forms.ts) comes with its config: the pull writes it as `fling.forms.json`
  * at the top of the folder and records its hash in the link (`forms`), so a deploy after it was
  * deleted removes the forms (forms.ts in the CLI). It is never one of the link's `files`.
+ *
+ * A version with a site server comes with its config (the secrets and health path its `fling.json`
+ * declared): the pull writes it as `fling.json`, without a `server` entry since the folder holds
+ * the built `_fling/server.mjs`, so a deploy of the folder publishes that bundle as it is with the
+ * same config (server-build.ts). The server's source is never on Fling: it is changed where its
+ * author keeps it (PULLED_SERVER_NOTE).
  */
 import { createHash } from 'node:crypto'
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
@@ -24,6 +30,8 @@ import {
   PULL_URL_TTL_SECONDS,
   type PullFile,
   PullResponseSchema,
+  SERVER_CONFIG_FILE,
+  type ServerConfig,
 } from '@fling/shared'
 import { z } from 'zod'
 import type { ApiClient, FetchLike } from './api.ts'
@@ -50,6 +58,8 @@ const SiteLinkSchema = z.object({
   files: z.record(z.string(), z.string()),
   /** the SHA-256 of the fling.forms.json pulled (or deployed); absent when the version had none */
   forms: z.string().optional(),
+  /** the SHA-256 of the fling.json pulled; absent when the version had no server */
+  serverConfig: z.string().optional(),
 })
 export type SiteLink = z.infer<typeof SiteLinkSchema>
 
@@ -154,6 +164,8 @@ export interface PullResult {
   totalBytes: number
   /** the version has forms: written as fling.forms.json */
   forms: boolean
+  /** the version has a server: its config, written as fling.json beside its bundle */
+  serverConfig?: ServerConfig
 }
 
 const defaultSleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
@@ -209,9 +221,18 @@ export async function pullSite(
     await writeFile(join(opts.dir, FORMS_FILE), bytes)
     forms = createHash('sha256').update(bytes).digest('hex')
   }
+  let serverConfig: string | undefined
+  if (pulled.server) {
+    const bytes = Buffer.from(`${JSON.stringify(pulled.server, null, 2)}\n`)
+    await writeFile(join(opts.dir, SERVER_CONFIG_FILE), bytes)
+    serverConfig = createHash('sha256').update(bytes).digest('hex')
+  }
   // A pull over an earlier one of the same site: what it pulled that the site no longer has goes.
   if (before && before.server === deps.client.serverUrl && before.name === opts.name) {
     if (before.forms && !pulled.forms) await rm(join(opts.dir, FORMS_FILE), { force: true })
+    if (before.serverConfig && !pulled.server) {
+      await rm(join(opts.dir, SERVER_CONFIG_FILE), { force: true })
+    }
     const now = new Set(pulled.files.map(f => f.path))
     const beforePrefix = before.path === undefined ? '' : `${before.path}/`
     for (const path of Object.keys(before.files)) {
@@ -227,6 +248,7 @@ export async function pullSite(
     ...(pulled.path === undefined ? {} : { path: pulled.path }),
     files: Object.fromEntries(pulled.files.map(f => [f.path, f.sha256])),
     ...(forms ? { forms } : {}),
+    ...(serverConfig ? { serverConfig } : {}),
   })
   return {
     server: deps.client.serverUrl,
@@ -237,6 +259,7 @@ export async function pullSite(
     fileCount: pulled.files.length,
     totalBytes,
     forms: pulled.forms !== undefined,
+    ...(pulled.server ? { serverConfig: pulled.server } : {}),
   }
 }
 

@@ -228,6 +228,11 @@ export const PullResponseSchema = z.object({
   expiresAt: z.string(),
   /** the version's forms config (`fling.forms.json`; `forms` capability), absent when it has none */
   forms: FormsConfigSchema.optional(),
+  /**
+   * the version's server config, as its `fling.json` declared it (`servers` capability): absent
+   * when it has no server. `fling.json` is a build input, never one of the `files`.
+   */
+  server: ServerConfigSchema.optional(),
 })
 export type PullResponse = z.infer<typeof PullResponseSchema>
 

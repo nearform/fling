@@ -1,7 +1,7 @@
 // The remote MCP's site server tools: fling_publish with a dependency-free `_fling/server.mjs`
 // and its fling.json (a file among the others, or `siteServer`), the refusals said as what to do
 // next, fling_server_template and fling_logs.
-import { SERVER_TEMPLATE } from '@fling/shared'
+import { PULLED_SERVER_NOTE, SERVER_TEMPLATE } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { logInvoke } from '../src/servers/logs.ts'
 import { MemoryServerLogs } from '../src/servers/memory-logs.ts'
@@ -122,6 +122,32 @@ describe('fling_publish with a site server', () => {
     })
     expect(r.isError).toBe(true)
     expect(r.content[0]?.text).toMatch(/secrets_missing[\s\S]*fling secrets set needs-key/)
+  })
+})
+
+describe('fling_read_files and fling_publish with `base` on a site with a server', () => {
+  it("returns the server's fling.json, says the bundle is not the source, and a page change keeps it", async () => {
+    await callTool(env, bearer, 'fling_publish', {
+      name: 'tz-base',
+      access: 'members',
+      files: [page, bundle()],
+      siteServer: { secrets: [], health: '/api/health' },
+    })
+    const read = await callTool(env, bearer, 'fling_read_files', { name: 'tz-base' })
+    expect(read.structuredContent.server).toEqual({ secrets: [], health: '/api/health' })
+    expect(read.structuredContent.files.map((f: { path: string }) => f.path)).not.toContain(
+      'fling.json'
+    )
+    expect(read.content[0]?.text).toContain(PULLED_SERVER_NOTE)
+    expect(read.content[0]?.text).toContain('not a published file')
+    servers.probes = []
+    const r = await callTool(env, bearer, 'fling_publish', {
+      name: 'tz-base',
+      base: read.structuredContent.versionId,
+      files: [{ path: 'index.html', content: '<h1>changed</h1>' }],
+    })
+    expect(r.isError).toBeFalsy()
+    expect(servers.probes.map(p => p.path)).toEqual(['/api/health'])
   })
 })
 

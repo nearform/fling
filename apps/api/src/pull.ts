@@ -11,7 +11,10 @@
  * The bytes never pass through the API (a buffered Lambda response is capped well below a site's
  * size): the API answers with each file's path, size, type and SHA-256, and a short-lived signed GET
  * for its bytes (`Blobs.presignGet`). The version's forms config (forms.ts) comes with them, so
- * the client can write `fling.forms.json` back into the folder.
+ * the client can write `fling.forms.json` back into the folder. So does its server's config, for a
+ * version with a server (`server`: the secrets and health path its `fling.json` declared), so the
+ * client can write `fling.json` back: it is a build input, never one of the files. A publish on
+ * the version pulled that keeps its bundle keeps that config anyway (publication.ts).
  *
  * With `path`, the pull is of that Path of the site (paths.ts): its version (the current one
  * unless `versionId` names another), on the same terms with the Path's roles (`pathPolicySite`)
@@ -22,6 +25,7 @@ import {
   type ManifestFile,
   PULL_URL_TTL_SECONDS,
   type PullResponse,
+  type ServerConfig,
   siteObjectKey,
 } from '@fling/shared'
 import { manifestKey } from './blobs/types.ts'
@@ -49,7 +53,13 @@ export async function pullable(
   user: User,
   name: string,
   opts: { versionId?: string; path?: string } = {}
-): Promise<{ site: SiteRecord; storage: string; versionId: string; files: ManifestFile[] }> {
+): Promise<{
+  site: SiteRecord
+  storage: string
+  versionId: string
+  files: ManifestFile[]
+  server?: ServerConfig
+}> {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.pull')
   const what = opts.path === undefined ? `"${name}"` : `/${opts.path}/ of "${name}"`
   const path = opts.path === undefined ? null : await deps.store.getPath(site.id, opts.path)
@@ -82,17 +92,28 @@ export async function pullable(
   }
   const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(target.storage, versionId))
   if (!manifest) throw notFound(`The files of version ${versionId} of ${what} are gone`)
-  return { site, storage: target.storage, versionId, files: manifest.files.slice().sort(byPath) }
+  // A Path never has a server; the site's version says what its fling.json declared.
+  const record = path ? null : (version ?? (await deps.store.getVersion(target.ref, versionId)))
+  const mark = record?.server
+  return {
+    site,
+    storage: target.storage,
+    versionId,
+    files: manifest.files.slice().sort(byPath),
+    ...(mark
+      ? { server: { secrets: mark.secrets, ...(mark.health ? { health: mark.health } : {}) } }
+      : {}),
+  }
 }
 
-/** GET /api/sites/:name/pull — the files to download, each with a signed URL, and the forms. */
+/** GET /api/sites/:name/pull — the files to download, each with a signed URL, the forms and server config. */
 export async function pull(
   deps: Deps,
   user: User,
   name: string,
   opts: { versionId?: string; path?: string } = {}
 ): Promise<PullResponse> {
-  const { storage, versionId, files } = await pullable(deps, user, name, opts)
+  const { storage, versionId, files, server } = await pullable(deps, user, name, opts)
   const expiresAt = new Date(deps.clock.now().getTime() + PULL_URL_TTL_SECONDS * 1000)
   const forms = await readForms(deps, storage, versionId)
   const prefix = opts.path === undefined ? '' : `${opts.path}/`
@@ -111,5 +132,6 @@ export async function pull(
     files: signed,
     expiresAt: expiresAt.toISOString(),
     ...(forms ? { forms } : {}),
+    ...(server ? { server } : {}),
   }
 }

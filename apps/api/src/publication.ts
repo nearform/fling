@@ -84,7 +84,9 @@
  * run for `/api/*`. Admission checks it from the manifest (`admitServer`: who may publish one, its
  * size, a Path at `api`, the instance's cap, a public site's confirmation; a Path publish carrying
  * `_fling/` is 400 `server_on_path`), and the version records the server mark (`server`: the
- * deploy's `fling.json`). Going live reads the bundle back (`checkBundle`: 400
+ * deploy's `fling.json`). A publish on a base that sends no `fling.json` and keeps the base's
+ * `_fling/server.mjs` (same SHA-256) keeps the base version's mark (`inheritedServer`): the file is
+ * a build input, so a pulled folder may not have it; one sent is the version's. Going live reads the bundle back (`checkBundle`: 400
  * `server_not_bundled`) and starts the server (`startServer`: `secrets_missing`, the start probe,
  * 422 `server_failed_to_start`) before the version is complete and the route changes; a repointed
  * version starts it the same way. A pending version refused only for `secrets_missing` waits for
@@ -478,7 +480,7 @@ async function layerOn(
   deps: Deps,
   target: { storage: string; current: string | null; what: string },
   req: Pick<DeployRequest, 'base' | 'partial' | 'remove'> & { files: ManifestFile[] }
-): Promise<{ layer: Layer; files: ManifestFile[] } | null> {
+): Promise<{ layer: Layer; files: ManifestFile[]; baseBundle?: string } | null> {
   const { base } = req
   if (!base) return null
   if (target.current !== base) throw baseChanged(target.what, base)
@@ -509,7 +511,27 @@ async function layerOn(
     if (kept.length >= MAX_KEPT_FILES) break
     if (hashes.get(f.path) === f.sha256) kept.push(f.path)
   }
-  return { layer: { base, kept }, files }
+  const baseBundle = hashes.get(SERVER_BUNDLE)
+  return { layer: { base, kept }, files, ...(baseBundle ? { baseBundle } : {}) }
+}
+
+/**
+ * The server config a publish on a base carries over (see the header): the base version's, when
+ * the deploy sends none and its `_fling/server.mjs` is the base's byte for byte. `fling.json` is a
+ * build input, never published, so a pulled folder or a fling_read_files agent may not have it.
+ */
+async function inheritedServer(
+  deps: Deps,
+  site: SiteRecord | null,
+  layered: { layer: Layer; files: ManifestFile[]; baseBundle?: string } | null,
+  sent: ServerConfig | undefined
+): Promise<ServerConfig | undefined> {
+  if (sent || !site || !layered?.baseBundle) return sent
+  const bundle = layered.files.find(f => f.path === SERVER_BUNDLE)
+  if (bundle?.sha256 !== layered.baseBundle) return undefined
+  const mark = (await deps.store.getVersion(site, layered.layer.base))?.server
+  if (!mark) return undefined
+  return { secrets: mark.secrets, ...(mark.health ? { health: mark.health } : {}) }
 }
 
 /** Name checks, the unchanged / repointed shortcuts, else a pending version (manifest stored). */
@@ -549,12 +571,26 @@ async function prepare(
     await checkDeployChanges(deps, actor, existing, deployChanges(existing, req, asked))
     await checkRestore(deps, actor, existing)
   }
+  // On a base, the server is admitted on the merged files: a partial publish carries its bundle.
+  const layered =
+    req.path === undefined
+      ? await layerOn(
+          deps,
+          {
+            storage: existing?.id ?? '',
+            current: existing?.currentVersionId ?? null,
+            what: `"${name}"`,
+          },
+          { ...req, files: req.manifest.files }
+        )
+      : null
+  const server = await inheritedServer(deps, existing, layered, req.server)
   const mark = await admitServer(deps, principal, {
     name,
     site: existing,
-    files: req.manifest.files,
+    files: layered?.files ?? req.manifest.files,
     ...(req.path === undefined ? {} : { path: req.path }),
-    ...(req.server ? { server: req.server } : {}),
+    ...(server ? { server } : {}),
     visibility: req.visibility ?? access?.visibility ?? existing?.visibility ?? 'private',
     ...(req.confirmPublicServer ? { confirmPublicServer: true } : {}),
   })
@@ -571,11 +607,6 @@ async function prepare(
     return preparePath(deps, user, actor, site, req.path, req, {})
   }
 
-  const layered = await layerOn(
-    deps,
-    { storage: existing?.id ?? '', current: existing?.currentVersionId ?? null, what: `"${name}"` },
-    { ...req, files: req.manifest.files }
-  )
   const layer = layered?.layer ?? null
   const files = layered?.files ?? req.manifest.files
   const versionId = computeVersionId(files)

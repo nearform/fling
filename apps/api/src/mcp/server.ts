@@ -505,6 +505,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       files: read.files,
       missing: read.missing,
       ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}),
+      ...(read.server ? { server: read.server } : {}),
     }
     // The contents go in the text too: some clients show the model only the text.
     return {

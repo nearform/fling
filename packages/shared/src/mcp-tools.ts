@@ -737,7 +737,10 @@ export function mcpToolsFor(w: McpWording) {
         `anything else base64), to change some of them and publish again. Returns up to ${MCP_READ_MAX_BYTES / 1024 / 1024} MB ` +
         'a call, in path order: when there is more, pass the returned `cursor` for the next files, or name the ' +
         'files you need in `paths` (fling_files lists them). It returns the `versionId` to pass to fling_publish as ' +
-        `\`base\`. Anyone who can open the site may read it; publishing needs an owner or publisher. ${PULL_NOTE}`,
+        '`base`. A site with a server also returns `server`, its fling.json (not a published file): publishing on ' +
+        'this base with the same _fling/server.mjs keeps it, `siteServer` changes it. The bundle is built, not the ' +
+        "server's source, which Fling never stores. " +
+        `Anyone who can open the site may read it; publishing needs an owner or publisher. ${PULL_NOTE}`,
       inputSchema: {
         name: siteName,
         paths: z

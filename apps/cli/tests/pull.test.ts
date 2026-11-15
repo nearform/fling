@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { PULLED_SERVER_NOTE } from '@fling/shared'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -289,6 +290,113 @@ describe('deploying a pulled folder', () => {
     const body = JSON.parse(String(m.calls.find(c => c.method === 'POST')?.init.body))
     expect(body.base).toBeUndefined()
     expect(log.lines.join('\n')).toMatch(/pulled from my-app/)
+  })
+})
+
+describe('a site with a server', () => {
+  const BUNDLE = 'export default{fetch(){return new Response("ok")}}'
+  const FLING = { secrets: ['TOKEN'], health: '/api/health' }
+  const files = { 'index.html': '<h1>v1</h1>', '_fling/server.mjs': BUNDLE }
+
+  /** The pull of a version with a server: its files and its fling.json's config. */
+  function serverRoutes(extra: Record<string, Route> = {}) {
+    const routes = pullRoutes(files)
+    const pull = routes['GET /api/sites/my-app/pull'] as Route
+    return mockFetch({
+      ...routes,
+      'GET /.well-known/fling': () =>
+        jsonResponse({
+          ...INSTANCE,
+          capabilities: { ...INSTANCE.capabilities, pull: true, servers: true },
+        }),
+      'GET /api/sites/my-app/pull': async (url, init) =>
+        jsonResponse({ ...((await (await pull(url, init)).json()) as object), server: FLING }),
+      ...extra,
+    })
+  }
+
+  function deployRoutes() {
+    return serverRoutes({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse({ status: 'upload', versionId: NEXT, uploads: [] }),
+      [`POST /api/sites/my-app/deploys/${NEXT}/finalize`]: () =>
+        jsonResponse({ status: 'live', versionId: NEXT, site: site() }),
+    })
+  }
+
+  const posted = (m: ReturnType<typeof mockFetch>) =>
+    JSON.parse(
+      String(
+        m.calls.find(c => c.method === 'POST' && c.url.pathname.endsWith('/deploys'))?.init.body
+      )
+    )
+
+  it('`fling pull` writes its fling.json beside the bundle, and says the source is not there', async () => {
+    const dir = join(await tempDir(), 'my-app')
+    const m = serverRoutes()
+    const { ctx, log } = await testContext({ store: await loggedInStore(), fetch: m.fetch })
+    await runPull(ctx, 'my-app', dir, {})
+    expect(JSON.parse(await readFile(join(dir, 'fling.json'), 'utf8'))).toEqual(FLING)
+    expect(await readFile(join(dir, '_fling/server.mjs'), 'utf8')).toBe(BUNDLE)
+    expect((await readSiteLink(dir))?.serverConfig).toBeDefined()
+    expect(Object.keys((await readSiteLink(dir))?.files ?? {})).not.toContain('fling.json')
+    expect(log.lines.join('\n')).toContain(PULLED_SERVER_NOTE)
+    expect(log.lines.join('\n')).toContain('not its source')
+  })
+
+  it('deploying the pulled folder publishes the bundle as it is, with the secrets declared', async () => {
+    const dir = join(await tempDir(), 'my-app')
+    await pullSite(client(serverRoutes().fetch), { name: 'my-app', dir })
+    await writeTree(dir, { 'index.html': '<h1>v2</h1>' })
+    const m = deployRoutes()
+    const { ctx } = await testContext({ store: await loggedInStore(), fetch: m.fetch })
+    await runDeploy(ctx, dir, {})
+    const body = posted(m)
+    expect(body.base).toBe(BASE)
+    expect(body.server).toEqual(FLING)
+    const paths = body.manifest.files.map((f: { path: string }) => f.path)
+    expect(paths).toContain('_fling/server.mjs')
+    expect(paths).not.toContain('fling.json')
+  })
+
+  it('without the fling.json, the deploy sends no config: the base keeps its own', async () => {
+    const dir = join(await tempDir(), 'my-app')
+    await pullSite(client(serverRoutes().fetch), { name: 'my-app', dir })
+    const { rm } = await import('node:fs/promises')
+    await rm(join(dir, 'fling.json'))
+    const m = deployRoutes()
+    const { ctx } = await testContext({ store: await loggedInStore(), fetch: m.fetch })
+    await runDeploy(ctx, dir, {})
+    const body = posted(m)
+    expect(body.base).toBe(BASE)
+    expect(body.server).toBeUndefined()
+  })
+
+  it('a pull of a version without a server removes the fling.json an earlier pull wrote', async () => {
+    const dir = join(await tempDir(), 'my-app')
+    await pullSite(client(serverRoutes().fetch), { name: 'my-app', dir })
+    await pullSite(client(mockFetch(pullRoutes()).fetch), { name: 'my-app', dir, force: true })
+    expect(existsSync(join(dir, 'fling.json'))).toBe(false)
+  })
+
+  it('fling_pull and fling_read_files say the bundle is not the source, and return the config', async () => {
+    const home = await tempDir()
+    const server = createMcpServer({
+      store: await loggedInStore(),
+      fetch: serverRoutes().fetch,
+      locate: { cwd: home, home, platform: process.platform, env: {} },
+      waitReady: async () => ({ ready: true, waitedMs: 0 }),
+    })
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair()
+    const mcp = new Client({ name: 'test', version: '0.0.0' })
+    await Promise.all([server.connect(serverT), mcp.connect(clientT)])
+    const text = (r: unknown) => (r as { content: { text: string }[] }).content[0]?.text ?? ''
+    const pulled = await mcp.callTool({ name: 'fling_pull', arguments: { name: 'my-app' } })
+    expect(text(pulled)).toContain(PULLED_SERVER_NOTE)
+    expect(text(pulled)).toContain('fling.json')
+    const read = await mcp.callTool({ name: 'fling_read_files', arguments: { name: 'my-app' } })
+    expect(text(read)).toContain(PULLED_SERVER_NOTE)
+    expect(text(read)).toContain(JSON.stringify(FLING))
   })
 })
 

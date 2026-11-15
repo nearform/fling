@@ -378,7 +378,7 @@ async function deployPrepared(
         forms: forms.send,
         ...(server
           ? {
-              server: serverRequest(server),
+              ...serverRequest(server),
               ...(confirmPublicServer ? { confirmPublicServer: true } : {}),
               onFinalize: () => {
                 starting = performance.now()

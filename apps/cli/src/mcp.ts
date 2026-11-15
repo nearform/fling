@@ -77,6 +77,7 @@ import {
   needsAudience,
   normalizePathFolder,
   PATH_PUBLISH_NOTE,
+  PULLED_SERVER_NOTE,
   PullResponseSchema,
   pageOfFiles,
   privateAudience,
@@ -647,7 +648,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         forms: forms.send,
         ...(siteServer
           ? {
-              server: serverRequest(siteServer),
+              ...serverRequest(siteServer),
               ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
             }
           : {}),
@@ -1013,6 +1014,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           summary:
             `Pulled ${pulled.fileCount} file(s) of ${pulled.name}${path ? ` /${path}/` : ''} (version ${pulled.versionId}, ${formatBytes(pulled.totalBytes)}) into ${pulled.dir}. ` +
             (pulled.forms ? `Its forms are in ${FORMS_FILE} there. ` : '') +
+            (pulled.serverConfig
+              ? `Its server's config is in ${SERVER_CONFIG_FILE} there. ${PULLED_SERVER_NOTE} `
+              : '') +
             `Edit the files there, then call fling_deploy with path "${pulled.dir}": it publishes on version ${pulled.versionId}.`,
           data: pulled,
         }
@@ -1056,6 +1060,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         files,
         missing,
         ...(nextCursor ? { nextCursor } : {}),
+        ...(pulled.server ? { server: pulled.server } : {}),
       }
       return { summary: describeReadFiles(args.name, result), data: result }
     })

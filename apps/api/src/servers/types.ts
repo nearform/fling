@@ -76,6 +76,13 @@ export interface SiteServers {
   /** The start probe: one request to this version's server, before the route points at it. */
   probe(site: ServerSite, version: ServerVersion, request: ProbeRequest): Promise<ProbeResult>
   /**
+   * The version's server takes the site's requests, once its start probe passed and before the
+   * route changes. Only for a platform whose edge reaches one place for every version (AWS: the
+   * live endpoint's revision weights); where the route value names the version, the route is the
+   * switch and there is nothing to do.
+   */
+  goLive?(site: ServerSite, version: ServerVersion): Promise<void>
+  /**
    * The live version's options changed (a secret set or removed, an admin's limits): it runs with
    * these from now on. Cloudflare: a fresh isolate; AWS: a new revision of the same version.
    */

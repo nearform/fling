@@ -9,6 +9,8 @@
  * API Gateway WebSocket events (the live rooms' `$connect`, `$default`, `$disconnect`, infra/live.tf)
  * go to live.ts with the same deps.
  *
+ * The hourly `{"fling":"maintain"}` also sweeps site servers (`sweepServers`) when they are on.
+ *
  * One non-HTTP event: `{"fling":"migrate"}` runs the pending data migrations (deploy.yml invokes it
  * after updating the code; see @fling/api/migrations) until shortly before the invocation's
  * timeout and returns the runner's report; invoke again until `done`. Optional `only: ["NNNN"]`
@@ -31,12 +33,14 @@ import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations
 import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
 import { sweepRevocations } from '@fling/api/revocations'
 import type { RouteTable } from '@fling/api/route-table'
+import type { Deps } from '@fling/api/types'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared'
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
 import { buildAwsDeps } from './deps.ts'
 import { handleLiveEvent, isLiveEvent, type LiveEvent } from './live.ts'
 import { loadSecretsFromSsm } from './secrets.ts'
+import type { AwsSiteServers } from './servers/site-servers.ts'
 import { DynamoTable } from './table/dynamo.ts'
 
 type Env = Record<string, string | undefined>
@@ -69,10 +73,10 @@ async function init() {
   const secrets = base.ssmPrefix ? await loadSecretsFromSsm(base.ssmPrefix) : secretsFromEnv(env)
   const secretsMs = Date.now() - start
   const config: Config = { ...base, secrets }
-  const { deps, live } = buildAwsDeps(config)
+  const { deps, live, servers } = buildAwsDeps(config, { env })
   const http = handle(createApp(deps))
   info('cold start', { secretsMs, appMs: Date.now() - start - secretsMs })
-  return { http, deps, live, siteHmacKey: secrets.siteHmacKey }
+  return { http, deps, live, servers, siteHmacKey: secrets.siteHmacKey }
 }
 
 /** Puts the SSM site-hmac-key in the KVS when the edge holds another (or none). */
@@ -108,6 +112,22 @@ export interface MaintainEvent {
 }
 
 const isMaintain = (event: unknown): event is MaintainEvent => isFlingEvent(event, 'maintain')
+
+/**
+ * The hourly sweep of site servers (servers/site-servers.ts `sweep`): functions whose site is
+ * gone, log groups whose function is. A failure is logged and waits for the next hour.
+ */
+export async function sweepServers(deps: Deps, servers: Pick<AwsSiteServers, 'sweep'>) {
+  try {
+    const swept = await servers.sweep(async (siteId, name) => {
+      const site = await deps.store.findSite(name)
+      return site?.id === siteId
+    })
+    console.log(JSON.stringify({ level: 'info', msg: 'servers swept', ...swept }))
+  } catch (err) {
+    console.warn(JSON.stringify({ level: 'warn', msg: 'servers sweep failed', err: String(err) }))
+  }
+}
 
 /** Leave this much of the invocation when draining. */
 const NOTIFY_MARGIN_MS = 5_000
@@ -153,7 +173,7 @@ export const handler = async (
     ready = undefined // retry the cold start on the next invocation
     throw err
   })
-  const { http, deps, live, siteHmacKey } = await ready
+  const { http, deps, live, servers, siteHmacKey } = await ready
   edgeKeySynced ??= syncEdgeKey(deps.routeTable, siteHmacKey).catch(err => {
     edgeKeySynced = undefined
     console.warn(JSON.stringify({ level: 'warn', msg: 'edge key sync failed', err: String(err) }))
@@ -180,6 +200,7 @@ export const handler = async (
       deadline: Date.now() + Math.max(0, context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS),
     })
     console.log(JSON.stringify({ level: 'info', msg: 'maintenance', ...result }))
+    if (servers) await sweepServers(deps, servers)
     return result
   }
   if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }

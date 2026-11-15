@@ -13,8 +13,9 @@
 //
 // An invoke (a site server's `/api/*`) goes on as the request it was, minus the browser's cookies
 // and any `x-fling-viewer` it sent, with `x-fling-viewer` set from the decision and
-// `x-fling-site` (`<siteId>/<v>[/private]`, serverSiteHeader); to the decision's `target` when it names one (the site's Web
-// Function endpoint, signed by origin access control), else to the distribution's own origin.
+// `x-fling-site` (`<siteId>/<v>[/private]`, serverSiteHeader); to the decision's `target` when it
+// names one (the site's Web Function endpoint, signed by origin access control, with the site's
+// host as `x-forwarded-host`), else to the distribution's own origin.
 
 import { SERVER_SITE_HEADER, SITE_HMAC_KVS_KEY, VIEWER_HEADER } from '@fling/shared/route-keys'
 import { routeSiteRequest, serverSiteHeader } from '@fling/shared/site-routing'
@@ -96,6 +97,8 @@ async function handler(event) {
     if (decision.viewer) request.headers[VIEWER_HEADER] = { value: JSON.stringify(decision.viewer) }
     request.headers[SERVER_SITE_HEADER] = { value: serverSiteHeader(decision) }
     if (decision.target) {
+      // The Web Function sees its endpoint's domain as Host: the server builds URLs from this.
+      request.headers['x-forwarded-host'] = { value: header(request, 'host') || '' }
       cf.updateRequestOrigin({
         domainName: decision.target,
         originAccessControlConfig: {

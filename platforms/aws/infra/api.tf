@@ -28,7 +28,8 @@ data "archive_file" "placeholder" {
 # config's INSTANCE object instead (var.instance), so changing them needs no infrastructure change;
 # var.environment can still set or override any key here except the four the module owns. LIVE_URL
 # is the live rooms' WebSocket stage (live.tf); the instance turns them off with LIVE=false. MAIL_*
-# and SES_CONFIGURATION_SET come from var.mail (mail.tf), and only with it.
+# and SES_CONFIGURATION_SET come from var.mail (mail.tf), and only with it; the site servers'
+# plumbing and SERVERS_EGRESS from var.servers (servers.tf), and only with it.
 locals {
   environment = merge(
     {
@@ -50,6 +51,7 @@ locals {
       SSM_PREFIX   = local.ssm_prefix
     },
     local.mail_environment,
+    local.servers_environment,
   )
 }
 
@@ -62,7 +64,8 @@ resource "aws_lambda_function" "api" {
   architectures = ["arm64"]
   handler       = "index.handler"
   memory_size   = var.lambda.memory_size
-  timeout       = var.lambda.timeout
+  # A publish that starts a site server waits for its revision and start probe: at least 60 s.
+  timeout = local.servers_on ? max(var.lambda.timeout, 60) : var.lambda.timeout
 
   filename         = data.archive_file.placeholder.output_path
   source_code_hash = data.archive_file.placeholder.output_base64sha256

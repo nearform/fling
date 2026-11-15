@@ -664,12 +664,16 @@ describe('site servers', () => {
       toCloudFrontEvent({
         host: 'srv-aws.fling.example.test',
         path: '/api/me',
-        headers: { 'x-fling-viewer': '{"id":"v_forged","email":"boss@example.test"}' },
+        headers: {
+          'x-fling-viewer': '{"id":"v_forged","email":"boss@example.test"}',
+          'x-forwarded-host': 'forged.example.test',
+        },
       })
     )
     const request = result as CloudFrontRequest
     expect(isInvoke(request)).toBe(true)
     expect(request.headers['x-fling-viewer']).toBeUndefined()
+    expect(request.headers['x-forwarded-host']?.value).toBe('srv-aws.fling.example.test')
     expect(request.origin).toMatchObject({
       domainName: 'abc.on.aws',
       originAccessControlConfig: { enabled: true, originType: 'lambda' },

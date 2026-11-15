@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.13.0 (2026-11-15)
+
 - **Site servers.** A site can carry a small backend: put a `server.ts` (or `server.js`) beside
   `index.html` and Fling runs it for `/api/*` on the site's own address, behind the site's access,
   for calling an API with a key, posting to a webhook or keeping data off the page. `fling deploy`

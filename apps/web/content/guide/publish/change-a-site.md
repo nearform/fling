@@ -51,9 +51,10 @@ Owners and publishers can pull an earlier version with `--version-id <id>` (ids 
 versions my-app`).
 
 <!-- requires: servers -->
-A site with a [server](/guide/servers/what-is-a-site-server) comes down with its server's built
-bundle, `_fling/server.mjs`, and a `fling.json` naming the secrets and health path it was published
-with. Deploying the folder publishes that same server again, with the same secrets. The folder
+For its owners and publishers, a site with a [server](/guide/servers/what-is-a-site-server) comes
+down with its server's built bundle, `_fling/server.mjs`, and a `fling.json` naming the secrets and
+health path it was published with. Deploying the folder publishes that same server again, with the
+same secrets. Anyone else who pulls it gets the pages a visitor sees, without the server. The folder
 never holds the server's source: that stays wherever its author keeps it, and the server is changed
 there and deployed from there.
 <!-- /requires -->

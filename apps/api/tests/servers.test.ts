@@ -23,7 +23,7 @@ import type {
   SiteServers,
 } from '../src/servers/types.ts'
 import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
-import { SESSION } from './oauth-helpers.ts'
+import { callTool, connect, SESSION } from './oauth-helpers.ts'
 
 const ALICE = 'alice@example.test'
 const BOB = 'bob@example.test'
@@ -640,6 +640,33 @@ describe('pull and publishing on a base', () => {
     await deploy(alice.key, 'plain', [file('index.html', '<h1>plain</h1>')])
     const plain = await json(await api(env, alice.key, 'GET', '/api/sites/plain/pull'))
     expect(plain.server).toBeUndefined()
+  })
+
+  it('a viewer pulls and reads the files a visitor sees: no bundle, no server config', async () => {
+    const alice = await createUser(env, ALICE)
+    const bob = await createUser(env, BOB)
+    await live(alice)
+    await api(env, alice.key, 'PATCH', '/api/sites/srv', { access: 'members' })
+    const pulled = await json(await api(env, bob.key, 'GET', '/api/sites/srv/pull'))
+    expect(pulled.server).toBeUndefined()
+    expect(pulled.files.map((f: { path: string }) => f.path)).toEqual(['index.html'])
+    const { accessToken } = await connect(env, BOB)
+    const read = await callTool(env, accessToken, 'fling_read_files', { name: 'srv' })
+    expect(read.structuredContent.server).toBeUndefined()
+    expect(read.structuredContent.files.map((f: { path: string }) => f.path)).toEqual([
+      'index.html',
+    ])
+    const asked = await callTool(env, accessToken, 'fling_read_files', {
+      name: 'srv',
+      paths: ['_fling/server.mjs'],
+    })
+    expect(asked.structuredContent.files).toEqual([])
+    expect(asked.structuredContent.missing).toEqual(['_fling/server.mjs'])
+    // A publisher builds it, so pulls it.
+    await api(env, alice.key, 'PATCH', '/api/sites/srv', { publishers: { emails: [BOB] } })
+    const publisher = await json(await api(env, bob.key, 'GET', '/api/sites/srv/pull'))
+    expect(publisher.server).toEqual(FLING)
+    expect(publisher.files.map((f: { path: string }) => f.path)).toContain('_fling/server.mjs')
   })
 
   it("a publish on a base that keeps the base's bundle and sends no config keeps the base's", async () => {

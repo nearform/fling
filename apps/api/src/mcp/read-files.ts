@@ -2,7 +2,8 @@
  * fling_read_files on the remote MCP server: a version's files, inline, for an agent that can't
  * download them. Who may read is pull's (`pullable`, pull.ts: `site.pull`); the paging, encoding
  * and wording are shared with the local server (read-files.ts in @fling/shared). A version with a
- * server comes with its config (`server`, its fling.json), which is no published file.
+ * server comes with its config (`server`, its fling.json), which is no published file; like its
+ * bundle, only for its owners, publishers and admins.
  */
 import {
   encodeForAgent,

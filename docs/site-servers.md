@@ -322,8 +322,8 @@ confirms in scripts, and without a terminal the CLI refuses rather than guess.
 
 ### Pull a site with a server
 
-`fling pull` (and `fling_pull`) of a version with a server brings down its files with the built
-bundle, `_fling/server.mjs`, and writes the version's `fling.json` beside them: the secrets and
+`fling pull` (and `fling_pull`) of a version with a server, by someone who may read its versions
+(its owners, publishers and admins), brings down its files with the built bundle, `_fling/server.mjs`, and writes the version's `fling.json` beside them: the secrets and
 health path its deploy declared, with no `"server"` entry, since there is no source to bundle.
 Deploying the pulled folder publishes that bundle as it is, with the same secrets declared.
 
@@ -343,6 +343,11 @@ deploy` of the pulled folder, or `fling_read_files` then `fling_publish` with `b
 and health path the base version declared. A publish that sends one (`fling.json` in the folder or
 among the files, or `siteServer`) uses that one. `fling_read_files` returns the config as `server`
 in its result; it is not one of the files.
+
+**A viewer's pull leaves the server out.** Anyone else who can open the site may pull it, and gets
+the files a visitor sees: no `_fling/server.mjs` and no `server` config, from `fling pull`,
+`fling_pull` and `fling_read_files` alike. The bundle holds whatever its source inlined from
+`server/`, which the site's visitors must never see.
 
 ## Logs: fling logs
 

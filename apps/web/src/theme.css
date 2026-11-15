@@ -499,6 +499,19 @@
     grid-template-rows: auto minmax(0, 1fr);
     block-size: 100dvh;
   }
+  /* A site with a server: its banner is a row of its own between the header and the frame. */
+  .review-layout:has(> .review-banner) {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .review-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.375rem 1rem;
+    font-size: 0.8125rem;
+    background: var(--tone-info-surface);
+    border-block-end: 1px solid var(--tone-info-border);
+  }
   /* The header is one row. Wide, it holds everything; narrower than 52rem, the path bar, reload,
      open, presence and theme fold into a panel behind one button, the brand and the word
      "Review" drop, and the site's name takes what is left, with an ellipsis. Under 30rem the

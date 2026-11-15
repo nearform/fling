@@ -1,9 +1,10 @@
 /**
  * The site's files and history: the files being served, then every version, newest first, with
- * who published it (and, for a path publish, the folder it replaced), its files on demand and a restore (rollback) for any but the current one. An
+ * who published it (and, for a path publish, the folder it replaced), whether it has a site server, its files on demand and a restore (rollback) for any but the current one. An
  * archived site keeps its versions but can't be pointed at another until it is unarchived.
  */
 import type { SiteDetail } from '@fling/shared'
+import { ServerIcon } from '@heroicons/react/24/outline'
 import { Fragment, useState } from 'react'
 import { useSiteActions } from '../../hooks/queries'
 import { formatBytes, fullDate, shortVersion, timeAgo } from '../../lib/format'
@@ -56,6 +57,15 @@ export function SiteVersions({ site }: { site: SiteDetail }) {
                           <code className="text-xs" title={version.id}>
                             {shortVersion(version.id)}
                           </code>
+                          {version.server && (
+                            <span
+                              className="badge badge-xs badge-ghost ml-1.5 gap-1"
+                              title="This version has its own server, run for /api/*"
+                            >
+                              <ServerIcon className="h-3 w-3" aria-hidden />
+                              Server
+                            </span>
+                          )}
                         </td>
                         <td title={fullDate(version.createdAt)}>
                           {timeAgo(version.createdAt)}

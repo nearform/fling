@@ -12,6 +12,9 @@
  * to change one the user owns, or to make one (from scratch, or from the listed people, to use in
  * their place); the group picker is shared with the owners and publishers (`PeoplePicker`).
  *
+ * Making a site with a site server public asks first (the API answers 409 `public_server` until
+ * it is confirmed): anyone could then call its `/api/*` and use its secrets through it.
+ *
  * An instance without the `accessLevels` capability has no "only you": the other options save
  * through `visibility` and `audience` instead. On someone else's site (an admin's, `owner`), "you"
  * reads "its owner".
@@ -37,7 +40,7 @@ import {
 import { useId, useState } from 'react'
 import { useInstance } from '../../hooks/instance'
 import { useGroups, useGroupsWithMembers, useSiteActions } from '../../hooks/queries'
-import { errorMessage } from '../../lib/api'
+import { ApiError, errorMessage } from '../../lib/api'
 import { addToAudience, audienceWho, peopleErrorMessage } from '../../lib/audience'
 import { copyText } from '../../lib/clipboard'
 import { displayUrl } from '../../lib/format'
@@ -88,6 +91,8 @@ export function SiteAccess({ site, owner }: { site: SiteWithAudience; owner?: st
   /** Asking before a list of people and teams is cleared: choosing only you or everyone. */
   const [confirmClear, setConfirmClear] = useState<'only_me' | 'members' | null>(null)
   const [dialog, setDialog] = useState<'refresh-share' | 'revoke-share' | null>(null)
+  /** The API's question before a site with a server goes public (409 `public_server`). */
+  const [publicServer, setPublicServer] = useState<string | null>(null)
   const closeDialog = () => setDialog(null)
 
   const listed = site.audience?.emails ?? []
@@ -98,18 +103,24 @@ export function SiteAccess({ site, owner }: { site: SiteWithAudience; owner?: st
   const instanceName = instance?.name ?? DEFAULT_INSTANCE_NAME
   const accounts = instance ? allowedAccountsPhrase(instance.auth) : null
 
-  /** Save a level; `audience` for people and teams. Older servers: visibility and audience. */
-  const save = async (choice: AccessChoice, audience?: Audience) => {
+  /**
+   * Save a level; `audience` for people and teams. Older servers: visibility and audience.
+   * `confirmed`: making a site with a server public, once the user said yes to the API's question.
+   */
+  const save = async (choice: AccessChoice, audience?: Audience, confirmed = false) => {
     setProblem(null)
+    const confirm = confirmed ? { confirmPublicServer: true as const } : {}
     try {
       if (levels) {
         await actions.setAccess.mutateAsync(
           choice === 'audience' && audience
             ? { access: audienceLevel(audience), audience }
-            : { access: choice as AccessLevel }
+            : { access: choice as AccessLevel, ...confirm }
         )
       } else if (choice === 'public') {
-        await actions.setVisibility.mutateAsync('public')
+        await actions.setVisibility.mutateAsync(
+          confirmed ? { visibility: 'public', confirmPublicServer: true } : 'public'
+        )
       } else {
         if (site.visibility === 'public') await actions.setVisibility.mutateAsync('private')
         const next = audience ?? { emails: [], groups: [] }
@@ -118,6 +129,10 @@ export function SiteAccess({ site, owner }: { site: SiteWithAudience; owner?: st
       setChosen(null)
       return true
     } catch (error) {
+      if (error instanceof ApiError && error.code === 'public_server') {
+        setPublicServer(error.message)
+        return false
+      }
       if (choice === 'audience') setProblem(peopleErrorMessage(error))
       else showToast(errorMessage(error), 'error')
       return false
@@ -389,6 +404,18 @@ export function SiteAccess({ site, owner }: { site: SiteWithAudience; owner?: st
         onConfirm={async () => {
           if (confirmClear) await save(confirmClear)
           setConfirmClear(null)
+        }}
+      />
+      <ConfirmModal
+        isOpen={publicServer !== null}
+        title="Make a site with a server public?"
+        message={`Anyone will be able to call ${site.name}’s /api/* without opening the page, and use its secrets through it.`}
+        confirmText="Make it public"
+        confirmButtonClass="btn-warning"
+        isLoading={busy}
+        onCancel={() => setPublicServer(null)}
+        onConfirm={() => {
+          void save('public', undefined, true).then(() => setPublicServer(null))
         }}
       />
       <ConfirmModal

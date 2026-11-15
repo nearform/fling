@@ -341,6 +341,9 @@ describe('site secrets', () => {
       versionId,
       secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'],
     })
+    expect(
+      (await json(await api(env, alice.key, 'GET', '/api/sites/srv'))).awaitingSecrets
+    ).toEqual({ versionId, secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'] })
     // One of two: it still waits, and says for what.
     const first = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/SLACK_WEBHOOK_URL', {
       value: 'https://hooks.slack.com/services/T/B/X',
@@ -365,6 +368,9 @@ describe('site secrets', () => {
       TOKEN: 't0k3n',
     })
     expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
+    expect(
+      (await json(await api(env, alice.key, 'GET', '/api/sites/srv'))).awaitingSecrets
+    ).toBeUndefined()
     const listed = await api(env, alice.key, 'GET', '/api/sites/srv/secrets')
     const text = await listed.text()
     expect(text).not.toContain('hooks.slack.com')

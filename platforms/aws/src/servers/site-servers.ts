@@ -37,6 +37,7 @@
 import { createHash } from 'node:crypto'
 import type { Blobs } from '@fling/api/blobs'
 import { ApiError } from '@fling/api/errors'
+import { heldBody } from '@fling/api/servers/body'
 import type {
   ProbeRequest,
   ProbeResult,
@@ -323,7 +324,7 @@ export class AwsSiteServers implements SiteServers {
     const status = restoredServerStatus(res.status, res.headers.get(SERVER_STATUS_HEADER))
     out.delete(SERVER_STATUS_HEADER)
     const statusText = status === res.status ? res.statusText : ''
-    return new Response(res.body, { status, statusText, headers: out })
+    return new Response(heldBody(res), { status, statusText, headers: out })
   }
 
   /**

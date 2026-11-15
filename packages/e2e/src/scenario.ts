@@ -3357,6 +3357,8 @@ async function serversStep(ctx: {
   )
   for (const path of [
     '/_fling/server.mjs',
+    '/_fling%2Fserver.mjs',
+    '/%5Ffling/server.mjs',
     '/server.ts',
     '/fling.json',
     '/package.json',
@@ -3368,7 +3370,7 @@ async function serversStep(ctx: {
   const home = await call('GET', '/')
   check(home.status === 200 && home.text.includes('<'), `GET / (the static page): ${home.status}`)
   step(
-    "the server's 404 is its JSON; /_fling/server.mjs, server.ts, fling.json, package.json, .env 404"
+    "the server's 404 is its JSON; /_fling/server.mjs (however spelled), server.ts, fling.json, package.json, .env 404"
   )
 
   // Without a viewer (the share link) the server still runs; its Slack route wants one.

@@ -424,6 +424,17 @@ describe('unknown hosts', () => {
     }
   })
 
+  it('refuses /_fling/ and dot segments spelled with encoded separators', async () => {
+    for (const path of [
+      '/_fling%2Fserver.mjs',
+      '/%5Ffling/server.mjs',
+      '/a%2F.env',
+      '/a%5Cb.html',
+    ]) {
+      expect((await asRequest({ host: PUBLIC, path })).uri).toBe('/_fling/missing')
+    }
+  })
+
   it('refuses dot segments', async () => {
     for (const path of ['/../S9/V9/a.html', '/a/./b.html', '/%2e%2E/x.html']) {
       expect((await asRequest({ host: PUBLIC, path })).uri).toBe('/_fling/missing')

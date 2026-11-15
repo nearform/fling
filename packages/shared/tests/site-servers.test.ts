@@ -105,6 +105,30 @@ describe('invoke', () => {
     }
   })
 
+  it('never serves /_fling/ by an encoded spelling, nor an encoded separator outside /api/', async () => {
+    for (const uri of [
+      '/_fling%2Fserver.mjs',
+      '/_fling%2fserver.mjs',
+      '/%5Ffling/server.mjs',
+      '/%5F%66ling/server.mjs',
+      '/a%2F.env',
+      '/a%5C..%5Cb.html',
+      '/a%00.html',
+      '/%E0%A4%A.html',
+    ]) {
+      expect(await routeSiteRequest(req({ uri }), ctx)).toMatchObject({
+        action: 'rewrite',
+        uri: MISSING_KEY,
+      })
+    }
+  })
+
+  it("passes an encoded separator under /api/ to the site's server", async () => {
+    expect(await routeSiteRequest(req({ uri: '/api/files/a%2Fb' }), ctx)).toMatchObject({
+      action: 'invoke',
+    })
+  })
+
   it('answers 503 for a server an admin stopped, after the access checks', async () => {
     const d = await routeSiteRequest(req({ host: 'fnstop.sites.example.test' }), ctx)
     expect(d).toMatchObject({ action: 'respond', status: 503 })

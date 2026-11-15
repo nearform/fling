@@ -224,6 +224,9 @@ interface RouteValue {
 // Any path segment starting with a dot (incl. `.`/`..` traversal and `.env`, `.git/…`,
 // percent-encoded too): never served, even from versions flung before dotfiles were refused.
 const DOT_SEGMENT_RE = /(^|\/)(\.|%2e)/i
+// Percent-encoded `/`, `\` and NUL: refused outside SERVER_PREFIX, so the decoded path the store
+// reads has the segments the checks saw.
+const ENCODED_SEPARATOR_RE = /%(2f|5c|00)/i
 
 /** The route table key for a sites host, or null when its first label is not a site's. */
 export function routeKeyForHost(host: string): { key: string; share: boolean } | null {
@@ -569,15 +572,25 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
   // place of any the site has.
   if (uri === NOT_FOUND_PAGE || uri === REVIEW_SHELL) return rewrite(uri)
   if (uri === '/robots.txt') return rewrite(ROBOTS_TXT)
+  // The checks below run on the path the store reads, which it decodes once. An encoded `/`, `\`
+  // or NUL never names a site's file, so only a site's server (which owns its own paths) gets one.
+  if (!api && ENCODED_SEPARATOR_RE.test(uri)) return rewrite(MISSING_KEY)
+  let decoded = uri
+  try {
+    decoded = decodeURIComponent(uri)
+  } catch (_e) {
+    // A malformed escape names no file; a server is given its paths as they came.
+    if (!api) return rewrite(MISSING_KEY)
+  }
   // Fling's own paths: a site's files there (its server's bundle among them) are never served.
-  if (uri.indexOf(FLING_DIR) === 0) return rewrite(MISSING_KEY)
+  if (decoded.indexOf(FLING_DIR) === 0) return rewrite(MISSING_KEY)
 
   const host = req.host.toLowerCase()
   const target = routeKeyForHost(host)
   let raw: string | null = null
   if (target) raw = await ctx.getRoute(target.key)
   const site = parseRoute(raw)
-  if (!target || !site || !site.id || !site.v || DOT_SEGMENT_RE.test(uri)) {
+  if (!target || !site || !site.id || !site.v || DOT_SEGMENT_RE.test(decoded)) {
     return rewrite(MISSING_KEY)
   }
 

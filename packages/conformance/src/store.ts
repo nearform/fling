@@ -1503,6 +1503,55 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       })
     })
 
+    describe('site servers', () => {
+      const secret = (siteId: string, name: string, sealed = 'sealed') => ({
+        siteId,
+        name,
+        sealed,
+        setBy: email(),
+        setAt: NOW,
+      })
+
+      it('site secrets: listed by name, replaced in place, capped for new names, deleted once', async () => {
+        const store = await factory()
+        const owner = email()
+        const s = site(owner)
+        await store.putSite(s)
+        expect(await store.listSiteSecrets(s.id)).toEqual([])
+        expect(await store.putSiteSecret(secret(s.id, 'B_KEY'), 2)).toBe(true)
+        expect(await store.putSiteSecret(secret(s.id, 'A_KEY'), 2)).toBe(true)
+        expect((await store.listSiteSecrets(s.id)).map(r => r.name)).toEqual(['A_KEY', 'B_KEY'])
+        expect(await store.putSiteSecret(secret(s.id, 'C_KEY'), 2)).toBe(false)
+        expect(await store.putSiteSecret(secret(s.id, 'A_KEY', 'again'), 2)).toBe(true)
+        const listed = await store.listSiteSecrets(s.id)
+        expect(listed.find(r => r.name === 'A_KEY')?.sealed).toBe('again')
+        expect(listed).toHaveLength(2)
+        // Another site's are its own.
+        expect(await store.listSiteSecrets(uid())).toEqual([])
+        expect(await store.deleteSiteSecret(s.id, 'A_KEY')).toBe(true)
+        expect(await store.deleteSiteSecret(s.id, 'A_KEY')).toBe(false)
+        await store.deleteSite(s)
+        expect(await store.listSiteSecrets(s.id)).toEqual([])
+      })
+
+      it('the sites with a server: counted, each once, and forgotten when the site goes', async () => {
+        const store = await factory()
+        const s = site(email())
+        await store.putSite(s)
+        const before = await store.serverSites(s.id)
+        expect(before.listed).toBe(false)
+        await store.markServerSite(s.id, s.name, true)
+        await store.markServerSite(s.id, s.name, true)
+        const on = await store.serverSites(s.id)
+        expect(on).toEqual({ count: before.count + 1, listed: true })
+        await store.markServerSite(s.id, s.name, false)
+        expect(await store.serverSites(s.id)).toEqual({ count: before.count, listed: false })
+        await store.markServerSite(s.id, s.name, true)
+        await store.deleteSite(s)
+        expect(await store.serverSites(s.id)).toEqual({ count: before.count, listed: false })
+      })
+    })
+
     notificationStoreConformance(factory)
   })
 }

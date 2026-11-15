@@ -249,3 +249,11 @@ describe('the rate limit', () => {
     expect(statuses).toContain(429)
   })
 })
+
+describe('the CPU limit', () => {
+  it("tells Cloudflare's CPU time stop from any other failure", async () => {
+    const { isCpuLimit } = await import('../src/servers/runtime.ts')
+    expect(isCpuLimit(new Error('Worker exceeded CPU time limit.'))).toBe(true)
+    expect(isCpuLimit(new Error('boom'))).toBe(false)
+  })
+})

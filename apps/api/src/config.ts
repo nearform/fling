@@ -379,13 +379,16 @@ export type ServersPublish =
  * it can (servers/types.ts). Admins may raise them for one site (`SiteRecord.server.limits`).
  */
 export interface ServerLimits {
-  /** wall time per request, streams included (`SERVER_TIMEOUT_SECONDS`, default 30) */
+  /**
+   * wall time per request, streams included (`SERVER_TIMEOUT_SECONDS`, default 30); a server runs
+   * with at most what the platform serves (`SiteServers.maxTimeoutSeconds`, servers/index.ts `limitsOf`)
+   */
   timeoutSeconds: number
-  /** CPU per request, where the platform measures it (`SERVER_CPU_MS`, default 1000) */
+  /** CPU per request, where the platform measures it: one platform does (`SERVER_CPU_MS`, default 1000) */
   cpuMs: number
   /** requests per second to one site (`SERVER_RPS`, default 100) */
   rps: number
-  /** environments one site may run at once, where the platform has them (`SERVER_ENVIRONMENTS`, default 2) */
+  /** environments one site may run at once, where the platform has them: one platform does (`SERVER_ENVIRONMENTS`, default 2) */
   environments: number
   /** the largest request body (`SERVER_BODY_BYTES`, default 10 MB) */
   bodyBytes: number

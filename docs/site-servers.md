@@ -81,20 +81,33 @@ Write the server in either style; both are first-class:
 | `node:crypto`, `Buffer`, streams, `fetch` | WebSockets |
 | Pure-JavaScript npm packages, bundled in | Keeping state in memory between requests: the server can stop at any time |
 | Secrets as `process.env.NAME`, `env.NAME` or `secret('NAME')` | Calling other hosts when the instance's `serversEgress` is `none` |
+| Timers and I/O inside a request | On Cloudflare, timers or I/O at the module's top level, while it loads: the start fails. Start them in the first request instead |
+| Time from `Date.now()` across I/O | On Cloudflare, `Date.now()` stands still during a request except across I/O, so a busy loop timed by it never ends (and is stopped at the CPU limit, 502 `server_cpu_limit`) |
+| | A secret named `AWS_*`, `LAMBDA_*`, `FLING_*`, `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER` or `FILES` (Fling's and the platforms'): refused with 400 `invalid_secret_name` everywhere |
 
 Limits, per site. Admins can raise them for one site; authors can't.
 
 | Limit | Default |
 |---|---|
-| Wall time per request, streamed responses included | 30 s |
-| CPU time per request (Cloudflare instances) | 1 s |
-| Requests per site | 100 a second |
+| Wall time per request, streamed responses included | 30 s (at most 120 s on AWS) |
+| CPU time per request (Cloudflare only, `SERVER_CPU_MS`) | 1 s |
+| Requests per site | 100 a second (on Cloudflare, counted per location over 10 s) |
+| Copies running at once (AWS only, `SERVER_ENVIRONMENTS`) | 2 |
 | Request body | 10 MB |
 | Bundle (`_fling/server.mjs`) | 5 MB |
 | Site secrets | 20 per site, 8 KB each |
 | Sites with a server, across the instance | 50 |
 
 The 30 seconds is the whole request: if a streamed answer is still going at 30 s, it is cut off.
+On AWS a request can't be given more than 120 s, how long CloudFront waits on a server: an admin's
+raise past it is refused (`limit_too_high`), and a longer instance setting runs as 120 s.
+
+Each platform enforces what it has. `SERVER_CPU_MS` applies on Cloudflare only (AWS measures only
+the wall time), and `SERVER_ENVIRONMENTS` on AWS only (a Cloudflare isolate has no environments
+to count). On Cloudflare the requests per site are counted by the rate limit binding per
+location, as `SERVER_RPS` × 10 in a 10-second window, so the limit is approximate and a burst
+within the window passes.
+
 Servers run only at the site root: a Path can't have one.
 
 ## The folder
@@ -233,6 +246,9 @@ $ fling secrets ls my-site
 - Setting a secret puts it to use at once, and says what it did: the live server restarts with
   the new value, or the version a deploy left waiting for its secrets goes live (see
   [Publish](#publish-fling-deploy)). There is no need to deploy again.
+- `fling secrets ls` lists the names, who set each and when, the names the live version declares
+  but aren't set, and, while a version waits for its secrets, which version it is, what it
+  declares and what it still needs.
 - The site page in the web app lists them too, with who set each and when, and can set them.
 
 > **Warning** Anyone who can publish the site can read its secrets, by publishing a server that
@@ -284,7 +300,9 @@ $ fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
 ```
 
 If that start fails instead, `fling secrets set` prints the failure and the server's log and exits
-non-zero; the version stops waiting, so fix it and deploy again.
+non-zero. The version keeps waiting: if a secret was wrong, set it again (or remove one) and the
+version is tried again; if the code was wrong, fix it and deploy again, and the new version waits
+in its place.
 
 **A server on a public site asks first.** Anyone can call a public site's `/api/*` directly,
 without the page, and use its secrets through it. The CLI asks you to confirm, on `fling deploy`
@@ -912,4 +930,8 @@ with the three files.
 | 405 | A method other than GET or HEAD outside `/api/` | Post forms to a path under `/api/` |
 | 502 from your own code, "could not reach" in the log | The server's `fetch` to another host failed. On an instance with `serversEgress: none`, every outbound call does | Check the capability; ask an admin whether servers may reach the internet |
 | 503 on `/api/*` | An admin has switched this site's server off | Ask an admin |
-| Cut off at 30 s | A request, or a streamed response, ran past the time limit | Do less per request, stop upstream calls earlier, or ask an admin to raise the limit for the site |
+| Cut off at 30 s | A request, or a streamed response, ran past the time limit | Do less per request, stop upstream calls earlier, or ask an admin to raise the limit for the site (on AWS at most 120 s) |
+| 502 `server_cpu_limit` (Cloudflare) | Cloudflare stopped the server for using more CPU time in one request than `SERVER_CPU_MS` allows (1 s by default) | Do less work per request, or move it out of the loop. A loop timed by `Date.now()` never ends on Cloudflare (see [What works](#what-works-what-doesnt-and-the-limits)). An admin can raise the limit for the site |
+| 400 `limit_too_high` (admins) | A time per request past what the platform serves: on AWS, 120 s | Set 120 s or less |
+| 400 `invalid_secret_name` | A secret name that isn't A-Z, 0-9 and `_`, or one Fling and the platforms keep (`PORT`, `FILES`, `AWS_*`…), set or declared in `fling.json` | Rename it in `fling.json`, the server and the secret |
+| Your 403 or 404 arrives as 300 with `x-fling-status` (AWS) | The function that puts it back isn't published yet: the deploy after servers are turned on publishes it | Ask the operator to deploy |

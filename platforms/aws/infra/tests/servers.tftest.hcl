@@ -82,6 +82,11 @@ run "without_servers" {
   }
 
   assert {
+    condition     = length(aws_cloudfront_function.server_status) == 0 && !contains(keys(output.deploy), "SERVER_STATUS_FUNCTION")
+    error_message = "Without servers, there is no server status function, and the deploy publishes none."
+  }
+
+  assert {
     condition     = aws_lambda_function.api.timeout == 30
     error_message = "Without servers, the function's timeout is var.lambda's."
   }
@@ -125,6 +130,24 @@ run "with_servers_fenced" {
       for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : b if b.path_pattern == "/api/*"
     ]).allowed_methods == toset(["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"])
     error_message = "With servers, /api/* on the sites distribution takes every method."
+  }
+
+  assert {
+    condition = length(aws_cloudfront_function.server_status) == 1 && contains([
+      for f in one([
+        for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : b if b.path_pattern == "/api/*"
+      ]).function_association : f.event_type
+    ], "viewer-response") && output.deploy.SERVER_STATUS_FUNCTION == "example-production-fling-server-status"
+    error_message = "With servers, /api/* restores a server's 403 and 404 (viewer-response), and the deploy publishes it."
+  }
+
+  assert {
+    condition = alltrue([
+      for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : alltrue([
+        for f in b.function_association : f.event_type == "viewer-request"
+      ]) if b.path_pattern != "/api/*"
+    ]) && alltrue([for f in aws_cloudfront_distribution.sites.default_cache_behavior[0].function_association : f.event_type == "viewer-request"])
+    error_message = "Only /api/* has the server status function."
   }
 
   assert {

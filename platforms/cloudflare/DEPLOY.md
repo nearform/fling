@@ -267,9 +267,9 @@ the Worker does with each:
 | `SERVERS_EGRESS` | `none` | `none`: the isolate's `globalOutbound` is null, so its `fetch()` and sockets reach nothing; `open`: the internet |
 | `SERVERS_MAX_SITES` | `50` | Enforced by the core at publish |
 | `SERVER_TIMEOUT_SECONDS` | `30` | A timer in the Fling Worker: 504 `server_timeout` before the answer starts, a stream cut off after |
-| `SERVER_CPU_MS` | `1000` | The isolate's `limits.cpuMs`, enforced by Cloudflare |
+| `SERVER_CPU_MS` | `1000` | Cloudflare only: the isolate's `limits.cpuMs`, enforced by Cloudflare; a request stopped at it answers 502 `server_cpu_limit` |
 | `SERVER_RPS` | `100` | The `SERVER_RATE_LIMIT` binding allows each site `SERVER_RPS` × 10 requests per 10 s (429 `rate_limited`); a site an admin raised is counted over as many keys as the raise multiplies it. Cloudflare counts per location, so the limit is approximate |
-| `SERVER_ENVIRONMENTS` | `2` | Not used: isolates have no environments to count |
+| `SERVER_ENVIRONMENTS` | `2` | AWS only: not used here, isolates have no environments to count |
 | `SERVER_BODY_BYTES` | `10485760` | 413 `too_large`, from the length or as the body streams |
 
 An isolate's env is the version's declared site secrets (also `process.env`), `PORT` and `FILES`,

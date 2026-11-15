@@ -2,8 +2,9 @@
  * What the API offers about site servers (the `servers` capability; without it these answer 404,
  * like a route that isn't there):
  *
- *   GET    /api/sites/:name/secrets            the site secrets by name, who set each and when, and
- *                                              the names the live version declares (`site.secrets`)
+ *   GET    /api/sites/:name/secrets            the site secrets by name, who set each and when, the
+ *                                              names the live version declares, and those the
+ *                                              version waiting for secrets declares (`site.secrets`)
  *   PUT    /api/sites/:name/secrets/:secret    { value } set one, then redeploy (below)
  *   DELETE /api/sites/:name/secrets/:secret    remove one, then redeploy the live server
  *   GET    /api/sites/:name/logs?since&limit    the server's log (`site.logs`)
@@ -18,10 +19,13 @@
  *   - the live version's server is reconfigured with the site's secrets as they now are and
  *     probed again (`live`); a failed probe is reported, not undone: the secret stays as set and
  *     that version keeps serving with it;
- *   - a set that leaves none of the waiting publish's declared secrets unset
+ *   - a change that leaves none of the waiting publish's declared secrets unset
  *     (`SiteServerState.awaiting`, publication.ts) publishes it, as finalizing it again would, by
- *     the one who set the secret (`deployed`: live at its URL, or the publish's refusal); with
- *     some still unset, `missing` names them.
+ *     the one who made the change (`deployed`: live at its URL, or the publish's refusal); with
+ *     some still unset, `missing` names them. A server that fails its start keeps the version
+ *     waiting: every later set or remove tries it again, until it goes live or a newer publish
+ *     takes its place. Any other refusal (the publisher may no longer publish servers, the
+ *     instance is full) ends the wait.
  */
 import type {
   DeleteSiteSecretResponse,
@@ -34,19 +38,31 @@ import type {
 import { z } from 'zod'
 import { ensure } from '../admin.ts'
 import type { ServerLimits } from '../config.ts'
-import { ApiError, notFound } from '../lib/errors.ts'
+import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import type { Principal } from '../policy.ts'
 import { publish } from '../publication.ts'
 import { auditAdmin, requireSite, requireSiteAs, save } from '../sites.ts'
 import type { SiteRecord, User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { probeServer, reconfigureLive, serverSite, serversOn } from './index.ts'
+import { limitsOf, probeServer, reconfigureLive, serverSite, serversOn } from './index.ts'
 import { readLogs, resolveViewer, sinceOf } from './logs.ts'
 import { listSecrets, removeSecret, secretValues, setSecret } from './secrets.ts'
 
 /** 404 unless the instance runs site servers: the routes are not there without them. */
 export function requireServers(deps: Deps) {
   if (!serversOn(deps)) throw notFound()
+}
+
+/** The version waiting for secrets and the names it declares, when there is one still pending. */
+async function waitingFor(
+  deps: Deps,
+  site: SiteRecord
+): Promise<{ versionId: string; declared: string[] } | undefined> {
+  const awaiting = site.server?.awaiting
+  if (!awaiting) return undefined
+  const version = await deps.store.getVersion(site, awaiting.versionId)
+  if (version?.status !== 'pending' || !version.server) return undefined
+  return { versionId: version.id, declared: version.server.secrets }
 }
 
 /** The secrets the site's live version declares (none without a server). */
@@ -89,7 +105,7 @@ async function deployAwaiting(
     return { deployed: { versionId: version.id, url: published.site.url } }
   } catch (err) {
     if (!(err instanceof ApiError)) throw err
-    if (err.code !== 'secrets_missing') await stopWaiting(deps, site.name, version.id)
+    if (!KEEPS_WAITING.has(err.code)) await stopWaiting(deps, site.name, version.id)
     const logs = err.extra?.logs
     return {
       deployed: {
@@ -101,6 +117,12 @@ async function deployAwaiting(
     }
   }
 }
+
+/**
+ * The refusals a waiting publish keeps waiting through: a secret still unset, and a server that
+ * didn't start with the secrets as they are (the next change may be the fix).
+ */
+const KEEPS_WAITING = new Set(['secrets_missing', 'server_failed_to_start'])
 
 /** A waiting publish refused for another reason waits no more: it is published again by hand. */
 async function stopWaiting(deps: Deps, name: string, versionId: string) {
@@ -118,7 +140,7 @@ export async function siteSecrets(
 ): Promise<SiteSecretsResponse> {
   requireServers(deps)
   const site = await requireSite(deps, user, name, 'site.secrets')
-  return listSecrets(deps, site, await declared(deps, site))
+  return listSecrets(deps, site, await declared(deps, site), await waitingFor(deps, site))
 }
 
 export async function putSiteSecret(
@@ -146,7 +168,8 @@ export async function deleteSiteSecret(
   const site = await requireSite(deps, user, name, 'site.secrets')
   await removeSecret(deps, site, secret)
   const live = await redeployLive(deps, site)
-  return { name: secret, ...(live ? { live } : {}) }
+  const waiting = await deployAwaiting(deps, user, site)
+  return { name: secret, ...(live ? { live } : {}), ...waiting }
 }
 
 export async function siteLogs(
@@ -195,7 +218,9 @@ export interface AdminServerState {
 
 /**
  * An admin's kill switch and limits for one site's server (`site.server`, audited as a change):
- * stopped, the route says `x` and `/api/*` answers 503; the platform is told either way.
+ * stopped, the route says `x` and `/api/*` answers 503; the platform is told either way. A time
+ * per request past what the platform serves (`SiteServers.maxTimeoutSeconds`) is 400
+ * `limit_too_high`.
  */
 export async function adminSetServer(
   deps: Deps,
@@ -205,6 +230,14 @@ export async function adminSetServer(
 ): Promise<AdminServerState> {
   requireServers(deps)
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.server')
+  const maxTimeout = deps.servers?.maxTimeoutSeconds
+  const timeout = req.limits?.timeoutSeconds
+  if (maxTimeout !== undefined && typeof timeout === 'number' && timeout > maxTimeout) {
+    throw badRequest(
+      `This Fling's platform serves a request for at most ${maxTimeout} s: set the time per request to ${maxTimeout} or less`,
+      'limit_too_high'
+    )
+  }
   await auditAdmin(deps, actor, site, 'site.server')
   const state = { ...site.server }
   if (req.stopped !== undefined) {
@@ -230,7 +263,7 @@ export async function adminSetServer(
     name: site.name,
     hasServer: site.server.live === true,
     stopped: site.server.stopped === true,
-    limits: { ...deps.config.servers.limits, ...site.server.limits },
+    limits: limitsOf(deps, site),
     raised: { ...site.server.limits },
   }
 }

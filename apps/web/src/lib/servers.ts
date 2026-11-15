@@ -83,13 +83,13 @@ export type AwaitingSecrets = NonNullable<SiteDetail['awaitingSecrets']>
 
 /**
  * The secrets to list: those the live version declares first, in its order (set or missing), then
- * those the waiting publish still needs, then those set that neither uses (kept for a rollback),
- * by name.
+ * those the waiting publish declares (`res.waiting`, else the names it was refused for), then
+ * those set that neither uses (kept for a rollback), by name.
  */
 export function secretRows(res: SiteSecretsResponse, awaiting?: AwaitingSecrets): SecretRow[] {
   const byName = new Map(res.secrets.map(s => [s.name, s]))
   const declared = new Set(res.declared)
-  const needed = new Set(awaiting?.secrets ?? [])
+  const needed = new Set(res.waiting?.declared ?? awaiting?.secrets ?? [])
   const waiting = [...needed].filter(n => !declared.has(n))
   const listed = new Set([...declared, ...waiting])
   return [
@@ -112,8 +112,12 @@ export function secretRows(res: SiteSecretsResponse, awaiting?: AwaitingSecrets)
   ]
 }
 
-/** The secrets the waiting publish still needs: those it was missing that aren't set since. */
+/**
+ * The secrets the waiting publish still needs: what the API says (`res.waiting.missing`), else
+ * those it was missing that aren't set since.
+ */
 export function stillAwaited(res: SiteSecretsResponse, awaiting: AwaitingSecrets): string[] {
+  if (res.waiting?.versionId === awaiting.versionId) return res.waiting.missing
   const set = new Set(res.secrets.map(s => s.name))
   return awaiting.secrets.filter(n => !set.has(n))
 }
@@ -146,9 +150,13 @@ export function secretOutcome(
         url: d.url,
       }
     }
+    const retry =
+      d.error === 'server_failed_to_start'
+        ? ' It still waits: change a secret and it is tried again, or publish a fixed version.'
+        : ''
     return {
       tone: 'error',
-      text: `Version ${shortVersion(d.versionId)} didn’t go live: ${d.message}`,
+      text: `Version ${shortVersion(d.versionId)} didn’t go live: ${d.message}${retry}`,
       ...(d.logs?.length ? { logs: d.logs } : {}),
     }
   }

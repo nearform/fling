@@ -12,7 +12,12 @@
  * a deploy that waited for secrets goes live once the last is set): the outcome is printed, with
  * the server's log when it didn't start.
  */
-import { formatLogLine, SITE_SECRET_NAME_RE } from '@fling/shared'
+import {
+  formatLogLine,
+  isReservedSecretName,
+  RESERVED_SECRET_NAMES_TEXT,
+  SITE_SECRET_NAME_RE,
+} from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { pickEnv } from '../dotenv.ts'
@@ -50,6 +55,11 @@ function checkName(name: string): string {
   if (!SITE_SECRET_NAME_RE.test(name)) {
     throw new CliError(`Invalid secret name "${name}"`, {
       hint: 'Use A-Z, 0-9 and _, not starting with a digit, at most 64 (e.g. SLACK_WEBHOOK_URL).',
+    })
+  }
+  if (isReservedSecretName(name)) {
+    throw new CliError(`A site secret can't be called ${name}`, {
+      hint: `${RESERVED_SECRET_NAMES_TEXT} are Fling's and the platform's: choose another name, in fling.json and the server too.`,
     })
   }
   return name
@@ -112,9 +122,15 @@ export async function runSecretsList(ctx: CommandContext, site: string): Promise
       { header: 'WHEN', value: s => ago(s.setAt) },
     ])
     const missing = res.missing.length
-      ? `\n${chalk.yellow(`Declared in fling.json but not set: ${res.missing.join(', ')}`)}`
+      ? `\n${chalk.yellow(`The live version declares in fling.json but not set: ${res.missing.join(', ')}`)}`
       : ''
-    return `${table}${missing}`
+    const w = res.waiting
+    const waiting = !w
+      ? ''
+      : w.missing.length
+        ? `\n${chalk.yellow(`Version ${w.versionId} waits for ${w.missing.join(', ')} (it declares ${w.declared.join(', ')}): it goes live once they are set`)}`
+        : `\n${chalk.yellow(`Version ${w.versionId} waits to go live: its server didn't start with the secrets it declares (${w.declared.join(', ')}). Setting or removing a secret tries it again`)}`
+    return `${table}${missing}${waiting}`
   })
 }
 

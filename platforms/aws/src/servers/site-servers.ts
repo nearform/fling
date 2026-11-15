@@ -18,7 +18,9 @@
  *     version nothing routes to are deleted before a new one is made, so a site keeps few, and
  *     old secret values (which GetWebFunctionRevision shows) do not linger.
  *   - Limits: the wall time and body size are the entry's (web-entry.ts) to the second and byte,
- *     the revision's timeoutSeconds Lambda's backstop (3 to 900 s); requests per second are the
+ *     the revision's timeoutSeconds Lambda's backstop (3 to 900 s). The wall time is at most
+ *     `maxTimeoutSeconds`, 120 s, the longest CloudFront waits on an origin (the router asks for
+ *     it on every invoke), so the core clamps SERVER_TIMEOUT_SECONDS and refuses a raise past it; requests per second are the
  *     live endpoint's rateLimit, in the steps Lambda takes (`rateStep`); environments its
  *     maxEnvironments (at least 2). Egress `none` needs the instance's network connector
  *     (Terraform's servers.egress): a revision is never made with egress open when `none` was
@@ -43,8 +45,17 @@ import type {
   ServerVersion,
   SiteServers,
 } from '@fling/api/servers/types'
-import { SERVER_SITE_HEADER } from '@fling/shared/route-keys'
-import { SERVER_START_LOG_LINES } from '@fling/shared/site-server'
+import {
+  EDGE_SERVER_READ_TIMEOUT_SECONDS,
+  restoredServerStatus,
+  SERVER_SITE_HEADER,
+  SERVER_STATUS_HEADER,
+} from '@fling/shared/route-keys'
+import {
+  isReservedSecretName,
+  RESERVED_SECRET_NAMES_TEXT,
+  SERVER_START_LOG_LINES,
+} from '@fling/shared/site-server'
 import { ENTRY_ENV, LOG_RETENTION_DAYS, SERVER_ERROR_HEADER } from './entry-contract.ts'
 import {
   functionName,
@@ -104,9 +115,6 @@ export interface AwsSiteServersOptions {
   pollMs?: number
 }
 
-/** Environment names a site secret can't have: Lambda's, the entry's, PORT and HOST. */
-const RESERVED_ENV = /^(AWS_|LAMBDA_|FLING_|_HANDLER$|_X_AMZN|PORT$|HOST$|TZ$|PATH$|LANG$)/
-
 /** Arm vCPUs one environment takes. */
 export const VCPUS_PER_ENVIRONMENT = 2
 /** Lambda's bounds on a revision's timeout. */
@@ -142,6 +150,8 @@ const startFailed = (message: string) =>
   new ApiError(422, 'server_failed_to_start', `Not published: ${message}`, { logs: [] })
 
 export class AwsSiteServers implements SiteServers {
+  /** CloudFront waits at most this long on the Web Function (the router's readTimeout). */
+  readonly maxTimeoutSeconds = EDGE_SERVER_READ_TIMEOUT_SECONDS
   /** the revision activate or reconfigure readied last, by site and version */
   private readonly readied = new Map<string, string>()
   /** each function's endpoint domains */
@@ -195,7 +205,8 @@ export class AwsSiteServers implements SiteServers {
         const marker = res.headers.get(SERVER_ERROR_HEADER)
         if (!platformError && !marker) {
           await res.body?.cancel()
-          return { ok: true, status: res.status, logs: [] }
+          const status = restoredServerStatus(res.status, res.headers.get(SERVER_STATUS_HEADER))
+          return { ok: true, status, logs: [] }
         }
         failure = marker ? await entryMessage(res) : `Lambda answered ${platformError}`
         if (platformError) await res.body?.cancel()
@@ -308,7 +319,11 @@ export class AwsSiteServers implements SiteServers {
     )
     const out = new Headers(res.headers)
     for (const name of [...out.keys()]) if (name.startsWith('lambda-web-')) out.delete(name)
-    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out })
+    // As the viewer-response function on /api/* does: a server's own 403 or 404, put back.
+    const status = restoredServerStatus(res.status, res.headers.get(SERVER_STATUS_HEADER))
+    out.delete(SERVER_STATUS_HEADER)
+    const statusText = status === res.status ? res.statusText : ''
+    return new Response(res.body, { status, statusText, headers: out })
   }
 
   /**
@@ -389,12 +404,13 @@ export class AwsSiteServers implements SiteServers {
     zip: RevisionSpec['zip']
   ): RevisionSpec {
     const { settings } = this.o
-    const reserved = Object.keys(opts.secrets).filter(name => RESERVED_ENV.test(name))
+    // The core refuses these when they are set or declared; never let one reach the revision.
+    const reserved = Object.keys(opts.secrets).filter(isReservedSecretName)
     if (reserved.length > 0) {
       throw new ApiError(
         400,
         'invalid_secret_name',
-        `On this Fling a site secret can't be called ${reserved.join(', ')}: AWS_*, LAMBDA_*, FLING_*, PORT, HOST and _HANDLER are the platform's. Rename it in fling.json and set it again`,
+        `A site secret can't be called ${reserved.join(', ')}: ${RESERVED_SECRET_NAMES_TEXT} are Fling's and the platform's. Rename it in fling.json and set it again`,
         { secrets: reserved }
       )
     }

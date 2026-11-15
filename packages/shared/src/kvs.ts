@@ -28,7 +28,7 @@ export const KvsSiteValueSchema = z.object({
   m: z.literal(1).optional(),
   /** present when the current version has a server (SERVER_BUNDLE), run for SERVER_PREFIX */
   f: z.literal(1).optional(),
-  /** where the server is reached, when the platform needs it (AWS: the Web Function's endpoint) */
+  /** where the server is reached, when the platform needs it (AWS: the Web Function's endpoint; Cloudflare: the run, which names its isolate and options) */
   t: z.string().optional(),
   /** present when an admin stopped the site's server: SERVER_PREFIX answers 503 */
   x: z.literal(1).optional(),

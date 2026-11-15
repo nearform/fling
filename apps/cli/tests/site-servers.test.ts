@@ -279,6 +279,21 @@ describe('fling secrets', () => {
     expect(out.content()).toContain('not set: OTHER')
   })
 
+  it('names what the version waiting for secrets declares and still needs', async () => {
+    const m = mockFetch({
+      'GET /api/sites/my-app/secrets': () =>
+        jsonResponse({
+          secrets: [],
+          declared: [],
+          missing: [],
+          waiting: { versionId: VERSION, declared: ['A', 'B'], missing: ['B'] },
+        }),
+    })
+    const { ctx, out } = await testContext({ store: await serversStore(), fetch: m.fetch })
+    await runSecretsList(ctx, 'my-app')
+    expect(out.content()).toContain(`Version ${VERSION} waits for B (it declares A, B)`)
+  })
+
   it('says when the Fling does not run site servers', async () => {
     const m = mockFetch({ 'GET /.well-known/fling': () => jsonResponse(INSTANCE) })
     const { ctx } = await testContext({ store: await serversStore(INSTANCE), fetch: m.fetch })
@@ -542,13 +557,17 @@ describe('fling dev', () => {
 })
 
 describe('what setting a secret did', () => {
-  it('says when nothing is live or waiting, and that a failed version needs deploying again', () => {
+  it('says when nothing is live or waiting, and that a version whose server failed still waits', () => {
     expect(describeSecretOutcome('s', {}).lines[0]).toMatch(/next deploy/)
     expect(describeSecretOutcome('s', {}, true).lines).toEqual([])
     const failed = describeSecretOutcome('s', {
       deployed: { versionId: VERSION, error: 'server_failed_to_start', message: 'no', logs: ['x'] },
     })
     expect(failed).toMatchObject({ failed: true, logs: ['x'] })
-    expect(failed.lines.join('\n')).toMatch(/deploy again/)
+    expect(failed.lines.join('\n')).toMatch(/still waits: set or remove a secret/)
+    const refused = describeSecretOutcome('s', {
+      deployed: { versionId: VERSION, error: 'servers_not_allowed', message: 'no' },
+    })
+    expect(refused.lines.join('\n')).toMatch(/stopped waiting for secrets/)
   })
 })

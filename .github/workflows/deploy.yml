@@ -16,6 +16,8 @@ name: Deploy
 # environment, so there is no AWS key in GitHub. See platforms/aws/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
+#   0. with site servers, the server status function (viewer-response on the sites' /api/*): it puts
+#      a server's 403 or 404 back, and changes nothing else, so it goes first;
 #   1. the API (Lambda code), and wait until the new code is live;
 #   1b. data migrations: invoke the function with {"fling":"migrate"} until it reports done. The
 #      code just deployed serves correctly before they run (each migration is written so; see
@@ -92,6 +94,8 @@ jobs:
               <<<"$CONFIG" >/dev/null || {
               echo "::error::AWS_DEPLOY_CONFIG.INSTANCE needs ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS (see platforms/aws/DEPLOY.md)"; exit 1; }
             echo "INSTANCE=$(jq -c '.INSTANCE' <<<"$CONFIG")"
+            # With site servers only (Terraform's var.servers): the server status function.
+            echo "SERVER_STATUS_FUNCTION=$(jq -r '.SERVER_STATUS_FUNCTION // ""' <<<"$CONFIG")"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
@@ -128,11 +132,12 @@ jobs:
           set -euo pipefail
           pnpm --filter "@fling/platform-aws..." build
           pnpm --filter "@fling/web..." build
-          # dist/site-router.js: the CloudFront Function, the shared routing decision bundled.
+          # dist/site-router.js: the CloudFront Function, the shared routing decision bundled; and
+          # dist/server-status.js, which puts a site server's own 403 or 404 back.
           pnpm --filter @fling/edge build
           # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
           pnpm --filter ./apps/cli build:mcpb
-          for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html apps/web/dist-review/review-shell.html edge/dist/site-router.js apps/cli/dist/fling.mcpb; do
+          for f in platforms/aws/dist/lambda.zip apps/web/dist/index.html apps/web/dist-404/404.html apps/web/dist-review/review-shell.html edge/dist/site-router.js edge/dist/server-status.js apps/cli/dist/fling.mcpb; do
             [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
           done
 
@@ -140,6 +145,40 @@ jobs:
         with:
           role-to-assume: ${{ steps.config.outputs.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ steps.config.outputs.AWS_REGION }}
+
+      # Before the API: a server's revision made by the new code sends its 403 and 404 as 300 +
+      # x-fling-status, which this puts back; with no header it changes nothing, so it can go first.
+      - name: Publish the server status function
+        if: steps.config.outputs.SERVER_STATUS_FUNCTION != ''
+        env:
+          FUNCTION: ${{ steps.config.outputs.SERVER_STATUS_FUNCTION }}
+        run: |
+          set -euo pipefail
+          code=edge/dist/server-status.js
+          described="$(aws cloudfront describe-function --name "$FUNCTION" --stage DEVELOPMENT)"
+          etag="$(jq -er .ETag <<<"$described")"
+          jq '.FunctionSummary.FunctionConfig | {Comment: (.Comment // ""), Runtime}' \
+            <<<"$described" > "$RUNNER_TEMP/server-status-config.json"
+          etag="$(aws cloudfront update-function --name "$FUNCTION" --if-match "$etag" \
+            --function-config "file://$RUNNER_TEMP/server-status-config.json" \
+            --function-code "fileb://$code" --query ETag --output text)"
+          # A server's 404 as it arrives: it must come out as 404, without the header.
+          jq -n '{version: "1.0", context: {eventType: "viewer-response"}, viewer: {ip: "192.0.2.1"},
+            request: {method: "GET", uri: "/api/x", querystring: {}, headers: {}, cookies: {}},
+            response: {statusCode: 300, statusDescription: "", headers: {"x-fling-status": {value: "404"}}, cookies: {}}}' \
+            > "$RUNNER_TEMP/server-status-event.json"
+          result="$(aws cloudfront test-function --name "$FUNCTION" --if-match "$etag" \
+            --stage DEVELOPMENT --event-object "fileb://$RUNNER_TEMP/server-status-event.json" --output json)"
+          error="$(jq -r '.TestResult.FunctionErrorMessage // ""' <<<"$result")"
+          if [ -n "$error" ]; then
+            echo "::error::The server status function fails in CloudFront, not published: $error"; exit 1
+          fi
+          status="$(jq -r '.TestResult.FunctionOutput | fromjson | .response.statusCode' <<<"$result")"
+          if [ "$status" != 404 ]; then
+            echo "::error::The server status function answered $status for a server's 404, not published"; exit 1
+          fi
+          aws cloudfront publish-function --name "$FUNCTION" --if-match "$etag" \
+            --query FunctionSummary.Status --output text
 
       - name: Deploy the API
         env:

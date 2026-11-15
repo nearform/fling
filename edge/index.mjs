@@ -4,9 +4,11 @@
 // run the same code CloudFront does.
 
 import nodeCrypto from 'node:crypto'
-import { buildSiteRouter } from './build.mjs'
+import { buildServerStatus, buildSiteRouter } from './build.mjs'
 
 export const SITE_ROUTER_SOURCE = buildSiteRouter()
+/** The deployable server status function (viewer-response on /api/* with site servers). */
+export const SERVER_STATUS_SOURCE = buildServerStatus()
 
 /** Substitute deploy-time placeholders. Use this when publishing the CloudFront Function too. */
 export function renderSiteRouter({ appOrigin, siteScheme = 'https' }, source = SITE_ROUTER_SOURCE) {
@@ -43,6 +45,28 @@ export function createSiteRouter({ kvs, appOrigin, siteScheme = 'https', now = D
     const result = await handler(structuredClone(event))
     if (origin && !isResponse(result)) result.origin = origin
     return result
+  }
+}
+
+/** The server status function as CloudFront runs it: event in, response out. */
+export function createServerStatus() {
+  if (/^import\s/m.test(SERVER_STATUS_SOURCE)) {
+    throw new Error('the server status function has an unexpected import')
+  }
+  const handler = new Function(`${SERVER_STATUS_SOURCE}\nreturn handler`)()
+  return event => handler(structuredClone(event))
+}
+
+/** Build a CloudFront Functions viewer-response event: the answer as the origin sent it. */
+export function toViewerResponseEvent({ status, headers: extra = {} }) {
+  const headers = {}
+  for (const [name, value] of Object.entries(extra)) headers[name.toLowerCase()] = { value }
+  return {
+    version: '1.0',
+    context: { eventType: 'viewer-response' },
+    viewer: { ip: '127.0.0.1' },
+    request: { method: 'GET', uri: '/api/x', querystring: {}, headers: {}, cookies: {} },
+    response: { statusCode: status, statusDescription: '', headers, cookies: {} },
   }
 }
 

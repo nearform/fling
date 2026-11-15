@@ -15,7 +15,8 @@
  *
  * Enforced here, around each request: the wall time (SERVER_TIMEOUT_SECONDS, streams included:
  * 504 before the answer starts, the stream cut after), the request body (SERVER_BODY_BYTES: 413)
- * and requests per site (the SERVER_RATE_LIMIT binding: 429). The route value's `x` (an admin's
+ * and requests per site (the SERVER_RATE_LIMIT binding: 429). Cloudflare enforces the CPU time
+ * (SERVER_CPU_MS) itself, stopping the isolate; that answers 502 `server_cpu_limit`. The route value's `x` (an admin's
  * kill switch) is the sites host's routing decision; setEnabled stops a site in this isolate too.
  * There are no environments to cap: SERVER_ENVIRONMENTS applies to AWS only.
  */
@@ -36,7 +37,7 @@ import type {
   ServerVersion,
   SiteServers,
 } from '@fling/api/servers/types'
-import { SERVER_HELPER_MODULE, sitePrefix } from '@fling/shared'
+import { isReservedSecretName, SERVER_HELPER_MODULE, sitePrefix } from '@fling/shared'
 import { SERVER_SITE_HEADER } from '@fling/shared/route-keys'
 import {
   BUNDLE_MODULE,
@@ -180,6 +181,10 @@ export class CloudflareSiteServers implements SiteServers {
         ? { ok: true, status: answer.status, logs: [...answer.logs] }
         : { ok: false, error: answer.error, logs: [...answer.logs] }
     } catch (err) {
+      if (isCpuLimit(err)) {
+        const ms = run.options.limits.cpuMs
+        return { ok: false, error: `it used more than ${ms} ms of CPU (SERVER_CPU_MS)`, logs: [] }
+      }
       return { ok: false, error: `it didn't load (${errorText(err)})`, logs: [] }
     } finally {
       clearTimeout(timer)
@@ -291,6 +296,13 @@ export class CloudflareSiteServers implements SiteServers {
           err: errorText(err),
         })
       )
+      if (isCpuLimit(err)) {
+        return failure(
+          502,
+          'server_cpu_limit',
+          `The site's server used more than its CPU time per request (${limits.cpuMs} ms, SERVER_CPU_MS)`
+        )
+      }
       return failure(502, 'server_failed', "The site's server failed")
     } finally {
       clearTimeout(timer)
@@ -340,6 +352,7 @@ export class CloudflareSiteServers implements SiteServers {
     return loader.get(`site:${site.id}:${version.id}:${run}`, async () => {
       const object = await bucket.get(version.bundle)
       if (!object) throw new Error(`no bundle at ${version.bundle}`)
+      const secrets = withoutReserved(options.secrets)
       const code: WorkerLoaderWorkerCode = {
         compatibilityDate: this.opts.compatibilityDate ?? SERVER_COMPATIBILITY_DATE,
         compatibilityFlags: ['nodejs_compat'],
@@ -347,11 +360,13 @@ export class CloudflareSiteServers implements SiteServers {
         modules: {
           [MAIN_MODULE]: { js: mainModule() },
           [BUNDLE_MODULE]: { js: await object.text() },
-          [SERVER_HELPER_MODULE]: { js: helperModule(Object.keys(options.secrets)) },
+          [SERVER_HELPER_MODULE]: { js: helperModule(Object.keys(secrets)) },
         },
-        // Fling's two after the secrets: a secret can't take their place.
+        // Fling's two after the secrets: a secret can't take their place. The core refuses a
+        // reserved name (RESERVED_SECRET_NAMES, PORT and FILES among them) when it is set or
+        // declared, and none reaches the isolate.
         env: {
-          ...options.secrets,
+          ...secrets,
           PORT: String(SERVER_PORT),
           FILES: bindings.files(version.files),
         },
@@ -442,3 +457,11 @@ function withDeadline(res: Response, remainingMs: number): Response {
 }
 
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+/** Cloudflare stopped the isolate for its CPU limit (`limits.cpuMs`): "exceeded CPU time limit". */
+export const isCpuLimit = (err: unknown) => /exceeded CPU time limit/i.test(errorText(err))
+
+/** The site secrets but any by a reserved name (`isReservedSecretName`, shared by every platform). */
+function withoutReserved(secrets: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(secrets).filter(([name]) => !isReservedSecretName(name)))
+}

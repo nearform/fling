@@ -6,6 +6,7 @@ import {
   shareKvsKey,
   siteKvsKey,
 } from '@fling/shared/kvs'
+import { EDGE_SERVER_READ_TIMEOUT_SECONDS } from '@fling/shared/route-keys'
 import {
   revocationMac,
   SITE_COOKIE_TTL_SECONDS,
@@ -677,6 +678,7 @@ describe('site servers', () => {
     expect(request.origin).toMatchObject({
       domainName: 'abc.on.aws',
       originAccessControlConfig: { enabled: true, originType: 'lambda' },
+      timeouts: { readTimeout: EDGE_SERVER_READ_TIMEOUT_SECONDS },
     })
   })
 

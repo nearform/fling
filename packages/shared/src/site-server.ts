@@ -23,6 +23,25 @@ export const SITE_SECRETS_MAX = 20
 export const SITE_SECRET_MAX_BYTES = 8 * 1024
 /** A site secret's name: what the server reads as `process.env.NAME`. */
 export const SITE_SECRET_NAME_RE = /^[A-Z_][A-Z0-9_]{0,63}$/
+/**
+ * The names a site secret can't have, on every platform: what a server's runtime sets beside the
+ * secrets (Lambda's `AWS_*`, `LAMBDA_*`, `_X_AMZN*` and `_HANDLER`; Fling's `FLING_*`, `PORT`,
+ * `HOST` and Cloudflare's `FILES` binding; the process's `PATH`, `TZ` and `LANG`). One list, so a
+ * site moves between platforms with its secrets.
+ */
+export const RESERVED_SECRET_NAMES = {
+  prefixes: ['AWS_', 'LAMBDA_', 'FLING_', '_X_AMZN'],
+  names: ['PORT', 'HOST', 'PATH', 'TZ', 'LANG', '_HANDLER', 'FILES'],
+} as const
+/** The reserved names, as people read them (`AWS_*, …, FILES`). */
+export const RESERVED_SECRET_NAMES_TEXT = [
+  ...RESERVED_SECRET_NAMES.prefixes.map(p => `${p}*`),
+  ...RESERVED_SECRET_NAMES.names,
+].join(', ')
+/** A name a runtime sets itself, so not one a site secret may have (RESERVED_SECRET_NAMES). */
+export const isReservedSecretName = (name: string) =>
+  RESERVED_SECRET_NAMES.prefixes.some(p => name.startsWith(p)) ||
+  (RESERVED_SECRET_NAMES.names as readonly string[]).includes(name)
 /** How long a start probe waits for the new version's server to answer, in milliseconds. */
 export const SERVER_PROBE_TIMEOUT_MS = 10_000
 /** The path the start probe asks when `fling.json` names no health path: any answer will do. */
@@ -69,12 +88,21 @@ export type SiteSecret = z.infer<typeof SiteSecretSchema>
 
 /**
  * GET /api/sites/:name/secrets. `declared`: the names the live version's `fling.json` declares,
- * set or not (`missing`: those not set).
+ * set or not (`missing`: those not set). `waiting`: the version waiting for secrets, when there is
+ * one, with the names its `fling.json` declares and those still unset (none: its server failed to
+ * start, and the next change tries it again).
  */
 export const SiteSecretsResponseSchema = z.object({
   secrets: z.array(SiteSecretSchema),
   declared: z.array(z.string()),
   missing: z.array(z.string()),
+  waiting: z
+    .object({
+      versionId: z.string(),
+      declared: z.array(z.string()),
+      missing: z.array(z.string()),
+    })
+    .optional(),
 })
 export type SiteSecretsResponse = z.infer<typeof SiteSecretsResponseSchema>
 
@@ -96,9 +124,10 @@ export const SecretLiveOutcomeSchema = z.union([
 export type SecretLiveOutcome = z.infer<typeof SecretLiveOutcomeSchema>
 
 /**
- * The publish that waited for secrets, once the last was set: live at `url`, or refused (`error`:
- * the code a publish would give, e.g. `server_failed_to_start` with the server's log). Refused,
- * it stays pending and waits no more: publish again.
+ * The publish that waited for secrets, once none is unset: live at `url`, or refused (`error`: the
+ * code a publish would give, e.g. `server_failed_to_start` with the server's log). Refused because
+ * its server didn't start, it still waits, and the next secret set or removed tries it again;
+ * refused for anything else, it waits no more: publish again.
  */
 export const SecretDeployedOutcomeSchema = z.union([
   z.object({ versionId: z.string(), url: z.string() }),
@@ -124,10 +153,15 @@ export const PutSiteSecretResponseSchema = SiteSecretSchema.extend({
 })
 export type PutSiteSecretResponse = z.infer<typeof PutSiteSecretResponseSchema>
 
-/** DELETE /api/sites/:name/secrets/:secret: the name removed, and the live server after it. */
+/**
+ * DELETE /api/sites/:name/secrets/:secret: the name removed, the live server after it, and the
+ * waiting publish tried again (as after a set).
+ */
 export const DeleteSiteSecretResponseSchema = z.object({
   name: z.string(),
   live: SecretLiveOutcomeSchema.optional(),
+  deployed: SecretDeployedOutcomeSchema.optional(),
+  missing: z.array(z.string()).optional(),
 })
 export type DeleteSiteSecretResponse = z.infer<typeof DeleteSiteSecretResponseSchema>
 

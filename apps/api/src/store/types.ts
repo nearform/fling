@@ -234,6 +234,7 @@ export interface SiteRecord {
 export interface SiteServerState {
   /** its current version has a server (the site's `hasServer`) */
   live?: true
+  /** what `SiteServers.activate` returned for it, the route value's `t` (AWS: an endpoint domain; Cloudflare: a run name) */
   target?: string
   stopped?: true
   limits?: Partial<ServerLimits>

@@ -68,3 +68,25 @@ export declare function isResponse(
 export declare function isInvoke(
   result: CloudFrontRequest | CloudFrontResponse
 ): result is CloudFrontRequest
+
+/** The deployable server status function (viewer-response on /api/* with site servers). */
+export declare const SERVER_STATUS_SOURCE: string
+
+export type ViewerResponseEvent = {
+  version: string
+  context: { eventType: string }
+  viewer: { ip: string }
+  request: CloudFrontRequest
+  response: CloudFrontResponse
+}
+
+/** The server status function as CloudFront runs it. */
+export declare function createServerStatus(): (
+  event: ViewerResponseEvent
+) => Promise<CloudFrontResponse>
+
+/** A viewer-response event: the answer as the origin sent it. */
+export declare function toViewerResponseEvent(opts: {
+  status: number
+  headers?: Record<string, string>
+}): ViewerResponseEvent

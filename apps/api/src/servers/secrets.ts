@@ -15,6 +15,8 @@
  */
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
 import {
+  isReservedSecretName,
+  RESERVED_SECRET_NAMES_TEXT,
   SITE_SECRET_MAX_BYTES,
   SITE_SECRET_NAME_RE,
   SITE_SECRETS_MAX,
@@ -124,7 +126,10 @@ const listed = (r: SiteSecretRecord): SiteSecret => ({
   setAt: r.setAt,
 })
 
-/** 400 `invalid_secret_name` unless `name` is one a server can read from its environment. */
+/**
+ * 400 `invalid_secret_name` unless `name` is one a server can read from its environment, and not
+ * one a runtime sets itself (RESERVED_SECRET_NAMES, the same on every platform).
+ */
 export function checkSecretName(name: string) {
   if (!SITE_SECRET_NAME_RE.test(name)) {
     throw badRequest(
@@ -132,13 +137,23 @@ export function checkSecretName(name: string) {
       'invalid_secret_name'
     )
   }
+  if (isReservedSecretName(name)) {
+    throw badRequest(
+      `"${name}" can't be a secret's name: ${RESERVED_SECRET_NAMES_TEXT} are Fling's and the platform's. Choose another name (in fling.json too)`,
+      'invalid_secret_name'
+    )
+  }
 }
 
-/** The site's secrets by name, who set each and when; the names `declared` asks for, and those unset. */
+/**
+ * The site's secrets by name, who set each and when; the names `declared` asks for (the live
+ * version's) and those unset; and the same for the version waiting for secrets, when there is one.
+ */
 export async function listSecrets(
   deps: Deps,
   site: SiteRecord,
-  declared: readonly string[]
+  declared: readonly string[],
+  waiting?: { versionId: string; declared: readonly string[] }
 ): Promise<SiteSecretsResponse> {
   const records = await deps.store.listSiteSecrets(site.id)
   const names = new Set(records.map(r => r.name))
@@ -146,6 +161,15 @@ export async function listSecrets(
     secrets: records.map(listed),
     declared: [...declared],
     missing: declared.filter(n => !names.has(n)),
+    ...(waiting
+      ? {
+          waiting: {
+            versionId: waiting.versionId,
+            declared: [...waiting.declared],
+            missing: waiting.declared.filter(n => !names.has(n)),
+          },
+        }
+      : {}),
   }
 }
 

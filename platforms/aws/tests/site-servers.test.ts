@@ -15,6 +15,11 @@ import type { ServerLimits } from '@fling/api/config'
 import { serverVersion } from '@fling/api/servers'
 import type { ServerOptions, ServerSite } from '@fling/api/servers/types'
 import { SERVER_FIXTURES, serverLogsConformance, siteServersConformance } from '@fling/conformance'
+import {
+  EDGE_SERVER_READ_TIMEOUT_SECONDS,
+  SERVER_STAND_IN_STATUS,
+  SERVER_STATUS_HEADER,
+} from '@fling/shared/route-keys'
 import { afterAll, describe, expect, it } from 'vitest'
 import { buildServerEntry } from '../scripts/server-entry.mjs'
 import { requestLogText } from '../src/servers/entry-contract.ts'
@@ -365,6 +370,44 @@ describe('AwsSiteServers', () => {
     expect(await h.functions.getFunction(`${PREFIX}${kept.id}`)).not.toBeNull()
     expect(await h.functions.getFunction(`${PREFIX}${gone.id}`)).toBeNull()
     expect(await h.logEvents.groups(`/aws/lambda/web/${PREFIX}${kept.id}`)).toHaveLength(2)
+  })
+
+  it("sends a server's 404 as the stand-in status naming it, which invoke and the probe put back", async () => {
+    const h = make()
+    const s = site()
+    const v = await h.putVersion(s, 'v1', { '_fling/server.mjs': SERVER_FIXTURES.fetch() })
+    await h.servers.activate(s, v, options())
+    await h.servers.goLive(s, v)
+    const fn = `${PREFIX}${s.id}`
+    const domain = (await h.functions.getEndpoint(fn, LIVE_ENDPOINT))?.domainName ?? ''
+    // What CloudFront gets from the Web Function: out of the custom error responses' reach.
+    const raw = await h.functions.fetch(
+      domain,
+      new Request(`https://${domain}/api/nothing-here`, {
+        headers: { 'x-fling-site': `${s.id}/v1/private` },
+      })
+    )
+    await raw.body?.cancel()
+    expect(raw.status).toBe(SERVER_STAND_IN_STATUS)
+    expect(raw.headers.get(SERVER_STATUS_HEADER)).toBe('404')
+    const res = await h.servers.invoke(
+      s,
+      v,
+      new Request('https://x.sites.example.test/api/nothing-here', {
+        headers: { 'x-fling-site': `${s.id}/v1/private` },
+      })
+    )
+    expect(res.status).toBe(404)
+    expect(res.headers.get(SERVER_STATUS_HEADER)).toBeNull()
+    expect(await h.servers.probe(s, v, PROBE)).toMatchObject({ ok: true, status: 404 })
+    const lines = await h.logs.read(s.id, new Date(Date.now() - 60_000), 100)
+    expect(lines).toContainEqual(
+      expect.objectContaining({ kind: 'request', path: '/api/nothing-here', status: 404 })
+    )
+  })
+
+  it('serves a request for at most as long as CloudFront waits', () => {
+    expect(make().servers.maxTimeoutSeconds).toBe(EDGE_SERVER_READ_TIMEOUT_SECONDS)
   })
 
   it('logs a request line for every request, and Cache-Control as the core rules', async () => {

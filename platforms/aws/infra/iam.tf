@@ -231,7 +231,8 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["${aws_s3_bucket.sites.arn}/${local.error_page_prefix}/*"]
   }
 
-  # The site router's code. UpdateFunction re-sends the function's KeyValueStore association.
+  # The site router's code, and the server status function's with site servers. UpdateFunction
+  # re-sends the function's KeyValueStore association.
   statement {
     sid = "EdgeFunctions"
     actions = [
@@ -241,7 +242,10 @@ data "aws_iam_policy_document" "deploy" {
       "cloudfront:TestFunction",
       "cloudfront:UpdateFunction",
     ]
-    resources = [aws_cloudfront_function.site_router.arn, aws_cloudfront_function.spa.arn]
+    resources = concat(
+      [aws_cloudfront_function.site_router.arn, aws_cloudfront_function.spa.arn],
+      aws_cloudfront_function.server_status[*].arn,
+    )
   }
 
   statement {

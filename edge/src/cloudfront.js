@@ -13,11 +13,11 @@
 //
 // An invoke (a site server's `/api/*`) goes on as the request it was, minus the browser's cookies
 // and any `x-fling-viewer` it sent, with `x-fling-viewer` set from the decision and
-// `x-fling-site: <siteId>/<v>`; to the decision's `target` when it names one (the site's Web
+// `x-fling-site` (`<siteId>/<v>[/private]`, serverSiteHeader); to the decision's `target` when it names one (the site's Web
 // Function endpoint, signed by origin access control), else to the distribution's own origin.
 
 import { SERVER_SITE_HEADER, SITE_HMAC_KVS_KEY, VIEWER_HEADER } from '@fling/shared/route-keys'
-import { routeSiteRequest } from '@fling/shared/site-routing'
+import { routeSiteRequest, serverSiteHeader } from '@fling/shared/site-routing'
 import cf from 'cloudfront'
 import crypto from 'crypto'
 
@@ -94,7 +94,7 @@ async function handler(event) {
     delete request.headers.cookie
     delete request.headers[VIEWER_HEADER]
     if (decision.viewer) request.headers[VIEWER_HEADER] = { value: JSON.stringify(decision.viewer) }
-    request.headers[SERVER_SITE_HEADER] = { value: `${decision.siteId}/${decision.v}` }
+    request.headers[SERVER_SITE_HEADER] = { value: serverSiteHeader(decision) }
     if (decision.target) {
       cf.updateRequestOrigin({
         domainName: decision.target,

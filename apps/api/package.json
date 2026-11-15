@@ -28,7 +28,15 @@
     "./table": "./src/table/types.ts",
     "./table/memory": "./src/table/memory.ts",
     "./table/file": "./src/table/file.ts",
-    "./migrations": "./src/migrations/index.ts"
+    "./migrations": "./src/migrations/index.ts",
+    "./servers": "./src/servers/index.ts",
+    "./servers/types": "./src/servers/types.ts",
+    "./servers/shell": "./src/servers/shell.ts",
+    "./servers/logs": "./src/servers/logs.ts",
+    "./servers/memory-logs": "./src/servers/memory-logs.ts",
+    "./servers/node": "./src/servers/node/runtime.ts",
+    "./servers/node/entry": "./src/servers/node/entry.mjs",
+    "./servers/node/helper": "./src/servers/node/helper.mjs"
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",

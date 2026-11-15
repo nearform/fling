@@ -654,7 +654,7 @@ describe('site servers', () => {
       email: 'alice@example.test',
       guest: false,
     })
-    expect(request.headers['x-fling-site']?.value).toBe('S10/V10')
+    expect(request.headers['x-fling-site']?.value).toBe('S10/V10/private')
     expect(request.headers['content-type']?.value).toBe('application/json')
     expect(request.origin).toBeUndefined()
   })

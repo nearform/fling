@@ -556,6 +556,69 @@ describe('fling dev', () => {
   })
 })
 
+describe('fling dev with Markdown', () => {
+  /** A folder of Markdown: a README at the top, a folder with only one page, one with an index. */
+  async function markdownFolder() {
+    const root = await tempDir()
+    const dir = join(root, 'notes-site')
+    await writeTree(dir, {
+      'README.md': '# Read me\n\nSee [other](notes/other.md).',
+      'notes/other.md': '# Other notes',
+      'guide/index.md': '# Guide home',
+      'guide/README.md': '# Not the guide home',
+      'app/index.html': '<h1>app</h1>',
+      'app/notes.md': '# App notes',
+    })
+    return dir
+  }
+
+  for (const spa of [false, true]) {
+    it(`renders Markdown and its folders' home pages as a published site does${spa ? ' (--spa)' : ''}`, async () => {
+      const dev = await startDevServer({ dir: await markdownFolder(), port: 0, spa, watch: false })
+      try {
+        const url = dev.status().url
+        const home = await fetch(`${url}/`)
+        expect(home.status).toBe(200)
+        expect(home.headers.get('content-type')).toMatch(/^text\/html/)
+        expect(await home.text()).toMatch(/<title>Read me<\/title>/)
+        expect(await fetch(`${url}/notes/`).then(r => r.text())).toMatch(/<h1[^>]*>Other notes/)
+        // index.md stands in before README.md
+        expect(await fetch(`${url}/guide/`).then(r => r.text())).toMatch(/<h1[^>]*>Guide home/)
+        // a folder with its own index.html keeps it
+        expect(await fetch(`${url}/app/`).then(r => r.text())).toBe('<h1>app</h1>')
+        const page = await fetch(`${url}/app/notes.md`)
+        expect(page.headers.get('content-type')).toMatch(/^text\/html/)
+        expect(await page.text()).toMatch(/<h1[^>]*>App notes/)
+        const raw = await fetch(`${url}/README.md?raw=1`)
+        expect(raw.headers.get('content-type')).toMatch(/markdown/)
+        expect(await raw.text()).toBe('# Read me\n\nSee [other](notes/other.md).')
+        expect((await fetch(`${url}/.rendered/README.md.html`)).status).toBe(404)
+        const deep = await fetch(`${url}/some/route`, { redirect: 'manual' })
+        if (spa) expect(await deep.text()).toMatch(/<title>Read me<\/title>/)
+        else expect(deep.status).toBe(301)
+      } finally {
+        await dev.close()
+      }
+    })
+  }
+
+  it('renders again when the Markdown changes', async () => {
+    const dir = await markdownFolder()
+    const dev = await startDevServer({ dir, port: 0, watch: false })
+    try {
+      const url = dev.status().url
+      await writeTree(dir, { 'README.md': '# Changed' })
+      await dev.rebuild()
+      expect(await fetch(`${url}/`).then(r => r.text())).toMatch(/<title>Changed<\/title>/)
+      await writeTree(dir, { 'index.html': '<h1>own home</h1>' })
+      await dev.rebuild()
+      expect(await fetch(`${url}/`).then(r => r.text())).toBe('<h1>own home</h1>')
+    } finally {
+      await dev.close()
+    }
+  })
+})
+
 describe('what setting a secret did', () => {
   it('says when nothing is live or waiting, and that a version whose server failed still waits', () => {
     expect(describeSecretOutcome('s', {}).lines[0]).toMatch(/next deploy/)

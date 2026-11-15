@@ -1,20 +1,22 @@
 /**
- * One site, everything about it: the overview, who can open it (Access), who owns and publishes it
- * (Owners and publishers), its files and versions, and archive or delete (Danger zone). An unknown
- * site, or one you hold no role on, is the 404 page, as the API answers both the same way; an
- * admin opens anyone's (`site.role` is `admin`), and is told whose it is and that what they change
- * is on the record. A publisher sees the overview, the owners and publishers (read-only) and the
- * versions, to roll back: not Access, the share link or the danger zone. Archived sites are
- * offline, so Access waits until they are unarchived. With the `paths` capability, the site's
- * Paths are listed when it has any, each linking to its own page.
+ * One site, everything about it: the header and the overview, then tabs (`?tab=`,
+ * `lib/site-tabs.ts`). Access, the first, is who can open it and who owns and publishes it
+ * (Owners and publishers); Versions is its files and versions, and its Paths; Server is its site
+ * server, secrets and logs; Settings is archive or delete (Danger zone). A tab the viewer has
+ * nothing in is left out. An unknown site, or one you hold no role on, is the 404 page, as the API
+ * answers both the same way; an admin opens anyone's (`site.role` is `admin`), and is told whose
+ * it is and that what they change is on the record. A publisher sees the overview, the owners and
+ * publishers (read-only) and the versions, to roll back: not Access, the share link or the danger
+ * zone. Archived sites are offline, so Access waits until they are unarchived. With the `paths`
+ * capability, the site's Paths are listed when it has any, each linking to its own page.
  *
  * With the `servers` capability, a site whose current version has a site server shows its Server
  * section (the kill switch and limits for admins); its owners and publishers see its Secrets once
  * any version has a server, a publish waits for secrets or a secret is set; its owners,
- * publishers and admins see its Logs.
+ * publishers and admins see its Logs. A publish waiting for secrets marks the Server tab.
  */
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { NotFound } from '../components/NotFound'
 import { PageHeader } from '../components/PageHeader'
 import { ResponsesLink } from '../components/review/Forms'
@@ -27,14 +29,17 @@ import { SiteOverview } from '../components/site/SiteOverview'
 import { SitePaths } from '../components/site/SitePaths'
 import { SiteSecrets } from '../components/site/SiteSecrets'
 import { SiteServer } from '../components/site/SiteServer'
+import { SiteTabPanel, SiteTabs } from '../components/site/SiteTabs'
 import { SiteTeam } from '../components/site/SiteTeam'
 import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
 import { useMe, useSiteDetail, useSiteSecrets } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
+import { type SiteTab, siteTabOf, siteTabParam, siteTabsFor } from '../lib/site-tabs'
 
 export default function Site() {
   const { name = '' } = useParams()
+  const [params, setParams] = useSearchParams()
   const instance = useInstance()
   const detail = useSiteDetail(name, name !== '')
   const { data: me } = useMe()
@@ -86,6 +91,26 @@ export default function Site() {
     serversOn &&
     everServer &&
     (site.role === 'owner' || publisher || site.role === 'admin' || admin)
+  const showServer = serversOn && site.server !== undefined
+  const showAccess = !site.archived && !publisher
+  const showTeam = instance?.capabilities.siteRoles === true
+  const tabs = siteTabsFor({
+    access: showAccess || showTeam,
+    server: showServer || showSecrets || showLogs,
+    settings: !publisher,
+  })
+  const tab = siteTabOf(params.get('tab'), tabs)
+  const selectTab = (next: SiteTab) =>
+    setParams(
+      prev => {
+        const p = new URLSearchParams(prev)
+        const value = siteTabParam(next, tabs)
+        if (value) p.set('tab', value)
+        else p.delete('tab')
+        return p
+      },
+      { replace: true }
+    )
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -126,22 +151,44 @@ export default function Site() {
         </div>
       )}
       <SiteOverview site={site} />
-      {serversOn && site.server && (
-        <SiteServer site={site} server={site.server} logs={showLogs} admin={admin} />
-      )}
-      {showSecrets && secrets.data && <SiteSecrets site={site} secrets={secrets.data} />}
-      {!site.archived && !publisher && (
-        <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />
-      )}
-      {instance?.capabilities.siteRoles === true && <SiteTeam site={site} />}
-      {instance?.capabilities.paths === true && (
-        <SitePaths name={site.name} reviewable={reviewable} />
-      )}
-      <SiteVersions site={site} />
-      {showLogs && (
-        <SiteLogs name={site.name} currentVersionId={site.currentVersionId} admin={admin} />
-      )}
-      {!publisher && <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />}
+      <SiteTabs
+        tabs={tabs}
+        selected={tab}
+        onSelect={selectTab}
+        {...(site.awaitingSecrets && {
+          attention: { server: 'a version is waiting for secrets' },
+        })}
+      />
+      <SiteTabPanel tab={tab}>
+        {tab === 'access' && (
+          <>
+            {showAccess && <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />}
+            {showTeam && <SiteTeam site={site} />}
+          </>
+        )}
+        {tab === 'versions' && (
+          <>
+            <SiteVersions site={site} />
+            {instance?.capabilities.paths === true && (
+              <SitePaths name={site.name} reviewable={reviewable} />
+            )}
+          </>
+        )}
+        {tab === 'server' && (
+          <>
+            {showServer && site.server && (
+              <SiteServer site={site} server={site.server} logs={showLogs} admin={admin} />
+            )}
+            {showSecrets && secrets.data && <SiteSecrets site={site} secrets={secrets.data} />}
+            {showLogs && (
+              <SiteLogs name={site.name} currentVersionId={site.currentVersionId} admin={admin} />
+            )}
+          </>
+        )}
+        {tab === 'settings' && (
+          <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />
+        )}
+      </SiteTabPanel>
     </div>
   )
 }

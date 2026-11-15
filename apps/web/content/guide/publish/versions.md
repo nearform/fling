@@ -4,7 +4,7 @@ part: publish
 order: 60
 summary: Every publish is kept as a version; put an earlier one back in an instant.
 requires: [rollback]
-sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteVersions.tsx, apps/web/src/components/site/PathVersions.tsx]
+sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteVersions.tsx, apps/web/src/components/site/PathVersions.tsx, apps/web/src/lib/site-tabs.ts]
 verified: 60d6113
 ---
 
@@ -46,7 +46,7 @@ fling rollback payments-plans <versionId> --path PAY-412
 
 ## In the web app
 
-Open the site from **Sites**. Its **Versions** section shows the files being served, then the
+Open the site from **Sites** and choose its **Versions** tab. It shows the files being served, then the
 **History**: each version with when it was flung, who published it, its files and size. Click
 **Files** to see a version's files, and **Restore** to serve it. The one being served is marked
 **Current**.

@@ -4,7 +4,7 @@ part: share
 order: 40
 summary: Share the work on a site. Owners can do everything; publishers publish and roll back.
 requires: [siteRoles]
-sources: [packages/shared/src/site-roles.ts, apps/api/src/policy.ts, apps/api/src/publication.ts, apps/api/src/invitations.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteTeam.tsx, apps/web/src/components/site/RoleLists.tsx, packages/shared/src/mcp-tools.ts]
+sources: [packages/shared/src/site-roles.ts, apps/api/src/policy.ts, apps/api/src/publication.ts, apps/api/src/invitations.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteTeam.tsx, apps/web/src/components/site/RoleLists.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
 verified: 60d6113
 ---
 
@@ -56,11 +56,12 @@ one [Path](/guide/team-sites/paths) instead of the whole site.
 
 ## In the web app
 
-Open the site from **Sites** and go to its **Owners and publishers** section. Add people and groups
-to **Owners** or **Publishers**. Each change saves at once.
+Open the site from **Sites**. Its **Access** tab, the one it opens on, has the **Owners and
+publishers** section. Add people and groups to **Owners** or **Publishers**. Each change saves at
+once.
 
 A publisher sees the section without being able to change it. Their site page also leaves out
-**Access**, the share link and the **Danger zone**.
+the **Access** section, the share link and the **Settings** tab.
 
 ## When it goes wrong
 

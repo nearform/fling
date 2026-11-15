@@ -4,7 +4,7 @@ part: team-sites
 order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
-sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts]
+sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
 verified: 60d6113
 ---
 
@@ -53,7 +53,7 @@ Name the folder after the ticket (`PAY-412`, `gh-1234`), not after a person.
 
 ## In the web app
 
-Open the site from **Sites**. Its **Paths** section lists each Path with its title, address and
+Open the site from **Sites** and choose its **Versions** tab. Its **Paths** section lists each Path with its title, address and
 when it last changed, with <!-- requires: comments -->**Review** and <!-- /requires -->**View**
 buttons. A long list gets a search box and a sort order.
 

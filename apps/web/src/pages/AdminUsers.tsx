@@ -100,6 +100,8 @@ const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'invitation.revoke': 'revoked the invitation of',
   'site.change': 'changed',
   'site.open': 'opened',
+  'site.server_published': 'published a site server on',
+  'viewer.resolved': 'resolved a viewer id on',
 }
 
 /** What an admin did to someone else's site (a policy action), as a verb for its name. */

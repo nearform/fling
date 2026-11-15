@@ -198,6 +198,14 @@ Values reach the function two ways, and the function's own environment wins:
 | `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. See [Outside invitations](#outside-invitations). |
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
 | `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, the hourly maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
+| `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. |
+| `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). |
+| `SERVERS_MAX_SITES` | no (`50`) | The most sites that may have a server at once; one more is refused with `too_many_servers`. |
+| `SERVER_TIMEOUT_SECONDS` | no (`30`) | The wall-time limit of one request to a site server, a stream included, from 1 to 900. An admin may raise it for one site. |
+| `SERVER_CPU_MS` | no (`1000`) | CPU time one request may use, where the platform measures it. An admin may raise it for one site. |
+| `SERVER_RPS` | no (`100`) | Requests per second one site's server is given before it is throttled. An admin may raise it for one site. |
+| `SERVER_ENVIRONMENTS` | no (`2`) | How many copies of one site's server may run at once, where the platform counts them. An admin may raise it for one site. |
+| `SERVER_BODY_BYTES` | no (`10485760`) | The largest request body a site server is sent. An admin may raise it for one site. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
 | `INSTALL_COMMAND` | no (`npm install -g` + the CLI package) | How the Get started page tells people to install the CLI. |

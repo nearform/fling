@@ -1,6 +1,7 @@
 /**
  * Build deps from config. The core only knows the dev/test adapters (Records on a memory table,
- * fs blobs, memory route table, no live hub, memory and file mailers); a platform entry (e.g. platforms/aws) passes its own adapters for the
+ * fs blobs, memory route table, no live hub, memory and file mailers, memory server logs); a
+ * platform entry (e.g. platforms/aws) passes its own adapters for the
  * drivers config selects. A cloud driver with no adapter supplied is an error, never a silent
  * fall back to memory.
  */
@@ -17,6 +18,8 @@ import { MemoryMailer } from './mail/memory.ts'
 import type { Mailer } from './mail/types.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
 import type { RouteTable } from './route-table/types.ts'
+import { MemoryServerLogs } from './servers/memory-logs.ts'
+import type { ServerLogs, SiteServers } from './servers/types.ts'
 import { Records } from './store/records.ts'
 import type { Store } from './store/types.ts'
 import { MemoryTable } from './table/memory.ts'
@@ -32,6 +35,10 @@ export interface Adapters {
   live?: LiveHub
   /** the cloud's mailer, for the `ses` and `cloudflare` mail drivers */
   mailer?: Mailer
+  /** runs site servers: needed when `SERVERS` is on */
+  servers?: SiteServers
+  /** site servers' logs; default: kept in memory */
+  serverLogs?: ServerLogs
 }
 
 const missing = (driver: string): never => {
@@ -60,6 +67,9 @@ export function buildDeps(
   const identities = opts.identities ?? identityProvidersFor(config)
   const live = config.live ? (opts.live ?? noLiveHub) : noLiveHub
   const mailer = mailerFor(config, opts)
+  const serversOn = config.servers.publish.kind !== 'off'
+  const servers = opts.servers ?? (serversOn ? missing('site servers') : undefined)
+  const serverLogs = opts.serverLogs ?? (servers ? new MemoryServerLogs() : undefined)
   return {
     config,
     store,
@@ -68,6 +78,8 @@ export function buildDeps(
     identities,
     live,
     ...(mailer ? { mailer } : {}),
+    ...(servers ? { servers } : {}),
+    ...(serverLogs ? { serverLogs } : {}),
     clock: systemClock,
   }
 }

@@ -172,6 +172,13 @@ export const accessOf = (site: AccessFields): Access =>
  *   response.read.all   see everyone's responses to a form whose visibility is `own`
  *                       (`canSeeResponse`): GET …/comments, GET …/responses and their MCP tools.
  *                       Without it, a reviewer sees only their own responses to such a form
+ *   site.secrets        GET, PUT, DELETE …/secrets: list the site secrets (by name, never a
+ *                       value), set and remove them. Owners and publishers: whoever can deploy
+ *                       a server can read a secret through it anyway. Not a Path's publishers
+ *   site.logs           GET …/logs: the site server's log. Owners, publishers, and admins from
+ *                       their browser session
+ *   site.server         PUT /api/admin/sites/:name/server: stop or start the site's server, and
+ *                       its limits. Admins only, from their browser session (audited)
  *
  * Comments are the conversation around a site, so everyone who can see a site by signing in
  * takes part: owners, publishers and members (on a restricted site, only its owners, publishers
@@ -209,6 +216,9 @@ export const ACTIONS = [
   'comment.delete',
   'comment.delete.own',
   'response.read.all',
+  'site.secrets',
+  'site.logs',
+  'site.server',
 ] as const
 
 export type Action = (typeof ACTIONS)[number]
@@ -259,6 +269,9 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'comment.delete': ownerOrAdminSession,
   'comment.delete.own': signedIn,
   'response.read.all': ownerOrAdmin,
+  'site.secrets': role => role === 'owner' || role === 'publisher',
+  'site.logs': role => role === 'owner' || role === 'publisher' || role === 'admin',
+  'site.server': role => role === 'admin',
 }
 
 /** Whether a list of people and groups names the user, by address or through one of `groups`. */
@@ -340,6 +353,10 @@ export const SITE_CHANGES: ReadonlySet<Action> = new Set<Action>([
   'share.create',
   'share.revoke',
   'comment.delete',
+  // Not changes, but what only a browser session may do: reading a site's logs as an admin,
+  // audited like one. Admins never get a site's secrets.
+  'site.secrets',
+  'site.logs',
 ])
 
 /**
@@ -489,6 +506,10 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *   account.revoke           DELETE /api/keys/:id, /api/connections/:id
  *   account.notifications.change  PUT /api/me/notifications (and fling_notifications_set)
  *   account.notifications.sent    GET /api/me/notifications/sent: the mail sent to them
+ *   server.publish           make a version with a site server live (publication.ts), as far as
+ *                            the user's standing goes; `SERVERS` narrows it (`canPublishServer`)
+ *   admin.viewers.resolve    POST /api/admin/sites/:name/viewers/resolve: who a viewer id is
+ *                            (audited as `viewer.resolved`)
  *
  * Admins see every site's listing (`admin.sites.list`: its name, owner, dates, state and access
  * level), and administer the sites themselves through `can` (the `admin` and `admin-token`
@@ -525,6 +546,8 @@ export const INSTANCE_ACTIONS = [
   'account.revoke',
   'account.notifications.change',
   'account.notifications.sent',
+  'server.publish',
+  'admin.viewers.resolve',
 ] as const
 
 export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
@@ -556,6 +579,8 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'account.revoke': notImpersonating,
   'account.notifications.change': notImpersonating,
   'account.notifications.sent': notImpersonating,
+  'server.publish': notGuest,
+  'admin.viewers.resolve': isAdminRole,
 }
 
 export function principalRole(p: Principal): PrincipalRole {
@@ -569,6 +594,37 @@ export function canInstance(p: Principal, action: InstanceAction): boolean {
   const role = principalRole(p)
   // An admin acting as a guest may do only what both may.
   return rule(role) && (role !== 'impersonating' || !p.guest || rule('guest'))
+}
+
+/** Who the instance lets publish a site server (`SERVERS`, config.ts). */
+export type ServersSetting =
+  | { kind: 'off' }
+  | { kind: 'admins' }
+  | { kind: 'members' }
+  | { kind: 'groups'; slugs: string[] }
+
+/**
+ * May this principal make a version with a site server live: `server.publish`, and the instance's
+ * `SERVERS` names them: `admins` (an admin, by their email: an admin acting through a token
+ * publishes as one too), `members` (anyone who isn't a guest), or `groups:<slug>,…` (a member of
+ * one of them; `groups` are the slugs of the groups the user is in). `off`: nobody.
+ */
+export function canPublishServer(
+  p: Principal,
+  setting: ServersSetting,
+  groups: readonly string[]
+): boolean {
+  if (!canInstance(p, 'server.publish')) return false
+  switch (setting.kind) {
+    case 'off':
+      return false
+    case 'admins':
+      return p.admin
+    case 'members':
+      return true
+    case 'groups':
+      return setting.slugs.some(s => groups.includes(s))
+  }
 }
 
 export type ImpersonationRefusal = 'no_such_user' | 'self' | 'admin'

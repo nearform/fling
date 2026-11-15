@@ -10,7 +10,8 @@
  *      pending one older than PENDING_TTL_MS (a deploy staged and never finalized).
  *   2. **Sweep**, at least GRACE_MS after the mark: claimed as `sweeping` (moveVersion, so only one
  *      run does it), its files, manifest and forms config are deleted, then its records
- *      (deleteVersion: both its keys).
+ *      (deleteVersion: both its keys). A version with a site server is retired from its platform
+ *      first (`SiteServers.retire`).
  * The grace covers a route still naming it (Cloudflare's KV trails a change by about a minute), a
  * pull's signed URLs (PULL_URL_TTL_SECONDS) and a finalize in flight. A version that became current
  * meanwhile (a rollback, or a deploy of the same files) is unmarked, never swept. Publication
@@ -22,6 +23,7 @@
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
 import { formsKey, manifestKey } from './blobs/types.ts'
 import { pathRef } from './paths.ts'
+import { serverSite, serverVersion } from './servers/index.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
@@ -103,6 +105,11 @@ export async function maintainTarget(
       v.id !== current
     ) {
       if (v.status === 'pruning' && !(await claim(deps, ref, v))) continue
+      // A site server's version is forgotten by its platform first (a Path's never has one).
+      const site = 'name' in ref ? (ref as SiteRecord) : null
+      if (v.server && site && deps.servers) {
+        await deps.servers.retire(serverSite(site), serverVersion(storage, v.id))
+      }
       await deps.blobs.deletePrefix(siteVersionPrefix(storage, v.id))
       await deps.blobs.delete(manifestKey(storage, v.id))
       await deps.blobs.delete(formsKey(storage, v.id))

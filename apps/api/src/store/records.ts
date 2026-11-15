@@ -14,6 +14,10 @@
  *                                                        author, resolvedAt, response?, …); ids
  *                                                        sort by time, but a page-kind response's
  *                                                        (`R<hash>`), so the core sorts by createdAt
+ *   SITE#<siteId>          SECRET#<name>                 site secret (sealed value, setBy, setAt):
+ *                                                        listed by prefix, deleted with the site
+ *   SERVERS                SITE#<siteId>                 a site whose current version has a server
+ *                                                        (name): what SERVERS_MAX_SITES counts
  *   SITE#<siteId>          LIVE#<connectionId>           a connection to the site's live room (peer,
  *                                                        connectedAt) — 2 h; only hubs that keep
  *                                                        connections in the store write them
@@ -280,6 +284,7 @@ import {
   type SiteRef,
   type SiteRoleName,
   type SiteRoleRecord,
+  type SiteSecretRecord,
   type Store,
   type SuppressionRecord,
   slugCandidate,
@@ -326,6 +331,8 @@ const key = {
     sk: `LIVE#${connectionId}`,
   }),
   liveRef: (connectionId: string) => ({ pk: `LIVE#${connectionId}`, sk: 'LIVE' }),
+  siteSecret: (siteId: string, name: string) => ({ pk: sitePk(siteId), sk: `SECRET#${name}` }),
+  serverSite: (siteId: string) => ({ pk: 'SERVERS', sk: `SITE#${siteId}` }),
   /** LEGACY (expand phase): where versions lived before the site-centric keys */
   legacyVersion: (email: string, siteId: string, id: string) => ({
     pk: userPk(email),
@@ -612,6 +619,52 @@ export class Records implements Store {
     }
   }
 
+  // --- site secrets and server sites ---
+
+  async listSiteSecrets(siteId: string) {
+    return this.list<SiteSecretRecord>('sitesecret', sitePk(siteId), 'SECRET#')
+  }
+
+  async putSiteSecret(secret: SiteSecretRecord, max: number) {
+    const k = key.siteSecret(secret.siteId, secret.name)
+    const item = encode('sitesecret', k, secret)
+    if (await this.table.get(k.pk, k.sk)) {
+      await this.table.put(item)
+      return true
+    }
+    // A count read then a conditional write: two new names racing may both pass at the cap.
+    if ((await this.listSiteSecrets(secret.siteId)).length >= max) return false
+    try {
+      await this.table.put(item, ifAbsent)
+    } catch (err) {
+      if (!(err instanceof ConditionFailed)) throw err
+      await this.table.put(item)
+    }
+    return true
+  }
+
+  async deleteSiteSecret(siteId: string, name: string) {
+    const k = key.siteSecret(siteId, name)
+    try {
+      await this.table.delete(k.pk, k.sk, ifExists)
+      return true
+    } catch (err) {
+      if (err instanceof ConditionFailed) return false
+      throw err
+    }
+  }
+
+  async markServerSite(siteId: string, name: string, on: boolean) {
+    const k = key.serverSite(siteId)
+    if (on) await this.table.put(encode('serversite', k, { siteId, name }))
+    else await this.table.delete(k.pk, k.sk)
+  }
+
+  async serverSites(siteId: string) {
+    const items = await this.list<{ siteId: string }>('serversite', 'SERVERS', 'SITE#')
+    return { count: items.length, listed: items.some(i => i.siteId === siteId) }
+  }
+
   // --- audit ---
 
   async addAuditEntry(entry: AuditRecord) {
@@ -842,7 +895,14 @@ export class Records implements Store {
     const grants = site.audience.emails.map(email => key.siteGrant(email, site.id))
     const groups = site.audience.groups.map(groupId => key.groupSite(groupId, site.id))
     const roles = [...roleHolders(site).keys()].map(holder => roleKey(holder, site.id))
-    await this.deleteAll([...rest, ...legacy.items, ...grants, ...groups, ...roles])
+    await this.deleteAll([
+      ...rest,
+      ...legacy.items,
+      ...grants,
+      ...groups,
+      ...roles,
+      key.serverSite(site.id),
+    ])
     // Release the name claim and the directory item only if they are this site's (or absent). If
     // another site holds the name, the site is still deleted and the holder's items kept.
     const ops: TransactOp[] = [

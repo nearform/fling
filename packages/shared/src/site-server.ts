@@ -7,11 +7,10 @@
 // server (the Worker, the local runtime, the AWS entry) use them.
 
 import { z } from 'zod'
-import { SERVER_BUNDLE, SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
+import { SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
 import type { SiteInvoke, SiteViewer } from './site-routing.ts'
 
 export type { SiteViewer }
-export { SERVER_BUNDLE, SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER }
 
 /** The file at the top of a deployed folder that says how its server runs: a build input. */
 export const SERVER_CONFIG_FILE = 'fling.json'

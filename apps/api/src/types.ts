@@ -5,6 +5,7 @@ import type { Config } from './config.ts'
 import type { LiveHub } from './live.ts'
 import type { Mailer } from './mail/types.ts'
 import type { RouteTable } from './route-table/types.ts'
+import type { ServerLogs, SiteServers } from './servers/types.ts'
 import type { Store, User } from './store/types.ts'
 
 export interface Clock {
@@ -32,6 +33,13 @@ export interface Deps {
    * (`config.mail`). Absent: no email channel.
    */
   mailer?: Mailer
+  /**
+   * Runs site servers (servers/types.ts): the platform's adapter. Absent, or with `SERVERS=off`,
+   * the instance runs none (the `servers` capability is off).
+   */
+  servers?: SiteServers
+  /** Site servers' logs (servers/types.ts); with servers on, buildDeps keeps them in memory by default. */
+  serverLogs?: ServerLogs
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

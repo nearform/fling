@@ -23,6 +23,7 @@ import {
   PathDetailSchema,
   PathListSchema,
   PullResponseSchema,
+  PutSiteSecretRequestSchema,
   ResponseExportFormatSchema,
   ResponsesExportSchema,
   RollbackRequestSchema,
@@ -30,12 +31,15 @@ import {
   responsesFileName,
   responsesJsonl,
   SentNotificationListSchema,
+  ServerLogsResponseSchema,
   SharedSiteListSchema,
   ShareResponseSchema,
   SiteDetailSchema,
   SiteListSchema,
   SitePathSchema,
   SiteSchema,
+  SiteSecretSchema,
+  SiteSecretsResponseSchema,
   SiteWithAudienceSchema,
   splitEmails,
   ThumbnailSchema,
@@ -63,6 +67,7 @@ import * as paths from '../paths.ts'
 import { canInstance, userActor } from '../policy.ts'
 import * as publication from '../publication.ts'
 import { pull } from '../pull.ts'
+import * as servers from '../servers/api.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
 import { adminRoutes } from './admin.ts'
@@ -465,6 +470,45 @@ apiRoutes.delete('/sites/:name/comments/:id', async c => {
     c.req.param('id')
   )
   return c.body(null, 204)
+})
+
+// --- site servers (the `servers` capability; servers/api.ts): secrets and logs ---
+
+apiRoutes.get('/sites/:name/secrets', async c => {
+  const res = await servers.siteSecrets(c.get('deps'), c.get('user'), c.req.param('name'))
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(SiteSecretsResponseSchema.parse(res))
+})
+
+apiRoutes.put('/sites/:name/secrets/:secret', async c => {
+  const { value } = await jsonBody(c, PutSiteSecretRequestSchema)
+  const set = await servers.putSiteSecret(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    c.req.param('secret'),
+    value
+  )
+  return c.json(SiteSecretSchema.parse(set))
+})
+
+apiRoutes.delete('/sites/:name/secrets/:secret', async c => {
+  await servers.deleteSiteSecret(
+    c.get('deps'),
+    c.get('user'),
+    c.req.param('name'),
+    c.req.param('secret')
+  )
+  return c.body(null, 204)
+})
+
+apiRoutes.get('/sites/:name/logs', async c => {
+  const lines = await servers.siteLogs(c.get('deps'), c.get('user'), c.req.param('name'), {
+    since: c.req.query('since'),
+    limit: c.req.query('limit'),
+  })
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(ServerLogsResponseSchema.parse({ lines }))
 })
 
 // --- forms and their responses (the `forms` capability, on with comments; forms.ts) ---

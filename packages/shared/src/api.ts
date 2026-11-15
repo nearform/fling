@@ -11,6 +11,7 @@ import {
   SiteRoleMembersSchema,
   SiteRoleSchema,
 } from './site-roles.ts'
+import { ServerConfigSchema } from './site-server.ts'
 import { ThumbnailSchema, ThumbnailStampSchema } from './thumbnails.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
@@ -57,6 +58,11 @@ export const SiteSchema = z.object({
   canPull: z.boolean().optional(),
   /** its home page's thumbnail, when it has one (`thumbnails` capability; thumbnails.ts) */
   thumbnail: ThumbnailSchema.optional(),
+  /**
+   * its current version has a site server, run for `/api/*` (`servers` capability; site-server.ts):
+   * the review page says so. Servers without the capability omit it
+   */
+  hasServer: z.boolean().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -85,6 +91,8 @@ export const VersionSchema = z.object({
    */
   path: z.string().optional(),
   base: z.string().optional(),
+  /** it has a site server (`servers` capability) */
+  server: z.boolean().optional(),
   createdAt: z.string(),
 })
 export type Version = z.infer<typeof VersionSchema>
@@ -252,6 +260,12 @@ export type WhySite = z.infer<typeof WhySiteSchema>
  * lists the base's files to leave out (under `<path>/` for a Path). `partial` needs `base`, and
  * `remove` needs `partial`.
  *
+ * `server` (`servers` capability; site-server.ts) is the folder's `fling.json` for a version whose
+ * files include `_fling/server.mjs`: the site secrets it needs and its health path. Such a version
+ * goes live only once its server answers a start probe (422 `server_failed_to_start`, with the
+ * server's first log lines), and on a public site only with `confirmPublicServer: true` (409
+ * `public_server` otherwise): anyone may then call its `/api/*` and use its secrets through it.
+ *
  * `forms` (`forms` capability; forms.ts) is the new version's forms config, from `fling.forms.json`
  * (never itself a file of the site), or `null` for none. Omitted, a publish on a base keeps the
  * base's forms, and any other deploy has none. A Path's version keeps its own, beside it.
@@ -268,6 +282,8 @@ export const DeployRequestSchema = z
     access: AccessLevelSchema.optional(),
     audience: AudienceInputSchema.optional(),
     forms: FormsConfigSchema.nullable().optional(),
+    server: ServerConfigSchema.optional(),
+    confirmPublicServer: z.boolean().optional(),
   })
   .superRefine((req, ctx) => {
     const issue = (message: string) => ctx.addIssue({ code: 'custom', message })
@@ -358,6 +374,8 @@ export const UpdateSiteRequestSchema = z.object({
   owners: OwnersInputSchema.optional(),
   /** the whole new list of publishers (site-roles.ts): owners only */
   publishers: PublishersInputSchema.optional(),
+  /** making a site whose live version has a server public (409 `public_server` without it) */
+  confirmPublicServer: z.boolean().optional(),
 })
 
 export const ApiKeySchema = z.object({
@@ -567,6 +585,8 @@ export const AuditEntrySchema = z.object({
     'invitation.revoke',
     'site.change',
     'site.open',
+    'site.server_published',
+    'viewer.resolved',
   ]),
   actor: z.string(),
   /** the person, or for site.change and site.open the site's name */

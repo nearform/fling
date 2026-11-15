@@ -3,11 +3,13 @@
  *
  *   aws         apps/api/src/dev.ts: the core on Node with the memory table, fs blobs and the
  *               real CloudFront Function (the generated bundle) in front of the sites; mail
- *               through MemoryMailer (MAIL_DRIVER=memory); outside invitations on (INVITES=on)
+ *               through MemoryMailer (MAIL_DRIVER=memory); outside invitations on (INVITES=on);
+ *               site servers on for members (dev.ts's default) as Node child processes
  *   cloudflare  platforms/cloudflare under `wrangler dev`: the Worker with local D1, R2 and KV
  *               (scripts/dev.mjs applies the D1 schema and the data migrations first); mail
  *               through the real CloudflareMailer over wrangler's simulated `send_email` binding,
- *               kept for `/dev/mail` (KeptMailer); outside invitations on (`--invites`)
+ *               kept for `/dev/mail` (KeptMailer); outside invitations on (`--invites`); site
+ *               servers on for members (`--servers members`) in the local Worker Loader
  *
  *   tsx src/local.ts [aws] [cloudflare]      (default: both, one after the other)
  *
@@ -92,6 +94,8 @@ async function cloudflareRuntime(): Promise<Runtime> {
           state,
           '--mail',
           '--invites',
+          '--servers',
+          'members',
         ],
         {
           cwd: REPO,

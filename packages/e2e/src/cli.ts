@@ -18,6 +18,20 @@ export interface CliOptions {
 }
 
 export function runCli(args: string[], opts: CliOptions): Promise<unknown> {
+  return runCliOutcome(args, opts).then(({ ok, json, output }) => {
+    if (!ok) throw new Error(`fling ${args.join(' ')} failed: ${output}`)
+    return json
+  })
+}
+
+/**
+ * The CLI's outcome either way: `ok` with its exit code, and the JSON it printed (on a failure,
+ * `{ error: { message, code, … } }`), for steps that expect a refusal.
+ */
+export function runCliOutcome(
+  args: string[],
+  opts: CliOptions
+): Promise<{ ok: boolean; json: unknown; output: string }> {
   const env: Record<string, string | undefined> = {
     ...process.env,
     FLING_URL: opts.serverUrl,
@@ -33,19 +47,17 @@ export function runCli(args: string[], opts: CliOptions): Promise<unknown> {
       [CLI, '--json', ...args],
       { cwd: REPO, env, timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        if (err) {
-          reject(
-            new Error(
-              `fling ${args.join(' ')} failed: ${stderr.trim() || stdout.trim() || err.message}`
-            )
-          )
-          return
-        }
+        const output = stderr.trim() || stdout.trim() || (err?.message ?? '')
+        let json: unknown = null
         try {
-          resolve(stdout.trim() ? JSON.parse(stdout) : null)
+          json = stdout.trim() ? JSON.parse(stdout) : null
         } catch {
-          reject(new Error(`fling ${args.join(' ')}: not JSON: ${stdout.slice(0, 300)}`))
+          if (!err) {
+            reject(new Error(`fling ${args.join(' ')}: not JSON: ${stdout.slice(0, 300)}`))
+            return
+          }
         }
+        resolve({ ok: !err, json, output })
       }
     )
   })

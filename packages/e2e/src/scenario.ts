@@ -32,7 +32,13 @@
  *   folder; rollback removes it) → pull (a member who can view the site pulls it but may not
  *   deploy it; the owner pulls it twice, deploys one folder with a page changed and one deleted,
  *   on the version pulled, and the other is refused as stale; remote MCP reads the files and
- *   publishes one on a base) → conditional-write race (concurrent first deploys of one name) →
+ *   publishes one on a base) → site servers (where on: the workshop-quote example, bundled by the
+ *   CLI, waits for its site secret and goes live once `fling secrets set --from` sets it; its
+ *   /api/* gives a member their viewer, validates, refuses a cross-origin write, keeps its bundle
+ *   and build inputs unserved, sends anonymous visitors to sign in and, restricted, answers an
+ *   outsider as a missing site; `fling logs` has the request with the viewer id; a node:http
+ *   server, rolled back to a version without one; the remote MCP's template published as it is)
+ *   → conditional-write race (concurrent first deploys of one name) →
  *   MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
@@ -47,7 +53,17 @@
  * wait covers them, and the scenario fails if a new site is not routed when the CLI says it is.
  */
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
@@ -61,7 +77,7 @@ import {
   type LiveServerMessage,
   RELEASE_HEADER,
 } from '@fling/shared'
-import { runCli } from './cli.ts'
+import { REPO, runCli, runCliOutcome } from './cli.ts'
 import { cookiePairs, type Session } from './sign-in.ts'
 
 export interface ScenarioOptions {
@@ -341,6 +357,13 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
   const work = mkdtempSync(join(tmpdir(), 'fling-e2e-'))
   const fling = (...args: string[]) =>
     runCli(args, {
+      serverUrl: appOrigin,
+      apiKey: opts.session.apiKey,
+      configDir: join(work, 'cli'),
+    })
+  /** The CLI, for a step that expects a refusal: its exit and its JSON either way. */
+  const flingTry = (...args: string[]) =>
+    runCliOutcome(args, {
       serverUrl: appOrigin,
       apiKey: opts.session.apiKey,
       configDir: join(work, 'cli'),
@@ -809,6 +832,25 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('invitations: off, or no dev mailbox or admin session (skipped)')
+    }
+
+    // Site servers: a site's own backend at /api/*, published, called, logged and rolled back.
+    // Only where the instance runs them (a deployed instance's smoke test may not).
+    if (meta.capabilities.servers === true) {
+      await serversStep({
+        appOrigin,
+        nonce,
+        work,
+        meta,
+        fling,
+        flingTry,
+        made,
+        opts,
+        step,
+        propagationMs,
+      })
+    } else {
+      step('site servers: not on this instance (the servers capability is off; skipped)')
     }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
@@ -3095,6 +3137,438 @@ async function adminStep(ctx: {
   step(
     `admin: lists users, every site (${name} included) and the settings; impersonates ${owner}, sees ${name}, is refused an API key, stops (audited)${othersSite ? `; changes ${name} from the browser (audited)` : ''}`
   )
+}
+
+interface CliLogLine {
+  kind: 'request' | 'output'
+  method?: string
+  path?: string
+  status?: number
+  viewer?: string | null
+  versionId: string
+  text?: string
+}
+
+/** A viewer id: `v_` and 13 base32 characters. */
+const VIEWER_ID_RE = /^v_[a-z2-7]{13}$/
+
+/**
+ * One of examples/site-servers, copied to `dest` as a person would have it: without its
+ * node_modules or local secrets. `deps` are linked from the workspace's own install (the example's
+ * package.json asks for the same majors), so the CLI under test bundles them with no npm install
+ * and no registry.
+ */
+function exampleCopy(example: string, dest: string, deps: string[] = []): string {
+  const src = join(REPO, 'examples', 'site-servers', example)
+  cpSync(src, dest, {
+    recursive: true,
+    filter: from => !/(^|\/)(node_modules|\.env(\.local)?)$/.test(from.slice(src.length)),
+  })
+  if (deps.length) mkdirSync(join(dest, 'node_modules'), { recursive: true })
+  for (const dep of deps) {
+    const installed = [
+      join(REPO, 'apps', 'api', 'node_modules', dep),
+      join(REPO, 'packages', 'shared', 'node_modules', dep),
+    ].find(p => existsSync(p))
+    check(installed, `${dep} is not installed in the workspace (pnpm install)`)
+    symlinkSync(realpathSync(installed), join(dest, 'node_modules', dep), 'dir')
+  }
+  return dest
+}
+
+/**
+ * Site servers (the `servers` capability): the workshop-quote example (Hono and zod, bundled by
+ * the CLI) waits for its site secret on its first publish and goes live once `fling secrets set
+ * --from` sets it; its `/api/*` answers a member with their viewer (an id, the email), validates,
+ * refuses a cross-origin write, keeps its bundle and build inputs unserved, sends anonymous
+ * visitors to sign in and, restricted, answers an outsider as a missing site; its own 404 arrives
+ * as JSON; `fling logs` has the request line with the viewer id, never the email. A plain
+ * node:http server publishes and answers with another viewer id for the same person; rolled back
+ * to a version without a server, `/api/*` is a plain path again. Over the remote MCP, the
+ * dependency-free template publishes as it is. Calls the example's Slack route only without a
+ * viewer (a 401 through the share link): the example's health check takes only a hooks.slack.com
+ * address, so nothing local can stand in for Slack.
+ */
+async function serversStep(ctx: {
+  appOrigin: string
+  nonce: string
+  work: string
+  meta: InstanceMetadata
+  fling: (...args: string[]) => Promise<unknown>
+  flingTry: (...args: string[]) => Promise<{ ok: boolean; json: unknown; output: string }>
+  made: string[]
+  opts: ScenarioOptions
+  step: (line: string) => void
+  propagationMs: number
+}) {
+  const { appOrigin, nonce, work, fling, flingTry, made, opts, step, propagationMs } = ctx
+  const quoteName = `e2e-${nonce}-quote`
+  const nodeName = `e2e-${nonce}-node`
+  const owner = opts.session
+  // The viewer: a member who isn't the site's owner, where there is one. A browser's `fling_site`
+  // is how a request reaches a members-only site's server with a viewer; without one (a smoke
+  // test signed in by key), the server is called through the share link, with no viewer.
+  const viewer = opts.member?.siteCookie ? opts.member : owner
+  const withViewer = viewer.siteCookie !== undefined
+  const egress = ctx.meta.capabilities.serversEgress === true ? 'open' : 'none'
+
+  // The first publish: the files upload, the version waits for SLACK_WEBHOOK_URL.
+  const quoteDir = exampleCopy('workshop-quote', join(work, 'workshop-quote'), ['hono', 'zod'])
+  const webhook = `https://hooks.slack.com/services/T00000000/B00000000/e2e${nonce}`
+  writeFileSync(join(quoteDir, '.env'), `SLACK_WEBHOOK_URL=${webhook}\nNOT_DECLARED=e2e\n`)
+  made.push(quoteName)
+  const waiting = await flingTry('deploy', quoteDir, '--name', quoteName, '--access', 'members')
+  const refusal = (waiting.json as { error?: { code?: string; secrets?: string[] } } | null)?.error
+  check(
+    !waiting.ok &&
+      refusal?.code === 'secrets_missing' &&
+      refusal.secrets?.includes('SLACK_WEBHOOK_URL'),
+    `first deploy of ${quoteName}: ${waiting.ok ? 'live' : waiting.output}`
+  )
+  const listed = (await fling('secrets', 'ls', quoteName)) as { secrets: { name: string }[] }
+  check(listed.secrets.length === 0, `fling secrets ls before: ${JSON.stringify(listed)}`)
+  step(`deployed ${quoteName} (hono, zod bundled): the version waits for SLACK_WEBHOOK_URL`)
+
+  // Setting it from the folder's .env (that name only) puts the waiting version live.
+  const set = (await fling(
+    'secrets',
+    'set',
+    quoteName,
+    'SLACK_WEBHOOK_URL',
+    '--from',
+    join(quoteDir, '.env')
+  )) as {
+    secrets: { name: string; deployed?: { versionId: string; url?: string; error?: string } }[]
+  }
+  const deployed = set.secrets[0]?.deployed
+  check(deployed?.url && !deployed.error, `fling secrets set --from .env: ${JSON.stringify(set)}`)
+  const after = (await fling('secrets', 'ls', quoteName)) as {
+    secrets: { name: string }[]
+    missing: string[]
+  }
+  check(
+    after.missing.length === 0 && after.secrets.map(s => s.name).join() === 'SLACK_WEBHOOK_URL',
+    `fling secrets ls after (only the name asked for is set): ${JSON.stringify(after)}`
+  )
+  const siteUrl = deployed.url
+  const shared = (await fling('share', quoteName)) as { shareUrl?: string }
+  check(shared.shareUrl, `share ${quoteName}: ${JSON.stringify(shared)}`)
+  const base = withViewer ? siteUrl : shared.shareUrl
+  const cookie: Record<string, string> = withViewer ? { cookie: viewer.siteCookie as string } : {}
+  const health = await eventually(
+    'the waiting version went live',
+    `${base}api/health`,
+    r => r.status === 200,
+    { timeoutMs: propagationMs, headers: cookie }
+  )
+  check(JSON.parse(health.text).ok === true, `GET /api/health: ${health.text}`)
+  step(`fling secrets set --from .env: version ${deployed.versionId} is live, /api/health 200`)
+
+  const call = async (
+    method: string,
+    path: string,
+    opts2: { body?: unknown; headers?: Record<string, string>; at?: string } = {}
+  ) => {
+    const res = await fetch(`${opts2.at ?? base}${path.replace(/^\//, '')}`, {
+      method,
+      redirect: 'manual',
+      headers: {
+        ...cookie,
+        ...(opts2.body === undefined ? {} : { 'content-type': 'application/json' }),
+        ...opts2.headers,
+      },
+      body: opts2.body === undefined ? undefined : JSON.stringify(opts2.body),
+    })
+    const text = await res.text()
+    let json: unknown = null
+    try {
+      json = JSON.parse(text)
+    } catch {
+      // not JSON
+    }
+    return { status: res.status, headers: res.headers, text, json }
+  }
+
+  // Who is calling: the viewer, with a forged header from the browser ignored.
+  const me = await call('GET', '/api/me', {
+    headers: { 'x-fling-viewer': JSON.stringify({ id: 'v_forged', email: 'forged@example.test' }) },
+  })
+  const meBody = me.json as { id?: string; email?: string | null; guest?: boolean } | null
+  let viewerId: string | null = null
+  if (withViewer) {
+    check(
+      me.status === 200 &&
+        VIEWER_ID_RE.test(meBody?.id ?? '') &&
+        meBody?.email === viewer.email &&
+        meBody.guest === false,
+      `GET /api/me as ${viewer.email}: ${me.status} ${me.text}`
+    )
+    viewerId = meBody.id as string
+  } else {
+    check(me.status === 200 && meBody?.email === null, `GET /api/me via the share link: ${me.text}`)
+  }
+  const cache = me.headers.get('cache-control') ?? ''
+  check(cache.includes('private') && cache.includes('no-store'), `/api/me cache-control: ${cache}`)
+  step(
+    withViewer
+      ? `GET /api/me as ${viewer.email}: viewer id ${viewerId}, the email, not a guest; a forged x-fling-viewer is ignored; private, no-store`
+      : 'GET /api/me through the share link: no viewer (no browser session); private, no-store'
+  )
+
+  // The page's own call (same origin), a curl-like one (no origin), and the validation's 400.
+  const origin = new URL(base).origin
+  const quote = await call('POST', '/api/quote', {
+    body: { people: 12, days: 2, format: 'onsite' },
+    headers: { origin, 'sec-fetch-site': 'same-origin' },
+  })
+  check(
+    quote.status === 200 && (quote.json as { total?: number } | null)?.total === 11546,
+    `POST /api/quote: ${quote.status} ${quote.text}`
+  )
+  const invalid = await call('POST', '/api/quote', {
+    body: { people: 0, days: 2, format: 'remote' },
+  })
+  check(
+    invalid.status === 400 &&
+      typeof (invalid.json as { error?: unknown } | null)?.error === 'string',
+    `POST /api/quote, people 0: ${invalid.status} ${invalid.text}`
+  )
+  // Another site's page posting as the visitor: refused before the server.
+  const otherSite = origin.replace(/\/\/[^.]+\./, `//e2e-${nonce}-elsewhere.`)
+  const crossed = await call('POST', '/api/quote', {
+    body: { people: 12, days: 2, format: 'onsite' },
+    headers: { origin: otherSite, 'sec-fetch-site': 'same-site' },
+  })
+  check(
+    crossed.status === 403 && crossed.text.includes('cross_origin'),
+    `cross-origin POST /api/quote: ${crossed.status} ${crossed.text}`
+  )
+  step(
+    'POST /api/quote: 200 with the price (same origin and no origin), 400 invalid, 403 cross-origin'
+  )
+
+  // The server's own 404 arrives as it sent it; the bundle and the build inputs are never served.
+  const nope = await call('GET', '/api/nope')
+  check(
+    nope.status === 404 &&
+      (nope.headers.get('content-type') ?? '').includes('application/json') &&
+      (nope.json as { error?: string } | null)?.error === 'No such endpoint',
+    `GET /api/nope: ${nope.status} ${nope.headers.get('content-type')} ${nope.text.slice(0, 200)}`
+  )
+  for (const path of [
+    '/_fling/server.mjs',
+    '/server.ts',
+    '/fling.json',
+    '/package.json',
+    '/.env',
+  ]) {
+    const res = await call('GET', path)
+    check(res.status === 404 && !res.text.includes(webhook), `GET ${path}: ${res.status}`)
+  }
+  const home = await call('GET', '/')
+  check(home.status === 200 && home.text.includes('<'), `GET / (the static page): ${home.status}`)
+  step(
+    "the server's 404 is its JSON; /_fling/server.mjs, server.ts, fling.json, package.json, .env 404"
+  )
+
+  // Without a viewer (the share link) the server still runs; its Slack route wants one.
+  const viaShare = await call('GET', '/api/me', { at: shared.shareUrl, headers: {} })
+  check(
+    viaShare.status === 200 && (viaShare.json as { email?: unknown } | null)?.email === null,
+    `GET /api/me via the share link: ${viaShare.status} ${viaShare.text}`
+  )
+  const unsigned = await call('POST', '/api/request', {
+    at: shared.shareUrl,
+    body: { people: 12, days: 2, format: 'onsite' },
+  })
+  check(unsigned.status === 401, `POST /api/request via the share link: ${unsigned.status}`)
+  step(
+    `share link: the server runs with no viewer (/api/request 401 before any Slack call; outbound network ${egress})`
+  )
+
+  // Anonymous: sent to sign in, as for a page.
+  const loginPrefix = `${appOrigin}/auth/login?return=`
+  const anon = await get(`${siteUrl}api/me`)
+  check(
+    anon.status === 302 && (anon.location ?? '').startsWith(loginPrefix),
+    `anonymous GET /api/me: ${anon.status} → ${anon.location}`
+  )
+  step('anonymous GET /api/me on a members-only site: 302 to sign in')
+
+  // Restricted to the viewer: they reach the server through the site pass, with the same viewer
+  // id; an outsider is answered as for a missing site. Only with browser sessions.
+  const outsider = opts.outsider
+  if (
+    ctx.meta.capabilities.audiences === true &&
+    viewer !== owner &&
+    viewer.cookie &&
+    outsider?.cookie
+  ) {
+    await fling('access', quoteName, '--add', viewer.email)
+    await eventually(
+      'restricted: the members cookie is not enough',
+      `${siteUrl}api/me`,
+      r => r.status === 302,
+      { timeoutMs: propagationMs, headers: cookie }
+    )
+    const jar: Record<string, string> = {
+      [new URL(appOrigin).host]: viewer.cookie,
+      [new URL(siteUrl).host]: viewer.siteCookie as string,
+    }
+    const passed = await browse(`${siteUrl}api/me`, jar)
+    const passedBody = JSON.parse(passed.status === 200 ? passed.text : '{}') as { id?: string }
+    check(
+      passed.status === 200 && passedBody.id === viewerId,
+      `restricted GET /api/me through the site pass: ${passed.status} ${passed.text.slice(0, 200)}`
+    )
+    await refusedAt(`${siteUrl}api/me`, appOrigin, outsider.cookie, 'outsider at /api/me')
+    step(
+      "restricted: the viewer's site pass reaches the server (same viewer id); an outsider gets the sites' 404"
+    )
+  } else {
+    step('restricted /api/*: needs a member and an outsider with browser sessions (skipped)')
+  }
+
+  // The log: the request line names the viewer by id, and no line names them by email.
+  const logsMs = Math.max(propagationMs, 15_000)
+  const start = Date.now()
+  let lines: CliLogLine[] = []
+  for (;;) {
+    lines = ((await fling('logs', quoteName, '--since', '1h')) as { lines: CliLogLine[] }).lines
+    const found = lines.some(
+      l =>
+        l.kind === 'request' &&
+        l.method === 'GET' &&
+        l.path === '/api/me' &&
+        l.status === 200 &&
+        l.viewer === viewerId &&
+        l.versionId === deployed.versionId
+    )
+    if (found) break
+    check(
+      Date.now() - start < logsMs,
+      `fling logs ${quoteName}: no GET /api/me 200 line with viewer ${viewerId}: ${JSON.stringify(lines.slice(-10))}`
+    )
+    await sleep(1000)
+  }
+  check(
+    !JSON.stringify(lines).includes(viewer.email),
+    `fling logs ${quoteName} names ${viewer.email}`
+  )
+  step(`fling logs: GET /api/me 200 with viewer ${viewerId ?? 'none'}, no email in the log`)
+
+  // A site whose first version has no server: /api/* is its files.
+  const plain = siteDir(work, 'node-plain', {
+    'index.html': page('plain', `plain ${nonce}`),
+    'api/status.json': `{"static":"${nonce}"}\n`,
+  })
+  made.push(nodeName)
+  const v1 = (await fling('deploy', plain, '--name', nodeName, '--access', 'members')) as {
+    status: string
+    site: CliSite
+  }
+  check(
+    v1.status === 'live' && v1.site.currentVersionId,
+    `deploy ${nodeName}: ${JSON.stringify(v1)}`
+  )
+  const nodeUrl = withViewer ? v1.site.url : ((await fling('share', nodeName)) as CliSite).shareUrl
+  check(nodeUrl, `share ${nodeName}`)
+
+  // The plain node:http example, as it is: no package.json, nothing to install.
+  const nodeDir = exampleCopy('node-http', join(work, 'node-http'))
+  const v2 = (await fling('deploy', nodeDir, '--name', nodeName)) as {
+    status: string
+    site: CliSite
+  }
+  check(v2.status === 'live', `deploy node-http to ${nodeName}: ${JSON.stringify(v2)}`)
+  const nodeMe = await eventually(
+    'the node:http server answers',
+    `${nodeUrl}api/me`,
+    r => r.status === 200 && (r.headers.get('content-type') ?? '').includes('application/json'),
+    { timeoutMs: propagationMs, headers: cookie }
+  )
+  const nodeViewer = JSON.parse(nodeMe.text) as { id?: string; email?: string | null }
+  check(
+    withViewer
+      ? nodeViewer.email === viewer.email &&
+          VIEWER_ID_RE.test(nodeViewer.id ?? '') &&
+          nodeViewer.id !== viewerId
+      : nodeViewer.email === null,
+    `GET ${nodeUrl}api/me: ${nodeMe.text}`
+  )
+  const nodeNope = await get(`${nodeUrl}api/nope`, cookie)
+  check(
+    nodeNope.status === 404 && nodeNope.text.includes('No such endpoint'),
+    `node:http GET /api/nope: ${nodeNope.status} ${nodeNope.text.slice(0, 200)}`
+  )
+  step(
+    withViewer
+      ? `node:http server on ${nodeName}: /api/me is the same person with another viewer id (${nodeViewer.id})`
+      : `node:http server on ${nodeName}: /api/me answers (no viewer through the share link)`
+  )
+
+  // Rolled back to the version without a server: /api/* is a plain path again.
+  await fling('rollback', nodeName, v1.site.currentVersionId as string)
+  await eventually(
+    'rolled back: /api/status.json is the static file',
+    `${nodeUrl}api/status.json`,
+    r => r.status === 200 && r.text.includes(`"static":"${nonce}"`),
+    { timeoutMs: propagationMs, headers: cookie }
+  )
+  // A missing file there is the sites' 404 page, not the server's JSON.
+  const gone = await get(`${nodeUrl}api/me.json`, cookie)
+  check(
+    gone.status === 404 &&
+      (gone.headers.get('content-type') ?? '').startsWith('text/html') &&
+      !gone.text.includes('No such endpoint'),
+    `/api/me.json after rollback: ${gone.status} ${gone.headers.get('content-type')}`
+  )
+  const posted = await call('POST', '/api/me', { at: nodeUrl })
+  check(posted.status === 405, `POST /api/me after rollback: ${posted.status}`)
+  step('rolled back to a version without a server: /api/* is files (200, the 404 page, POST 405)')
+
+  // The remote MCP: the dependency-free template publishes as it is.
+  const mcpName = `e2e-${nonce}-mcp-server`
+  const template = await mcpTool(appOrigin, owner, 'fling_server_template', {})
+  const files = (template?.structuredContent as { files?: { path: string; content: string }[] })
+    ?.files
+  check(
+    !template?.isError && files !== undefined && files.some(f => f.path === '_fling/server.mjs'),
+    `fling_server_template: ${JSON.stringify(template).slice(0, 300)}`
+  )
+  made.push(mcpName)
+  const published = await mcpTool(appOrigin, owner, 'fling_publish', {
+    name: mcpName,
+    access: 'members',
+    files: [{ path: 'index.html', content: page('mcp server', `mcp server ${nonce}`) }, ...files],
+  })
+  const mcpUrl = (published?.structuredContent as { url?: string } | undefined)?.url
+  check(
+    !published?.isError && mcpUrl,
+    `fling_publish with the template: ${JSON.stringify(published)}`
+  )
+  if (withViewer) {
+    const time = await eventually(
+      'the template server answers',
+      `${mcpUrl}api/time?zone=Europe/London`,
+      r => r.status === 200,
+      { timeoutMs: propagationMs, headers: cookie }
+    )
+    const body = JSON.parse(time.text) as { zone?: string; time?: string }
+    check(
+      body.zone === 'Europe/London' && /^\d\d:\d\d$/.test(body.time ?? ''),
+      `GET /api/time: ${time.text}`
+    )
+    const mcpMe = await get(`${mcpUrl}api/me`, cookie)
+    check(JSON.parse(mcpMe.text).email === viewer.email, `template GET /api/me: ${mcpMe.text}`)
+    step(
+      `remote MCP: fling_server_template → fling_publish ${mcpName}; /api/time and /api/me answer`
+    )
+  } else {
+    step(
+      `remote MCP: fling_server_template → fling_publish ${mcpName} (no browser session, not called)`
+    )
+  }
 }
 
 export { ScenarioError }

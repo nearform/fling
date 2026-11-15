@@ -16,7 +16,9 @@
  * others, the audience and group checks run through the API (without an outsider, the admin, who
  * reads the site anyway, is the one the member's group lets in); the site pass needs browser
  * sessions, so only `pnpm e2e` follows it.
- * On an instance with email, it checks that the notification settings answer and sends nothing:
+ * On an instance with site servers (the `servers` capability), the servers are called through
+ * share links, with no viewer, since a key gives no `fling_site`; without the capability that part
+ * is skipped. On an instance with email, it checks that the notification settings answer and sends nothing:
  * there is no dev drain, so what each person is sent is only checked by `pnpm e2e`.
  */
 import { parseArgs } from 'node:util'

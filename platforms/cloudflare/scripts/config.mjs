@@ -159,6 +159,33 @@ function mailConfig(template, mail) {
   }
 }
 
+/** INSTANCE.SERVERS names who may publish a site server: anything but off (or unset) is on. */
+export const serversOn = instance => {
+  const v = String(instance?.SERVERS ?? '')
+    .trim()
+    .toLowerCase()
+  return v !== '' && v !== 'off'
+}
+
+/**
+ * The bindings site servers need, only with INSTANCE.SERVERS on: the Worker Loader (in beta, on
+ * Workers Paid; a deploy without access to it would fail) and the rate limit, which allows each
+ * site SERVER_RPS (default 100) requests a second, counted over 10 s.
+ */
+function serversConfig(template, instance) {
+  if (!serversOn(instance)) return {}
+  const rps = Number(instance.SERVER_RPS ?? 100)
+  if (!Number.isInteger(rps) || rps < 1) {
+    throw new Error('CF_DEPLOY_CONFIG.INSTANCE.SERVER_RPS must be a positive whole number')
+  }
+  return {
+    // Site secrets are sealed with it (the Worker refuses SERVERS on without it).
+    secrets: { required: [...(template.secrets?.required ?? []), 'SITE_SECRETS_KEY'] },
+    worker_loaders: template.worker_loaders,
+    ratelimits: template.ratelimits.map(r => ({ ...r, simple: { limit: rps * 10, period: 10 } })),
+  }
+}
+
 /** The longest dot-suffix two hosts share: the domain the `fling_site` cookie is set on. */
 export function commonParent(a, b) {
   const x = a.split('.').reverse()
@@ -178,7 +205,9 @@ const rebase = (path, dir) => {
 
 /**
  * The deployable wrangler config: the template with this instance's account, resources, routes
- * and vars, plus, with `MAIL`, the Email Service binding, the drain's cron and the mail vars. The dev vars are dropped, never merged: production gets only what is configured.
+ * and vars, plus, with `MAIL`, the Email Service binding, the drain's cron and the mail vars, and,
+ * with INSTANCE.SERVERS on, the Worker Loader and the servers' rate limit. The dev vars are
+ * dropped, never merged: production gets only what is configured.
  */
 export function renderWranglerConfig(template, config, outDir) {
   checkDeployConfig(config)
@@ -222,6 +251,9 @@ export function renderWranglerConfig(template, config, outDir) {
     },
     triggers: mail.triggers,
   }
+  delete out.worker_loaders
+  delete out.ratelimits
+  Object.assign(out, serversConfig(template, config.INSTANCE))
   if (mail.send_email) out.send_email = mail.send_email
   else delete out.send_email
   delete out.dev

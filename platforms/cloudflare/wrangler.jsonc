@@ -42,6 +42,15 @@
   // saved to files, never sent; `scripts/dev.mjs --mail` (or MAIL_DRIVER=cloudflare and MAIL_FROM in
   // .dev.vars) uses it. A deploy keeps it only with the deploy config's MAIL, restricted to MAIL.FROM.
   "send_email": [{ "name": "EMAIL" }],
+  // Site servers (src/servers/): the Worker Loader runs each version's server in an isolate of its
+  // own, and the rate limit counts each site's requests (SERVER_RPS over 10 s; the limit is
+  // rendered from it). The Worker Loader is in beta, on Workers Paid: a deploy keeps both only
+  // with INSTANCE.SERVERS on (DEPLOY.md, Site servers). Locally they are always there;
+  // `scripts/dev.mjs --servers` turns servers on.
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "ratelimits": [
+    { "name": "SERVER_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 1000, "period": 10 } }
+  ],
   // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
   "triggers": { "crons": ["17 * * * *"] },
   "secrets": { "required": ["SESSION_SECRET", "SITE_HMAC_KEY"] },

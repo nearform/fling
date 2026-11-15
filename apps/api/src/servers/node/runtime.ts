@@ -19,6 +19,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { SERVER_HELPER_MODULE, SERVER_SITE_HEADER, SERVER_START_LOG_LINES } from '@fling/shared'
 import type { Blobs } from '../../blobs/types.ts'
+import { heldBody } from '../body.ts'
 import type {
   ProbeRequest,
   ProbeResult,
@@ -206,7 +207,7 @@ export class NodeSiteServers implements SiteServers {
       const out = new Headers(res.headers)
       out.delete('content-encoding')
       out.delete('content-length')
-      return new Response(res.body, {
+      return new Response(heldBody(res), {
         status: res.status,
         statusText: res.statusText,
         headers: out,

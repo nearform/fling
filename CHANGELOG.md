@@ -13,6 +13,7 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **`fling dev`: a site server's answer arrives whole.** An answer from the server under `fling dev` could now and then arrive empty, or not at all: Node cancelled its body if it collected garbage before the answer went out. Answers are held until they are sent.
 - **`fling dev` renders Markdown as a published site does.** A `.md` file is served as its rendered page (`?raw=1` for the source), and a folder without an `index.html` gets its `index.md`, `README.md` or only Markdown file as its home page, re-rendered when the files change. `fling dev` served Markdown as raw text and gave `/` the 404 page.
 - **AWS: site servers can be created.** The module's IAM fence (infra-aws-v1.4.1) fences creating and tagging a server's Web Function by name, as it does every other Web Function action: Web Functions do not evaluate tag conditions on `CreateWebFunction`, so 1.4.0's refused every new server (an internal error on the first publish or secret). Upgrade note: on AWS, move the module to `infra-aws-v1.4.1` and apply.
 

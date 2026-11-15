@@ -12,6 +12,7 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
 import { dirname, join } from 'node:path'
+import { heldBody } from '@fling/api/servers/body'
 import { unzipSync } from 'fflate'
 import type { LogEvent, LogEventsApi } from '../src/servers/server-logs.ts'
 import type {
@@ -334,7 +335,7 @@ export class FakeWebFunctions implements WebFunctionsApi {
     headers.delete('content-length')
     headers.set('lambda-web-logstream', stream)
     headers.set('lambda-web-request-id', `req-${++this.n}`)
-    return new Response(res.body, { status: res.status, headers })
+    return new Response(heldBody(res), { status: res.status, headers })
   }
 
   private async start(f: FakeFunction, revision: FakeRevision, stream: string) {

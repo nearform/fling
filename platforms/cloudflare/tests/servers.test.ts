@@ -7,6 +7,7 @@
  */
 import { join } from 'node:path'
 import { serverVersion } from '@fling/api/servers'
+import { heldBody } from '@fling/api/servers/body'
 import type { ServerLogLine, ServerLogs, SiteServers } from '@fling/api/servers/types'
 import { SERVER_FIXTURES, serverLogsConformance, siteServersConformance } from '@fling/conformance'
 import { Miniflare } from 'miniflare'
@@ -54,7 +55,12 @@ async function start(rateLimit = 100_000) {
       headers: Object.fromEntries(headers),
       body: hasBody ? Buffer.from(await request.arrayBuffer()) : undefined,
     })
-    return res as unknown as Response
+    // dispatchFetch wraps undici's body in a new Response, which a collection can cancel.
+    return new Response(heldBody(res as unknown as Response), {
+      status: res.status,
+      statusText: res.statusText,
+      headers: res.headers as unknown as Headers,
+    })
   }
   const servers: SiteServers = {
     activate: (...a) => call('/port/activate', a),

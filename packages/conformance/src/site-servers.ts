@@ -13,6 +13,8 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { setFlagsFromString } from 'node:v8'
+import { runInNewContext } from 'node:vm'
 import type { ServerLimits } from '@fling/api/config'
 import { SERVER_HELPER_MODULE } from '@fling/api/servers'
 import type {
@@ -82,6 +84,16 @@ function request(path: string, init: RequestInit & { viewer?: typeof VIEWER | nu
   const headers = new Headers(init.headers)
   if (init.viewer) headers.set('x-fling-viewer', JSON.stringify(init.viewer))
   return new Request(`${HOST}${path}`, { ...init, headers })
+}
+
+/**
+ * A full garbage collection, now. Node's fetch cancels the body of a Response it made once that
+ * Response is collected, unless something holds the body: an answer has to survive this until the
+ * caller reads it.
+ */
+function collectGarbage() {
+  setFlagsFromString('--expose-gc')
+  ;(runInNewContext('gc') as () => void)()
 }
 
 const uid = () => randomUUID().replaceAll('-', '').slice(0, 12)
@@ -251,6 +263,18 @@ export function siteServersConformance(name: string, factory: () => Promise<Site
       const b = await h.servers.invoke(site, second, request('/api/hello'))
       expect((await a.json()).kind).toBe('fetch')
       expect(await b.json()).toMatchObject({ kind: 'node', env: 'second' })
+    })
+
+    it('an answer stays readable until it is read, whatever is collected meanwhile', async () => {
+      const { h, site, version } = await ready(
+        { '_fling/server.mjs': SERVER_FIXTURES.fetch() },
+        { GREETING: 'kept' }
+      )
+      const res = await h.servers.invoke(site, version, request('/api/hello'))
+      await new Promise(r => setTimeout(r, 10))
+      collectGarbage()
+      await new Promise(r => setTimeout(r, 10))
+      expect(await res.json()).toMatchObject({ kind: 'fetch', env: 'kept' })
     })
 
     it('setEnabled: a stopped site answers 503 until it runs again; retire forgets it', async () => {

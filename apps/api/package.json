@@ -33,6 +33,7 @@
     "./servers": "./src/servers/index.ts",
     "./servers/types": "./src/servers/types.ts",
     "./servers/shell": "./src/servers/shell.ts",
+    "./servers/body": "./src/servers/body.ts",
     "./servers/logs": "./src/servers/logs.ts",
     "./servers/memory-logs": "./src/servers/memory-logs.ts",
     "./servers/node": "./src/servers/node/runtime.ts",

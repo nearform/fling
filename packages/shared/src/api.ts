@@ -11,7 +11,7 @@ import {
   SiteRoleMembersSchema,
   SiteRoleSchema,
 } from './site-roles.ts'
-import { ServerConfigSchema } from './site-server.ts'
+import { ServerConfigSchema, SiteServerSchema } from './site-server.ts'
 import { ThumbnailSchema, ThumbnailStampSchema } from './thumbnails.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
@@ -104,6 +104,13 @@ export type Version = z.infer<typeof VersionSchema>
 export const SiteDetailSchema = SiteWithAudienceSchema.extend({
   owner: z.string().optional(),
   versions: z.array(VersionSchema),
+  /** its server, while the current version has one (`servers` capability) */
+  server: SiteServerSchema.optional(),
+  /**
+   * a publish waiting for site secrets (409 `secrets_missing`): the pending version, and the
+   * secrets it was missing then. Setting the last of them takes it live (`servers` capability)
+   */
+  awaitingSecrets: z.object({ versionId: z.string(), secrets: z.array(z.string()) }).optional(),
 })
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 

@@ -19,6 +19,9 @@
  * offers the comment-kind forms that apply to the page as types of comment
  * (components/review/Forms.tsx).
  *
+ * With the `servers` capability, while the live version has a site server, a banner above the
+ * frame says that what each reviewer sees may differ and that what they do on it is real.
+ *
  * The comments panel sits beside the frame while the frame keeps most of the width, and over the
  * site as a sheet from the bottom when it can't (the stylesheet's container query decides, and
  * says so in `--review-sheet`). The reviewer shows and hides it from the header; the choice is
@@ -47,6 +50,7 @@ import {
   CheckCircleIcon,
   EllipsisHorizontalIcon,
   MapPinIcon,
+  ServerIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -199,6 +203,7 @@ function ReviewSession({
   const [initial] = useState(() => reviewTarget(params.get('path')))
   const [shellSrc] = useState(() => reviewShellUrl(list.site.url, targetString(initial)))
   const siteOrigin = new URL(list.site.url).origin
+  const serverBanner = useInstance()?.capabilities.servers === true && list.site.hasServer === true
   const frame = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
   const [at, setAt] = useState<FrameLocation>(initial)
@@ -580,6 +585,15 @@ function ReviewSession({
         </div>
       </header>
 
+      {serverBanner && (
+        <p className="review-banner" role="note">
+          <ServerIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            This site has its own server. What you see may differ from what other reviewers see, and
+            actions you take on it are real.
+          </span>
+        </p>
+      )}
       <div ref={body} className="review-body">
         <div ref={frameBox} className="review-frame">
           <iframe

@@ -40,6 +40,7 @@ import { newCommentId } from './lib/ids.ts'
 import { publishQuietly } from './live.ts'
 import { type Acting, notifyComment } from './notifications/notify.ts'
 import { type Action, type Actor, can, canDeleteComment, isAuthor } from './policy.ts'
+import { serversOn } from './servers/index.ts'
 import { auditAdmin, resolveSite } from './sites.ts'
 import type { CommentRecord, SiteRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
@@ -124,6 +125,7 @@ export async function listComments(
       name: site.name,
       url: siteUrl(siteLabel(site.name), deps.config.sitesDomain, `${deps.config.siteScheme}:`),
       currentVersionId: site.currentVersionId,
+      ...(serversOn(deps) && site.server?.live ? { hasServer: true } : {}),
     },
     comments: comments.map(c => toComment(who, site, c)),
     can: {

@@ -11,6 +11,8 @@ import {
   AdminInvitationSchema,
   type AdminInviteResult,
   AdminInviteResultSchema,
+  type AdminServerState,
+  AdminServerStateSchema,
   type AdminSettings,
   AdminSettingsSchema,
   type AdminSiteList,
@@ -30,6 +32,8 @@ import {
   ConnectionListSchema,
   type CreateCommentRequest,
   type CreateGroupRequest,
+  type DeleteSiteSecretResponse,
+  DeleteSiteSecretResponseSchema,
   ErrorEnvelopeSchema,
   type FieldError,
   FieldErrorSchema,
@@ -58,11 +62,15 @@ import {
   type PathDetail,
   PathDetailSchema,
   PathListSchema,
+  type PutSiteSecretResponse,
+  PutSiteSecretResponseSchema,
   type ResponseExportFormat,
   type ResponsesExport,
   ResponsesExportSchema,
   type SentNotification,
   SentNotificationListSchema,
+  type ServerLogLine,
+  ServerLogsResponseSchema,
   type SharedSite,
   SharedSiteListSchema,
   type SignInLinkRequest,
@@ -73,6 +81,8 @@ import {
   type SitePath,
   SitePathSchema,
   type SiteRoleInput,
+  type SiteSecretsResponse,
+  SiteSecretsResponseSchema,
   type Thumbnail,
   ThumbnailSchema,
   type VersionFiles,
@@ -186,6 +196,16 @@ const ShareResponseParser: Parser<{ shareUrl: string }> = {
   },
 }
 
+const ViewerParser: Parser<{ id: string; email: string | null }> = {
+  parse(data) {
+    const { id, email } = (data ?? {}) as { id?: unknown; email?: unknown }
+    if (typeof id !== 'string' || (email !== null && typeof email !== 'string')) {
+      throw new Error('viewer missing')
+    }
+    return { id, email }
+  },
+}
+
 const site = (name: string) => `/api/sites/${encodeURIComponent(name)}`
 const path = (name: string, folder: string) => `${site(name)}/paths/${encodeURIComponent(folder)}`
 const group = (slug: string) => `/api/groups/${encodeURIComponent(slug)}`
@@ -260,6 +280,8 @@ export const api = {
       audience?: AudienceInput
       owners?: SiteRoleInput
       publishers?: SiteRoleInput
+      /** making a site with a server public, once the publisher has confirmed (409 `public_server`) */
+      confirmPublicServer?: boolean
     }
   ) => request(site(name), ignoreBody, { method: 'PATCH', body }),
   /** Creates the share link, or rotates it when one exists (the old link stops working). */
@@ -270,6 +292,31 @@ export const api = {
   deleteSite: (name: string) => request(site(name), ignoreBody, { method: 'DELETE' }),
   setCurrentVersion: (name: string, versionId: string) =>
     request(`${site(name)}/current`, ignoreBody, { method: 'POST', body: { versionId } }),
+  /** The site secrets by name, who set each and when, and what the live version declares. */
+  siteSecrets: (name: string): Promise<SiteSecretsResponse> =>
+    request(`${site(name)}/secrets`, SiteSecretsResponseSchema),
+  /**
+   * Set one site secret (the value is never read back), and what that did: the live server
+   * restarted with it, or the publish that waited for it went live (or still waits).
+   */
+  putSiteSecret: (name: string, secret: string, value: string): Promise<PutSiteSecretResponse> =>
+    request(`${site(name)}/secrets/${encodeURIComponent(secret)}`, PutSiteSecretResponseSchema, {
+      method: 'PUT',
+      body: { value },
+    }),
+  /** Remove one site secret; the live server restarts without it. */
+  deleteSiteSecret: (name: string, secret: string): Promise<DeleteSiteSecretResponse> =>
+    request(`${site(name)}/secrets/${encodeURIComponent(secret)}`, DeleteSiteSecretResponseSchema, {
+      method: 'DELETE',
+    }),
+  /** The site server's log since `since` (an ISO time, or `15m`, `1h`, `2d`), oldest first. */
+  async siteLogs(name: string, since = '1h'): Promise<ServerLogLine[]> {
+    const { lines } = await request(
+      `${site(name)}/logs?since=${encodeURIComponent(since)}`,
+      ServerLogsResponseSchema
+    )
+    return lines
+  },
   /** A site's comments and what the caller may do (members too: it is how they review). */
   listComments: (name: string): Promise<CommentList> =>
     request(`${site(name)}/comments`, CommentListSchema),
@@ -357,6 +404,27 @@ export const api = {
   },
   /** Admins only: every site's listing, by name (`truncated`: the server's ceiling cut it). */
   adminSites: (): Promise<AdminSiteList> => request('/api/admin/sites', AdminSiteListSchema),
+  /**
+   * Admins: stop or start a site's server, and its limits (null puts one back to the instance's).
+   * Audited as a change to the site.
+   */
+  adminSetServer: (
+    name: string,
+    body: {
+      stopped?: boolean
+      limits?: Partial<Record<keyof AdminServerState['limits'], number | null>>
+    }
+  ): Promise<AdminServerState> =>
+    request(`/api/admin/sites/${encodeURIComponent(name)}/server`, AdminServerStateSchema, {
+      method: 'PUT',
+      body,
+    }),
+  /** Admins: whose viewer id `id` is on the site (null: nobody's). Audited. */
+  resolveViewer: (name: string, id: string): Promise<{ id: string; email: string | null }> =>
+    request(`/api/admin/sites/${encodeURIComponent(name)}/viewers/resolve`, ViewerParser, {
+      method: 'POST',
+      body: { id },
+    }),
   /** Admins, with outside invitations on: a page of the invitation directory, by address. */
   adminInvitations(q: string, cursor?: string): Promise<AdminInvitationList> {
     const params = new URLSearchParams()

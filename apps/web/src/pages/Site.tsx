@@ -7,6 +7,11 @@
  * versions, to roll back: not Access, the share link or the danger zone. Archived sites are
  * offline, so Access waits until they are unarchived. With the `paths` capability, the site's
  * Paths are listed when it has any, each linking to its own page.
+ *
+ * With the `servers` capability, a site whose current version has a site server shows its Server
+ * section (the kill switch and limits for admins); its owners and publishers see its Secrets once
+ * any version has a server, a publish waits for secrets or a secret is set; its owners,
+ * publishers and admins see its Logs.
  */
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams } from 'react-router-dom'
@@ -17,12 +22,15 @@ import { ReviewButton } from '../components/SiteButtons'
 import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
+import { SiteLogs } from '../components/site/SiteLogs'
 import { SiteOverview } from '../components/site/SiteOverview'
 import { SitePaths } from '../components/site/SitePaths'
+import { SiteSecrets } from '../components/site/SiteSecrets'
+import { SiteServer } from '../components/site/SiteServer'
 import { SiteTeam } from '../components/site/SiteTeam'
 import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
-import { useMe, useSiteDetail } from '../hooks/queries'
+import { useMe, useSiteDetail, useSiteSecrets } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
 
 export default function Site() {
@@ -30,6 +38,12 @@ export default function Site() {
   const instance = useInstance()
   const detail = useSiteDetail(name, name !== '')
   const { data: me } = useMe()
+  const serversOn = instance?.capabilities.servers === true
+  const role = detail.data?.role
+  const secrets = useSiteSecrets(
+    name,
+    serversOn && (role === 'owner' || role === 'publisher') && detail.isSuccess
+  )
 
   if (detail.isPending) {
     return (
@@ -63,6 +77,15 @@ export default function Site() {
     ? site.role === 'admin'
     : me != null && site.owner !== undefined && site.owner !== me.email
   const publisher = site.role === 'publisher'
+  const admin = me?.admin === true
+  const everServer = site.hasServer === true || site.versions.some(v => v.server)
+  const showSecrets =
+    secrets.data !== undefined &&
+    (everServer || site.awaitingSecrets !== undefined || secrets.data.secrets.length > 0)
+  const showLogs =
+    serversOn &&
+    everServer &&
+    (site.role === 'owner' || publisher || site.role === 'admin' || admin)
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -103,6 +126,10 @@ export default function Site() {
         </div>
       )}
       <SiteOverview site={site} />
+      {serversOn && site.server && (
+        <SiteServer site={site} server={site.server} logs={showLogs} admin={admin} />
+      )}
+      {showSecrets && secrets.data && <SiteSecrets site={site} secrets={secrets.data} />}
       {!site.archived && !publisher && (
         <SiteAccess site={site} {...(othersSite && { owner: site.owner })} />
       )}
@@ -111,6 +138,9 @@ export default function Site() {
         <SitePaths name={site.name} reviewable={reviewable} />
       )}
       <SiteVersions site={site} />
+      {showLogs && (
+        <SiteLogs name={site.name} currentVersionId={site.currentVersionId} admin={admin} />
+      )}
       {!publisher && <SiteDangerZone site={site} home={othersSite ? '/?view=all' : '/'} />}
     </div>
   )

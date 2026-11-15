@@ -139,6 +139,8 @@ export const CommentListSchema = z.object({
     name: z.string(),
     url: z.string(),
     currentVersionId: z.string().nullable(),
+    /** its live version has a site server (`servers` capability): the review page says so */
+    hasServer: z.boolean().optional(),
   }),
   comments: z.array(CommentSchema),
   can: z.object({

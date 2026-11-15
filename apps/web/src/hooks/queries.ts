@@ -10,6 +10,7 @@ import type {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ADMIN_USERS_PATH } from '../lib/admin'
 import { ApiError, api, errorMessage } from '../lib/api'
+import { LOGS_FOLLOW_MS, LOGS_SINCE } from '../lib/servers'
 import { showToast } from '../lib/toast'
 
 export const queryKeys = {
@@ -44,6 +45,9 @@ export const queryKeys = {
   allAdminInvitations: ['admin', 'invitations'] as const,
   adminMail: ['admin', 'mail'] as const,
   adminSettings: ['admin', 'settings'] as const,
+  // Under the site's key, so whatever refetches the site refetches these too.
+  secrets: (name: string) => ['site', name, 'secrets'] as const,
+  serverLogs: (name: string) => ['site', name, 'logs'] as const,
   notifications: ['notifications'] as const,
   sentNotifications: ['notifications', 'sent'] as const,
 }
@@ -197,6 +201,8 @@ function useSiteMutation<TVars, TResult>(
       if (success) showToast(typeof success === 'string' ? success : success(result))
     },
     onError: error => {
+      // A server going public is the caller's to confirm (SiteAccess), never a failure to toast.
+      if (error instanceof ApiError && error.code === 'public_server') return
       if (toastErrors) showToast(errorMessage(error), 'error')
     },
   })
@@ -221,9 +227,11 @@ export function useSaveThumbnail(name: string) {
 
 export function useSiteActions(name: string) {
   return {
+    /** `confirmPublicServer`: retried once the publisher confirmed a public server. */
     setVisibility: useSiteMutation(
       name,
-      (visibility: Visibility) => api.updateSite(name, { visibility }),
+      (visibility: Visibility | { visibility: Visibility; confirmPublicServer: true }) =>
+        api.updateSite(name, typeof visibility === 'string' ? { visibility } : visibility),
       'Visibility updated'
     ),
     /**
@@ -232,8 +240,11 @@ export function useSiteActions(name: string) {
      */
     setAccess: useSiteMutation(
       name,
-      (choice: { access: AccessLevel; audience?: { emails: string[]; groups: string[] } }) =>
-        api.updateSite(name, choice),
+      (choice: {
+        access: AccessLevel
+        audience?: { emails: string[]; groups: string[] }
+        confirmPublicServer?: boolean
+      }) => api.updateSite(name, choice),
       'Access updated',
       false
     ),
@@ -269,6 +280,66 @@ export function useSiteActions(name: string) {
       'Version restored — the site now serves it'
     ),
   }
+}
+
+/** The site secrets by name and what the live version declares (`servers` capability). */
+export function useSiteSecrets(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.secrets(name),
+    queryFn: () => api.siteSecrets(name),
+    enabled,
+    retry: false,
+  })
+}
+
+/**
+ * Set or remove a site secret; the list (and the site) refetch. What it did (the outcome) is the
+ * caller's to show, and a failure to set one too.
+ */
+export function useSecretActions(name: string) {
+  const set = useSiteMutation(
+    name,
+    ({ secret, value }: { secret: string; value: string }) =>
+      api.putSiteSecret(name, secret, value),
+    undefined,
+    false
+  )
+  const remove = useSiteMutation(name, (secret: string) => api.deleteSiteSecret(name, secret))
+  return { set, remove }
+}
+
+/**
+ * The site server's last hour of log, shared by the Logs panel and the request counts. `follow`
+ * asks again every 2 s; otherwise once a minute.
+ */
+export function useServerLogs(name: string, enabled: boolean, follow = false) {
+  return useQuery({
+    queryKey: queryKeys.serverLogs(name),
+    queryFn: () => api.siteLogs(name, LOGS_SINCE),
+    enabled,
+    retry: false,
+    refetchInterval: follow ? LOGS_FOLLOW_MS : 60_000,
+  })
+}
+
+/** Admins: a site server's kill switch and limits. Failures are toasted. */
+export function useAdminServer(name: string) {
+  return useSiteMutation(
+    name,
+    (body: Parameters<typeof api.adminSetServer>[1]) => api.adminSetServer(name, body),
+    result =>
+      result.stopped
+        ? `${result.name}'s server is stopped: /api/* answers 503`
+        : `${result.name}'s server is updated`
+  )
+}
+
+/** Admins: whose viewer id it is on this site. Audited; failures are toasted. */
+export function useResolveViewer(name: string) {
+  return useMutation({
+    mutationFn: (id: string) => api.resolveViewer(name, id),
+    onError: error => showToast(errorMessage(error), 'error'),
+  })
 }
 
 /**

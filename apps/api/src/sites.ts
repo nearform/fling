@@ -121,6 +121,7 @@ import {
 } from './policy.ts'
 import {
   applyServer,
+  limitsOf,
   noteLive,
   principalOfUser,
   publicServerMessage,
@@ -895,6 +896,18 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
         ...(v.server ? { server: true } : {}),
         createdAt: v.createdAt,
       })),
+    ...(serversOn(deps) && site.server?.live
+      ? {
+          server: {
+            stopped: site.server.stopped === true,
+            limits: limitsOf(deps, site),
+            raised: { ...site.server.limits },
+          },
+        }
+      : {}),
+    ...(serversOn(deps) && site.server?.awaiting
+      ? { awaitingSecrets: { ...site.server.awaiting } }
+      : {}),
   }
 }
 

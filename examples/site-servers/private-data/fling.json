@@ -1,0 +1,4 @@
+{
+  "server": "server.ts",
+  "health": "/api/health"
+}

@@ -1,0 +1,4 @@
+{
+  "server": "server.js",
+  "health": "/api/health"
+}

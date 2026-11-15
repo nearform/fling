@@ -1,0 +1,7 @@
+{
+  "products": [
+    { "sku": "desk-oak", "name": "Oak desk", "listPrice": 640 },
+    { "sku": "chair-mesh", "name": "Mesh chair", "listPrice": 310 },
+    { "sku": "lamp-arm", "name": "Arm lamp", "listPrice": 85 }
+  ]
+}

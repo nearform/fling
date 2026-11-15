@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **AWS: site servers can be created.** The module's IAM fence (infra-aws-v1.4.1) fences creating and tagging a server's Web Function by name, as it does every other Web Function action: Web Functions do not evaluate tag conditions on `CreateWebFunction`, so 1.4.0's refused every new server (an internal error on the first publish or secret). Upgrade note: on AWS, move the module to `infra-aws-v1.4.1` and apply.
+
 ## 0.13.0 (2026-11-15)
 
 - **Site servers.** A site can carry a small backend: put a `server.ts` (or `server.js`) beside

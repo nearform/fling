@@ -106,12 +106,13 @@ page and use its secrets through it. `fling deploy`, `fling access --public` and
 <!-- requires: pull -->
 ### Change a site that has a server
 
-`fling pull` of a site with a server (see [Change a published site](/guide/publish/change-a-site))
-brings down the built bundle, `_fling/server.mjs`, and a `fling.json` with the secrets and health
+`fling pull` of a site with a server (see [Change a published site](/guide/publish/change-a-site)),
+by one of its owners or publishers, brings down the built bundle, `_fling/server.mjs`, and a `fling.json` with the secrets and health
 path it was published with. Deploying that folder publishes the same server, with the same secrets.
 It is the bundle, not the source: {{instance:name}} never stores `server.ts` or `server/`. Change
 the pages in the pulled folder; change the server in its own folder, wherever you keep its source,
-and deploy from there.
+and deploy from there. Anyone else who can open the site pulls only its pages: the bundle, with
+whatever it took from `server/`, stays with the people who publish it.
 
 Publishing on what is live keeps the server's `fling.json` as it was, so long as the bundle is the
 same: an assistant that reads the site's files and publishes a change to a page needn't send it.

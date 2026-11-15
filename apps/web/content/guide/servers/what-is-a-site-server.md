@@ -119,7 +119,8 @@ model, are in the [site servers how-to]({{fact:repo-url}}/blob/main/docs/site-se
 ## Good to know
 
 - Anything under `server/` is bundled into the server when imported and never published, so it is
-  the place for data visitors mustn't see. Any other file in the folder is published as usual, and
+  the place for data visitors mustn't see: neither visitors nor people who pull the site (unless
+  they own or publish it) get the bundle. Any other file in the folder is published as usual, and
   anyone who can open the site can fetch it, whichever way the server reads it.
 - The bundle is part of the version: [rolling back](/guide/publish/versions) rolls the server back
   too.

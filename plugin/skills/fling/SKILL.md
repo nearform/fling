@@ -287,12 +287,12 @@ published as it is: no need to convert it to HTML.
   pulls just that Path, and deploying the folder publishes it back to the Path on the version
   pulled. `fling_read_files { name, path }` names the files within the Path; publish them back with
   `fling_publish { name, path, base, files, remove }`.
-- A site with a server: the pulled folder (or `fling_read_files`) has its built bundle,
+- A site with a server: for its owners and publishers, the pulled folder (or `fling_read_files`) has its built bundle,
   `_fling/server.mjs`, and its `fling.json` (written into the folder; `server` in
   `fling_read_files`' result), never the server's source, which stays in the author's own
   repository. Deploying it as it is keeps the server and its secrets; publishing on `base` without
   `siteServer` keeps the base's config while the bundle is unchanged. Change the server from its
-  source, not by editing the bundle.
+  source, not by editing the bundle. Anyone else who pulls it gets only its pages.
 - Anyone signed in who can open a site may pull it; only its owners and publishers may publish it.
 - `base_changed`: someone published the site after you pulled it. Never force over it without
   asking: pull (or read) it again, redo the change on the new version and publish that. Only if

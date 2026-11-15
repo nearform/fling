@@ -13,6 +13,7 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Security: only a site's owners, publishers and admins pull its server.** `fling pull`, `fling_pull` and `fling_read_files` gave anyone who could open a site its server's bundle, `_fling/server.mjs`, with whatever it inlined from `server/`: the data the guide says visitors never see. A viewer's pull now holds the files a visitor sees, without the bundle or the server's `fling.json`.
 - **Security: a site server's bundle is never served, however its path is spelled.** The sites host checked for `/_fling/` and dot segments before decoding the path, so `/_fling%2Fserver.mjs` or `/%5Ffling/server.mjs` served `_fling/server.mjs`, with anything bundled into it, to anyone who could open the site. The checks now run on the decoded path the store reads, and a path with an encoded `/`, `\` or NUL is refused outside `/api/` (a site's server still gets its paths as they came).
 - **Security: patched Hono, its Node server and node-forge.** Hono 4.13.16 (CSRF, `mount()`, router, form validator and `css` helper fixes), `@hono/node-server` 2.1.6 (backslash paths, WebSocket upgrade crash) and node-forge 1.4.3 in the CLI's `.mcpb` packer.
 - **`fling dev`: a site server's answer arrives whole.** An answer from the server under `fling dev` could now and then arrive empty, or not at all: Node cancelled its body if it collected garbage before the answer went out. Answers are held until they are sent.

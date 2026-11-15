@@ -16,12 +16,17 @@
  * client can write `fling.json` back: it is a build input, never one of the files. A publish on
  * the version pulled that keeps its bundle keeps that config anyway (publication.ts).
  *
+ * A version's server is its owners', publishers' and admins' (`version.read`): its bundle
+ * (`FLING_DIR`, `_fling/server.mjs`, with whatever its source inlined from `server/`) and its
+ * config come only to them. A viewer pulls the site's files without them, as a visitor sees it.
+ *
  * With `path`, the pull is of that Path of the site (paths.ts): its version (the current one
  * unless `versionId` names another), on the same terms with the Path's roles (`pathPolicySite`)
  * for other versions. Its files are the Path's, named within it (`pullable`) and, in the API's
  * answer, by site path (`<path>/…`).
  */
 import {
+  FLING_DIR,
   type ManifestFile,
   PULL_URL_TTL_SECONDS,
   type PullResponse,
@@ -39,6 +44,8 @@ import type { SiteRecord, User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
 const PRESIGN_CONCURRENCY = 32
+
+const FLING_PREFIX = FLING_DIR.slice(1)
 
 const byPath = (a: { path: string }, b: { path: string }) =>
   a.path < b.path ? -1 : a.path > b.path ? 1 : 0
@@ -95,12 +102,13 @@ export async function pullable(
   // A Path never has a server; the site's version says what its fling.json declared.
   const record = path ? null : (version ?? (await deps.store.getVersion(target.ref, versionId)))
   const mark = record?.server
+  const builds = can(actor, 'version.read', target.policy)
   return {
     site,
     storage: target.storage,
     versionId,
-    files: manifest.files.slice().sort(byPath),
-    ...(mark
+    files: manifest.files.filter(f => builds || !f.path.startsWith(FLING_PREFIX)).sort(byPath),
+    ...(mark && builds
       ? { server: { secrets: mark.secrets, ...(mark.health ? { health: mark.health } : {}) } }
       : {}),
   }

@@ -512,8 +512,8 @@ Two things CloudFront decides for the whole sites distribution, and how Fling ke
 
 **The API creates Web Functions at publish time, inside an IAM fence.** Terraform defines the
 fence and the shared parts; the API creates each site's function, endpoint and revisions.
-Web Function actions (prefix `lambda:`) only on `<namespace>-<env>-<name>-site-*`, and
-`CreateWebFunction` only with the instance's `fling:instance` tag; `iam:PassRole` only on the one
+Web Function actions (prefix `lambda:`) only on `<namespace>-<env>-<name>-site-*`, fenced by name
+(Web Functions do not evaluate tag conditions on `CreateWebFunction`); `iam:PassRole` only on the one
 server role, which can write nothing but its own logs; object reads, writes and deletes (with their
 versions) only on the zip bucket; log-group calls only on `/aws/lambda/web/<prefix>*`; no other
 compute. Deleting a site or retention removes its function, and an hourly sweep deletes any tagged

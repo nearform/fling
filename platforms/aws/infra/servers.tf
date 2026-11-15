@@ -91,30 +91,14 @@ resource "aws_iam_role_policy" "server" {
 data "aws_iam_policy_document" "servers" {
   count = local.servers_on ? 1 : 0
 
-  # A function is created only with this instance's tag.
+  # Creating and tagging functions is fenced by name, like every other action here: Web Functions
+  # do not evaluate tag conditions (aws:RequestTag, aws:TagKeys) on CreateWebFunction, so a
+  # condition on them refuses every create. The name prefix keeps the API to its own instance's
+  # functions; the tags it sets are Fling's own (src/servers/naming.ts).
   statement {
-    sid       = "CreateTaggedFunctions"
-    actions   = ["lambda:CreateWebFunction"]
+    sid       = "CreateAndTagFunctions"
+    actions   = ["lambda:CreateWebFunction", "lambda:TagResource"]
     resources = [local.server_fn_arn, "${local.server_fn_arn}/*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestTag/fling:instance"
-      values   = [local.name]
-    }
-  }
-
-  # Fling's own tags only (src/servers/naming.ts): the instance, the site, the rate, stopped.
-  statement {
-    sid       = "TagFunctions"
-    actions   = ["lambda:TagResource"]
-    resources = [local.server_fn_arn, "${local.server_fn_arn}/*"]
-
-    condition {
-      test     = "ForAllValues:StringEquals"
-      variable = "aws:TagKeys"
-      values   = ["fling:instance", "fling:site", "fling:rate", "fling:stopped"]
-    }
   }
 
   statement {

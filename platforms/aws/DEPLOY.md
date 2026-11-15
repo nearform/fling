@@ -648,8 +648,8 @@ plan of an existing instance shows no changes.
 What Terraform builds:
 
 - **The fence** on the API's role (`site-servers` policy): Web Function actions (IAM prefix
-  `lambda:`) only on `web-function/<namespace>-<env>-<name>-site-*` and what is under it, creating
-  one only with the `fling:instance` tag, tagging only with Fling's four tags, `iam:PassRole` only on
+  `lambda:`) only on `web-function/<namespace>-<env>-<name>-site-*` and what is under it (by name:
+  Web Functions do not evaluate tag conditions on `CreateWebFunction`), `iam:PassRole` only on
   the server role, the zip bucket, the servers' log groups (`/aws/lambda/web/<prefix>*`), and
   `lambda:PassNetworkConnector` on the connector. `GetWebAccountSettings` and `ListWebFunctions` are
   account-wide. `GetWebFunctionRevision` returns a revision's environment, site secrets included,

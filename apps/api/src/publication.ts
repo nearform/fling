@@ -176,15 +176,16 @@ import {
   actorOn,
   applySettings,
   auditAdmin,
+  changeSite,
   detectGeneratedIndex,
   initialAccess,
   inviteAdded,
   nameTaken,
   requireSiteAs,
   type StoredManifest,
-  save,
   siteActor,
   toSite,
+  writeSite,
 } from './sites.ts'
 import type { PathRecord, ServerMark, SiteRecord, User, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
@@ -321,13 +322,44 @@ const baseChanged = (what: string, base: string) =>
     { base }
   )
 
-/** Save the site; with a base, only while that is still its current version. */
-async function saveOnBase(deps: Deps, site: SiteRecord, layer: { base: string } | null) {
-  if (!layer) return save(deps, site)
+/**
+ * Make a deploy's `change` to the site and save it; with a base, only while that is still its
+ * current version (409 `base_changed`). When the site was saved since this deploy read it, the
+ * change is made to the newer copy only as far as the deployer still may: they still deploy to it
+ * (404 otherwise), and restore it if it is archived now (`checkRestore`), with `recheck` for what
+ * else the change needs. So a deploy in flight never undoes an owner's or admin's change made
+ * meanwhile, nor brings back an archived site for a publisher or a deleted one for anyone.
+ * Returns the actor as resolved against the site saved.
+ */
+async function saveOnBase(
+  deps: Deps,
+  actor: Actor,
+  site: SiteRecord,
+  layer: { base: string } | null,
+  change: (site: SiteRecord, actor: Actor) => void,
+  recheck?: (site: SiteRecord, actor: Actor) => Promise<void>
+): Promise<Actor> {
   try {
-    await save(deps, site, undefined, { ifCurrentVersion: layer.base })
+    return await changeSite(
+      deps,
+      actor,
+      site,
+      ['site.deploy'],
+      (s, a) => {
+        if (layer && s.currentVersionId !== layer.base) throw new ConditionFailed()
+        change(s, a)
+        return true
+      },
+      {
+        ...(layer ? { ifCurrentVersion: layer.base } : {}),
+        recheck: async (s, a) => {
+          await checkRestore(deps, a, s)
+          await recheck?.(s, a)
+        },
+      }
+    )
   } catch (err) {
-    if (err instanceof ConditionFailed) throw baseChanged(`"${site.name}"`, layer.base)
+    if (err instanceof ConditionFailed && layer) throw baseChanged(`"${site.name}"`, layer.base)
     throw err
   }
 }
@@ -566,9 +598,12 @@ async function prepare(
   const neverLive = !existing || existing.currentVersionId === null
   const inviter = inviterOf(principal)
   const access = neverLive ? await initialAccess(deps, req, inviter) : null
+  const asked = req.access === undefined ? null : access
+  // What this deploy's changes need, asked again of a newer copy of the site (`saveOnBase`).
+  const recheck = (s: SiteRecord, a: Actor) =>
+    checkDeployChanges(deps, a, s, deployChanges(s, req, asked))
   if (existing) {
-    const asked = req.access === undefined ? null : access
-    await checkDeployChanges(deps, actor, existing, deployChanges(existing, req, asked))
+    await recheck(existing, actor)
     await checkRestore(deps, actor, existing)
   }
   // On a base, the server is admitted on the merged files: a partial publish carries its bundle.
@@ -595,9 +630,19 @@ async function prepare(
     ...(req.confirmPublicServer ? { confirmPublicServer: true } : {}),
   })
   if (existing && access && req.access !== undefined) {
-    const before = existing.audience
-    Object.assign(existing, access)
-    await save(deps, existing)
+    let before = existing.audience
+    await changeSite(
+      deps,
+      actor,
+      existing,
+      ['site.deploy'],
+      s => {
+        before = s.audience
+        Object.assign(s, access)
+        return true
+      },
+      { recheck }
+    )
     await inviteAdded(deps, inviter, existing, before)
   }
 
@@ -616,12 +661,20 @@ async function prepare(
 
   if (existing && existing.currentVersionId === versionId) {
     if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
-    applySettings(existing, req)
-    existing.archived = false
-    await saveOnBase(deps, existing, layer)
+    const as = await saveOnBase(
+      deps,
+      actor,
+      existing,
+      layer,
+      s => {
+        applySettings(s, req)
+        s.archived = false
+      },
+      recheck
+    )
     return {
       kind: 'done',
-      result: { status: 'unchanged', versionId, site: toSite(deps, actor, existing) },
+      result: { status: 'unchanged', versionId, site: toSite(deps, as, existing) },
     }
   }
 
@@ -637,15 +690,23 @@ async function prepare(
       if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
       const live = await withMark(deps, existing, version, mark)
       const target = await startServer(deps, principal, existing, live)
-      existing.currentVersionId = versionId
-      existing.archived = false
-      applySettings(existing, req)
-      applyServer(existing, live, target)
-      await saveOnBase(deps, existing, layer)
+      const as = await saveOnBase(
+        deps,
+        actor,
+        existing,
+        layer,
+        s => {
+          s.currentVersionId = versionId
+          s.archived = false
+          applySettings(s, req)
+          applyServer(s, live, target)
+        },
+        recheck
+      )
       await noteLive(deps, user.email, existing, live)
       return {
         kind: 'done',
-        result: { status: 'repointed', versionId, site: toSite(deps, actor, existing) },
+        result: { status: 'repointed', versionId, site: toSite(deps, as, existing) },
       }
     }
   }
@@ -674,9 +735,12 @@ async function prepare(
   await store.putVersion(site, version)
   // A newer publish: the one that waited for secrets no longer goes live when they are set.
   if (site.server?.awaiting && site.server.awaiting.versionId !== version.id) {
-    const { awaiting: _, ...rest } = site.server
-    site.server = rest
-    await save(deps, site)
+    await writeSite(deps, site, s => {
+      if (!s.server?.awaiting || s.server.awaiting.versionId === version.id) return false
+      const { awaiting: _, ...rest } = s.server
+      s.server = rest
+      return true
+    })
   }
   const kept = new Set(layer?.kept)
   const sent = req.manifest.files.filter(f => !kept.has(f.path))
@@ -691,8 +755,10 @@ const isSecretsMissing = (err: unknown): err is ApiError & { extra: { secrets: s
  * setting the last one takes it live, or tries to, again at every later change (servers/api.ts).
  */
 async function awaitSecrets(deps: Deps, site: SiteRecord, versionId: string, secrets: string[]) {
-  site.server = { ...site.server, awaiting: { versionId, secrets } }
-  await save(deps, site)
+  await writeSite(deps, site, s => {
+    s.server = { ...s.server, awaiting: { versionId, secrets } }
+    return true
+  })
 }
 
 /**
@@ -1082,7 +1148,7 @@ async function goLive(
 ): Promise<Published> {
   const first = site.currentVersionId === null
   // A server starts before anything about the version changes: a refusal leaves it as it was.
-  let target = site.server?.target ?? null
+  let started: string | null = null
   if (version.server && site.currentVersionId !== version.id) {
     if (version.status === 'pending') {
       const bundle = await deps.blobs.get(serverVersion(site.id, version.id).bundle)
@@ -1090,7 +1156,7 @@ async function goLive(
       checkBundle(bundle)
     }
     try {
-      target = await startServer(deps, principalOfUser(user), site, version)
+      started = await startServer(deps, principalOfUser(user), site, version)
     } catch (err) {
       if (version.status === 'pending' && isSecretsMissing(err)) {
         await awaitSecrets(deps, site, version.id, err.extra.secrets)
@@ -1113,14 +1179,18 @@ async function goLive(
       publishedBy: user.email,
     })
   }
-  site.currentVersionId = version.id
-  site.archived = false
-  applySettings(site, settingsFor(actor, site, version))
-  applyServer(site, version, target)
+  let as = actor
   try {
-    await saveOnBase(deps, site, layer)
+    as = await saveOnBase(deps, actor, site, layer, (s, a) => {
+      s.currentVersionId = version.id
+      s.archived = false
+      applySettings(s, settingsFor(a, s, version))
+      applyServer(s, version, started ?? s.server?.target ?? null)
+    })
   } catch (err) {
-    if (version.status === 'pending') await deps.store.putVersion(site, version)
+    // Back to pending, unless the site was deleted meanwhile (404): nothing to keep it for.
+    const gone = err instanceof ApiError && err.status === 404
+    if (version.status === 'pending' && !gone) await deps.store.putVersion(site, version)
     throw err
   }
   await noteLive(deps, user.email, site, version)
@@ -1132,7 +1202,7 @@ async function goLive(
   return {
     status: 'live',
     versionId: version.id,
-    site: toSite(deps, actor, site),
+    site: toSite(deps, as, site),
     ...(first ? { first } : {}),
     ...(hints.length ? { hints } : {}),
   }

@@ -618,6 +618,13 @@ site's partition (`SITE#<id>`) holds its record and versions; the sites a user c
 they hold a role on are index items (`USER#<email>/SITE#<name>`, **Role item**); a site is found by
 name through its name claim.
 
+**Revision** — how many times a site's record has been saved (`SiteRecord.revision`; absent counts
+as 0). `putSite` writes the next one only while the stored record still has the one its copy was
+read at, else nothing is written and it throws `SiteChanged` (`apps/api/src/store/records.ts`). A
+change to a site goes through `writeSite` or `changeSite` (`apps/api/src/sites.ts`): on
+`SiteChanged` they read the site again, ask policy again, and make the change to the newer copy, so
+a request in flight never undoes a change made meanwhile.
+
 **Migration** — a one-off rewrite of stored data, written once against Table
 (`apps/api/src/migrations/NNNN-*.ts`), idempotent and resumable, with its checkpoint and lock in
 `MIGRATION#NNNN` items. Deploys run the pending ones (`runMigrations`); they are the only code that

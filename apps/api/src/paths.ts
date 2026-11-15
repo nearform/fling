@@ -48,8 +48,8 @@ import {
   requireSiteAs,
   rolesView,
   type StoredManifest,
-  syncRouteTable,
   toSite,
+  writeSite,
 } from './sites.ts'
 import type { PathRecord, SiteRecord, SiteRef, User } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
@@ -101,8 +101,9 @@ export function pathListing(paths: readonly PathRecord[]): PathListing[] {
 
 /**
  * Bring the site's Paths flag (`paths`) and rendered home page (`home`) up to date with its
- * current version and live Paths, and its routes with them. Writes only what changed, and the site
- * only while its current version is the one this read: a publish meanwhile refreshes it again.
+ * current version and live Paths, and its routes with them. Writes only those fields, on the site
+ * as it is when written (`writeSite`), and only while its current version is the one this read: a
+ * publish meanwhile refreshes it again.
  */
 export async function refreshHome(deps: Deps, site: SiteRecord) {
   const paths = pathListing(await deps.store.listPaths(site.id))
@@ -138,26 +139,27 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
     }
   }
   const hasPaths = paths.length > 0
-  if ((site.paths === true) === hasPaths && site.home === home) return
-  if (hasPaths) site.paths = true
-  else delete site.paths
-  if (site.home && site.home !== home) {
-    const at = deps.clock.now().toISOString()
-    site.homeOld = [...(site.homeOld ?? []), { sha: site.home, at }].slice(-MAX_HOME_OLD)
-  }
-  if (home) site.home = home
-  else delete site.home
-  // A rendered page is not a change to the site: `updatedAt` stays.
-  try {
-    await deps.store.putSite(
-      site,
-      site.currentVersionId ? { ifCurrentVersion: site.currentVersionId } : {}
-    )
-  } catch (err) {
-    if (err instanceof ConditionFailed) return
-    throw err
-  }
-  await syncRouteTable(deps, site)
+  const versionId = site.currentVersionId
+  // Only the Paths fields change, on the site as it is when written; a rendered page is not a
+  // change to the site, so `updatedAt` stays.
+  await writeSite(
+    deps,
+    site,
+    s => {
+      if (s.currentVersionId !== versionId) return false
+      if ((s.paths === true) === hasPaths && s.home === home) return false
+      if (hasPaths) s.paths = true
+      else delete s.paths
+      if (s.home && s.home !== home) {
+        const at = deps.clock.now().toISOString()
+        s.homeOld = [...(s.homeOld ?? []), { sha: s.home, at }].slice(-MAX_HOME_OLD)
+      }
+      if (home) s.home = home
+      else delete s.home
+      return true
+    },
+    { touch: false }
+  )
 }
 
 /**

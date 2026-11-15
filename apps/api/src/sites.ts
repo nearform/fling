@@ -31,6 +31,12 @@
  * still do, and those their role items and their groups' role items name. Deleting a group takes
  * it out of every site's roles.
  *
+ * Saving: every change to a site is a function given to `writeSite` (or `changeSite`, for a
+ * user's change, which asks policy again), applied to the site as read at the start of the request
+ * and written only while it is still at that revision (`SiteRecord.revision`). When someone saved
+ * it meanwhile, the change is made again to the newer copy, so no request writes back a stale
+ * copy over another's change.
+ *
  * Thumbnails (`putThumbnail`, `siteThumbnail`; thumbnails.ts in shared): a PNG of the home page
  * that an owner's or publisher's browser takes of the current version, kept beside the site's
  * files and read by whoever may view the site.
@@ -136,11 +142,11 @@ import {
   listingOf,
   type SharedListing,
   type SiteAudience,
+  SiteChanged,
   type SiteRecord,
   type SiteRoleList,
   type User,
 } from './store/types.ts'
-import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
@@ -466,19 +472,99 @@ export function requireSiteAs(
   return resolveSite(deps, userActor(user), name, ...actions)
 }
 
+/** How many reads of a site a change is applied to before it gives up (409 `site_changed`). */
+const SITE_WRITE_ATTEMPTS = 5
+
+export interface SiteWrite {
+  /** whether `updatedAt` moves (default true): false for what is no change to the site */
+  touch?: boolean
+  /** whether its routes are written after (default true) */
+  routes?: boolean
+  /** only while the stored site's current version is that one (`ConditionFailed` otherwise) */
+  ifCurrentVersion?: string
+}
+
 /**
- * Write the site (with its index items) and its routes. `ifCurrentVersion`: only while the stored
- * site's current version is that one (`ConditionFailed` otherwise, nothing written).
+ * Apply `change` to the site and write it (with its index items, `putSite`) and its routes. The
+ * write holds only while the site is as `site` was read (its `revision`): when someone saved it
+ * meanwhile, it is read again, `recheck` (which throws to give up: a refusal, or a change that no
+ * longer applies) is asked of the newer copy, and `change` is applied to that. So a change is
+ * always made to the site as it is now, never written over one it did not see. `change` returns
+ * false when it leaves nothing to write. Afterwards `site` is the copy written, or the newest one
+ * read. 404 when the site was deleted meanwhile, 409 `site_changed` when it keeps changing.
  */
-export async function save(
+export async function writeSite(
   deps: Deps,
   site: SiteRecord,
-  oldShareToken?: string,
-  opts: { ifCurrentVersion?: string } = {}
-) {
-  site.updatedAt = deps.clock.now().toISOString()
-  await deps.store.putSite(site, opts)
-  await syncRouteTable(deps, site, oldShareToken)
+  change: (site: SiteRecord) => boolean | undefined | Promise<boolean | undefined>,
+  opts: SiteWrite & { recheck?: (site: SiteRecord) => void | Promise<void> } = {}
+): Promise<boolean> {
+  for (let attempt = 1; ; attempt++) {
+    if (attempt > 1) {
+      const fresh = await deps.store.findSite(site.name)
+      if (fresh?.id !== site.id) throw notFound(`No site named "${site.name}"`)
+      becomes(site, fresh)
+      await opts.recheck?.(site)
+    }
+    const oldShareToken = site.shareToken ?? undefined
+    if ((await change(site)) === false) return false
+    if (opts.touch !== false) site.updatedAt = deps.clock.now().toISOString()
+    try {
+      await deps.store.putSite(
+        site,
+        opts.ifCurrentVersion === undefined ? {} : { ifCurrentVersion: opts.ifCurrentVersion }
+      )
+    } catch (err) {
+      if (!(err instanceof SiteChanged)) throw err
+      if (attempt < SITE_WRITE_ATTEMPTS) continue
+      throw conflict(`"${site.name}" is changing: try again`, 'site_changed')
+    }
+    if (opts.routes !== false) await syncRouteTable(deps, await newest(deps, site), oldShareToken)
+    return true
+  }
+}
+
+/** Make `site` (the object callers hold) the copy `from`. */
+function becomes(site: SiteRecord, from: SiteRecord) {
+  for (const k of Object.keys(site)) delete (site as unknown as Record<string, unknown>)[k]
+  Object.assign(site, from)
+}
+
+/**
+ * The site as stored now, if a save newer than `site` landed after it: the routes follow the
+ * newest save, whichever request writes them last.
+ */
+async function newest(deps: Deps, site: SiteRecord): Promise<SiteRecord> {
+  const stored = await deps.store.findSite(site.name)
+  return stored?.id === site.id && (stored.revision ?? 0) > (site.revision ?? 0) ? stored : site
+}
+
+/**
+ * `writeSite` on behalf of `actor`, who may do `actions` to the site: when the site is read again,
+ * the actor is resolved against the newer copy and asked again (404 as `resolveSite` when they no
+ * longer may), then `recheck`. `change` gets the actor as resolved; so does the caller, returned.
+ */
+export async function changeSite(
+  deps: Deps,
+  actor: Actor,
+  site: SiteRecord,
+  actions: readonly Action[],
+  change: (site: SiteRecord, actor: Actor) => boolean | undefined | Promise<boolean | undefined>,
+  opts: SiteWrite & { recheck?: (site: SiteRecord, actor: Actor) => void | Promise<void> } = {}
+): Promise<Actor> {
+  let resolved = actor
+  const { recheck, ...write } = opts
+  await writeSite(deps, site, s => change(s, resolved), {
+    ...write,
+    recheck: async fresh => {
+      resolved = await actorOn(deps, actor, fresh)
+      if (!actions.every(a => can(resolved, a, fresh))) {
+        throw notFound(`No site named "${fresh.name}"`)
+      }
+      await recheck?.(fresh, resolved)
+    },
+  })
+  return resolved
 }
 
 /**
@@ -705,20 +791,22 @@ export async function dropGroup(deps: Deps, groupId: string) {
   for (const [siteId, name] of named) {
     const site = await deps.store.findSite(name)
     if (site?.id !== siteId) continue
-    let changed = false
-    const audience = site.audience
-    const groups = audience.groups.filter(g => g !== groupId)
-    if (groups.length < audience.groups.length && audience.emails.length + groups.length > 0) {
-      site.audience = { ...audience, groups }
-      changed = true
-    }
-    for (const role of ['owners', 'publishers'] as const) {
-      if (site[role].groups.includes(groupId)) {
-        site[role] = without(site[role])
+    await writeSite(deps, site, s => {
+      let changed = false
+      const audience = s.audience
+      const groups = audience.groups.filter(g => g !== groupId)
+      if (groups.length < audience.groups.length && audience.emails.length + groups.length > 0) {
+        s.audience = { ...audience, groups }
         changed = true
       }
-    }
-    if (changed) await save(deps, site)
+      for (const role of ['owners', 'publishers'] as const) {
+        if (s[role].groups.includes(groupId)) {
+          s[role] = without(s[role])
+          changed = true
+        }
+      }
+      return changed
+    })
   }
 }
 
@@ -972,25 +1060,29 @@ export async function updateSite(
     ...(patch.publishers === undefined ? [] : (['site.publishers'] as const)),
   ]
   const [first = 'site.settings', ...rest] = actions
-  const site = await requireSite(deps, user, name, first, ...rest)
-  const goesPublic =
-    site.visibility !== 'public' && (patch.visibility === 'public' || patch.access === 'public')
-  if (goesPublic && site.server?.live && !patch.confirmPublicServer) {
-    throw conflict(publicServerMessage(site.name), 'public_server')
-  }
+  const { site, actor } = await requireSiteAs(deps, user, name, first, ...rest)
   const roles = patch.owners !== undefined || patch.publishers !== undefined
-  const rolesBefore = { owners: site.owners, publishers: site.publishers }
-  if (roles) await applyRoles(deps, site, patch)
-  applySettings(site, patch)
+  let rolesBefore = { owners: site.owners, publishers: site.publishers }
   let before: SiteAudience | undefined
   const inviter = inviterOf(principal)
-  if (patch.access !== undefined) {
-    before = await applyAccess(deps, site, patch.access, patch.audience, inviter)
-  } else if (patch.audience !== undefined) {
-    before = await applyAudience(deps, site, patch.audience, inviter)
-    site.restricted = site.audience.emails.length + site.audience.groups.length > 0
-  }
-  await save(deps, site)
+  await changeSite(deps, actor, site, [first, ...rest], async s => {
+    const goesPublic =
+      s.visibility !== 'public' && (patch.visibility === 'public' || patch.access === 'public')
+    if (goesPublic && s.server?.live && !patch.confirmPublicServer) {
+      throw conflict(publicServerMessage(s.name), 'public_server')
+    }
+    rolesBefore = { owners: s.owners, publishers: s.publishers }
+    if (roles) await applyRoles(deps, s, patch)
+    applySettings(s, patch)
+    before = undefined
+    if (patch.access !== undefined) {
+      before = await applyAccess(deps, s, patch.access, patch.audience, inviter)
+    } else if (patch.audience !== undefined) {
+      before = await applyAudience(deps, s, patch.audience, inviter)
+      s.restricted = s.audience.emails.length + s.audience.groups.length > 0
+    }
+    return true
+  })
   // The invitations first: the share's email, sent later, goes only to people with standing.
   if (before) await inviteAdded(deps, inviter, site, before)
   if (before) await notifyAudienceChange(deps, user.email, site, before, actingOf(principal))
@@ -1012,41 +1104,49 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.rollback')
   const version = await reviveVersion(deps, site, await deps.store.getVersion(site, versionId))
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
-  const target =
+  const started =
     site.currentVersionId === versionId
-      ? (site.server?.target ?? null)
+      ? null
       : await startServer(deps, principalOfUser(user), site, version)
-  site.currentVersionId = versionId
-  applyServer(site, version, target)
-  await save(deps, site)
+  const as = await changeSite(deps, actor, site, ['site.rollback'], s => {
+    const target = started ?? s.server?.target ?? null
+    s.currentVersionId = versionId
+    applyServer(s, version, target)
+    return true
+  })
   await noteLive(deps, user.email, site, version)
   // The home page is the version's: with Paths, render it again.
   if (site.paths) await refreshHome(deps, site)
-  return toSite(deps, actor, site)
+  return toSite(deps, as, site)
 }
 
 export async function rotateShare(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name, 'share.create')
-  const old = site.shareToken ?? undefined
-  site.shareToken = newShareToken()
-  await save(deps, site, old)
+  const { site, actor } = await requireSiteAs(deps, user, name, 'share.create')
+  const shareToken = newShareToken()
+  await changeSite(deps, actor, site, ['share.create'], s => {
+    s.shareToken = shareToken
+    return true
+  })
   return {
-    shareUrl: siteUrl(shareLabel(site.shareToken), deps.config.sitesDomain, protocol(deps)),
+    shareUrl: siteUrl(shareLabel(shareToken), deps.config.sitesDomain, protocol(deps)),
   }
 }
 
 export async function revokeShare(deps: Deps, user: User, name: string) {
   const { site, actor } = await requireSiteAs(deps, user, name, 'share.revoke')
-  const old = site.shareToken ?? undefined
-  site.shareToken = null
-  await save(deps, site, old)
-  return toSite(deps, actor, site)
+  const as = await changeSite(deps, actor, site, ['share.revoke'], s => {
+    s.shareToken = null
+    return true
+  })
+  return toSite(deps, as, site)
 }
 
 export async function setArchived(deps: Deps, user: User, name: string, archived: boolean) {
-  const { site, actor } = await requireSiteAs(deps, user, name, 'site.archive')
-  site.archived = archived
-  await save(deps, site)
+  const { site, actor: resolved } = await requireSiteAs(deps, user, name, 'site.archive')
+  const actor = await changeSite(deps, resolved, site, ['site.archive'], s => {
+    s.archived = archived
+    return true
+  })
   // An archived site's server goes dark with it; restored, it runs again unless an admin stopped it.
   if (site.server && deps.servers) {
     await deps.servers.setEnabled(serverSite(site), !archived && !site.server.stopped)
@@ -1068,7 +1168,7 @@ export async function putThumbnail(
   versionId: string,
   bytes: Uint8Array
 ): Promise<Thumbnail> {
-  const site = await requireSite(deps, user, name, 'site.thumbnail')
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.thumbnail')
   const problem = thumbnailProblem(bytes)
   if (problem) {
     throw new ApiError(problem.code === 'too_large' ? 413 : 400, problem.code, problem.message)
@@ -1081,12 +1181,20 @@ export async function putThumbnail(
     cacheControl: 'private, no-cache',
   })
   const thumbnail = { versionId, updatedAt: deps.clock.now().toISOString() }
-  try {
-    await deps.store.putSite({ ...site, thumbnail }, { ifCurrentVersion: versionId })
-  } catch (err) {
-    if (err instanceof ConditionFailed) throw changed()
-    throw err
-  }
+  // Only the thumbnail changes, on the site as it is when written: a change made while the
+  // picture was stored stays.
+  await changeSite(
+    deps,
+    actor,
+    site,
+    ['site.thumbnail'],
+    s => {
+      if (s.archived || s.currentVersionId !== versionId) throw changed()
+      s.thumbnail = thumbnail
+      return true
+    },
+    { touch: false, routes: false }
+  )
   return thumbnail
 }
 

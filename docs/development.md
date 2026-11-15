@@ -177,7 +177,10 @@ A feature is written once in the core and must work on every platform:
 
 1. **Domain and persistence.** Add records and keys in `apps/api/src/store/records.ts`. Keep keys
    site-centric, and add index items rather than scans. If stored data must change shape, bump the
-   record's `v` and write a migration (see below).
+   record's `v` and write a migration (see below). Change a site through `writeSite` or
+   `changeSite` (`apps/api/src/sites.ts`) with a function that makes only your change: the save
+   holds only while the site is at the revision read, and on a conflict the change is made again
+   to the site as it is now.
 2. **Access.** Add the actions to `apps/api/src/policy.ts` with cases in `tests/policy.test.ts`.
    Routes resolve sites through `requireSite`.
 3. **API and MCP.** Add the routes in `apps/api/src/routes/` and the remote MCP tools in

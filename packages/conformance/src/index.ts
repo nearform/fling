@@ -16,5 +16,12 @@ export {
 } from './mailer.ts'
 export { legacyItems, migrationsConformance } from './migrations.ts'
 export { routeTableConformance } from './route-table.ts'
+export {
+  SERVER_FIXTURES,
+  type ServerLogsHarness,
+  type SiteServersHarness,
+  serverLogsConformance,
+  siteServersConformance,
+} from './site-servers.ts'
 export { storeConformance } from './store.ts'
 export { tableConformance } from './table.ts'

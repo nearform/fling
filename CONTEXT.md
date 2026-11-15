@@ -25,6 +25,35 @@ site publisher making a new Path owns it (403 `path_not_yours` to publish someon
 `MAX_PATHS_PER_SITE`, folders of at most `MAX_PATH_FOLDER_LENGTH` characters. `/api/sites/<name>/paths`,
 `fling paths`, `fling_paths`; the `paths` capability.
 
+**Site server** — a version's `_fling/server.mjs`: one bundled ES module, importing only `node:*`
+and Fling's helpers, run for the site's `/api/*` after every access check the site's files get
+(`apps/api/src/servers/`; the port is `SiteServers`, `servers/types.ts`). A fetch handler or a
+plain Node server. Who may publish one is `SERVERS` (the `servers` capability); a version that has
+one carries its **server mark** (`VersionRecord.server`: the secrets its `fling.json` declares, its
+health path) and the site's route value says `f`. Only at a site's root, never in a Path.
+
+**Invoke** — the routing decision's answer for `/api/*` on a site with a server
+(`packages/shared/src/site-routing.ts`): the request goes on to the version's server without the
+browser's cookies, with the **viewer** (`x-fling-viewer`: id, email, guest; null on a public site
+or through a share link). Writes from another origin are refused (403 `cross_origin`).
+
+**Viewer id** — `v_` and 13 base32 characters of an HMAC of a person's email for one site
+(`viewerIdOf`): how a site's logs name who called, different on every site. Only an admin
+resolves one to an address (`POST /api/admin/sites/:name/viewers/resolve`, audited).
+
+**Site secret** — a value a site's server reads as `process.env.NAME` (`apps/api/src/servers/secrets.ts`,
+`SITE#<id>/SECRET#<name>`): set by owners and publishers, sealed in the Table, never returned. A
+version gets only the ones its `fling.json` declares; going live with one unset is 409
+`secrets_missing`.
+
+**Start probe** — the one request a server answers before its version goes live (servers/index.ts
+`startServer`): its health path must answer 2xx, else any answer from `/api/` will do. No answer is
+422 `server_failed_to_start`, with the first lines it printed.
+
+**Server log** — a site server's output and Fling's request line for each invoke (method, path,
+status, duration, viewer id, version), kept `SERVER_LOG_DAYS` (`ServerLogs`, servers/types.ts;
+`GET /api/sites/:name/logs`).
+
 **Path publish** — a deploy to one top-level folder of a site (`DeployRequest.path`, e.g.
 `PAY-412`, spelled as in `packages/shared/src/publish-path.ts`): the files sent (each under the
 folder, else 400 `outside_path`) become the **Path**'s new version, making the Path on first use.

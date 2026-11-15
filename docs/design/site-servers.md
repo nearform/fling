@@ -512,13 +512,15 @@ Two things CloudFront decides for the whole sites distribution, and how Fling ke
 
 **The API creates Web Functions at publish time, inside an IAM fence.** Terraform defines the
 fence and the shared parts; the API creates each site's function, endpoint and revisions.
-`lambda-web:*` only on `fling-<instance>-site-*` with a `fling:instance` tag; `iam:PassRole` only
-on the one no-permission server role; `s3:PutObject` only on the zip bucket; no other compute.
-Deleting a site or retention removes its function, and an hourly sweep deletes any tagged function
-with no site. Terraform also adds the `/api/*` cache behaviour (all methods, no caching,
-`AllViewerExceptHostHeader`).
+Web Function actions (prefix `lambda:`) only on `<namespace>-<env>-<name>-site-*`, and
+`CreateWebFunction` only with the instance's `fling:instance` tag; `iam:PassRole` only on the one
+server role, which can write nothing but its own logs; object reads, writes and deletes (with their
+versions) only on the zip bucket; log-group calls only on `/aws/lambda/web/<prefix>*`; no other
+compute. Deleting a site or retention removes its function, and an hourly sweep deletes any tagged
+function with no site and any log group whose function is gone. Terraform also adds the `/api/*`
+cache behaviour (all methods, no caching, `AllViewerExceptHostHeader`).
 
-The adapter is built from the documentation; §18 lists what the live check confirms.
+A live check in a real account (§18) settled the API calls, timings and IAM actions the adapter uses.
 
 ## 16. Architecture
 
@@ -615,17 +617,27 @@ published through the real CLI and API, routed by the real decision and served b
 | Secret in loader env | `env.X` and `process.env.X`, both styles |
 | Same bundle as a Node HTTP server (AWS entry) | Works |
 
-The live check on AWS confirmed the origin switch with `always-amz-auth`, and found the two
-distribution-wide limits §15 works around: CloudFront's 120 s wait, and the custom error responses
-that took a server's 403 and 404 (hence the 300 stand-in). The Terraform provider has the network
-connector from 6.72; the functions themselves are the API's, so they need no provider support.
+A live check of Lambda Web Functions in a real account (eu-west-1) settled the AWS side: a revision
+goes Active in about 4 s, so a publish waits for it rather than answering 202; moving the live
+endpoint's weights takes about 1 s; a new revision's first request takes about 0.45 s, a warm one
+about 25 ms; and the viewer-request origin switch with an inline `always-amz-auth` OAC config carried
+GET, POST, PUT and DELETE with bodies, with no OAC resource and nothing from the browser. It also
+found what the adapter guards against: revisions return their environment (the site secrets) in
+plain text to anyone allowed to read them, a revision fails for good if its zip's object version is
+deleted, log groups are created with no retention, and the endpoint answers headers naming the
+function and revision. The 120 s origin wait and the distribution-wide error responses (hence the
+300 stand-in) come from CloudFront's documentation; the deploy's test run of the status function
+checks the restore before it is published.
+
+The Cloudflare side ran on a real account too: the CPU limit stops a server (502
+`server_cpu_limit`), the 30 s limit answers 504, and `Date.now()` stands still within a request.
 
 Still to check, none of which changes the author contract:
 
-- **AWS:** cold starts, Region availability, and about 50 revisions kept per function (a rollback
-  past that recreates the revision from the stored bundle). A publish waits for the revision
-  (Active within 60 s); if revisions routinely took longer, publishing would answer 202 with a
-  status to poll.
+- **AWS, on a real distribution:** the 300 stand-in restored at the edge, the origin switch from
+  the S3 origin of the `/api/*` behaviour, `x-forwarded-host` set by the router, the entry under the
+  real Node runtime, the egress connector, and the IAM condition keys on Web Functions. Rollback
+  past the 50 revisions a function keeps recreates the revision from the stored bundle.
 - **Secret scanner:** how often do minified npm bundles trip it? Bundle the top 200 packages and
   see.
 

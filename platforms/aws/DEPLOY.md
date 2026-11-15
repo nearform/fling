@@ -92,7 +92,8 @@ for a day, and replaced rendered home pages of sites with Paths
 ([`maintenance.ts`](../../apps/api/src/maintenance.ts)).
 
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
-provider 6.x. Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
+provider 6.72 or later in 6.x (the site servers' network connector is a 6.72 resource; run
+`terraform init -upgrade` once if your lock file holds an older one). Give it the provider twice: your region, and `us-east-1` as `aws.us_east_1`. Tag your
 resources with the providers' `default_tags`.
 
 | Input | Default | What |
@@ -111,12 +112,13 @@ resources with the providers' `default_tags`.
 | `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
 | `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
-| `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }` |
+| `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }`. With `servers`, the timeout is at least 60 s |
 | `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*` | App paths routed to the function, uncached. With `mail`, `/notifications/*` is added |
 | `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
 | `log_retention_days` | `30` | The function's log retention |
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |
 | `mail` | `null` (no email) | Email notifications through an SES identity you already have: `{ from, from_name, reply_to, identity_arn, configuration_set_name, events_topic_arn }`. See [Email](#email) |
+| `servers` | `{}` (off) | Site servers' infrastructure: `{ enabled = false, egress = "none", vpc_cidr = "10.240.0.0/16" }`. See [Site servers](#site-servers) |
 
 | Output | What |
 | --- | --- |
@@ -198,13 +200,13 @@ Values reach the function two ways, and the function's own environment wins:
 | `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. See [Outside invitations](#outside-invitations). |
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
 | `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, the hourly maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
-| `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. |
-| `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). |
+| `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
+| `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
 | `SERVERS_MAX_SITES` | no (`50`) | The most sites that may have a server at once; one more is refused with `too_many_servers`. |
 | `SERVER_TIMEOUT_SECONDS` | no (`30`) | The wall-time limit of one request to a site server, a stream included, from 1 to 900. An admin may raise it for one site. |
 | `SERVER_CPU_MS` | no (`1000`) | CPU time one request may use, where the platform measures it. An admin may raise it for one site. |
-| `SERVER_RPS` | no (`100`) | Requests per second one site's server is given before it is throttled. An admin may raise it for one site. |
-| `SERVER_ENVIRONMENTS` | no (`2`) | How many copies of one site's server may run at once, where the platform counts them. An admin may raise it for one site. |
+| `SERVER_RPS` | no (`100`) | Requests per second one site's server is given before it is throttled. An admin may raise it for one site. AWS: rounded up to a step Lambda takes (100 to 1000 by 100, then by 1000, at most 10000). |
+| `SERVER_ENVIRONMENTS` | no (`2`) | How many copies of one site's server may run at once, where the platform counts them. An admin may raise it for one site. AWS: at least 2, and `SERVERS_MAX_SITES` × this × 2 vCPU must fit the account's quota (see [Site servers](#site-servers)). |
 | `SERVER_BODY_BYTES` | no (`10485760`) | The largest request body a site server is sent. An admin may raise it for one site. |
 | `INSTANCE_NAME` | no (`Fling`) | The name the UI, the CLI and the MCP descriptions show. |
 | `SITE_DEFAULT_ACCESS` | no (`only_me`) | Who can open a new site whose first deploy names no access level: `only_me` (its owner alone) or `members` (everyone signed in). Published as `defaultAccess` in the metadata, so the CLI, the MCP servers and the web say who a new site is open to. It applies to sites created after the deploy that sets it; existing sites keep their access. |
@@ -629,6 +631,87 @@ viewer-response on the sites distribution, adding `siteResponseHeaders(host)` fr
 from site hosts, so it would set `no-referrer` on every site). Separately, on any platform, a page
 can set its own `<meta name="referrer">`, which the browser obeys over the header.
 
+## Site servers
+
+A site whose version has `_fling/server.mjs` runs it for its own `/api/*`
+([the design](../../docs/design/site-servers.md)). On AWS each such site gets a Lambda Web
+Function, which the API creates at publish time inside a fence Terraform draws. Turn it on in two
+places: the module's `servers = { enabled = true }` (apply), and the instance's `SERVERS` (who may
+publish one, in `INSTANCE`; redeploy). Off, none of [`servers.tf`](infra/servers.tf) exists and a
+plan of an existing instance shows no changes.
+
+What Terraform builds:
+
+- **The fence** on the API's role (`site-servers` policy): Web Function actions (IAM prefix
+  `lambda:`) only on `web-function/<namespace>-<env>-<name>-site-*` and what is under it, creating
+  one only with the `fling:instance` tag, tagging only with Fling's four tags, `iam:PassRole` only on
+  the server role, the zip bucket, the servers' log groups (`/aws/lambda/web/<prefix>*`), and
+  `lambda:PassNetworkConnector` on the connector. `GetWebAccountSettings` and `ListWebFunctions` are
+  account-wide. `GetWebFunctionRevision` returns a revision's environment, site secrets included,
+  in plain text: only the API's role may call it.
+- **The server role** (`<…>-server`) every revision runs as: it may write its own log groups and
+  nothing else.
+- **The zip bucket** (`<bucket_prefix><…>-server-zips`), versioned. Its policy lets Lambda read
+  object versions for this instance's revisions only. A revision names the object version it was
+  made from and Lambda reads it at every start, so deleting that version, or Lambda's statement,
+  fails the revision for good: there is no noncurrent-version expiry, and the API deletes zips only
+  with their revisions.
+- **`site-secrets-key`** in SSM (see [Secrets](#secrets)).
+- **`/api/*` on the sites distribution**: every method, CachingDisabled, AllViewerExceptHostHeader,
+  the site router at viewer-request, and a response headers policy that removes
+  `lambda-web-logstream` (it names the function and the revision). The router switches a server's
+  requests to the site's endpoint with an inline origin access control config (`originType:
+  lambda`, `always-amz-auth`); no OAC resource is needed. It sets `x-forwarded-host` to the site's
+  host, since the function sees its endpoint's domain as `Host`.
+- **Egress `none`** (`servers.egress`, the default): a VPC with two subnets, no internet or NAT
+  gateway and a security group with no rules, and a network connector into it
+  (`aws_lambdacore_network_connector`, up to ten minutes to create) that every revision names. The
+  module sets the function's `SERVERS_EGRESS` from `servers.egress`. `open` builds neither, and
+  servers reach the internet.
+- **The API's plumbing** in its environment: `SERVER_FUNCTION_PREFIX`, `SERVER_INSTANCE`,
+  `SERVER_ROLE_ARN`, `SERVER_ZIP_BUCKET`, `SITES_DISTRIBUTION_ARN` (the API puts each function's
+  resource policy, letting only this distribution invoke its `live` endpoint) and, with egress
+  `none`, `SERVER_NETWORK_CONNECTOR_ARN`. Its timeout is at least 60 s, for the start probe.
+
+What the API does ([`src/servers/`](src/servers/)):
+
+- **One function per site**, `<prefix><siteId>`, with two IAM-authenticated HomeRegion endpoints
+  (`autoDeploymentMode: Disabled`): `live`, which CloudFront reaches, and `probe`, which only the
+  API calls. A version is a revision (Node 24, Arm) built from its zip: the server runtime
+  ([`server-entry.mjs`](scripts/server-entry.mjs)), the bundle, and the version's files for
+  `file()`, up to 50 MB of them. A changed secret or limit makes another revision of the same
+  version. Both log groups get 7 days' retention when the function is created.
+- **Publishing**: the revision is made and waited for (Active within 60 s, polled every second),
+  the `probe` endpoint is pointed at it and asked, and only once the probe passes do `live`'s
+  revision weights move to it. A rollback moves them back. The kill switch (an admin's stop,
+  archiving) sets `live`'s `rateLimit` to 0 (503 EndpointDisabled).
+- **Limits**: the wall time and the body size are enforced by the server runtime; Lambda's
+  `timeoutSeconds` (3 to 900) is a backstop. `SERVER_RPS` is `live`'s `rateLimit`,
+  `SERVER_ENVIRONMENTS` its `maxEnvironments`. `SERVER_CPU_MS` has no AWS equivalent.
+- **Logs**: what a server prints, and the request line the server runtime prints for each request
+  (method, path, status, time to headers, viewer id, version), are read back from
+  `/aws/lambda/web/<function>` with FilterLogEvents.
+- **Deleting a site** deletes its function, both log groups and its zips; retention deletes a
+  version's revisions and zip. The hourly maintenance also deletes functions whose site is gone and
+  log groups Lambda wrote again after their function was deleted.
+
+**The vCPU quota.** Each environment takes 2 Arm vCPUs, and the account has a quota for every
+Web Function together (`aws lambda-web get-web-account-settings`, `maxTotalArmVCpus`; not
+adjustable in Service Quotas, so ask AWS). The API refuses the first new server of a cold start
+with 409 `servers_quota` when `SERVERS_MAX_SITES` × `SERVER_ENVIRONMENTS` × 2 exceeds it: at the
+defaults (50 × 2 × 2 = 200) that is the whole of a 200 vCPU quota. Lower `SERVERS_MAX_SITES`, or
+ask for more.
+
+**Known limits on AWS.**
+
+- The sites distribution's custom error responses turn every 403 and 404 into the sites' 404
+  page, and they apply to every origin: a server's own 403 or 404 reaches the browser as that page.
+  Answer with another status (400, 409, 410, 422) where the body matters.
+- CloudFront waits as long as the sites origin's response timeout (30 s) for the first byte, so a
+  server whose time limit an admin raised past 30 s is cut there.
+- A site secret can't be called `AWS_*`, `LAMBDA_*`, `FLING_*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`
+  or `_HANDLER`: going live with one is refused with 400 `invalid_secret_name`.
+
 ## Rollback
 
 Run the **Deploy** workflow by hand from `main` (Actions, Deploy, Run workflow) with `ref` set to an
@@ -782,6 +865,7 @@ Admin → Settings lists each one under its environment name (`OIDC_CLIENT_SECRE
 | `google-client-id`, `google-client-secret` | A Google client's id and secret, put there by hand (see [A Google client](#a-google-client)) |
 | `session-secret`, `site-hmac-key` | Generated by Terraform, never in its state |
 | `origin-verify-secret` | Generated by Terraform. CloudFront also sends it to the function URL as `X-Origin-Verify` |
+| `site-secrets-key` | With `servers` on: generated by Terraform once (43 characters, read as base64url: 32 bytes), never in its state. `SITE_SECRETS_KEY`, which seals site secrets. `secrets_version` leaves it alone: losing or replacing it makes every stored site secret unreadable, and they count as unset until set again |
 
 To rotate the generated ones, bump the module's `secrets_version` and apply, then redeploy so warm
 functions pick them up. Rotating `session-secret` signs everyone out. Rotating `site-hmac-key`

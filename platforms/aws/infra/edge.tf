@@ -4,7 +4,8 @@
 # - sites (*.<hostname>): every site, from the sites bucket. A viewer-request CloudFront Function (the
 #   site router) maps the Host to the site's current version through the KeyValueStore, checks the
 #   sign-in cookie for private sites, and rewrites the URI to sites/<siteId>/<versionId>/<path>. The
-#   cache key is that rewritten URI, so one cache policy serves every site.
+#   cache key is that rewritten URI, so one cache policy serves every site. With site servers on,
+#   /api/* is uncached and takes every method (servers.tf).
 
 # AWS managed policies, by their fixed ids.
 locals {
@@ -240,6 +241,30 @@ resource "aws_cloudfront_distribution" "sites" {
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = local.cache_policy_caching_optimized
     compress               = true
+  }
+
+  # With site servers (servers.tf): /api/* takes every method, uncached, with the viewer's headers
+  # but Host. The site router sends a server's requests on to its Web Function; any other site's
+  # api/ files still come from the bucket.
+  dynamic "ordered_cache_behavior" {
+    for_each = local.servers_on ? [1] : []
+
+    content {
+      path_pattern               = "/api/*"
+      target_origin_id           = "sites"
+      viewer_protocol_policy     = "redirect-to-https"
+      allowed_methods            = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+      cached_methods             = ["GET", "HEAD"]
+      cache_policy_id            = local.cache_policy_caching_disabled
+      origin_request_policy_id   = local.origin_request_policy_all_viewer_except_host
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.servers[0].id
+      compress                   = true
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.site_router.arn
+      }
+    }
   }
 
   # A missing file (404, as CloudFront may list the bucket) or anything S3 refuses (403), on any site or

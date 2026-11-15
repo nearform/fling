@@ -8,6 +8,7 @@
   "exports": {
     "./app": "./src/app.ts",
     "./config": "./src/config.ts",
+    "./errors": "./src/lib/errors.ts",
     "./deps": "./src/deps.ts",
     "./types": "./src/types.ts",
     "./live": "./src/live.ts",

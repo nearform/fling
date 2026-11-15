@@ -1,5 +1,6 @@
 // Bundle the Lambda (the @fling/api core with the AWS adapters):
 // src/lambda.ts → dist/lambda/index.mjs (handler `index.handler`) → dist/lambda.zip
+// with dist/lambda/server-entry/, the runtime of every site server's zip (server-entry.mjs).
 //
 // FLING_INSTANCE_CONFIG (optional): a JSON object of instance env keys (INSTANCE_NAME,
 // ALLOWED_EMAIL_DOMAINS, BRAND_*, …) written into the zip as instance.json, which the function
@@ -10,6 +11,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { parseInstanceConfig } from './instance-config.mjs'
+import { buildServerEntry } from './server-entry.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const outdir = `${root}dist/lambda`
@@ -32,6 +34,8 @@ await build({
   },
   logLevel: 'info',
 })
+
+await buildServerEntry(`${outdir}/server-entry`)
 
 const instance = process.env.FLING_INSTANCE_CONFIG?.trim()
 if (instance) {

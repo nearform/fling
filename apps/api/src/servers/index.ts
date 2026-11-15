@@ -23,7 +23,9 @@
  * before the route changes: the health path `fling.json` names, which must answer 2xx, or else
  * SERVER_PREFIX, where any HTTP answer will do. No answer within SERVER_PROBE_TIMEOUT_MS, or a
  * crash, is 422 `server_failed_to_start` with the first lines of the server's log; the version
- * stays as it was (pending, for a publish) and the live one keeps serving. Then the site records
+ * stays as it was (pending, for a publish) and the live one keeps serving. A probe that passed
+ * hands the site's requests to the version where the platform switches them itself
+ * (`SiteServers.goLive`: AWS's revision weights). Then the site records
  * where the server is reached (`SiteRecord.server.target`, the route value's `t`), the
  * `SERVERS/SITE#` index item counts it, and `site.server_published` is audited.
  */
@@ -262,6 +264,7 @@ export async function startServer(
       ...(probe.status === undefined ? {} : { status: probe.status }),
     })
   }
+  await deps.servers.goLive?.(ref, ver)
   return target
 }
 

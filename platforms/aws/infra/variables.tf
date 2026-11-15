@@ -219,3 +219,30 @@ variable "mail" {
     error_message = "mail.identity_arn must be an SES identity ARN (arn:aws:ses:<region>:<account>:identity/<name>)."
   }
 }
+
+variable "servers" {
+  description = <<-EOT
+    Site servers (servers.tf; DEPLOY.md, Site servers): what the API needs to give a site's
+    _fling/server.mjs a Lambda Web Function. Off by default, and then none of servers.tf exists and
+    the function's environment is as it was. Who may publish a server is still the instance's
+    SERVERS value (var.instance); this only builds the infrastructure.
+    - enabled: build it: the IAM fence on <namespace>-<env>-<name>-site-*, the servers' execution
+      role, the versioned zip bucket, the site-secrets-key parameter and the sites distribution's
+      /api/* behaviour.
+    - egress: what servers may reach, the function's SERVERS_EGRESS. "none" (the default) also
+      builds a VPC with no route out and a Lambda network connector into it, which every revision
+      uses; "open" builds neither, and servers reach the internet.
+    - vpc_cidr: that VPC's address range (nothing else ever routes to it).
+  EOT
+  type = object({
+    enabled  = optional(bool, false)
+    egress   = optional(string, "none")
+    vpc_cidr = optional(string, "10.240.0.0/16")
+  })
+  default = {}
+
+  validation {
+    condition     = contains(["none", "open"], var.servers.egress)
+    error_message = "servers.egress is none or open."
+  }
+}

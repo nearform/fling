@@ -25,6 +25,14 @@ describe('loadSecretsFromSsm', () => {
     expect(secrets).toMatchObject({ oidcClientSecret: 'oidc', sessionSecret: 's'.repeat(40) })
   })
 
+  it('reads the site secrets key, which site servers need', async () => {
+    const secrets = await loadSecretsFromSsm(
+      '/example/fling',
+      fakeSsm({ ...core, 'oidc-client-secret': 'oidc', 'site-secrets-key': 'k'.repeat(43) })
+    )
+    expect(secrets.siteSecretsKey).toBe('k'.repeat(43))
+  })
+
   it('reads the Google client', async () => {
     const secrets = await loadSecretsFromSsm(
       '/example/fling/',

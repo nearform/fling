@@ -4,12 +4,14 @@ part: start
 order: 10
 summary: Publish a folder of static files and get a link back, from your assistant, the command line or the web.
 sources: [README.md, packages/shared/src/distribution.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 {{instance:name}} puts a folder of static files online and gives you a link back:
 `{{instance:site:my-app}}`. A page Claude made you, a report, a prototype, a build of an app: if
-it runs in a browser without a server of its own, it can be flung.
+it runs in a browser without a server of its own, it can be flung.<!-- requires: servers --> One
+that needs a small backend, to call a service with a key or keep data off the page, can bring a
+[site server](/guide/servers/what-is-a-site-server).<!-- /requires -->
 
 Every site is private until you say otherwise: only you, the people you choose, or
 {{instance:audience}} can open it. You choose who sees it, keep earlier versions, and collect comments from the people you share it with.
@@ -30,8 +32,9 @@ A site is a name and the files you published under it. The name becomes its addr
 `https://<name>.{{instance:sites}}`, and stays yours until you delete the site. Publish again and
 the same address shows the new files; the earlier version is kept, so you can put it back.
 
-> **Note** Fling hosts static files only: HTML, CSS, JavaScript, images, documents. There is no
-> server-side code, and no database of your own.
+> **Note** Fling hosts static files: HTML, CSS, JavaScript, images, documents. There is no
+> server-side code<!-- requires: servers --> beyond a site server for `/api/…`<!-- /requires -->, and no
+> database of your own.
 
 ## Good to know
 

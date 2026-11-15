@@ -4,7 +4,7 @@ part: start
 order: 30
 summary: Install the Fling extension, so Claude Desktop can fling files from your computer.
 sources: [apps/cli/mcpb/**, apps/cli/src/mcp.ts, apps/cli/src/mcp-entry.ts, apps/cli/src/locate.ts, apps/cli/src/commands/setup.ts, apps/web/src/pages/GetStarted.tsx]
-verified: 60d6113
+verified: 32545014b
 ---
 
 The Fling extension lets Claude Desktop publish files that are on your computer: a page you
@@ -68,6 +68,11 @@ Claude checks the name with you before it publishes: a file's name becomes the s
 ## Good to know
 
 - The extension runs on macOS and Windows.
+<!-- requires: servers -->
+- The extension can publish a [site server](/guide/servers/what-is-a-site-server) that is already
+  one file, `_fling/server.mjs`, with no npm packages. A `server.ts`, or any server that needs
+  bundling, is published with the [CLI](/guide/start/cli).
+<!-- /requires -->
 - One extension serves every Fling. Installing it from another Fling updates it and adds that
   Fling; with several, Claude agrees with you which one to use and says so.
 - It shares its sign-ins with the CLI: sign in once, from either, and both work.

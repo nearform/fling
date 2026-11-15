@@ -5,7 +5,7 @@ order: 10
 summary: Reviewers comment on a site's pages beside the site itself; you act on them and resolve them.
 requires: [comments]
 sources: [apps/api/src/comments.ts, packages/shared/src/comments.ts, apps/api/src/policy.ts, apps/web/src/pages/Review.tsx, apps/web/src/components/SiteButtons.tsx, apps/cli/src/commands/comments.ts, packages/shared/src/mcp-tools.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Every site has a review page, `{{instance:origin}}/review/<name>`, that shows the site with its
@@ -80,5 +80,10 @@ comments appear without reloading.
 <!-- requires: notifications -->
 - A site's owners hear about new threads, and everyone in a thread hears about replies. See
   [Notifications](/guide/feedback/notifications).
+<!-- /requires -->
+<!-- requires: servers -->
+- On a site with a [site server](/guide/servers/visitors-and-limits#reviews), the review page says
+  so above the site: what reviewers see may differ from one to the next, and what they do on it is
+  real.
 <!-- /requires -->
 - For labels, ratings or scores, use a [form](/guide/feedback/forms) rather than comments.

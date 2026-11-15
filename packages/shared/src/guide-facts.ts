@@ -19,9 +19,16 @@ import {
 import { MAX_MARKDOWN_BYTES, MAX_RENDERED_MARKDOWN } from './markdown.ts'
 import { MCP_PUBLISH_MAX_BYTES } from './mcp-tools.ts'
 import { MAIL_TESTS_PER_HOUR } from './notifications.ts'
-import { SITE_PASS_TTL_SECONDS } from './route-keys.ts'
+import { EDGE_SERVER_READ_TIMEOUT_SECONDS, SITE_PASS_TTL_SECONDS } from './route-keys.ts'
 import { SITE_NAME_MAX } from './site-labels.ts'
 import { OWNER_EMAILS_MAX, PUBLISHER_EMAILS_MAX } from './site-roles.ts'
+import {
+  SERVER_BUNDLE_MAX_BYTES,
+  SERVER_LOG_DAYS,
+  SERVER_PROBE_TIMEOUT_MS,
+  SITE_SECRET_MAX_BYTES,
+  SITE_SECRETS_MAX,
+} from './site-server.ts'
 
 const mb = (bytes: number) => `${bytes / (1024 * 1024)} MB`
 const count = (n: number) => n.toLocaleString('en-GB')
@@ -43,6 +50,12 @@ export const PINNED_GUIDE_FACTS = {
   'invites-per-day': '20',
   /** how long an address that bounced or complained gets no mail (`SUPPRESSION_MS`) */
   'suppression-days': '30 days',
+  /** a site server's wall time per request, unless the instance says otherwise (`SERVER_TIMEOUT_SECONDS`) */
+  'server-timeout': '30 seconds',
+  /** the largest request body a site server takes, unless the instance says otherwise (`SERVER_BODY_BYTES`) */
+  'server-body-max': '10 MB',
+  /** requests a second to one site's server, unless the instance says otherwise (`SERVER_RPS`) */
+  'server-rps': '100',
 } as const
 
 export const GUIDE_FACTS: Readonly<Record<string, string>> = {
@@ -70,5 +83,11 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'repo-slug': REPO_SLUG,
   'repo-url': REPO_URL,
   'why-site': WHY_SITE_NAME,
+  'server-bundle-max': mb(SERVER_BUNDLE_MAX_BYTES),
+  'site-secrets-max': count(SITE_SECRETS_MAX),
+  'site-secret-max-size': `${SITE_SECRET_MAX_BYTES / 1024} KB`,
+  'server-log-days': `${SERVER_LOG_DAYS} days`,
+  'server-probe-timeout': `${SERVER_PROBE_TIMEOUT_MS / 1000} seconds`,
+  'server-timeout-ceiling': `${EDGE_SERVER_READ_TIMEOUT_SECONDS} seconds`,
   ...PINNED_GUIDE_FACTS,
 }

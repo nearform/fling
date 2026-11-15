@@ -524,7 +524,7 @@ export const SERVERS_NOTE = (w: McpWording, opts: { local?: boolean } = {}) =>
     ? `fling_deploy bundles a folder's server.ts (or server.js, or the entry ${SERVER_CONFIG_FILE} names) into ${SERVER_BUNDLE}, with its npm dependencies inside; fling_dev runs the folder locally first. `
     : `fling_publish takes a server already in one file, ${SERVER_BUNDLE}, importing only node:* and ${SERVER_HELPER_MODULE}: start from fling_server_template, and pass ${SERVER_CONFIG_FILE} among the files (or as \`siteServer\`). `) +
   `${SERVER_CONFIG_FILE} declares the secrets it needs and a health path. Never ask for, or pass, a secret's value: ` +
-  'ask the user to set it themselves (`fling secrets set <site> NAME`, or the Secrets section of the site page); a deploy ' +
+  'ask the user to set it themselves (`fling secrets set <site> NAME`, or on the Server tab of the site page); a deploy ' +
   'that waits for secrets goes live as soon as the last is set; if its server then fails to start it keeps waiting, and each later secret set or removed tries it again. A public site with a server asks first: tell the user ' +
   `anyone could call its ${SERVER_PREFIX}* and use its secrets, and only with their yes repeat the call with \`confirmPublicServer: true\`. ` +
   'If a publish answers server_failed_to_start, read the log lines it returns, fix the server and publish again; ' +
@@ -582,8 +582,8 @@ export function describeServerError(
       return (
         `Not live yet (secrets_missing): ${message} Never ask for a secret's value in the conversation: ask the ` +
         `user to set ${extra.secrets?.length === 1 ? 'it' : 'them'} themselves, with \`fling secrets set ${site} ` +
-        `--from .env ${names}\` in a terminal (or \`fling secrets set ${site} NAME < file\`), or in the Secrets ` +
-        'section of the site page. The version goes live as soon as the last one is set: nothing needs publishing again.'
+        `--from .env ${names}\` in a terminal (or \`fling secrets set ${site} NAME < file\`), or on the Server tab ` +
+        'of the site page. The version goes live as soon as the last one is set: nothing needs publishing again.'
       )
     }
     case 'server_failed_to_start': {

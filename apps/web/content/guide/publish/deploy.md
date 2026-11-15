@@ -4,7 +4,7 @@ part: publish
 order: 10
 summary: Fling a folder, a page or a zip and get its address back.
 sources: [apps/cli/src/commands/deploy.ts, apps/cli/src/deploy.ts, apps/cli/src/inputs.ts, apps/cli/src/cli.ts, apps/api/src/publication.ts, packages/shared/src/mcp-tools.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Publishing (flinging) puts your files online at `https://<name>.{{instance:sites}}`. Fling the same
@@ -56,6 +56,12 @@ fling deploy ./dist --name my-app --spa
 `people` with `--add`, `groups` with `--group`, or `public`. Without it, the site gets your Fling's
 default and the result says who that is. See [Who can open a site](/guide/share/who-can-open).
 
+<!-- requires: servers -->
+**A folder with a `server.ts`** (or a `fling.json`) has a [site server](/guide/servers/what-is-a-site-server):
+`fling deploy` bundles it, starts it and puts it live with the files. The new version goes live
+only once its server has started. See [Try it and publish it](/guide/servers/develop-and-publish).
+<!-- /requires -->
+
 **In scripts and CI**, add `--yes`: Fling never asks, uses the generated name, and fails if that
 name is taken. Pass `--name` to be sure of the name.
 
@@ -84,6 +90,10 @@ published before and that version is put back at once, without uploading anythin
   containing them. See [What gets published](/guide/publish/what-gets-published).
 - **Too large.** One publish holds up to {{fact:max-deploy}} and {{fact:max-files}} files, none
   over {{fact:max-file}}.
+<!-- requires: servers -->
+- **`server_failed_to_start`, `secrets_missing` or `public_server`.** The folder has a site server.
+  See [Try it and publish it](/guide/servers/develop-and-publish#when-it-goes-wrong).
+<!-- /requires -->
 - **`owner_only`.** You publish this site but don't own it, so you can't change its settings
   (`--access`, `--public`, `--spa`) or bring it back from the archive. Ask an owner.
 

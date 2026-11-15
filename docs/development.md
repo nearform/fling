@@ -165,7 +165,11 @@ runtime). It starts each runtime on free ports with fresh state, runs
 `packages/e2e/src/scenario.ts` through the real CLI and over HTTP, then stops it. Both runtimes run
 with mail on (MemoryMailer on Node, the CloudflareMailer over the simulated binding under
 `wrangler dev`), and the scenario drains with `POST /dev/notify/drain` and reads what each person
-was sent from `GET /api/me/notifications/sent`.
+was sent from `GET /api/me/notifications/sent`. Both also run with site servers on for members:
+Node by `apps/api/src/dev.ts`'s default (`SERVERS=members` unless set), each server a Node child
+process, and the Worker with `--servers members`, each server a local Worker Loader isolate. The
+scenario publishes the workshop-quote example, which waits for its site secret and goes live once
+`fling secrets set --from` sets it, calls its `/api/*`, reads its logs and rolls back.
 
 ## Adding a feature
 
@@ -250,6 +254,12 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 A platform is `platforms/<cloud>/` with:
 - an entry point that builds `Deps` (`buildDeps` with its own adapters);
 - adapters for `Table`, `Blobs` and `RouteTable` that pass `packages/conformance`;
+- for site servers ([docs/site-servers.md](site-servers.md), the design in
+  [docs/design/site-servers.md](design/site-servers.md)), a `SiteServers` adapter that runs a
+  version's `_fling/server.mjs` for `/api/*` and a `ServerLogs` adapter for its log
+  (`apps/api/src/servers/types.ts`), both passing the conformance suites in
+  `packages/conformance/src/site-servers.ts`, which run a fetch handler and a `node:http` server
+  through each. Without them, leave `SERVERS` off and the `servers` capability is off;
 - a `LiveHub` for the live rooms (`apps/api/src/live.ts`): something that keeps a site's sockets
   and runs the core's room functions (`joinRoom`, `receive`, `leaveRoom`, `broadcast`) over them,
   plus a `LIVE_URL` where clients connect. A hub whose connections outlive one process keeps them

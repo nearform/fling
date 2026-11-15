@@ -62,7 +62,7 @@ secret('OPENAI_KEY')          // process.env lookup that throws a clear error wh
 | Works | Doesn't |
 |---|---|
 | Fetch handlers (Hono, itty-router, plain) | Native addons (`.node`) |
-| `node:http` servers; Express where Cloudflare's Node compatibility allows (the Guide lists what is known to work) | `child_process`, a writable filesystem |
+| `node:http` servers; Express where the platform's Node compatibility allows | `child_process`, a writable filesystem |
 | `node:crypto`, `Buffer`, streams | WebSockets (Web Functions refuse upgrades) |
 | Pure-JS npm packages | State kept in memory: an isolate or environment can go at any time |
 | Secrets as `env.NAME` and `process.env.NAME` | Secrets by a reserved name (`RESERVED_SECRET_NAMES`: `AWS_*`, `LAMBDA_*`, `FLING_*`, `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER`, `FILES`), refused with 400 `invalid_secret_name` on every platform |
@@ -106,16 +106,23 @@ $ npm install
 $ echo 'SLACK_WEBHOOK_URL=https://hooks.slack.com/services/…' >> .env
 $ fling dev --as ada@example.com
   serving workshop-quote/ at http://localhost:47180  (server: server.ts, rebuilt on save)
-  viewer: ada@example.com · secrets: SLACK_WEBHOOK_URL (from .env)
+  viewer: ada@example.com (v_3f9a2c71) · secrets: SLACK_WEBHOOK_URL (from .env)
 
+$ fling deploy . --name workshop-quote --access members
+  bundling server.ts → _fling/server.mjs (465 KB, 100 KB gzipped)
+  ✖ Version f12ba1d8273dc664 of "workshop-quote" needs the site secrets SLACK_WEBHOOK_URL, which aren't set. …
 $ fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
   ✓ SLACK_WEBHOOK_URL set on workshop-quote (from .env; nothing else read)
-$ fling deploy . --name workshop-quote --access members
-  bundling server.ts → _fling/server.mjs (474 KB, 102 KB gzipped)
-  starting server… GET /api/health 200 in 1.2 s
-  ✓ live  https://workshop-quote.<sites domain>/
-          server: /api/* · members only · outbound network: open · secrets: SLACK_WEBHOOK_URL
-  review  https://<your Fling>/review/workshop-quote
+  Version f12ba1d8273dc664 is live now: https://workshop-quote.<sites domain>/
+
+$ fling deploy . --name workshop-quote          # later deploys, with the secret set
+  bundling server.ts → _fling/server.mjs (465 KB, 100 KB gzipped)
+  starting server… GET /api/health answered in 1.2 s
+  ✓ Deployed workshop-quote (4 files, 467 KB; uploaded 4, version 5024258572153ca0)
+  https://workshop-quote.<sites domain>/
+  Share for feedback (reviewers sign in to <your Fling>): https://<your Fling>/review/workshop-quote
+  server: /api/* · members only · outbound network: open · secrets: SLACK_WEBHOOK_URL
+  logs: `fling logs workshop-quote`
 ```
 
 The version that goes live is `index.html`, `app.js`, `style.css` and `_fling/server.mjs` (one ESM
@@ -283,8 +290,8 @@ $ fling secrets rm workshop-quote SLACK_WEBHOOK_URL
 - **Owners and publishers set them**, from stdin or with `--from .env NAME…`, which reads only the
   keys named, never as a command-line value. `fling deploy` never uploads `.env`: a local file
   doesn't silently become production secrets. Path publishers can't set them.
-- **The site page lists them** by name, with who set each and when. Values are never shown or
-  returned.
+- **The site page lists them** by name, with who set each and when, in the Secrets section of its
+  Server tab, which also sets, replaces and removes them. Values are never shown or returned.
 - **They reach the server** as `env.NAME` and `process.env.NAME` on both clouds, and
   `secret('NAME')` from the helper. On Cloudflare a changed secret gets a fresh isolate; on AWS it
   makes a new revision of the current version.
@@ -319,14 +326,16 @@ A version goes live only when its server starts.
 
 1. **Admission.** Bundled (no bare imports), within size, secret-scanned, its declared secrets set,
    the publisher allowed.
-2. **`activate`.** Cloudflare: nothing to prepare. AWS: zip the bundle (and the version's files for
-   `file()`), create the revision, wait for Active. The AWS timing stays behind the port: if
-   revisions routinely take over a minute, the API answers 202 with a status to poll.
+2. **`activate`.** Cloudflare: seal the run's options into R2 and name the run. AWS: zip the bundle
+   (and the version's files for `file()`), create the revision and wait for it to be Active
+   (within 60 s, polled every second); the publish waits with it. The AWS timing stays behind the
+   port.
 3. **Start probe.** One request straight to the new version's server, before the route changes:
    its health path if `fling.json` names one, which must answer 2xx; otherwise `GET /api/`, where
    any HTTP answer, a 404 included, counts. A crash, no listener or 10 s of silence fails it. On
    Cloudflare it also warms the isolate.
-4. **Go live.** The route value changes as today, now with `f`.
+4. **Go live.** AWS moves the live endpoint's revision weights (`goLive`); then the route value
+   changes as today, now with `f`.
 
 On failure the version stays pending, the live one keeps serving, and the publish answers 422
 `server_failed_to_start` with the first lines of the server's log, which the CLI and MCP show so an
@@ -364,9 +373,11 @@ won't exist; a `--isolate` mode on workerd is later (§19).
 Seven days of logs, no emails.
 
 - A **`ServerLogs`** port. Cloudflare: a tail consumer in the Fling Worker writes each site's
-  output to R2 in hourly chunks. AWS: `read` calls CloudWatch on the site's log group.
-- `fling logs <site> [--since 1h] [--follow]`, `fling_logs` on both MCP servers, and a Logs panel
-  on the site page. `--follow` polls every 2 s.
+  output to R2, a second's lines at a time, and the hourly cron folds each past hour into one
+  chunk. AWS: `read` calls CloudWatch on the site's log group. The local runtime keeps them in
+  memory.
+- `fling logs <site> [--since 1h] [--follow]`, `fling_logs` on both MCP servers, and the Logs
+  section of the site page's Server tab. `--follow` polls every 2 s.
 - Owners and publishers read them (a new `site.logs` action), and admins from their browser
   session. Kept 7 days on both clouds. Each line names its version.
 - Fling logs every request: method, path, status, duration, viewer id, version. That is the
@@ -375,9 +386,9 @@ Seven days of logs, no emails.
 **Viewer ids, not emails.** `v_3f9a2c71` is the first 8 bytes of
 `HMAC(instance key, siteId + ":" + email)`, base32. It is the same for one person on one site and
 different on every other site, so a site's logs can follow a user without anyone joining two
-sites' logs, and it isn't reversible from the logs. An admin can resolve one when there's a reason:
-`fling admin viewer <site> <id>` hashes each member for that site, and the lookup is audited as
-`viewer.resolved`.
+sites' logs, and it isn't reversible from the logs. An admin can resolve one when there's a reason,
+by clicking it in the site page's Logs section (`POST /api/admin/sites/:name/viewers/resolve`,
+which hashes each member for that site), and the lookup is audited as `viewer.resolved`.
 
 The author's server still receives the email in `x-fling-viewer`, and Fling can't stop it logging
 that. The header carries the id too, and the Guide says to log the id.
@@ -401,23 +412,28 @@ site on the site page. Authors can't raise their own.
 
 ## 14. Cloudflare: the Worker Loader
 
-An isolate per version, loaded from R2. The Fling Worker already serves every sites host. For
-invoke it asks the `worker_loaders` binding for an isolate named after the version and its
-secrets. The first time, the loader reads the bundle from R2; after that the warm isolate is
-reused.
+An isolate per version and run, loaded from R2. The Fling Worker already serves every sites
+host. For invoke it asks the `worker_loaders` binding for the isolate named
+`site:<siteId>:<versionId>:<run>`, where the run is a keyed hash of what the version runs with (its
+secrets, the egress, the limits). The first time, the loader reads the bundle from R2; after that
+the warm isolate is reused.
 
 ```ts
-// platforms/cloudflare/src/sites.ts
-const worker = env.LOADER.get(`site:${siteId}:${v}:${secretsHash}`, async () => ({
-  compatibilityDate: '2026-10-19',
+// platforms/cloudflare/src/servers/runtime.ts (abridged)
+loader.get(`site:${site.id}:${version.id}:${run}`, async () => ({
+  compatibilityDate: SERVER_COMPATIBILITY_DATE,
   compatibilityFlags: ['nodejs_compat'],
-  mainModule: 'server.mjs',
-  modules: { 'server.mjs': { js: await (await bucket.get(key)).text() } },
-  env: { ...secrets, FILES: ctx.exports.SiteFiles({ props: { prefix } }) },
-  globalOutbound: egress === 'none' ? null : undefined,
-  limits: { cpuMs: 1000 },
+  mainModule: MAIN_MODULE, // Fling's: runs the bundle as a fetch handler or a node:http server
+  modules: {
+    [MAIN_MODULE]: { js: mainModule() },
+    [BUNDLE_MODULE]: { js: await (await bucket.get(version.bundle)).text() },
+    [SERVER_HELPER_MODULE]: { js: helperModule(Object.keys(secrets)) },
+  },
+  env: { ...secrets, PORT: String(SERVER_PORT), FILES: bindings.files(version.files) },
+  limits: { cpuMs: options.limits.cpuMs },
+  tails: [bindings.tail({ siteId: site.id, versionId: version.id })],
+  ...(options.egress === 'none' ? { globalOutbound: null } : {}),
 }))
-return worker.getEntrypoint().fetch(request)
 ```
 
 Why this one: no upload step (the version's file is the code); 15–20 ms for a version's first
@@ -454,17 +470,19 @@ body, which rules them out. Lambda Web Functions fit almost one for one:
 
 | Fling | Web Functions |
 |---|---|
-| Site with a server | A Web Function with one HomeRegion endpoint, IamAuth |
+| Site with a server | A Web Function with two HomeRegion endpoints, IamAuth: `live`, which CloudFront reaches, and `probe`, which only the API calls |
 | Version | A revision: immutable code and config, from a zip in a versioned S3 bucket |
-| Go live / rollback | The endpoint's revision weights |
-| Kill switch | `rateLimit: 0` → 503 `EndpointDisabled` |
+| Start probe | The `probe` endpoint, pointed at the new revision |
+| Go live / rollback | The `live` endpoint's revision weights |
+| Kill switch | `live`'s `rateLimit: 0` → 503 `EndpointDisabled` |
 | Limits | `rateLimit`, `maxEnvironments`, `timeoutSeconds` |
 | Secrets | Revision `environmentVariables` (a changed secret makes a new revision) |
 | Egress none | An egress connector into a VPC with no NAT |
 | Logs | `/aws/lambda/web/<function>`, 7-day retention |
 
-A fetch handler is served by a 30-line `index.mjs` that Fling adds to the zip. The CloudFront
-Function switches the origin for invoke, using the endpoint host the route value carries:
+Fling's server runtime, added to the zip beside the bundle, runs either style and enforces the
+wall time and body size, writes the request line and sets `Cache-Control`. The CloudFront Function
+switches the origin for invoke, using the `live` endpoint host the route value carries:
 
 ```js
 // edge/src/cloudfront.js
@@ -507,23 +525,29 @@ The adapter is built from the documentation; §18 lists what the live check conf
 Ports, capabilities, policy.
 
 ```ts
-// apps/api/src/ports
+// apps/api/src/servers/types.ts (abridged)
 interface SiteServers {
-  /** ready a version's server; the route value carries what the edge needs */
-  activate(site: SiteRef, version: VersionRef, opts: ServerOptions): Promise<{ target: string }>
+  /** the longest time per request the platform serves, when less than the config allows (AWS: 120) */
+  readonly maxTimeoutSeconds?: number
+  /** ready a version's server; the route value carries the target (`t`) for the sites host */
+  activate(site: ServerSite, version: ServerVersion, opts: ServerOptions): Promise<{ target: string | null }>
   /** the start probe: one request to this version's server before it goes live */
-  probe(site: SiteRef, version: VersionRef): Promise<ProbeResult>
-  /** a secret changed: Cloudflare renames the isolate, AWS makes a revision */
-  reconfigure(site: SiteRef, version: VersionRef, opts: ServerOptions): Promise<{ target: string }>
+  probe(site: ServerSite, version: ServerVersion, request: ProbeRequest): Promise<ProbeResult>
+  /** the probe passed: where one place serves every version (AWS), move it to this one */
+  goLive?(site: ServerSite, version: ServerVersion): Promise<void>
+  /** a secret or limit changed: Cloudflare names a new run, AWS makes a revision */
+  reconfigure(site: ServerSite, version: ServerVersion, opts: ServerOptions): Promise<{ target: string | null }>
   /** the site goes dark (kill switch, archive) or comes back */
-  setEnabled(site: SiteRef, enabled: boolean): Promise<void>
+  setEnabled(site: ServerSite, enabled: boolean): Promise<void>
   /** retention or delete */
-  retire(site: SiteRef, version?: VersionRef): Promise<void>
+  retire(site: ServerSite, version?: ServerVersion): Promise<void>
+  /** run a request through a version's server (the conformance suites, the local sites host) */
+  invoke(site: ServerSite, version: ServerVersion, request: Request): Promise<Response>
 }
 
 interface ServerLogs {
-  append?(site: SiteRef, lines: LogLine[]): Promise<void>
-  read(site: SiteRef, since: Date, limit: number): Promise<LogLine[]>
+  append?(siteId: string, lines: ServerLogLine[]): Promise<void>
+  read(siteId: string, since: Date, limit: number): Promise<ServerLogLine[]>
 }
 ```
 
@@ -545,6 +569,11 @@ Instance configuration:
 | `SERVERS_EGRESS` | `none` | Whether servers reach the internet: `none` or `open` |
 | `SERVERS_MAX_SITES` | `50` | Sites with a server at once |
 | `SERVER_TIMEOUT_SECONDS` | `30` | Wall time per request, streams included; admins raise it per site |
+| `SERVER_CPU_MS` | `1000` | CPU per request, Cloudflare only |
+| `SERVER_RPS` | `100` | Requests per second to one site |
+| `SERVER_ENVIRONMENTS` | `2` | Copies of one site's server at once, AWS only |
+| `SERVER_BODY_BYTES` | `10485760` | The largest request body |
+| `SITE_SECRETS_KEY` | (none) | A secret: 32 random bytes that seal site secrets, required when `SERVERS` is on |
 
 ## 17. Reviews
 
@@ -586,12 +615,17 @@ published through the real CLI and API, routed by the real decision and served b
 | Secret in loader env | `env.X` and `process.env.X`, both styles |
 | Same bundle as a Node HTTP server (AWS entry) | Works |
 
+The live check on AWS confirmed the origin switch with `always-amz-auth`, and found the two
+distribution-wide limits §15 works around: CloudFront's 120 s wait, and the custom error responses
+that took a server's 403 and 404 (hence the 300 stand-in). The Terraform provider has the network
+connector from 6.72; the functions themselves are the API's, so they need no provider support.
+
 Still to check, none of which changes the author contract:
 
-- **AWS, live:** revision preparation time, cold starts, the origin switch with
-  `always-amz-auth`, Terraform provider support for `lambda-web`, Region availability, and about
-  50 revisions kept per function (a rollback past that recreates the revision from the stored
-  bundle). Decides whether publishing needs 202 and polling.
+- **AWS:** cold starts, Region availability, and about 50 revisions kept per function (a rollback
+  past that recreates the revision from the stored bundle). A publish waits for the revision
+  (Active within 60 s); if revisions routinely took longer, publishing would answer 202 with a
+  status to poll.
 - **Secret scanner:** how often do minified npm bundles trip it? Bundle the top 200 packages and
   see.
 

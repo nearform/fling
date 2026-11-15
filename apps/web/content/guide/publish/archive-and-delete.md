@@ -4,7 +4,7 @@ part: publish
 order: 70
 summary: Take a site offline and keep it, or remove it for good.
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteDangerZone.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/site-tabs.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 When a site has done its job, you can take it away in two ways.
@@ -74,7 +74,8 @@ Open the site from **Sites** and choose its **Settings** tab, with the **Danger 
 
 ## Good to know
 
-- Deleting a site deletes its Paths, versions and share link too.
+- Deleting a site deletes its Paths, versions and share link too<!-- requires: servers -->, and its server and secrets. Its server's logs can no longer be read,
+  and are gone within {{fact:server-log-days}}<!-- /requires -->.
 <!-- requires: archive -->
 - While a site is archived, nobody can roll it back from the web app: unarchive it first.
 <!-- /requires -->

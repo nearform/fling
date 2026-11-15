@@ -21,6 +21,10 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it. Ship a form with the site to collect labels or scores,
   and export the answers as CSV.
+- **A small server when a page isn't enough.** Put a `server.ts` beside `index.html` and Fling runs
+  it for `/api/*`, behind the site's sign-in, with its keys kept as site secrets: call an API, post
+  to Slack, keep a price list off the page. Off unless the instance turns it on. See
+  [docs/site-servers.md](docs/site-servers.md).
 - **Hear about it.** With email set up, people are told when a site is shared with them, they join a
   group, or someone comments on their site, and choose what they hear about from any client.
 - **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.

@@ -4,7 +4,7 @@ part: start
 order: 40
 summary: Add the Fling plugin to Claude Code, so it can publish your builds and pages.
 sources: [plugin/**, .claude-plugin/**, apps/cli/src/claude.ts, apps/cli/src/commands/setup.ts, apps/cli/src/mcp.ts, apps/web/src/pages/GetStarted.tsx]
-verified: 60d6113
+verified: 32545014b
 ---
 
 The Fling plugin teaches Claude Code how to publish with {{instance:name}}: build the project,
@@ -43,7 +43,9 @@ Ask in your own words:
 - "Build this and fling it as my-app"
 - "Fling the dist folder and give me a share link"
 - "Fling this report as q3-report, open to everyone signed in"
-- "Roll my-app back to yesterday's version"
+- "Roll my-app back to yesterday's version"<!-- requires: servers -->
+- "Add a server to this site that posts the form to our team's webhook, run it with fling dev,
+  then deploy it" (see [Site servers](/guide/servers/what-is-a-site-server))<!-- /requires -->
 
 Claude checks the name with you before it publishes a new site, and asks who should be able to
 open it. It gives you back the site's address and, where your Fling has comments, a review link to

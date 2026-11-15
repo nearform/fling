@@ -15,6 +15,7 @@ export const GUIDE_PARTS = [
   { id: 'publish', label: 'Publish' },
   { id: 'share', label: 'Share' },
   { id: 'team-sites', label: 'Team sites' },
+  { id: 'servers', label: 'Site servers' },
   { id: 'feedback', label: 'Feedback' },
   { id: 'admin', label: 'Admin' },
   { id: 'run', label: 'Run your own Fling' },

@@ -5,7 +5,7 @@ order: 30
 summary: Named lists of people, such as a team, to open sites to or make owners and publishers.
 requires: [groups]
 sources: [packages/shared/src/groups.ts, apps/api/src/groups.ts, apps/api/src/policy.ts, apps/cli/src/commands/groups.ts, apps/web/src/pages/Groups.tsx, apps/web/src/components/GroupEditor.tsx, packages/shared/src/mcp-tools.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 A group is a named list of people, such as a team. Name the group once instead of listing

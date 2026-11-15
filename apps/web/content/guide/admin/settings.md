@@ -5,7 +5,7 @@ order: 30
 summary: See how the instance is configured; changing it is a deploy.
 audience: admin
 sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts]
-verified: 98b7f5e
+verified: 32545014b
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its
@@ -22,7 +22,7 @@ Open **Admin → Settings**. The values are in groups:
 | **Sign-in** | The email domains and addresses that may sign in, the admins, and the sign-in provider |
 | **Sites** | The app's address, the sites' domain, and who can open a new site by default |
 | **Branding** | The instance's name, the install command it shows, its logo, favicon and colours |
-| **Features** | Comments, live review, outside invitations and their daily limit, and how many versions of each site are kept |
+| **Features** | Comments, live review, outside invitations and their daily limit, how many versions of each site are kept, and site servers: who may publish one, what they may reach and their limits |
 | **Mail** | How email is sent, and from which address |
 | **Platform** | Where its data and files are kept, on its cloud |
 
@@ -42,7 +42,8 @@ Nothing on this page changes from the web app. What admins do day to day is else
 | Help someone by seeing what they see | [Users](/guide/admin/users-and-invitations#impersonate-someone) |
 | Let someone from outside in, or take their access away, where invitations are on | [Invitations](/guide/admin/users-and-invitations) |
 | Change who can open a site, or delete it | The site's own page, as an admin |
-| Check email is getting through | [Mail](/guide/admin/mail) |
+| Check email is getting through | [Mail](/guide/admin/mail) |<!-- requires: servers -->
+| Stop a site's server, change its limits, or find out who a viewer id belongs to | The site's **Server** tab, as an admin ([Logs and the Server tab](/guide/servers/logs#for-admins)) |<!-- /requires -->
 
 Everything on this page is set at deploy by whoever runs {{instance:name}}: who may sign in and
 who the admins are, the name and brand, the addresses, and which features are on. See

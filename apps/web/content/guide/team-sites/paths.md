@@ -5,7 +5,7 @@ order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
 sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 A team site holds many pieces of work in one place: a plan per ticket, a report per week. Each
@@ -81,6 +81,12 @@ Click a Path's folder to open its own page. There you can:
   more on its own; otherwise publish again.
 - **`paths_block_hidden`**: you published the site's own files under a folder that is a Path, and
   the Path hides them. Publish them to the Path instead, or leave them out.
+<!-- requires: servers -->
+- **`server_on_path`**: a Path can't have a [site server](/guide/servers/what-is-a-site-server).
+  Publish the server to the site itself.
+- **`path_conflict`**: the site has a server, which answers at `/api/`, so a Path can't be called
+  `api`; or a server can't be published onto a site that has an `api` Path. Use another folder.
+<!-- /requires -->
 - **`owner_only`**: the Path is archived, and only its owners can bring it back.
 
 ## Good to know

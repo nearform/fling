@@ -5,7 +5,7 @@ order: 10
 summary: Each site has one access level, from only you to anyone with the address.
 requires: [accessLevels]
 sources: [packages/shared/src/access.ts, packages/shared/src/audience.ts, apps/api/src/policy.ts, apps/api/src/invitations.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteAccess.tsx, packages/shared/src/mcp-tools.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Every site has an access level: who can open it. A site is private unless you make it public, and
@@ -96,6 +96,11 @@ Sites other people have opened to you are on the **Shared with me** tab of the S
 - A public site keeps its list of people and teams. Make it private again and the list applies
   again.
 - On a public site, the review page and comments still need sign-in.
+<!-- requires: servers -->
+- Making a site with a [site server](/guide/servers/visitors-and-limits#who-can-call-it) public
+  asks you to confirm first, since anyone could then call its `/api/…` and use its secrets: the web
+  app asks, and `fling access --public` asks or takes `--yes`.
+<!-- /requires -->
 - A list can name up to {{fact:audience-emails-max}} people and {{fact:audience-groups-max}}
   groups. See [Groups](/guide/share/groups).
 - To show a private site to someone who can't sign in, use a

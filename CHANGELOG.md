@@ -13,6 +13,39 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Site servers.** A site can carry a small backend: put a `server.ts` (or `server.js`) beside
+  `index.html` and Fling runs it for `/api/*` on the site's own address, behind the site's access,
+  for calling an API with a key, posting to a webhook or keeping data off the page. `fling deploy`
+  bundles it with its npm dependencies into `_fling/server.mjs`, which is part of the version, so a
+  rollback rolls the code back, and the version goes live only once the server answers its start
+  probe. `fling.json` names the **site secrets** it needs and an optional health path. Secrets are
+  set with `fling secrets set <site> NAME` (from stdin, or `--from .env NAME`) or on the site
+  page's Server tab, never shown again, and setting the last one a waiting version needs puts it
+  live. The server learns who is calling from `x-fling-viewer` (a per-site **viewer id**, the
+  email and whether they are a guest). `fling dev` runs a folder and its server locally with
+  secrets from `.env` and `.env.local`; `fling logs` (and `fling_logs` on both MCP servers, and the
+  Server tab) reads seven days of request lines and output. The local MCP's `fling_deploy` bundles
+  and `fling_dev` runs a folder; the remote MCP's `fling_publish` takes a dependency-free
+  `_fling/server.mjs` (start from `fling_server_template`) with `fling.json` among the files or as
+  `siteServer`. A public site with a server asks first (`--yes`, `confirmPublicServer`), the review
+  page says when a site has one, and admins can stop a site's server or change its limits from its
+  Server tab. Off unless an instance turns it on with `SERVERS` (`admins`, `members` or
+  `groups:<slug>,…`), advertised as the `servers` and `serversEgress` capabilities. The new
+  instance values are `SERVERS`, `SERVERS_EGRESS` (`none`, the default, or `open`),
+  `SERVERS_MAX_SITES` (50), `SERVER_TIMEOUT_SECONDS` (30), `SERVER_CPU_MS` (1000, Cloudflare
+  only), `SERVER_RPS` (100), `SERVER_ENVIRONMENTS` (2, AWS only) and `SERVER_BODY_BYTES` (10 MB),
+  plus the secret `SITE_SECRETS_KEY` (32 random bytes, required when servers are on), which seals
+  site secrets. See [docs/site-servers.md](docs/site-servers.md) and the Guide's Site servers part.
+- Upgrade note: on AWS the module needs the AWS provider 6.72 or later in 6.x, so run
+  `terraform init -upgrade` once before the next plan, whether or not you turn servers on. To turn
+  them on, set the module's `servers = { enabled = true }` (with `egress = "open"` if servers may
+  reach the internet; `none` builds a VPC with no way out and a network connector, which takes up
+  to ten minutes to create), apply, set `SERVERS` in `INSTANCE`, and deploy: Terraform generates
+  `site-secrets-key`, and requests to a server are capped at 120 s. On Cloudflare servers run on
+  the Worker Loader, which is in open beta on Workers Paid: check the account has it, run
+  `setup.mjs --servers members` (or set `SERVERS` in `INSTANCE` and rerun setup, which adds
+  `SITE_SECRETS_KEY` once), then deploy. Never replace `SITE_SECRETS_KEY`: every stored site secret
+  would become unreadable.
 - **The site page has tabs.** Under the overview, **Access** (who can open the site, its owners
   and publishers) is the one it opens on; **Versions** has its versions and Paths, **Server** its
   site server, secrets and logs, and **Settings** archive and delete. A tab you have nothing in is

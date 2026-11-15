@@ -92,7 +92,8 @@ describe('the Guide pages', () => {
   })
 
   it('name no host but the ones every instance shares: the rest are placeholders', () => {
-    const allowed = /^(github\.com|claude\.ai|chatgpt\.com|nodejs\.org|www\.npmjs\.com)$/
+    const allowed =
+      /^(github\.com|claude\.ai|chatgpt\.com|nodejs\.org|www\.npmjs\.com|localhost:\d+)$/
     for (const page of GUIDE_PAGES) {
       for (const [, host = ''] of page.body.matchAll(/https?:\/\/([^\s/)`'"\]]+)/gi)) {
         // a host made of placeholders (`s--<token>.{{instance:sites}}`) is each instance's own

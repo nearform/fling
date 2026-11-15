@@ -414,6 +414,18 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   .preview .pv-hero { transition: background-color 350ms var(--ease-out); }
 }
 
+/* ---------- 9b · site servers ---------- */
+.servers { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
+.servers .term pre { min-block-size: 13.5rem; padding-block: 0.9rem 1rem; font-size: clamp(0.7rem, 0.64rem + 0.3vw, 0.85rem); line-height: 1.55; white-space: pre; overflow-x: auto; }
+.tree { list-style: none; margin: 0.6rem 0 0; padding: 0; display: grid; gap: 0.35rem; }
+.tree li { display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; padding: 0.4rem 0.7rem; border-radius: 10px; background: var(--bg-2); font-size: 0.85rem; }
+.tree .mono { font-size: 0.8rem; }
+.tree .tag { flex: none; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; padding: 0.1rem 0.5rem; border-radius: 999px; }
+.tree .pub { color: var(--green); background: color-mix(in oklch, var(--green) 16%, transparent); }
+.tree .stay { color: var(--muted); background: color-mix(in oklch, var(--ink) 8%, transparent); }
+.tree .never { color: var(--red); background: color-mix(in oklch, var(--red) 14%, transparent); }
+.servers .deploy-links { margin-block-start: 0.2rem; }
+
 /* ---------- 10 · team sites ---------- */
 .team { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr)); align-items: center; }
 .team .term pre { min-block-size: 0; padding-block: 0.9rem 1rem; font-size: clamp(0.7rem, 0.64rem + 0.3vw, 0.85rem); line-height: 1.55; white-space: pre; overflow-x: auto; }
@@ -781,6 +793,41 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
         <h3>Notifications</h3>
         <div class="prefs" id="prefs"></div>
         <div class="inbox" id="inbox" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9b · site servers -->
+  <section class="slide" id="servers" data-label="Site servers">
+    <div class="inner servers">
+      <div style="display:grid; gap: var(--gap)">
+        <p class="eyebrow reveal">Site servers</p>
+        <h2 class="reveal">Needs an API key? <span class="rainbow-text">Bring a small server.</span></h2>
+        <p class="lead reveal">Put a <span class="mono">server.ts</span> beside your <span class="mono">index.html</span> and Fling runs it for <span class="mono">/api/*</span>, on the site's own link. Call an LLM, post to Slack, keep a price list off the page.</p>
+        <ul class="facts reveal">
+          <li>Keys stay secret: set once for the site, never in the files or the page.</li>
+          <li>Same link, same access: the server sits behind the site's sign-in and knows who is calling.</li>
+          <li>Part of the version: roll back and the code rolls back with it. Reviewers comment as usual.</li>
+          <li><span class="mono">fling dev</span> runs it locally first; <span class="mono">fling logs</span> shows what it did.</li>
+        </ul>
+        <div class="deploy-links reveal">
+          <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/docs/site-servers.md">How to write one <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+      <div style="display:grid; gap: var(--gap)">
+        <div class="term reveal">
+          <div class="term-bar"><i></i><i></i><i></i><span>zsh</span></div>
+          <pre id="srv-term" aria-live="polite"></pre>
+        </div>
+        <div class="card reveal">
+          <h3>quote/</h3>
+          <ul class="tree">
+            <li><span class="mono">index.html, app.js</span><span class="tag pub">published</span></li>
+            <li><span class="mono">server.ts → _fling/server.mjs</span><span class="tag pub">runs /api/*</span></li>
+            <li><span class="mono">fling.json, package.json</span><span class="tag stay">stays behind</span></li>
+            <li><span class="mono">.env</span><span class="tag never">never published</span></li>
+          </ul>
+        </div>
       </div>
     </div>
   </section>
@@ -1388,6 +1435,33 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
   renderInbox(false);
   starters.hear = async function () {
     while (shown < mails.length) { await sleep(1500); shown++; renderInbox(true); }
+  };
+
+  /* ---- 9b · site servers: dev, then deploy ---- */
+  starters.servers = async function () {
+    var out = $('#srv-term');
+    var lines = [
+      ['p', '$ '], ['t', 'fling dev --as ada@example.com\n'], ['w', 400],
+      ['c', '  serving quote/ at http://localhost:47180\n'],
+      ['c', '  secrets: SLACK_WEBHOOK_URL (from .env)\n'], ['w', 700],
+      ['p', '$ '], ['t', 'fling secrets set quote --from .env SLACK_WEBHOOK_URL\n'], ['w', 400],
+      ['ok', '  ✓ SLACK_WEBHOOK_URL set (nothing else read)\n'], ['w', 600],
+      ['p', '$ '], ['t', 'fling deploy . --name quote --access members\n'], ['w', 500],
+      ['c', '  bundling server.ts → _fling/server.mjs (102 KB gzipped)\n'], ['w', 500],
+      ['c', '  starting server… GET /api/health 200\n'], ['w', 400],
+      ['ok', '  ✓ live  '], ['u', 'https://quote.' + sites + '/\n'],
+      ['c', '          server: /api/* · members only\n']
+    ];
+    for (var i = 0; i < lines.length; i++) {
+      var kind = lines[i][0], val = lines[i][1];
+      if (kind === 'w') { await sleep(val); continue; }
+      var span = document.createElement('span');
+      span.className = kind === 't' ? '' : kind;
+      out.appendChild(span);
+      if (kind === 't' && !reduce) {
+        for (var j = 1; j <= val.length; j++) { span.textContent = val.slice(0, j); await sleep(22); }
+      } else { span.textContent = val; await sleep(120); }
+    }
   };
 
   /* ---- 5 · versions ---- */

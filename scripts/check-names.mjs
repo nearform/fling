@@ -30,6 +30,15 @@ const ALLOWED = {
   '.github/workflows/release-cli.yml': [PACKAGE, REPO],
   // The "Why Fling?" page, a static site published with Fling itself.
   'why/index.html': [PACKAGE, REPO],
+  // Site servers: the how-to, the design and the standalone examples, which install the CLI
+  // package and import its server helper (`<package>/server`).
+  'docs/site-servers.md': [PACKAGE],
+  'docs/design/site-servers.md': [PACKAGE],
+  'examples/site-servers/workshop-quote/package.json': [PACKAGE],
+  'examples/site-servers/llm-proxy/package.json': [PACKAGE],
+  'examples/site-servers/llm-proxy/server.ts': [PACKAGE],
+  'examples/site-servers/private-data/package.json': [PACKAGE],
+  'examples/site-servers/private-data/server.ts': [PACKAGE],
 }
 
 /** Matches that are neither name, by file and line pattern. */

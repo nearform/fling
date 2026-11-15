@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>What time is it there?</title>
+  <style>
+    body { font: 1rem/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100svh; }
+    main { display: grid; gap: 1rem; width: min(28rem, 100% - 2rem); }
+    output { font-size: 1.6rem; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>What time is it there?</h1>
+    <p id="hello"></p>
+    <form id="zone">
+      <label>Time zone <input name="zone" value="America/New_York" required></label>
+      <button>Ask the server</button>
+    </form>
+    <output id="time"></output>
+  </main>
+  <script type="module">
+    const me = await fetch('/api/me').then(r => r.json())
+    document.querySelector('#hello').textContent = me.email ? `Hello, ${me.email}.` : 'Hello.'
+
+    const form = document.querySelector('#zone')
+    form.addEventListener('submit', async event => {
+      event.preventDefault()
+      const zone = new FormData(form).get('zone')
+      const data = await fetch(`/api/time?zone=${encodeURIComponent(zone)}`).then(r => r.json())
+      document.querySelector('#time').textContent = data.error ?? `${data.time} in ${data.zone}`
+    })
+  </script>
+</body>
+</html>

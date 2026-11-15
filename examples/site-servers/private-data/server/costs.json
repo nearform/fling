@@ -1,0 +1,9 @@
+{
+  "marginFloor": 0.22,
+  "unitCost": { "desk-oak": 410, "chair-mesh": 180, "lamp-arm": 38 },
+  "volumeDiscounts": [
+    { "from": 50, "off": 0.12 },
+    { "from": 20, "off": 0.08 },
+    { "from": 10, "off": 0.04 }
+  ]
+}

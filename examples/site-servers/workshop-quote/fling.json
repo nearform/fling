@@ -1,0 +1,5 @@
+{
+  "server": "server.ts",
+  "secrets": ["SLACK_WEBHOOK_URL"],
+  "health": "/api/health"
+}

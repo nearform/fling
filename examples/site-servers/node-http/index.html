@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Who is looking?</title>
+  <style>
+    body { font: 1rem/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100svh; }
+    pre { background: #f3f3f3; padding: 1rem; border-radius: 0.5rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Who is looking?</h1>
+    <p id="hello">Asking the server…</p>
+    <pre id="raw"></pre>
+  </main>
+  <script type="module">
+    const me = await fetch('/api/me').then(r => r.json())
+    document.querySelector('#hello').textContent = me.email
+      ? `Signed in as ${me.email}${me.guest ? ' (a guest)' : ''}.`
+      : 'Nobody signed in: a public site, a share link, or fling dev without --as.'
+    document.querySelector('#raw').textContent = JSON.stringify(me, null, 2)
+  </script>
+</body>
+</html>

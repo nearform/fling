@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask</title>
+  <style>
+    body { font: 1rem/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100svh; }
+    main { display: grid; gap: 1rem; width: min(40rem, 100% - 2rem); }
+    textarea { font: inherit; min-height: 6rem; padding: 0.5rem; }
+    button { justify-self: start; font: inherit; padding: 0.4rem 1rem; }
+    output { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Ask</h1>
+    <form id="ask">
+      <textarea name="question" required maxlength="2000" placeholder="What is a site server?"></textarea>
+      <button>Ask</button>
+    </form>
+    <output id="answer"></output>
+  </main>
+  <script type="module">
+    const form = document.querySelector('#ask')
+    const answer = document.querySelector('#answer')
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault()
+      answer.textContent = ''
+      const question = new FormData(form).get('question')
+      const res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question }),
+      })
+      if (!res.ok) {
+        answer.textContent = (await res.json()).error
+        return
+      }
+      // The answer arrives as it is written: read the stream and append each piece.
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        answer.textContent += value
+      }
+    })
+  </script>
+</body>
+</html>

@@ -46,12 +46,20 @@ import { CellChangeSchema } from './notifications.ts'
 import { PATHS_OPTIONS, PATHS_PLACEHOLDERS } from './paths-index.ts'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from './paths-templates.ts'
 import { MCP_READ_MAX_BYTES } from './read-files.ts'
+import { SERVER_BUNDLE, SERVER_PREFIX } from './route-keys.ts'
 import {
   OWNER_EMAILS_MAX,
   PUBLISHER_EMAILS_MAX,
   PUBLISHER_GROUPS_MAX,
   whoHolds,
 } from './site-roles.ts'
+import {
+  SERVER_BUNDLE_MAX_BYTES,
+  SERVER_CONFIG_FILE,
+  SERVER_HELPER_MODULE,
+  SERVER_LOG_DAYS,
+  ServerConfigSchema,
+} from './site-server.ts'
 import { SITE_SORTS } from './site-sort.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -501,6 +509,120 @@ const spa = z
     'Single-page app: serve index.html for unknown paths (client-side routing). Omit to keep the current setting'
   )
 
+// --- site servers -------------------------------------------------------------------------------
+
+/**
+ * What both servers tell the agent about site servers, on an instance that runs them (`servers`).
+ * `local`: the local server, which bundles a folder's server.ts; the remote one takes only a
+ * dependency-free bundle.
+ */
+export const SERVERS_NOTE = (w: McpWording, opts: { local?: boolean } = {}) =>
+  `${w.name} runs site servers: a small backend inside a site, run for ${SERVER_PREFIX}* on the site's own address, ` +
+  'for what a static page cannot do safely: call an API with a key, post to a webhook, keep data off the page, ' +
+  'answer per viewer. Its server sees who is calling (the x-fling-viewer header: id, email, guest; null on a public site or through a share link) and reads its site secrets as process.env.NAME. ' +
+  (opts.local
+    ? `fling_deploy bundles a folder's server.ts (or server.js, or the entry ${SERVER_CONFIG_FILE} names) into ${SERVER_BUNDLE}, with its npm dependencies inside; fling_dev runs the folder locally first. `
+    : `fling_publish takes a server already in one file, ${SERVER_BUNDLE}, importing only node:* and ${SERVER_HELPER_MODULE}: start from fling_server_template, and pass ${SERVER_CONFIG_FILE} among the files (or as \`siteServer\`). `) +
+  `${SERVER_CONFIG_FILE} declares the secrets it needs and a health path. Never ask for, or pass, a secret's value: ` +
+  'ask the user to set it themselves (`fling secrets set <site> NAME`, or the Secrets section of the site page); a deploy ' +
+  'that waits for secrets goes live as soon as the last is set. A public site with a server asks first: tell the user ' +
+  `anyone could call its ${SERVER_PREFIX}* and use its secrets, and only with their yes repeat the call with \`confirmPublicServer: true\`. ` +
+  'If a publish answers server_failed_to_start, read the log lines it returns, fix the server and publish again; ' +
+  'fling_logs reads the log of a live one.'
+
+/**
+ * What a publish result says about the site server it made live: where it answers, what it may
+ * reach, the secrets it runs with, and where its log is.
+ */
+export function describeServerLive(opts: {
+  name: string
+  secrets: readonly string[]
+  egress: 'open' | 'none'
+}): string {
+  return (
+    `\nIts server answers ${SERVER_PREFIX}* (outbound network: ${opts.egress}; secrets: ` +
+    `${opts.secrets.length ? opts.secrets.join(', ') : 'none'}). Call fling_logs with name "${opts.name}" to see ` +
+    'its requests and what it prints.'
+  )
+}
+
+/** The refusals of a publish with a site server that tell the agent what to do next. */
+export const SERVER_ERRORS = [
+  'public_server',
+  'secrets_missing',
+  'server_failed_to_start',
+  'server_not_bundled',
+  'servers_not_allowed',
+  'server_on_path',
+  'path_conflict',
+  'too_many_servers',
+] as const
+
+/**
+ * A site server's refusal as both servers' tools say it (undefined: not one): what happened and
+ * what to do next, with the server's log lines for a start that failed, so the agent can fix it
+ * in the same turn.
+ */
+export function describeServerError(
+  code: string | undefined,
+  message: string,
+  extra: { secrets?: readonly string[]; logs?: readonly string[] } = {},
+  opts: { site?: string; retryWith: string; local?: boolean }
+): string | undefined {
+  const site = opts.site ?? '<site>'
+  switch (code) {
+    case 'public_server':
+      return (
+        `Not published yet (public_server): ${message} Tell the user that anyone could call its ${SERVER_PREFIX}* ` +
+        `without the page and use its secrets through it, and ask whether to go ahead. Only if they agree, call ` +
+        `${opts.retryWith} again with the same arguments plus \`confirmPublicServer: true\`.`
+      )
+    case 'secrets_missing': {
+      const names = extra.secrets?.length ? extra.secrets.join(' ') : 'NAME'
+      return (
+        `Not live yet (secrets_missing): ${message} Never ask for a secret's value in the conversation: ask the ` +
+        `user to set ${extra.secrets?.length === 1 ? 'it' : 'them'} themselves, with \`fling secrets set ${site} ` +
+        `--from .env ${names}\` in a terminal (or \`fling secrets set ${site} NAME < file\`), or in the Secrets ` +
+        'section of the site page. The version goes live as soon as the last one is set: nothing needs publishing again.'
+      )
+    }
+    case 'server_failed_to_start': {
+      const logs = extra.logs?.length ? `\nThe server's log:\n${extra.logs.join('\n')}` : ''
+      return (
+        `Not published (server_failed_to_start): ${message.replace(/ Its log:[\s\S]*$/, '')} Nothing changed for ` +
+        `visitors.${logs}\nFix the server from these lines${opts.local ? ' (fling_dev runs it locally)' : ''} and call ` +
+        `${opts.retryWith} again.`
+      )
+    }
+    case 'server_not_bundled':
+      return (
+        `Not published (server_not_bundled): ${message}. ` +
+        (opts.local
+          ? 'Deploy the folder with its server.ts (or server.js) and fling_deploy bundles it.'
+          : `Rewrite ${SERVER_BUNDLE} without npm packages, starting from fling_server_template, or ask the user to deploy the folder with the Fling CLI, which bundles dependencies.`)
+      )
+    case 'servers_not_allowed':
+    case 'server_on_path':
+    case 'path_conflict':
+    case 'too_many_servers':
+      return `Not published (${code}): ${message}.`
+    default:
+      return undefined
+  }
+}
+
+/** `fling.json` as a tool argument: the secrets the server needs and its health path. */
+const serverConfig = ServerConfigSchema.describe(
+  `The site server's ${SERVER_CONFIG_FILE}: \`secrets\` (the names of the site secrets it needs, never their values) and \`health\` (a path under ${SERVER_PREFIX} that must answer 2xx before the version goes live)`
+)
+
+const confirmPublicServer = z
+  .boolean()
+  .optional()
+  .describe(
+    `Only after the user agreed: publish a server on a public site, where anyone can call its ${SERVER_PREFIX}* and use its secrets. Omit until a publish answers public_server`
+  )
+
 // --- tools --------------------------------------------------------------------------------------
 
 /** The catalogue, its descriptions rendered with `w`. */
@@ -668,7 +790,9 @@ export function mcpToolsFor(w: McpWording) {
         `${NAME_REQUIRED} ${NAME_RULES} ${VISIBILITY} ${LIST_HTML} ${NEVER_PUBLISHED} ` +
         'The result includes `warnings`. Share the returned URL with the user; fling_files shows exactly which files ' +
         'the site has. To collect labels, ratings, scores or eval judgements from reviewers, pass `forms` (or include ' +
-        `${FORMS_FILE} among the files): see fling_forms_template.`,
+        `${FORMS_FILE} among the files): see fling_forms_template. A site server (where ${w.name} runs them) is ` +
+        `${SERVER_BUNDLE} among the files, one dependency-free module (fling_server_template), with ` +
+        `${SERVER_CONFIG_FILE} among the files or as \`siteServer\`.`,
       inputSchema: {
         name: siteName,
         files: z
@@ -698,6 +822,8 @@ export function mcpToolsFor(w: McpWording) {
           .describe(
             `The site's forms config (as ${FORMS_FILE}; fling_forms_template, fling_forms_check), for structured feedback on the review page. null removes the forms. Omitted: a publish on a \`base\` keeps the site's forms, a publish with \`path\` leaves them as they are (forms are the site's, never a Path's: \`forms\` with \`path\` is refused), any other publish has none`
           ),
+        siteServer: serverConfig.optional(),
+        confirmPublicServer,
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
     }),
@@ -759,6 +885,7 @@ export function mcpToolsFor(w: McpWording) {
       inputSchema: {
         uploadId: z.string().min(1).max(100).describe('From fling_upload_begin'),
         listHtml,
+        confirmPublicServer,
       },
       annotations: { destructiveHint: false, openWorldHint: true },
     }),
@@ -1225,6 +1352,36 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 
+    logs: tool({
+      name: 'fling_logs',
+      title: "Read a site server's log",
+      description:
+        `Read a site server's log, oldest first: a line per request (method, path, status, duration, the viewer id, ` +
+        `the version) and what the server printed (console.log and console.error). Kept ${SERVER_LOG_DAYS} days; for ` +
+        "the site's owners and publishers. Use it when a server misbehaves, or after a publish to see it take requests.",
+      inputSchema: {
+        name: siteName,
+        since: z
+          .string()
+          .regex(/^(\d+[smhd]|\d{4}-\d{2}-\d{2}T[\d:.]+Z?)$/)
+          .optional()
+          .describe('From this long ago (15m, 1h, 2d) or this ISO time; default 1h'),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    serverTemplate: tool({
+      name: 'fling_server_template',
+      title: 'Start a site server',
+      description:
+        `A site server to start from: a ~30-line ${SERVER_BUNDLE} with no dependencies (a route table with ` +
+        `GET ${SERVER_PREFIX}health for the start probe and GET ${SERVER_PREFIX}me for the viewer) and the matching ` +
+        `${SERVER_CONFIG_FILE}. Add the routes the site needs, without npm packages, and publish both with the ` +
+        `site's pages. Its bundle is at most ${SERVER_BUNDLE_MAX_BYTES / 1024 / 1024} MB.`,
+      inputSchema: {},
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
     rollback: tool({
       name: 'fling_rollback',
       title: 'Roll back',
@@ -1257,7 +1414,7 @@ export const mcpTools: McpTools = mcpToolsFor(mcpWording())
 /** Sent at `initialize` by the remote server. */
 export const mcpRemoteInstructions = (
   w: McpWording,
-  opts: { comments?: boolean; forms?: boolean; notifications?: boolean } = {}
+  opts: { comments?: boolean; forms?: boolean; notifications?: boolean; servers?: boolean } = {}
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
@@ -1286,6 +1443,7 @@ export const mcpRemoteInstructions = (
     ...(opts.comments ? [COMMENTS_NOTE(w, { forms: opts.forms })] : []),
     ...(opts.comments && opts.forms ? [FORMS_NOTE(w)] : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
+    ...(opts.servers ? [SERVERS_NOTE(w)] : []),
     ...[GUIDE_NOTE(w)].filter(p => p !== undefined),
   ].join('\n\n')
 

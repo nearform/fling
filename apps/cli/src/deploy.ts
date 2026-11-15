@@ -21,6 +21,7 @@ import {
   type FormsConfig,
   isValidSiteName,
   type PublishHint,
+  type ServerConfig,
   SITE_NAME_MAX,
   type Site,
   slugify,
@@ -135,6 +136,12 @@ export interface DeployOptions {
   forms?: FormsConfig | null
   /** A manifest already built from `dir` (so the caller can inspect it before deploying). */
   manifest?: LocalManifest
+  /** The folder's `fling.json`, for a manifest with a server bundle (server-build.ts). */
+  server?: ServerConfig
+  /** A server on a public site: the publisher confirmed it (else 409 `public_server`). */
+  confirmPublicServer?: boolean
+  /** Called when the upload is done and the version is going live (its server starting). */
+  onFinalize?: () => void
   onProgress?: (event: {
     uploaded: number
     total: number
@@ -223,6 +230,8 @@ async function deployOnce(
         ...(opts.access ? { access: opts.access } : {}),
         ...(opts.audience ? { audience: opts.audience } : {}),
         ...(opts.forms === undefined ? {} : { forms: opts.forms }),
+        ...(opts.server ? { server: opts.server } : {}),
+        ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
       },
     })
     .catch(async (error: unknown) => {
@@ -260,6 +269,7 @@ async function deployOnce(
     opts.onProgress?.({ uploaded: done, total: uploads.length, bytes, totalBytes })
   })
 
+  opts.onFinalize?.()
   const fin = await deps.client
     .request('POST', `${path}/${encodeURIComponent(res.versionId)}/finalize`, {
       schema: FinalizeResponseSchema,

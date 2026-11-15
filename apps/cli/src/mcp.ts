@@ -47,6 +47,8 @@ import {
   describeReadFiles,
   describeResponses,
   describeRoles,
+  describeServerError,
+  describeServerLive,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
@@ -55,6 +57,7 @@ import {
   FORMS_HINT,
   FORMS_NOTE,
   type FormsSummary,
+  formatLogLine,
   formsSummaryLines,
   formsTemplate,
   GUIDE_NOTE,
@@ -79,6 +82,11 @@ import {
   privateAudience,
   responsesPageUrl,
   reviewUrl,
+  SERVER_BUNDLE,
+  SERVER_CONFIG_FILE,
+  SERVER_TEMPLATE,
+  SERVER_TEMPLATE_CONFIG,
+  SERVERS_NOTE,
   shareForFeedback,
 } from '@fling/shared'
 import { checkPathsIndex } from '@fling/shared/paths-index'
@@ -100,6 +108,7 @@ import {
 } from './config.ts'
 import type { OpenLike } from './context.ts'
 import { BaseChangedError, deploy, NameTakenError, resolveSiteName } from './deploy.ts'
+import { type DevServer, startDevServer } from './dev-server.ts'
 import {
   type DoctorDeps,
   describeChecks,
@@ -119,7 +128,6 @@ import {
   resolveInput,
 } from './locate.ts'
 import {
-  buildManifest,
   describeSkipped,
   hasRootIndex,
   htmlPages,
@@ -151,6 +159,8 @@ import {
   writeSiteLink,
 } from './pull.ts'
 import { createReadyWaiter, type ReadyWaiter } from './ready.ts'
+import { buildSiteManifest, findServer, serverRequest } from './server-build.ts'
+import { checkSince, egressOf, readLogs, serverErrorOf, serversEnabled } from './site-server.ts'
 import {
   accessLevelsEnabled,
   addComment,
@@ -237,6 +247,8 @@ export const mcpLocalInstructions = (
     comments?: boolean
     forms?: boolean
     notifications?: boolean
+    /** some known Fling runs site servers */
+    siteServers?: boolean
     servers?: readonly KnownServer[]
     /** A newer Fling release a known server runs (`newestRelease`). */
     newerRelease?: string | null
@@ -265,6 +277,7 @@ export const mcpLocalInstructions = (
         ]
       : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),
+    ...(opts.siteServers ? [SERVERS_NOTE(w, { local: true })] : []),
     ...[GUIDE_NOTE(w)].filter(p => p !== undefined),
   ].join('\n\n')
 
@@ -534,6 +547,8 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       remove?: string[]
       /** a forms config given inline (null: none), instead of the folder's fling.forms.json */
       forms?: unknown
+      /** the user said yes to a server on a public site */
+      confirmPublicServer?: boolean
     }
   ): Promise<DeployOutcome> {
     if (opts.access) await requireAccessLevels(t)
@@ -544,7 +559,21 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     const shownFolder = folder ?? link?.path
     const inFolder = (file: string) => (shownFolder === undefined ? file : `${shownFolder}/${file}`)
     const top = folder === undefined ? 'at the root' : `in /${folder}/`
-    let local = await buildManifest(dir)
+    const source = await findServer(dir)
+    if (source && shownFolder !== undefined) {
+      throw new CliError(
+        `A Path can't have a server: ${source.entry ?? SERVER_BUNDLE} runs at the site's root only. Publish the server to the site itself, without a path`
+      )
+    }
+    const serversNow = source
+      ? await loadInstanceWith(store, t.config, fetchImpl, 'servers')
+      : await t.instance()
+    const built = await buildSiteManifest(dir, {
+      servers: serversEnabled(serversNow),
+      ...(serversNow ? { instanceName: serversNow.name } : {}),
+    })
+    let local = built.local
+    const siteServer = built.server
     local.skipped.dotfiles.unshift(...(opts.skippedDotfiles ?? []))
     const skippedNote = describeSkipped(local.skipped)
       .map(l => `\n${l}.`)
@@ -616,8 +645,24 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             }
           : { public: opts.public }),
         forms: forms.send,
+        ...(siteServer
+          ? {
+              server: serverRequest(siteServer),
+              ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
+            }
+          : {}),
       }
     ).catch((error: unknown) => {
+      const refusal = serverErrorOf(error)
+      const said =
+        refusal && error instanceof Error
+          ? describeServerError(refusal.code, error.message, refusal, {
+              site: opts.name,
+              retryWith: opts.retryWith,
+              local: true,
+            })
+          : undefined
+      if (said) throw new CliError(said)
       if (error instanceof BaseChangedError) {
         throw new CliError(
           `Not published: ${error.message}. ` +
@@ -685,10 +730,19 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       : opts.access
         ? `\nIts access is unchanged (deploying never changes it for an existing site): ${who} ${accessChangeHint('mcp', result.name, { invites: instance?.capabilities.invites === true })}`
         : ''
+    const serverText =
+      siteServer && result.status !== 'unchanged'
+        ? describeServerLive({
+            name: result.name,
+            secrets: siteServer.config.secrets,
+            egress: egressOf(serversNow),
+          })
+        : ''
+    const notes = built.notes.map(n => `\n${n}`).join('')
     return {
       kind: 'deployed',
       summary:
-        `${head}${access}${warnings}${describePublishHints(result.hints)}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
+        `${head}${serverText}${access}${warnings}${notes}${describePublishHints(result.hints)}${skippedNote}${edge.note}${onFling(t.url, instance)}` +
         `\nTo check exactly which files the site has, call fling_files with name "${result.name}".` +
         (formsHint ? `\n${formsHint}` : ''),
       data: {
@@ -706,6 +760,18 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         generatedIndex,
         warnings: result.warnings,
         skipped: local.skipped,
+        ...(siteServer
+          ? {
+              server: {
+                entry: siteServer.entry,
+                bundleBytes: siteServer.size,
+                secrets: siteServer.config.secrets,
+                ...(siteServer.config.health ? { health: siteServer.config.health } : {}),
+                egress: egressOf(serversNow),
+                buildInputs: siteServer.buildInputs,
+              },
+            }
+          : {}),
         ...(formsSummary
           ? {
               forms: {
@@ -728,6 +794,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         comments: servers.some(s => commentsEnabled(s.instance)),
         forms: servers.some(s => formsEnabled(s.instance)),
         notifications: servers.some(s => notificationsEnabled(s.instance)),
+        siteServers: servers.some(s => serversEnabled(s.instance) === true),
         servers,
         newerRelease: newestRelease(servers),
       }),
@@ -741,6 +808,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
     emails,
     groups,
     forms: formsArg,
+    confirmPublicServer,
   } = mcpTools.publish.inputSchema
 
   server.registerTool(
@@ -769,6 +837,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         `A ${FORMS_FILE} at the top of the folder is never published: it is the site's forms, for structured ` +
         'feedback (labels, ratings, scores, eval judgements) on the review page; `forms` passes one inline instead ' +
         '(fling_forms_template). ' +
+        `A server.ts or server.js at the top of a folder (or the entry its ${SERVER_CONFIG_FILE} names) is its site server, ` +
+        `where the Fling runs them: it is bundled with its dependencies into ${SERVER_BUNDLE} and run for /api/*; the ` +
+        `entry, server/, ${SERVER_CONFIG_FILE}, package.json and lockfiles are build inputs, never published. ` +
         `${NEVER_PUBLISHED}${note}`,
       inputSchema: {
         path: z
@@ -806,6 +877,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         forms: formsArg.describe(
           `The site's forms config, instead of the folder's ${FORMS_FILE} (null: none). Omitted: the file, if any; without one, deploying a whole site removes its forms and a \`sitePath\` or pulled folder keeps them`
         ),
+        confirmPublicServer,
         server: serverArg,
       },
       annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -850,6 +922,7 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             listHtml: args.listHtml,
             folder: args.sitePath,
             retryWith: 'fling_deploy',
+            confirmPublicServer: args.confirmPublicServer,
             skippedDotfiles: prepared.skippedDotfiles,
             ...(args.forms === undefined ? {} : { forms: args.forms }),
           })
@@ -1057,7 +1130,14 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         const tmp = await mkdtemp(join(tmpdir(), 'fling-publish-'))
         try {
           const { skippedDotfiles } = await writeInlineFiles(tmp, args.files)
+          if (args.siteServer !== undefined) {
+            if (args.files.some(f => f.path.replace(/^\.?\//, '') === SERVER_CONFIG_FILE)) {
+              throw new CliError(`Pass \`siteServer\` or a ${SERVER_CONFIG_FILE} file, not both`)
+            }
+            await writeFile(join(tmp, SERVER_CONFIG_FILE), JSON.stringify(args.siteServer))
+          }
           return await deployFolder(t, tmp, {
+            confirmPublicServer: args.confirmPublicServer,
             skippedDotfiles,
             name,
             nameGiven: true,
@@ -1850,6 +1930,130 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   }
 
   // Notifications: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => serversEnabled(s.instance) === true)) {
+    /** The call's Fling, refused when it doesn't run site servers. */
+    const withServers = async (target: Target) => {
+      const instance = await loadInstanceWith(store, target.config, fetchImpl, 'servers')
+      if (serversEnabled(instance) === false) {
+        throw new CliError(
+          `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)}) doesn't run site servers`
+        )
+      }
+      return instance
+    }
+
+    server.registerTool(t.logs.name, serverTool(t.logs), args =>
+      run(t.logs.name, args.server, async target => {
+        const instance = await withServers(target)
+        const since = checkSince(args.since ?? '1h')
+        const lines = await readLogs(target.client, args.name, { since }, instance?.name)
+        return {
+          summary: lines.length
+            ? `${args.name}'s server log since ${since} ago (${lines.length} line${lines.length === 1 ? '' : 's'}, oldest first):\n${lines.map(formatLogLine).join('\n')}`
+            : `No log lines for ${args.name} since ${since} ago.`,
+          data: { name: args.name, lines },
+        }
+      })
+    )
+
+    // The template is local: no Fling is asked.
+    server.registerTool(
+      t.serverTemplate.name,
+      {
+        title: t.serverTemplate.title,
+        description: `${t.serverTemplate.description} On this computer a folder's server can also be a server.ts with npm dependencies: fling_deploy bundles it.`,
+        inputSchema: t.serverTemplate.inputSchema,
+        annotations: t.serverTemplate.annotations,
+      },
+      async () =>
+        textResult(
+          "A dependency-free site server to start from. Save it in the site's folder as _fling/server.mjs " +
+            `(or as server.js at the top, which fling_deploy bundles), with this ${SERVER_CONFIG_FILE} beside the pages; ` +
+            'add the routes the site needs, and the names of any site secrets it reads to "secrets" (the user sets ' +
+            'their values: never the conversation). fling_dev runs it locally.\n\n' +
+            `_fling/server.mjs:\n${SERVER_TEMPLATE}\n${SERVER_CONFIG_FILE}:\n${JSON.stringify(SERVER_TEMPLATE_CONFIG, null, 2)}`
+        )
+    )
+
+    /** The dev servers this MCP server runs, by folder. */
+    const devServers = new Map<string, DevServer>()
+    process.once('exit', () => {
+      for (const dev of devServers.values()) void dev.close()
+    })
+    server.registerTool(
+      'fling_dev',
+      {
+        title: 'Run a site with its server locally',
+        description:
+          'Serve a folder on this computer the way its site will be served, with its site server running beside it ' +
+          `(its server.ts, server.js or ${SERVER_BUNDLE}, bundled as fling_deploy bundles it) and rebuilt when a file ` +
+          'changes: at http://localhost:47180 (or a free port). Call it again with the same folder to rebuild now and ' +
+          'read what the server printed and the requests it took; `stop: true` stops it. Then try it with curl or the ' +
+          'page, and deploy with fling_deploy. `as` makes requests arrive as that signed-in viewer (without it, none, as ' +
+          `on a public site). Secrets come from the folder's .env and .env.local, only those ${SERVER_CONFIG_FILE} declares: ` +
+          'never ask for their values; the user puts them there. Nothing leaves the computer.',
+        inputSchema: {
+          path: z
+            .string()
+            .min(1)
+            .describe('The site folder (absolute, or relative to the working directory)'),
+          as: z.string().email().optional().describe('Requests arrive as this signed-in viewer'),
+          guest: z.boolean().optional().describe('With `as`: the viewer is a guest'),
+          stop: z.boolean().optional().describe('Stop the dev server for this folder'),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      },
+      async args => {
+        try {
+          const dir = resolvePath(cwd, args.path)
+          const running = devServers.get(dir)
+          if (args.stop) {
+            if (!running) return textResult(`No dev server is running for ${dir}.`)
+            devServers.delete(dir)
+            await running.close()
+            return textResult(`Stopped the dev server for ${dir}.`)
+          }
+          const viewerChanged =
+            running &&
+            (running.status().viewer?.email ?? undefined) !== (args.as?.toLowerCase() ?? undefined)
+          if (running && viewerChanged) {
+            devServers.delete(dir)
+            await running.close()
+          }
+          let dev = viewerChanged ? undefined : running
+          if (dev) await dev.rebuild()
+          else {
+            dev = await startDevServer({
+              dir,
+              ...(args.as ? { as: args.as } : {}),
+              guest: args.guest,
+            })
+            devServers.set(dir, dev)
+          }
+          const status = dev.status()
+          const logs = dev.recentLogs().slice(-50).map(formatLogLine)
+          const build =
+            status.build && !status.build.ok
+              ? `\nThe server didn't build: ${status.build.error}`
+              : status.probe?.error
+                ? `\nThe server didn't start (${status.probe.error}).${status.probe.logs.length ? `\n${status.probe.logs.join('\n')}` : ''}`
+                : status.server
+                  ? `\nIts server (${status.server}) answered GET ${status.probe?.path} with ${status.probe?.status}.`
+                  : '\nThe folder has no server: static files only.'
+          const missing = status.missing.length
+            ? `\nDeclared secrets not in .env or .env.local: ${status.missing.join(', ')} (ask the user to add them; never their values here).`
+            : ''
+          return textResult(
+            `${running && !viewerChanged ? 'Rebuilt' : 'Serving'} ${dir} at ${status.url}${status.viewer ? `, as ${status.viewer.email}` : ''}.` +
+              `${build}${missing}${logs.length ? `\nRecent log:\n${logs.join('\n')}` : ''}\n\n${JSON.stringify(status, null, 2)}`
+          )
+        } catch (error) {
+          return failure(error)
+        }
+      }
+    )
+  }
+
   if (servers.some(s => notificationsEnabled(s.instance))) {
     /** The call's Fling and its name, refused when it has no notifications. */
     const withNotifications = async (target: Target) => {

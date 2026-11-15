@@ -166,9 +166,13 @@ export async function rollback(client: ApiClient, name: string, versionId: strin
 export async function setVisibility(
   client: ApiClient,
   name: string,
-  visibility: Visibility
+  visibility: Visibility,
+  /** making a site whose live version has a server public (else 409 `public_server`) */
+  confirmPublicServer?: boolean
 ): Promise<Site> {
-  const raw = await client.request('PATCH', sitePath(name), { body: { visibility } })
+  const raw = await client.request('PATCH', sitePath(name), {
+    body: { visibility, ...(confirmPublicServer ? { confirmPublicServer: true } : {}) },
+  })
   return siteAfter(client, name, raw)
 }
 
@@ -180,11 +184,17 @@ export async function setAccess(
   client: ApiClient,
   name: string,
   access: AccessLevel,
-  audience?: AudienceInput
+  audience?: AudienceInput,
+  /** making a site whose live version has a server public (else 409 `public_server`) */
+  confirmPublicServer?: boolean
 ): Promise<SiteWithAudience> {
   return client.request('PATCH', sitePath(name), {
     schema: SiteWithAudienceSchema,
-    body: { access, ...(audience ? { audience } : {}) },
+    body: {
+      access,
+      ...(audience ? { audience } : {}),
+      ...(confirmPublicServer ? { confirmPublicServer: true } : {}),
+    },
   })
 }
 

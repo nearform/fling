@@ -17,9 +17,8 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { createConnection, createServer } from 'node:net'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { SERVER_SITE_HEADER, SERVER_START_LOG_LINES } from '@fling/shared'
+import { SERVER_HELPER_MODULE, SERVER_SITE_HEADER, SERVER_START_LOG_LINES } from '@fling/shared'
 import type { Blobs } from '../../blobs/types.ts'
-import { SERVER_HELPER_MODULE } from '../index.ts'
 import type {
   ProbeRequest,
   ProbeResult,
@@ -37,7 +36,7 @@ export const NODE_HELPER = fileURLToPath(new URL('./helper.mjs', import.meta.url
 
 export interface NodeSiteServersOptions {
   /** where bundles are read from */
-  blobs: Blobs
+  blobs: Pick<Blobs, 'get'>
   /** where bundles are copied to and run from */
   workDir: string
   /** a version's files as a directory, for `file()` (fs blobs: under their root); null: none */

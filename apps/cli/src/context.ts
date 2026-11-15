@@ -3,7 +3,7 @@
  * injectable seams tests use (`fetch`, `open`, `confirm`, TTY). Commands receive a context and
  * return; they never touch `process` directly.
  */
-import { confirm, isCancel, text } from '@clack/prompts'
+import { confirm, isCancel, password, text } from '@clack/prompts'
 import { type ApiClient, createApiClient, type FetchLike } from './api.ts'
 import { type ConfigStore, createConfigStore, type Env, type ResolvedConfig } from './config.ts'
 import { CliError, NoServerError, NotLoggedInError } from './errors.ts'
@@ -36,6 +36,10 @@ export interface CommandContext {
   binName: string
   /** Waits for a new site / share link to reach the edge; absent → no wait (tests). */
   waitReady?: ReadyWaiter
+  /** All of stdin, or null when stdin is a terminal (a value is then asked with `promptSecret`). */
+  readStdin?: () => Promise<string | null>
+  /** Ask for a value without echoing it (a site secret). */
+  promptSecret?: PromptLike
 }
 
 export interface ContextOptions {
@@ -69,7 +73,22 @@ export async function createContext(options: ContextOptions = {}): Promise<Comma
     progress: interactive ? ttyProgress : () => {},
     binName: BIN_NAME,
     waitReady: createReadyWaiter({ env: options.env }),
+    readStdin: readAllStdin,
+    promptSecret: ttySecret,
   }
+}
+
+async function readAllStdin(): Promise<string | null> {
+  if (process.stdin.isTTY) return null
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+async function ttySecret(question: string): Promise<string> {
+  const answer = await password({ message: question.trim(), output: process.stderr })
+  if (isCancel(answer)) throw new CliError('Cancelled')
+  return answer ?? ''
 }
 
 // Prompts draw on stderr so stdout stays clean for pipes and --json. Ctrl-C / Esc cancels.

@@ -1,7 +1,13 @@
-// Bundle src/cli.ts → dist/cli.js: one ESM file with a node shebang. `@fling/shared` (a workspace
-// devDependency consumed as TypeScript) is bundled in; every runtime dependency stays external so
-// npm installs it.
-import { chmod, readFile, rm } from 'node:fs/promises'
+// Bundle src/cli.ts → dist/cli.js: one ESM file with a node shebang. `@fling/shared` and
+// `@fling/api` (workspace devDependencies consumed as TypeScript) are bundled in; every runtime
+// dependency stays external so npm installs it.
+//
+// Beside it, for site servers: the package's `./server` export (the helpers a server imports) is
+// the core's Node implementation of them, dist/helper.mjs, typed by dist/server.d.ts; and
+// dist/entry.mjs is the core's Node entry that `fling dev` runs a server behind. Both .mjs files
+// are the core's own (apps/api/src/servers/node), copied as they are: the local runtime
+// (NodeSiteServers, bundled into cli.js) finds them next to the module it runs from.
+import { chmod, copyFile, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
@@ -24,4 +30,8 @@ await build({
   logLevel: 'warning',
 })
 await chmod(outfile, 0o755)
+const node = join(root, '../api/src/servers/node')
+await copyFile(join(node, 'entry.mjs'), join(root, 'dist/entry.mjs'))
+await copyFile(join(node, 'helper.mjs'), join(root, 'dist/helper.mjs'))
+await copyFile(join(root, 'src/server/index.d.ts'), join(root, 'dist/server.d.ts'))
 console.log(`built ${outfile}`)

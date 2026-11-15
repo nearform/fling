@@ -23,12 +23,15 @@ import {
   describeReadFiles,
   describeResponses,
   describeRoles,
+  describeServerError,
+  describeServerLive,
   describeSharedSite,
   describeSiteAccess,
   describeVersionFiles,
   editAudienceInput,
   editRoleInput,
   FORMS_HINT,
+  formatLogLine,
   formsSummaryLines,
   formsTemplate,
   MCP_PUBLISH_MAX_BYTES,
@@ -48,6 +51,9 @@ import {
   responsesPageUrl,
   reviewUrl,
   roleLabel,
+  SERVER_CONFIG_FILE,
+  SERVER_TEMPLATE,
+  SERVER_TEMPLATE_CONFIG,
   type Site,
   shareForFeedback,
   sortSites,
@@ -68,6 +74,7 @@ import { ApiError } from '../lib/errors.ts'
 import * as notifications from '../notifications/settings.ts'
 import * as paths from '../paths.ts'
 import { canInstance, type Principal, userActor } from '../policy.ts'
+import { siteLogs } from '../servers/api.ts'
 import type { StoredManifest } from '../sites.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
@@ -100,7 +107,28 @@ async function run(op: () => Promise<Result>): Promise<CallToolResult> {
   }
 }
 
+/** A tool's refusal already in the words the agent needs (serverAware). */
+class ToolMessage extends Error {}
+
+/** Run a publish, rollback or upload finish, its site server's refusals said as what to do next. */
+async function serverAware<T>(site: string, retryWith: string, op: () => Promise<T>): Promise<T> {
+  try {
+    return await op()
+  } catch (err) {
+    if (err instanceof ApiError) {
+      const extra = (err.extra ?? {}) as { secrets?: string[]; logs?: string[] }
+      const text = describeServerError(err.code, err.message, extra, { site, retryWith })
+      if (text) throw new ToolMessage(text)
+    }
+    throw err
+  }
+}
+
+/** Whether the instance runs site servers (the `servers` capability). */
+const serversEnabled = (deps: Deps) => instanceMetadata(deps.config).capabilities.servers === true
+
 export function describeError(err: unknown): string {
+  if (err instanceof ToolMessage) return err.message
   if (err instanceof ApiError) {
     if (err.code === 'name_taken') {
       const suggestions = (err.extra?.suggestions as string[] | undefined) ?? []
@@ -214,9 +242,17 @@ async function publishResult(
   const formsText = forms?.summary
     ? `\n${describeFormsSummary(forms.summary, forms.responsesPage)}`
     : ''
+  const serverText =
+    site.hasServer && status !== 'unchanged'
+      ? describeServerLive({
+          name: site.name,
+          secrets: await liveSecrets(deps, site.name),
+          egress: deps.config.servers.egress,
+        })
+      : ''
   return {
     text:
-      `${head}${formsText}${privacy}${edge.note}${warnings}${describePublishHints(outcome.hints)}` +
+      `${head}${formsText}${serverText}${privacy}${edge.note}${warnings}${describePublishHints(outcome.hints)}` +
       `\nTo check exactly which files the site has, call fling_files with name "${site.name}".` +
       (forms && !forms.summary ? `\n${FORMS_HINT}` : ''),
     data: {
@@ -251,6 +287,14 @@ async function publishResult(
           : {}),
     },
   }
+}
+
+/** The secrets the site's live version declares (its `fling.json`), for the publish result. */
+async function liveSecrets(deps: Deps, name: string): Promise<string[]> {
+  const site = await deps.store.findSite(name)
+  if (!site?.currentVersionId) return []
+  const version = await deps.store.getVersion(site, site.currentVersionId)
+  return version?.server?.secrets ?? []
 }
 
 /** Whether the instance has forms (the `forms` capability). */
@@ -344,6 +388,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
         comments: deps.config.comments,
         forms: formsEnabled(deps),
         notifications: notificationChannels(deps.config).length > 0,
+        servers: serversEnabled(deps),
       }),
     }
   )
@@ -500,16 +545,20 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
         `These files are ${(total / 1024 / 1024).toFixed(1)} MB; fling_publish takes up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB. Use fling_upload_begin / fling_upload_file / fling_upload_finish instead`
       )
     }
-    const outcome = await publishFiles(deps, user, args.name, files, {
-      principal,
-      path: args.path,
-      base: args.base,
-      remove: args.remove,
-      spa: args.spa,
-      ...accessOf(args),
-      listHtml: args.listHtml,
-      ...(args.forms === undefined ? {} : { forms: args.forms }),
-    })
+    const outcome = await serverAware(args.name, 'fling_publish', () =>
+      publishFiles(deps, user, args.name, files, {
+        principal,
+        path: args.path,
+        base: args.base,
+        remove: args.remove,
+        spa: args.spa,
+        ...accessOf(args),
+        listHtml: args.listHtml,
+        ...(args.forms === undefined ? {} : { forms: args.forms }),
+        ...(args.siteServer === undefined ? {} : { server: args.siteServer }),
+        ...(args.confirmPublicServer ? { confirmPublicServer: true } : {}),
+      })
+    )
     return publishResult(deps, args.name, outcome, 'fling_publish', args.access)
   })
 
@@ -545,10 +594,13 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
 
   registerSiteTool(mcpTools.uploadFinish, async args => {
     const upload = await deps.store.getUpload(args.uploadId)
-    const outcome = await finishUpload(deps, user, args.uploadId, {
-      principal,
-      listHtml: args.listHtml,
-    })
+    const outcome = await serverAware(upload?.name ?? 'the site', 'fling_upload_finish', () =>
+      finishUpload(deps, user, args.uploadId, {
+        principal,
+        listHtml: args.listHtml,
+        ...(args.confirmPublicServer ? { confirmPublicServer: true } : {}),
+      })
+    )
     return publishResult(
       deps,
       upload?.name ?? 'the site',
@@ -713,7 +765,9 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
         data: { name: args.name, ...path },
       }
     }
-    const site = await sites.rollback(deps, user, args.name, args.versionId)
+    const site = await serverAware(args.name, 'fling_rollback', () =>
+      sites.rollback(deps, user, args.name, args.versionId)
+    )
     return {
       text: `${site.name} now serves version ${site.currentVersionId}: ${site.url}`,
       data: site,
@@ -745,6 +799,38 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       const check = checkPathsIndex(args.html)
       return { text: describePathsCheck(check), data: { ...check } }
     })
+  }
+
+  if (serversEnabled(deps)) {
+    registerSiteTool(mcpTools.logs, async args => {
+      const lines = await siteLogs(deps, user, args.name, {
+        ...(args.since ? { since: args.since } : {}),
+      })
+      return {
+        text: lines.length
+          ? `${args.name}'s server log since ${args.since ?? '1h'} ago (${lines.length} line${lines.length === 1 ? '' : 's'}, oldest first):\n${lines.map(formatLogLine).join('\n')}`
+          : `No log lines for ${args.name} since ${args.since ?? '1h'} ago.`,
+        data: { name: args.name, lines },
+      }
+    })
+
+    registerSiteTool(mcpTools.serverTemplate, async () => ({
+      text:
+        'A dependency-free site server to start from. Add the routes the site needs to its table (plain ' +
+        'JavaScript, no npm packages: a remote publish takes the server as one file), then call fling_publish with ' +
+        `the site's pages plus these two files: _fling/server.mjs and ${SERVER_CONFIG_FILE} (add the names of any ` +
+        'site secrets it reads to "secrets"; the user sets their values, never the conversation).\n\n' +
+        `_fling/server.mjs:\n${SERVER_TEMPLATE}\n${SERVER_CONFIG_FILE}:\n${JSON.stringify(SERVER_TEMPLATE_CONFIG, null, 2)}`,
+      data: {
+        files: [
+          { path: '_fling/server.mjs', content: SERVER_TEMPLATE },
+          {
+            path: SERVER_CONFIG_FILE,
+            content: `${JSON.stringify(SERVER_TEMPLATE_CONFIG, null, 2)}\n`,
+          },
+        ],
+      },
+    }))
   }
 
   if (canInstance(principal, 'account.groups.read')) {

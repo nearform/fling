@@ -6,7 +6,8 @@
  * (see gitignore.ts), and `node_modules`; anything matched by a root `.flingignore` (gitignore
  * syntax) is skipped too. Skipped dotfiles and gitignored files are reported in `skipped`. The
  * folder's own `fling.forms.json` (forms.ts) is never a file of the site: a deploy sends it as the
- * version's forms instead.
+ * version's forms instead; nor is its `fling.json` (server-build.ts), which says how its site
+ * server runs. A folder with a server leaves its other build inputs out too (`exclude`).
  *
  * Refused outright (a CliError, nothing is uploaded): secret files by name (`server.key`,
  * `id_rsa`, `credentials.json`… — isSecretPath) and files whose contents contain secrets
@@ -37,6 +38,7 @@ import {
   NEVER_PUBLISHED_NOTE,
   renderHtmlListing,
   SECRET_SCAN_MAX_FILE_BYTES,
+  SERVER_CONFIG_FILE,
   type SecretFinding,
   scanBytesForSecrets,
 } from '@fling/shared'
@@ -154,7 +156,17 @@ export function toManifest(local: LocalManifest): Manifest {
   }
 }
 
-export async function buildManifest(dir: string): Promise<LocalManifest> {
+export interface ManifestOptions {
+  /** Leave out this file or folder (site-relative) without reporting it: a build input. */
+  exclude?: (path: string, isDir: boolean) => boolean
+  /** No files is not an error: the caller adds some (a server's bundle). */
+  allowEmpty?: boolean
+}
+
+export async function buildManifest(
+  dir: string,
+  opts: ManifestOptions = {}
+): Promise<LocalManifest> {
   let root: string
   try {
     root = await realpath(dir)
@@ -185,7 +197,8 @@ export async function buildManifest(dir: string): Promise<LocalManifest> {
         continue
       }
       if (ALWAYS_SKIP.has(entry.name)) continue
-      if (rel === FORMS_FILE && !entry.isDirectory()) continue
+      if ((rel === FORMS_FILE || rel === SERVER_CONFIG_FILE) && !entry.isDirectory()) continue
+      if (opts.exclude?.(rel, entry.isDirectory())) continue
       let abs = join(realDir, entry.name)
       let isDir = entry.isDirectory()
       let isFile = entry.isFile()
@@ -248,7 +261,7 @@ export async function buildManifest(dir: string): Promise<LocalManifest> {
   await walk(root, '')
 
   if (secretFiles.length > 0) throw new SecretFilesError(secretFiles)
-  if (found.length === 0) {
+  if (found.length === 0 && !opts.allowEmpty) {
     throw new CliError(
       `Nothing to deploy: ${dir} has no files (dotfiles, gitignored files and node_modules are skipped)`
     )

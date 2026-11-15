@@ -216,6 +216,10 @@ fling secrets rm my-site SLACK_WEBHOOK_URL
 ```
 
 ```text
+$ fling secrets set my-site --from .env SLACK_WEBHOOK_URL
+  ✓ SLACK_WEBHOOK_URL set on my-site (from .env; nothing else read)
+  The live server (version 5024258572153ca0) restarted with it.
+
 $ fling secrets ls my-site
   NAME                SET BY            WHEN
   SLACK_WEBHOOK_URL   ada@example.com   2 minutes ago
@@ -226,7 +230,9 @@ $ fling secrets ls my-site
 - `fling deploy` never uploads `.env`: a local file never quietly becomes production secrets.
 - Secrets belong to the site, not the version. A rollback runs the old code with today's secrets,
   so a rotated key never comes back.
-- Changing a secret restarts the server with the new value; there is no need to redeploy.
+- Setting a secret puts it to use at once, and says what it did: the live server restarts with
+  the new value, or the version a deploy left waiting for its secrets goes live (see
+  [Publish](#publish-fling-deploy)). There is no need to deploy again.
 - The site page in the web app lists them too, with who set each and when, and can set them.
 
 > **Warning** Anyone who can publish the site can read its secrets, by publishing a server that
@@ -240,11 +246,13 @@ fling deploy . --name workshop-quote --access members
 ```
 
 ```text
-  bundling server.ts → _fling/server.mjs (474 KB, 102 KB gzipped)
-  starting server… GET /api/health 200 in 1.2 s
-  ✓ live  https://workshop-quote.<sites domain>/
-          server: /api/* · members only · outbound network: open · secrets: SLACK_WEBHOOK_URL
-  review  https://<your Fling>/review/workshop-quote
+  bundling server.ts → _fling/server.mjs (465 KB, 100 KB gzipped)
+  starting server… GET /api/health answered in 1.2 s
+  ✓ Deployed workshop-quote (4 files, 467 KB; uploaded 4, version f12ba1d8273dc664)
+  https://workshop-quote.<sites domain>/
+  Share for feedback (reviewers sign in to <your Fling>): https://<your Fling>/review/workshop-quote
+  server: /api/* · members only · outbound network: open · secrets: SLACK_WEBHOOK_URL
+  logs: `fling logs workshop-quote`
 ```
 
 What happens, in order:
@@ -260,9 +268,28 @@ What happens, in order:
 If the server doesn't start, nothing changes: the live version keeps serving, and the deploy fails
 with `server_failed_to_start` and the first lines of the server's log.
 
+**A secret not set yet holds the version back, not the deploy.** The files upload and the version
+waits; the deploy names the secrets it needs. Set them, and the version goes live as soon as the
+last one is set, with no second deploy:
+
+```text
+$ fling deploy . --name workshop-quote
+  ✖ Version f12ba1d8273dc664 of "workshop-quote" needs the site secrets SLACK_WEBHOOK_URL, which aren't set. …
+    Set it: `fling secrets set workshop-quote SLACK_WEBHOOK_URL < file`, or
+    `fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL`. The version goes live as soon as the last is set
+
+$ fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
+  ✓ SLACK_WEBHOOK_URL set on workshop-quote (from .env; nothing else read)
+  Version f12ba1d8273dc664 is live now: https://workshop-quote.<sites domain>/
+```
+
+If that start fails instead, `fling secrets set` prints the failure and the server's log and exits
+non-zero; the version stops waiting, so fix it and deploy again.
+
 **A server on a public site asks first.** Anyone can call a public site's `/api/*` directly,
-without the page, and use its secrets through it. The CLI asks you to confirm; `--yes` confirms
-in scripts.
+without the page, and use its secrets through it. The CLI asks you to confirm, on `fling deploy`
+and on `fling access … --public` or `fling visibility … public` for a site with a server; `--yes`
+confirms in scripts, and without a terminal the CLI refuses rather than guess.
 
 ## Logs: fling logs
 
@@ -298,9 +325,13 @@ bundles the server, `fling_dev` runs the folder locally, and `fling_logs` reads 
   run it with fling dev."
 - "Deploy it to my-site for the design group, then show me its logs."
 
-The agent can't set a secret's value for you, and shouldn't: values never pass through the
-conversation. Set them yourself with `fling secrets set` or on the site page, then let the agent
-deploy.
+`fling_dev` starts `fling dev` for a folder and answers with its address; calling it again with
+the same folder rebuilds and returns what the server printed and the requests it took, and
+`stop: true` stops it. The agent then tries the routes with `curl` and deploys.
+
+The agent can't set a secret's value for you, and shouldn't: no tool takes one, so values never
+pass through the conversation. When a deploy answers `secrets_missing`, the agent tells you which
+to set; set them with `fling secrets set` or on the site page, and the waiting version goes live.
 
 ### Claude on the web and other remote clients
 
@@ -313,7 +344,9 @@ A remote client can't run esbuild, so over the remote MCP connector (`https://<y
    with a `/api/health` route) and the matching `fling.json`, like
    [the remote MCP example](#e-a-dependency-free-server-for-the-remote-mcp).
 2. Write the routes the site needs into it, without npm packages.
-3. Call `fling_publish` with `index.html`, `_fling/server.mjs`, `fling.json` and the other files.
+3. Call `fling_publish` with `index.html`, `_fling/server.mjs`, `fling.json` and the other files
+   (or pass the `fling.json` object as `siteServer` instead of the file). `fling.json` is never
+   published as a file.
 4. If the site is public, the first call answers with a `public_server` hint instead of
    publishing. Tell the user that anyone can call the site's `/api/*` and use its secrets through
    it, ask whether to go ahead, and if they agree repeat the call with
@@ -872,7 +905,7 @@ with the three files.
 | 400 `server_not_bundled` | `_fling/server.mjs` imports something other than `node:*` and `@nearform/fling/server`. Usually a remote client published a server with an npm import | Over the remote MCP, start from `fling_server_template` and drop the dependency. Otherwise deploy with the CLI or the local MCP, which bundle it |
 | 400 `server_on_path` | A Path publish contains `_fling/`. Servers run only at the site root | Deploy the server to the site itself, without `--path` |
 | 409 `path_conflict` | The site has a Path called `api`, which a server would hide; or the site has a server and you tried to make an `api` Path | Rename or remove the `api` Path, or use another folder name |
-| 409 `secrets_missing` | A secret named in `fling.json` isn't set on the site. Also on a rollback to a version that needs one | `fling secrets set <site> --from .env NAME` for each name listed, then deploy again |
+| 409 `secrets_missing` | A secret named in `fling.json` isn't set on the site. Also on a rollback to a version that needs one | `fling secrets set <site> --from .env NAME` for each name listed. After a deploy, the waiting version goes live when the last is set, with no second deploy; after a rollback, roll back again |
 | 422 `server_failed_to_start` | The start probe failed: the server crashed, didn't listen, took more than 10 s, or its health path didn't answer 2xx. Nothing changed for visitors | Read the log lines in the error. Run `fling dev` and call the health path; check the secrets it needs are set and well formed |
 | `public_server` (MCP) / a confirmation (CLI) | The site is public, so anyone can call `/api/*` and use its secrets through it | Make sure that's intended. CLI: answer the prompt or pass `--yes`. MCP: ask the user, then repeat with `confirmPublicServer: true` |
 | 403 `cross_origin` | A POST (or other write) to `/api/*` came from another site's page | Call `/api/…` from the site's own pages. Cross-origin calls can't be opted in to yet |

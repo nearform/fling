@@ -9,7 +9,7 @@
  *
  * `putUpload` is the one unauthenticated call: a PUT of file bytes to a presigned S3 URL.
  */
-import { ErrorEnvelopeSchema, RELEASE_HEADER } from '@fling/shared'
+import { ErrorEnvelopeSchema, RELEASE_HEADER, SERVER_BUNDLE } from '@fling/shared'
 import type { z } from 'zod'
 import { CliError, EXIT_ERROR, EXIT_FORBIDDEN, EXIT_NOT_LOGGED_IN } from './errors.ts'
 import { BIN_NAME, PACKAGE_NAME, VERSION } from './package-info.ts'
@@ -216,9 +216,13 @@ function errorFromResponse(status: number, body: unknown, method: string, path: 
       hint: code ? ERROR_HINTS[code] : undefined,
     })
     // The server's secret checks (the guarantee behind the CLI's own): keep the details for --json.
-    const extra = (body as { error?: { findings?: unknown; paths?: unknown } }).error
+    const extra = (body as { error?: Record<string, unknown> }).error
     if (Array.isArray(extra?.findings)) Object.assign(error, { findings: extra.findings })
     if (Array.isArray(extra?.paths)) Object.assign(error, { paths: extra.paths })
+    // A site server's refusals: the start log, the secrets to set, the imports to bundle.
+    for (const key of ['logs', 'secrets', 'imports'] as const) {
+      if (Array.isArray(extra?.[key])) Object.assign(error, { [key]: extra[key] })
+    }
     return error
   }
   return new CliApiError({ status, body, message: `${method} ${path} failed with HTTP ${status}` })
@@ -233,11 +237,26 @@ const NEVER_PUBLISHED_HINTS: Record<string, string> = {
   dotfile: `Dotfiles are never flung. Update the CLI (\`npm i -g ${PACKAGE_NAME}@latest\`), which skips them.`,
 }
 
+/** Hints for a site server's refusals (site servers, docs/site-servers.md). */
+const SERVER_HINTS: Record<string, string> = {
+  servers_not_allowed: `Ask an admin to let you publish site servers, or deploy the folder without its server (server.ts, ${SERVER_BUNDLE}).`,
+  server_not_bundled: `Deploy the folder with the CLI (\`${BIN_NAME} deploy\`), which bundles the server and its dependencies into one file.`,
+  server_on_path:
+    'Servers run at the site root only: deploy the server to the site itself, without --path.',
+  path_conflict:
+    "The site's server answers /api/*: rename or delete the Path called api, or publish without the server.",
+  too_many_servers:
+    'This Fling runs as many site servers as it allows: publish without the server, or ask an admin.',
+  server_failed_to_start: `Nothing changed for visitors: the live version keeps serving. Run \`${BIN_NAME} dev\` and call the server (its health path, if fling.json names one), fix it and deploy again.`,
+  server_stopped: "An admin has stopped this site's server: ask an admin.",
+}
+
 /** Hints for refusals a command can't fix itself, by the server's error code. */
 const ERROR_HINTS: Record<string, string> = {
   ...NEVER_PUBLISHED_HINTS,
   too_many_invites:
     'Nothing changed. Addresses from outside are invited as reviewers, a few a day per person: add them tomorrow, or ask an admin to invite them.',
+  ...SERVER_HINTS,
 }
 
 function describeCause(cause: unknown): string {

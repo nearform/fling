@@ -96,7 +96,10 @@ jobs:
           tarball="$(ls "$RUNNER_TEMP"/*-fling-*.tgz)"
           # List to a file first: `tar | grep -q` fails under pipefail (grep exits early, tar gets SIGPIPE).
           tar -tzf "$tarball" > "$RUNNER_TEMP/pack-contents.txt"
-          grep -qx 'package/dist/cli.js' "$RUNNER_TEMP/pack-contents.txt" || { echo "::error::dist/cli.js missing from $tarball"; exit 1; }
+          # The CLI, and what `@nearform/fling/server` and `fling dev` need beside it.
+          for f in cli.js entry.mjs helper.mjs server.d.ts; do
+            grep -qx "package/dist/$f" "$RUNNER_TEMP/pack-contents.txt" || { echo "::error::dist/$f missing from $tarball"; exit 1; }
+          done
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
 
       # Trusted publishing needs npm >= 11.5.1; don't depend on the version bundled with Node.

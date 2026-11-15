@@ -19,6 +19,7 @@ import { Command, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
+import { runDev } from './commands/dev.ts'
 import { runDoctor } from './commands/doctor.ts'
 import { runForms, runFormsCheck, runFormsInit, runResponses } from './commands/forms.ts'
 import {
@@ -44,6 +45,7 @@ import {
   runPathsInit,
 } from './commands/paths.ts'
 import { runPull } from './commands/pull.ts'
+import { runLogs, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/servers.ts'
 import { runSetup } from './commands/setup.ts'
 import {
   runAccess,
@@ -139,10 +141,13 @@ function report(error: unknown, ctx: CommandContext | undefined): void {
   if (error instanceof CliError && error.hint) log.hint(error.hint)
   if (ctx?.config.debug && error instanceof Error && error.stack) log.hint(error.stack)
   if (ctx?.json) {
-    const { code, findings, paths } = error as {
+    const { code, findings, paths, logs, secrets, imports } = error as {
       code?: unknown
       findings?: unknown
       paths?: unknown
+      logs?: unknown
+      secrets?: unknown
+      imports?: unknown
     }
     process.stdout.write(
       `${formatJson({
@@ -152,6 +157,9 @@ function report(error: unknown, ctx: CommandContext | undefined): void {
           ...(typeof code === 'string' ? { code } : {}),
           ...(Array.isArray(findings) ? { findings } : {}),
           ...(Array.isArray(paths) ? { paths } : {}),
+          ...(Array.isArray(logs) ? { logs } : {}),
+          ...(Array.isArray(secrets) ? { secrets } : {}),
+          ...(Array.isArray(imports) ? { imports } : {}),
         },
       })}\n`
     )
@@ -372,7 +380,12 @@ program
   .description(
     'private (sign-in required) or public (anyone can open the site; reviewing it still needs sign-in)'
   )
-  .action(action((ctx, name: string, visibility: string) => runVisibility(ctx, name, visibility)))
+  .option('-y, --yes', 'making public a site with a server: confirm that anyone may call it')
+  .action(
+    action((ctx, name: string, visibility: string, opts: { yes?: boolean }) =>
+      runVisibility(ctx, name, visibility, opts)
+    )
+  )
 program
   .command('access <name>')
   .helpGroup('Sites:')
@@ -396,6 +409,7 @@ program
   .option('--group <slugs...>', 'let these groups in (see `fling groups`)')
   .option('--remove-group <slugs...>', 'take these groups out')
   .option('--clear', 'empty the audience: everyone signed in can open it again')
+  .option('-y, --yes', 'with --public on a site with a server: confirm that anyone may call it')
   .action(
     action(
       (
@@ -410,6 +424,7 @@ program
           onlyMe?: boolean
           members?: boolean
           public?: boolean
+          yes?: boolean
         }
       ) => runAccess(ctx, name, opts)
     )
@@ -733,6 +748,76 @@ notifications
   .action(action(ctx => runNotificationsSent(ctx)))
 
 // ---- agents --------------------------------------------------------------------------------
+
+// ---- site servers --------------------------------------------------------------------------
+
+program
+  .command('dev [dir]')
+  .helpGroup('Site servers:')
+  .description(
+    'serve a folder (default: .) as its site will be served, its server (server.ts, fling.json) running beside it and rebuilt on save, at http://localhost:47180'
+  )
+  .option(
+    '--as <email>',
+    'requests arrive as this signed-in viewer (default: none, as on a public site)'
+  )
+  .option('--guest', 'with --as: the viewer is a guest, invited from outside as a reviewer')
+  .option('--port <port>', 'listen on this port (default: 47180, else a free one)')
+  .option('--spa', 'single-page app: serve index.html for unknown paths')
+  .action(
+    action(
+      (
+        ctx,
+        dir: string | undefined,
+        opts: { as?: string; guest?: boolean; port?: string; spa?: boolean }
+      ) => runDev(ctx, dir, opts)
+    )
+  )
+
+const secrets = program
+  .command('secrets')
+  .helpGroup('Site servers:')
+  .description(
+    "a site's secrets, which its server reads as process.env.NAME (owners and publishers)"
+  )
+secrets
+  .command('set <name> <secrets...>')
+  .description(
+    'set a secret, its value from stdin (asked, not shown, on a terminal); with --from, the named keys of a file. Never a value on the command line'
+  )
+  .option(
+    '--from <file>',
+    'read the values of the named secrets from this env file (e.g. .env), nothing else of it'
+  )
+  .action(
+    action((ctx, name: string, names: string[], opts: { from?: string }) =>
+      runSecretsSet(ctx, name, names, opts)
+    )
+  )
+secrets
+  .command('ls <name>')
+  .description(
+    "list a site's secrets: names, who set each and when (never values), and any its server needs that aren't set"
+  )
+  .action(action((ctx, name: string) => runSecretsList(ctx, name)))
+secrets
+  .command('rm <name> <secret>')
+  .description('remove a secret; the server restarts without it')
+  .action(action((ctx, name: string, secret: string) => runSecretsRemove(ctx, name, secret)))
+
+program
+  .command('logs <name>')
+  .helpGroup('Site servers:')
+  .description(
+    "a site server's log: a line per request (with the viewer id) and what it printed, kept 7 days"
+  )
+  .option('--since <when>', 'from this long ago (15m, 1h, 2d) or this time (ISO)', '1h')
+  .option('-f, --follow', 'keep printing new lines (every 2 seconds) until Ctrl-C')
+  .action(
+    action((ctx, name: string, opts: { since?: string; follow?: boolean }) =>
+      runLogs(ctx, name, opts)
+    )
+  )
 
 program
   .command('mcp')

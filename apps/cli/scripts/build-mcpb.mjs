@@ -6,7 +6,11 @@
 //    its origin is baked into the server's env as FLING_ADD_SERVER — the deploy passes the
 //    instance's app origin, so the extension a Fling serves adds that Fling to the ones it knows)
 //    and mcpb/icon.png next to it. Name, display name and author never change, so a copy from any
-//    Fling installs as the same extension and updates it in place;
+//    Fling installs as the same extension and updates it in place. Beside the server, the core's
+//    Node entry and helpers for site servers (entry.mjs, helper.mjs: fling_dev runs a server
+//    behind them). esbuild is the one dependency left out (it has a native binary): the extension
+//    publishes a folder whose server is already bundled (_fling/server.mjs) and asks for the CLI to
+//    bundle a server.ts;
 // 3. `mcpb validate` + `mcpb pack` → dist/fling.mcpb, with the devDependency @anthropic-ai/mcpb:
 //    installed from the lockfile, so building needs no network after `pnpm install`.
 //
@@ -43,8 +47,12 @@ await build({
   banner: {
     js: "import { createRequire as __flingCreateRequire } from 'node:module'; const require = __flingCreateRequire(import.meta.url);",
   },
+  external: ['esbuild'],
   logLevel: 'warning',
 })
+const node = join(root, '../api/src/servers/node')
+await copyFile(join(node, 'entry.mjs'), join(stage, 'server/entry.mjs'))
+await copyFile(join(node, 'helper.mjs'), join(stage, 'server/helper.mjs'))
 
 const manifest = JSON.parse(await readFile(join(root, 'mcpb/manifest.json'), 'utf8'))
 manifest.version = pkg.version

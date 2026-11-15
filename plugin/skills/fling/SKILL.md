@@ -386,6 +386,33 @@ path? }` returns every response as data and how many pages each form has left
 `fling_response_submit { name, path, formId, data }` when the user asks, for example to pre-label
 pages so your judgements can be compared with the reviewers'.
 
+## Site servers
+
+When the Fling runs site servers (the `fling_logs`, `fling_server_template` and, locally,
+`fling_dev` tools exist), a site can answer `/api/*` from a small server of its own, behind the
+site's access. Use one when the site needs something a static page can't do: a key kept off the
+page (an LLM or webhook proxy), data only signed-in people may see, a write to somewhere else.
+The full guide is `docs/site-servers.md` in the Fling repository, linked from the CLI's README.
+
+- **Locally (fling_deploy):** put `server.ts` or `server.js` at the top of the folder, exporting
+  `default { fetch(request) }` (or a Node `createServer` that listens). `fling_deploy` bundles it
+  with its npm dependencies; run `npm install` first. A `fling.json` declares the `secrets` it
+  needs and a `health` path the start probe calls. Run it first with `fling_dev { path, as? }`,
+  try the routes with curl, call `fling_dev` again to read its log, then deploy.
+- **Remote (fling_publish):** there is no bundler, so start from `fling_server_template` and send a
+  dependency-free `_fling/server.mjs` (importing only `node:*` and `@nearform/fling/server`), with
+  `fling.json` among the files or as `siteServer`.
+- **Secrets:** never ask for a value, and no tool takes one. When a deploy answers
+  `secrets_missing`, tell the user which names to set (`fling secrets set <site> --from .env NAME`
+  or the site page); the version goes live as soon as the last is set.
+- **`public_server`:** a public site's `/api/*` can be called by anyone. Tell the user, ask, and
+  only if they agree repeat with `confirmPublicServer: true`.
+- **`server_failed_to_start`:** nothing changed for visitors. Read the log lines in the result,
+  fix the server (run it with `fling_dev`), and deploy again. `fling_logs { name, since? }` reads
+  the live server's log.
+- Tell the server's code to log the viewer's `id`, never their email: everyone who publishes the
+  site reads its logs.
+
 ## Notifications
 
 When the Fling has notifications (it emails people when a site is shared with them, they are added

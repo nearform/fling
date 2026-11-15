@@ -21,6 +21,7 @@ import {
   whoHolds,
 } from '@fling/shared'
 import chalk from 'chalk'
+import { CliApiError } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
 import { loadInstanceWith } from '../instance.ts'
@@ -285,18 +286,48 @@ export async function runShare(
 export async function runVisibility(
   ctx: CommandContext,
   name: string,
-  visibility: string
+  visibility: string,
+  opts: { yes?: boolean } = {}
 ): Promise<void> {
   if (visibility !== 'private' && visibility !== 'public') {
     throw new CliError(`Visibility must be "private" or "public", not "${visibility}"`)
   }
-  const site = await setVisibility(requireClient(ctx), name, visibility as Visibility)
+  const client = requireClient(ctx)
+  const site = await confirmingPublicServer(ctx, name, opts.yes, confirmed =>
+    setVisibility(client, name, visibility as Visibility, confirmed)
+  )
   ctx.log.success(
     site.visibility === 'public'
       ? `${name} is public — no sign-in needed`
       : `${name} is private — sign-in required`
   )
   ctx.out.data(site, () => site.url)
+}
+
+/**
+ * Make a change that may make public a site whose live version has a server: with `yes`, confirmed
+ * up front; on a terminal, asked when the API answers 409 `public_server` (anyone could then call
+ * its `/api/*` and use its secrets through it); else that refusal, with how to confirm.
+ */
+async function confirmingPublicServer<T>(
+  ctx: CommandContext,
+  name: string,
+  yes: boolean | undefined,
+  change: (confirmed: boolean) => Promise<T>
+): Promise<T> {
+  try {
+    return await change(yes === true)
+  } catch (error) {
+    if (!(error instanceof CliApiError) || error.code !== 'public_server') throw error
+    if (!ctx.interactive) {
+      throw new CliError(error.message, { hint: 'Confirm with --yes.' })
+    }
+    ctx.log.warn(error.message)
+    if (!(await ctx.confirm(`Make ${name} public, with its server callable by anyone?`))) {
+      throw new CliError(`Nothing changed: ${name} keeps its access`)
+    }
+    return change(true)
+  }
 }
 
 /** The level `fling access` sets, from `--only-me`, `--members` and `--public`. */
@@ -329,6 +360,8 @@ export async function runAccess(
     onlyMe?: boolean
     members?: boolean
     public?: boolean
+    /** making a site with a server public: confirmed up front */
+    yes?: boolean
   }
 ): Promise<void> {
   const level = levelOf(opts)
@@ -366,6 +399,7 @@ async function runSetLevel(
     group?: string[]
     removeGroup?: string[]
     clear?: boolean
+    yes?: boolean
   }
 ): Promise<void> {
   if (
@@ -385,7 +419,10 @@ async function runSetLevel(
       hint: `Use \`${ctx.binName} visibility ${name} public|private\` and \`${ctx.binName} access ${name} --clear\`.`,
     })
   }
-  const site = await setAccess(requireClient(ctx), name, level)
+  const client = requireClient(ctx)
+  const site = await confirmingPublicServer(ctx, name, opts.yes, confirmed =>
+    setAccess(client, name, level, undefined, confirmed)
+  )
   const warnings = audienceWarnings(site)
   for (const w of warnings) ctx.log.warn(w)
   ctx.out.data({ ...site, warnings }, () => describeAudience(site, membersOf(ctx)))

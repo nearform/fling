@@ -21,6 +21,14 @@
  * DeployRequest.forms). A `fling.forms.json` among the files, at the top of the folder published,
  * is taken as `forms` and never published as a file. Either is checked first
  * (`checkFormsConfig`), so a bad config fails with every error, each saying where.
+ *
+ * Site servers (servers/index.ts): a server is `_fling/server.mjs` among the files, already one
+ * dependency-free module (a remote client can't bundle; `checkBundle` refuses any other import
+ * with `server_not_bundled`). Its `fling.json` is `server` (fling_publish's `siteServer`) or a
+ * `fling.json` among the files, at the top of the folder published, which is never published as a
+ * file either; only its `secrets` and `health` are read (its `server`, the entry the CLI bundles,
+ * means nothing here).
+ * `confirmPublicServer` is the publisher's yes to a server on a public site.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -38,6 +46,9 @@ import {
   normalizePathFolder,
   type PublishHint,
   renderHtmlListing,
+  SERVER_CONFIG_FILE,
+  type ServerConfig,
+  ServerConfigSchema,
   type Site,
   type Visibility,
 } from '@fling/shared'
@@ -79,6 +90,28 @@ export interface PublishOptions extends AccessOptions {
   listHtml?: boolean
   /** the version's forms config (null: none); omitted, as DeployRequest.forms */
   forms?: unknown
+  /** the server's `fling.json` (DeployRequest.server); omitted, a `fling.json` among the files */
+  server?: unknown
+  /** a server on a public site: the publisher said yes (DeployRequest.confirmPublicServer) */
+  confirmPublicServer?: boolean
+}
+
+/** A `fling.json` as an agent sent it, checked; 400 `invalid_server_config` naming the problem. */
+export function checkedServerConfig(raw: unknown, where = '`siteServer`'): ServerConfig {
+  const object = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+  // `server`, the entry the CLI bundles, has no meaning for a server already in one file.
+  const { server: _entry, ...rest } = object ? (raw as Record<string, unknown>) : {}
+  const parsed = ServerConfigSchema.safeParse(object ? rest : raw)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    const at = issue?.path.length ? ` at ${issue.path.join('.')}` : ''
+    throw new ApiError(
+      400,
+      'invalid_server_config',
+      `${where} is not a ${SERVER_CONFIG_FILE} Fling can use${at}: ${issue?.message ?? 'invalid'}. It takes "secrets" (names) and "health" (a path under /api/)`
+    )
+  }
+  return parsed.data
 }
 
 /** A forms config as an agent sent it, checked; 400 `invalid_forms` listing every error. */
@@ -204,6 +237,25 @@ export async function publishFiles(
     files.delete(FORMS_FILE)
     if (files.size === 0 && remove.length === 0) throw badRequest('No files to publish', 'no_files')
   }
+  let server = opts.server === undefined ? undefined : checkedServerConfig(opts.server)
+  const serverFile = files.get(SERVER_CONFIG_FILE)
+  if (serverFile) {
+    if (opts.server !== undefined) {
+      throw badRequest(
+        `Pass \`siteServer\` or a ${SERVER_CONFIG_FILE} file, not both`,
+        'bad_request'
+      )
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(Buffer.from(serverFile).toString('utf8'))
+    } catch {
+      throw new ApiError(400, 'invalid_server_config', `${SERVER_CONFIG_FILE} is not valid JSON`)
+    }
+    server = checkedServerConfig(parsed, SERVER_CONFIG_FILE)
+    files.delete(SERVER_CONFIG_FILE)
+    if (files.size === 0 && remove.length === 0) throw badRequest('No files to publish', 'no_files')
+  }
   const warnings: string[] = []
   let generatedIndex = false
   // On a base the site keeps the pages it has: no listing to decide on.
@@ -245,6 +297,8 @@ export async function publishFiles(
       access: opts.access,
       audience: opts.audience,
       ...(forms === undefined ? {} : { forms }),
+      ...(server ? { server } : {}),
+      ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
     }
   )
   return {
@@ -368,7 +422,7 @@ export async function finishUpload(
   deps: Deps,
   user: User,
   uploadId: string,
-  opts: { principal: Principal; listHtml?: boolean }
+  opts: { principal: Principal; listHtml?: boolean; confirmPublicServer?: boolean }
 ): Promise<PublishOutcome> {
   const upload = await requireUpload(deps, user, uploadId)
   const records = await deps.store.listUploadFiles(upload.id)
@@ -405,6 +459,7 @@ export async function finishUpload(
     access: upload.access,
     audience: upload.audience,
     listHtml: opts.listHtml,
+    ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
   })
   // Keep the staged upload when the user still has to decide about the index page.
   if (outcome.kind === 'published') {

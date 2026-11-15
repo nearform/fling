@@ -77,7 +77,6 @@ import { formsEnabled, formsHint, getForms, planForms } from '../forms.ts'
 import { type PreparedInput, prepareInput } from '../inputs.ts'
 import { loadInstance, loadInstanceWith } from '../instance.ts'
 import {
-  buildManifest,
   describeSkipped,
   hasRootIndex,
   htmlPages,
@@ -94,6 +93,15 @@ import {
   writeSiteLink,
 } from '../pull.ts'
 import { waitWithSpinner } from '../ready.ts'
+import {
+  buildSiteManifest,
+  describeBundle,
+  findServer,
+  type ServerPlan,
+  type SiteBuild,
+  serverRequest,
+} from '../server-build.ts'
+import { egressOf, serverErrorOf, serverLine, serversEnabled } from '../site-server.ts'
 import {
   accessLevelsEnabled,
   checkName,
@@ -298,7 +306,12 @@ async function deployPrepared(
   // Where the folder lands in the site: a path publish's folder, or the folder a pull was of.
   const folder = opts.folder ?? link?.path
   const inFolder = (file: string) => (folder === undefined ? file : `${folder}/${file}`)
-  let local = await buildManifest(prepared.dir)
+  const built = await buildFolder(ctx, prepared.dir, instance, folder)
+  instance = built.instance
+  let local = built.local
+  const server = built.server
+  for (const note of built.notes) ctx.log.warn(note)
+  if (server) ctx.log.info(describeBundle(server))
   local.skipped.dotfiles.unshift(...prepared.skippedDotfiles)
   // Never flung, whatever the flags: say so, so nobody wonders where .env went.
   for (const line of describeSkipped(local.skipped)) ctx.log.info(line)
@@ -344,44 +357,69 @@ async function deployPrepared(
     ...(folder === undefined ? {} : { path: folder }),
   })
   let progressShown = false
-  const result = await deploy(
-    { client, fetch: ctx.fetch },
-    {
-      dir: prepared.dir,
-      name,
-      manifest: local,
-      path: opts.folder ?? onBase?.path,
-      ...(onBase
-        ? {
-            base: onBase.base,
-          }
-        : {}),
-      spa: opts.spa ? true : undefined,
-      public: opts.public,
-      access: opts.access,
-      audience: opts.audience,
-      forms: forms.send,
-      onProgress: p => {
-        if (p.total === 0) return
-        progressShown = true
-        ctx.progress(
-          `${progressBar(p.totalBytes ? p.bytes / p.totalBytes : p.uploaded / p.total)} uploading ${p.uploaded}/${p.total} files · ${formatBytes(p.bytes)}/${formatBytes(p.totalBytes)}`
+  let starting = 0
+  const run = (confirmPublicServer: boolean) =>
+    deploy(
+      { client, fetch: ctx.fetch },
+      {
+        dir: prepared.dir,
+        name,
+        manifest: local,
+        path: opts.folder ?? onBase?.path,
+        ...(onBase
+          ? {
+              base: onBase.base,
+            }
+          : {}),
+        spa: opts.spa ? true : undefined,
+        public: opts.public,
+        access: opts.access,
+        audience: opts.audience,
+        forms: forms.send,
+        ...(server
+          ? {
+              server: serverRequest(server),
+              ...(confirmPublicServer ? { confirmPublicServer: true } : {}),
+              onFinalize: () => {
+                starting = performance.now()
+                progressShown = true
+                ctx.progress('starting server…')
+              },
+            }
+          : {}),
+        onProgress: p => {
+          if (p.total === 0) return
+          progressShown = true
+          ctx.progress(
+            `${progressBar(p.totalBytes ? p.bytes / p.totalBytes : p.uploaded / p.total)} uploading ${p.uploaded}/${p.total} files · ${formatBytes(p.bytes)}/${formatBytes(p.totalBytes)}`
+          )
+        },
+      }
+    )
+      .catch((error: unknown) => {
+        if (server) throw serverRefusal(ctx, name, prepared.dir, server, error)
+        if (!(error instanceof BaseChangedError)) throw error
+        const dir = relative(process.cwd(), prepared.dir) || '.'
+        throw new BaseChangedError(
+          error.siteName,
+          error.base,
+          `Pull it again into another folder (\`${ctx.binName} pull ${name} ${dir}-latest\`), redo your changes there and deploy that; or \`${ctx.binName} deploy ${dir} --force\` to replace what they published with this folder.`
         )
-      },
+      })
+      .finally(() => {
+        if (progressShown) ctx.progress(null)
+      })
+  const result = await run(server !== null && opts.yes === true).catch(async (error: unknown) => {
+    if (!(error instanceof PublicServerError)) throw error
+    if (!ask) throw error
+    ctx.log.warn(error.message)
+    if (!(await ctx.confirm(`Publish ${name} with its server, callable by anyone?`))) {
+      throw new CliError('Not flung: the site is public and has a server', {
+        hint: 'Deploy it with --access members (or another level), or confirm with --yes.',
+      })
     }
-  )
-    .catch((error: unknown) => {
-      if (!(error instanceof BaseChangedError)) throw error
-      const dir = relative(process.cwd(), prepared.dir) || '.'
-      throw new BaseChangedError(
-        error.siteName,
-        error.base,
-        `Pull it again into another folder (\`${ctx.binName} pull ${name} ${dir}-latest\`), redo your changes there and deploy that; or \`${ctx.binName} deploy ${dir} --force\` to replace what they published with this folder.`
-      )
-    })
-    .finally(() => {
-      if (progressShown) ctx.progress(null)
-    })
+    return run(true)
+  })
   // A pulled folder now stands for the version it made current.
   if (link) {
     await writeSiteLink(
@@ -392,6 +430,11 @@ async function deployPrepared(
 
   for (const warning of result.warnings) if (warning !== NO_INDEX_WARNING) ctx.log.warn(warning)
   for (const hint of result.hints) ctx.log.info(hint.message)
+  if (server && starting > 0) {
+    const secs = ((performance.now() - starting) / 1000).toFixed(1)
+    const probe = server.config.health ? `GET ${server.config.health} answered` : 'started'
+    ctx.log.info(`starting server… ${probe} in ${secs} s`)
+  }
   const summary = changes
     ? `${describeChanges(changes)} since ${link?.versionId}`
     : `${result.fileCount} files, ${formatBytes(result.totalBytes)}`
@@ -430,6 +473,9 @@ async function deployPrepared(
       `--access only applies to a new site: ${result.name} keeps its access. Change it with \`${ctx.binName} access ${result.name}\`.`
     )
   }
+  const serverNotes = server
+    ? [serverLine(level, instance, server.config), `logs: \`${ctx.binName} logs ${result.name}\``]
+    : []
   const accessNotes = result.first
     ? [
         `Who can open it: ${who}`,
@@ -472,6 +518,20 @@ async function deployPrepared(
     ...(review ? { reviewUrl: review } : {}),
     ready,
     skipped: local.skipped,
+    ...(server
+      ? {
+          server: {
+            entry: server.entry,
+            bundleBytes: server.size,
+            ...(server.gzipped === undefined ? {} : { gzippedBytes: server.gzipped }),
+            secrets: server.config.secrets,
+            ...(server.config.health ? { health: server.config.health } : {}),
+            egress: egressOf(instance),
+            buildInputs: server.buildInputs,
+            logs: `${ctx.binName} logs ${result.name}`,
+          },
+        }
+      : {}),
     ...(formsSummary
       ? {
           forms: {
@@ -496,16 +556,93 @@ async function deployPrepared(
         [
           ...(review ? [chalk.dim(reviewNote), brand.url(review), '', chalk.dim('Site:')] : []),
           brand.url(url),
+          ...serverNotes.map(n => chalk.dim(n)),
           ...accessNotes.map(n => chalk.dim(n)),
         ],
         chalk.bold(`flung · ${ACCESS_LABELS[level].toLowerCase()}`)
       )
     const lines = [chalk.bold(url)]
     if (review) lines.push(chalk.dim(`${reviewNote} ${review}`))
-    for (const n of accessNotes) lines.push(chalk.dim(n))
+    for (const n of [...serverNotes, ...accessNotes]) lines.push(chalk.dim(n))
     return lines.join('\n')
   })
   if (hint && !opts.quiet && !ctx.json) ctx.log.hint(hint)
+}
+
+/** The folder's manifest with its server (server-build.ts), and the instance as it says. */
+async function buildFolder(
+  ctx: CommandContext,
+  dir: string,
+  instance: InstanceMetadata | null,
+  folder: string | undefined
+): Promise<SiteBuild & { instance: InstanceMetadata | null }> {
+  const source = await findServer(dir)
+  if (source && folder !== undefined) {
+    throw new CliError(
+      `A Path can't have a server: ${source.entry ?? '_fling/server.mjs'} runs at the site's root only`,
+      {
+        hint: 'Deploy the server to the site itself, without --path, or leave it out of the folder.',
+      }
+    )
+  }
+  // A folder with a server needs a Fling with servers: asked again if the stored copy predates them.
+  if (source && serversEnabled(instance) !== true) {
+    instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'servers')
+  }
+  const built = await buildSiteManifest(dir, {
+    servers: serversEnabled(instance),
+    ...(instance ? { instanceName: instance.name } : {}),
+  })
+  return { ...built, instance }
+}
+
+/** A server on a public site, not yet confirmed (409 `public_server`). */
+export class PublicServerError extends CliError {
+  readonly code = 'public_server'
+  constructor(message: string) {
+    super(message, {
+      hint: 'Confirm with --yes, or deploy with --access members (or another level).',
+    })
+    this.name = 'PublicServerError'
+  }
+}
+
+/** A refusal of a deploy with a server, in words that say what to do next. */
+export function serverRefusal(
+  ctx: Pick<CommandContext, 'binName'>,
+  name: string,
+  dir: string,
+  server: ServerPlan,
+  error: unknown
+): unknown {
+  const details = serverErrorOf(error)
+  if (!details || !(error instanceof Error)) return error
+  if (details.code === 'public_server') return new PublicServerError(error.message)
+  if (details.code === 'secrets_missing') {
+    const names = details.secrets?.length ? details.secrets : server.config.secrets
+    return new SecretsMissingError(ctx.binName, name, names, error.message, dir)
+  }
+  return error
+}
+
+/**
+ * The version waits for its secrets (409 `secrets_missing`): it goes live as soon as they are set.
+ * The hint names the command, with `--from` when the folder's .env has them.
+ */
+export class SecretsMissingError extends CliError {
+  readonly code = 'secrets_missing'
+  constructor(
+    bin: string,
+    readonly siteName: string,
+    readonly secrets: string[],
+    message: string,
+    readonly dir: string
+  ) {
+    super(message, {
+      hint: `Set ${secrets.length === 1 ? 'it' : 'them'}: \`${bin} secrets set ${siteName} ${secrets[0] ?? 'NAME'} < file\`, or \`${bin} secrets set ${siteName} --from .env ${secrets.join(' ')}\`. The version goes live as soon as the last is set; there is nothing to deploy again.`,
+    })
+    this.name = 'SecretsMissingError'
+  }
 }
 
 const BAR_WIDTH = 20

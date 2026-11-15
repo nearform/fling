@@ -459,6 +459,28 @@ fling responses my-app --format csv -o labels.csv          # the export: json, j
 | `fling forms check [path]` | check a folder's `fling.forms.json` (or a file) against the folder's pages |
 | `fling responses <name> [--form <id>] [--path <page>] [--format json\|jsonl\|csv] [-o file]` | the responses as a table with progress, or the export |
 
+## Site servers
+
+On a Fling that runs them (`servers` in its `/.well-known/fling`), a site can have a small server
+of its own beside its static files: put a `server.ts` (or `server.js`) at the top of the folder,
+and `/api/*` on the site goes to it, behind the site's access. `fling deploy` bundles it and its
+npm dependencies into one module, `_fling/server.mjs`; the server's source, `fling.json`,
+`package.json` and the lockfiles stay behind. Type it with `@nearform/fling/server`
+(`npm install -D @nearform/fling`), which gives `viewer(request)`, `file(path)` and
+`secret(name)`. The full guide, with five worked examples, is
+[docs/site-servers.md](https://github.com/nearform/fling/blob/main/docs/site-servers.md).
+
+| Command | |
+|---|---|
+| `fling dev [dir] [--as <email> [--guest]] [--port <n>] [--spa]` | serve the folder as its site will be, at `http://localhost:47180`, with the server rebuilt on save; secrets from `.env`, `.env.local` overriding, only the names `fling.json` declares |
+| `fling secrets set <name> <SECRET>` | set a site secret from stdin (`< file`, or typed at a prompt), never from the command line; `--from .env A B` reads only the names you list. Prints what it did: the live server restarted, the waiting version live, or a start that failed with its log |
+| `fling secrets ls <name>` / `fling secrets rm <name> <SECRET>` | names, who set each and when (never values), and the declared ones not set |
+| `fling logs <name> [--since 1h\|1d\|<ISO time>] [-f, --follow]` | the server's request lines and what it printed; `--follow` polls every 2 seconds |
+
+A deploy whose secrets aren't all set uploads and waits: it names the secrets, and the version goes
+live as soon as the last one is set. A server on a public site asks first (`--yes` in scripts), on
+`fling deploy` and on `fling access --public` or `fling visibility public`.
+
 ## Notifications
 
 A Fling with email tells you when a site is shared with you (directly or through a group), when

@@ -8,7 +8,7 @@
 
 import { z } from 'zod'
 import { SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
-import type { SiteInvoke, SiteViewer } from './site-routing.ts'
+import { type SiteInvoke, type SiteViewer, serverSiteHeader } from './site-routing.ts'
 
 export type { SiteViewer }
 
@@ -134,19 +134,29 @@ export function parseViewerHeader(value: string | null | undefined): SiteViewer 
 /** Request headers a server never sees from the browser: its credentials and a forged viewer. */
 const DROPPED = ['cookie', 'authorization', VIEWER_HEADER, SERVER_SITE_HEADER]
 
+/** SERVER_SITE_HEADER read back (site-routing.ts serverSiteHeader); null when it isn't one. */
+export function parseServerSiteHeader(
+  value: string | null | undefined
+): { siteId: string; v: string; private: boolean } | null {
+  const parts = (value ?? '').split('/')
+  const [siteId, v, flag] = parts
+  if (!siteId || !v || parts.length > 3 || (flag !== undefined && flag !== 'private')) return null
+  return { siteId, v, private: flag === 'private' }
+}
+
 /**
  * The request a site's server gets for an invoke: the browser's, without its cookies,
  * credentials or any VIEWER_HEADER, with VIEWER_HEADER set from the decision and
- * SERVER_SITE_HEADER naming `<siteId>/<v>`.
+ * SERVER_SITE_HEADER (serverSiteHeader).
  */
 export function serverRequestHeaders(
   headers: Headers,
-  decision: Pick<SiteInvoke, 'siteId' | 'v' | 'viewer'>
+  decision: Pick<SiteInvoke, 'siteId' | 'v' | 'viewer' | 'private'>
 ): Headers {
   const out = new Headers(headers)
   for (const name of DROPPED) out.delete(name)
   if (decision.viewer) out.set(VIEWER_HEADER, JSON.stringify(decision.viewer))
-  out.set(SERVER_SITE_HEADER, `${decision.siteId}/${decision.v}`)
+  out.set(SERVER_SITE_HEADER, serverSiteHeader(decision))
   return out
 }
 

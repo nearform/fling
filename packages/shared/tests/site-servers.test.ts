@@ -7,6 +7,7 @@ import { revocationMac, signSiteCookie, signSitePass } from '../src/site-cookie.
 import { routeSiteRequest, type SiteRequest, viewerIdOf } from '../src/site-routing.ts'
 import {
   formatLogLine,
+  parseServerSiteHeader,
   parseViewerHeader,
   serverCacheControl,
   serverFilePath,
@@ -212,17 +213,26 @@ describe('what a server receives', () => {
         [VIEWER_HEADER]: '{"id":"v_forged","email":"boss@example.test","guest":false}',
         'content-type': 'application/json',
       }),
-      { siteId: 'S1', v: 'V1', viewer }
+      { siteId: 'S1', v: 'V1', viewer, private: true }
     )
     expect(out.get('cookie')).toBeNull()
     expect(out.get('authorization')).toBeNull()
     expect(parseViewerHeader(out.get(VIEWER_HEADER))).toEqual(viewer)
-    expect(out.get(SERVER_SITE_HEADER)).toBe('S1/V1')
+    expect(out.get(SERVER_SITE_HEADER)).toBe('S1/V1/private')
+    expect(parseServerSiteHeader(out.get(SERVER_SITE_HEADER))).toEqual({
+      siteId: 'S1',
+      v: 'V1',
+      private: true,
+    })
+    expect(parseServerSiteHeader('S1/V1')).toEqual({ siteId: 'S1', v: 'V1', private: false })
+    expect(parseServerSiteHeader('S1/V1/x')).toBeNull()
+    expect(parseServerSiteHeader('S1')).toBeNull()
     expect(out.get('content-type')).toBe('application/json')
     const anonymous = serverRequestHeaders(new Headers({ [VIEWER_HEADER]: '{"id":"v"}' }), {
       siteId: 'S1',
       v: 'V1',
       viewer: null,
+      private: false,
     })
     expect(anonymous.get(VIEWER_HEADER)).toBeNull()
   })

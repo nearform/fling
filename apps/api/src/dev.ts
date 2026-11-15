@@ -12,7 +12,10 @@
  * (MemoryLiveHub): the API server also accepts `GET /api/live?ticket=` WebSocket upgrades, and
  * LIVE_URL points straight at it (the UI dev server needn't proxy sockets). With a mail driver
  * (MAIL_DRIVER=file, MAIL_FROM), the notifications outbox drains every minute, as the platforms'
- * ticks drain it, and `POST /dev/notify/drain` drains it at once. The e2e
+ * ticks drain it, and `POST /dev/notify/drain` drains it at once. Site servers (SERVERS, on here
+ * for members unless set) run as Node child processes (servers/node/runtime.ts): an invoke from
+ * the edge harness goes to the version's server through the core's shell (servers/shell.ts), and
+ * their logs are kept in memory. The e2e
  * (packages/e2e) runs it as the AWS-flavoured local runtime.
  */
 import { randomBytes } from 'node:crypto'
@@ -20,12 +23,22 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createSiteRouter, isResponse, toCloudFrontEvent } from '@fling/edge'
-import { MISSING_KEY, REVIEW_SHELL_PATH, ROBOTS_TXT, SITE_HMAC_KVS_KEY } from '@fling/shared'
+import { createSiteRouter, isInvoke, isResponse, toCloudFrontEvent } from '@fling/edge'
+import {
+  MISSING_KEY,
+  parseServerSiteHeader,
+  parseViewerHeader,
+  REVIEW_SHELL_PATH,
+  ROBOTS_TXT,
+  SERVER_SITE_HEADER,
+  SITE_HMAC_KVS_KEY,
+  VIEWER_HEADER,
+} from '@fling/shared'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { WebSocketServer } from 'ws'
 import { createApp } from './app.ts'
+import { FsBlobs } from './blobs/fs.ts'
 import { type Config, loadBaseConfig, secretsFromEnv } from './config.ts'
 import { buildDeps } from './deps.ts'
 import { contentTypeFor } from './lib/mime.ts'
@@ -34,6 +47,11 @@ import { MemoryLiveHub } from './live-memory.ts'
 import { MIGRATIONS, runMigrations } from './migrations/index.ts'
 import { drain } from './notifications/drain.ts'
 import { TableRouteTable } from './route-table/table.ts'
+import { optionsFor } from './servers/index.ts'
+import { MemoryServerLogs } from './servers/memory-logs.ts'
+import { NodeSiteServers } from './servers/node/runtime.ts'
+import { runInvoke } from './servers/shell.ts'
+import type { ServerOptions, ServerSite, ServerVersion } from './servers/types.ts'
 import { Records } from './store/records.ts'
 import { FileTable } from './table/file.ts'
 
@@ -72,6 +90,8 @@ const env = {
   SITES_DOMAIN: `fling.lvh.me:${SITES_PORT}`,
   SITE_SCHEME: 'http',
   SITE_COOKIE_DOMAIN: 'fling.lvh.me',
+  // Site servers run here as Node child processes (NodeSiteServers); SERVERS=off turns them off.
+  SERVERS: 'members',
   ...process.env,
   SESSION_SECRET: process.env.SESSION_SECRET ?? devSecrets.session,
   SITE_HMAC_KEY: process.env.SITE_HMAC_KEY ?? devSecrets.siteHmac,
@@ -86,13 +106,42 @@ console.log(
   `fling migrations: ${migrated.migrations.map(m => `${m.id} ${m.status}`).join(', ') || 'none'}`
 )
 const live = new MemoryLiveHub()
+const store = new Records(table)
+const blobs = new FsBlobs(fsRoot, `http://localhost:${API_PORT}`, config.secrets.sessionSecret)
+const serverLogs = new MemoryServerLogs()
+// A server started again after a restart runs with its version's options as the core makes them.
+let restartOptions: (site: ServerSite, version: ServerVersion) => Promise<ServerOptions | null> =
+  async () => null
+const servers = new NodeSiteServers({
+  blobs,
+  workDir: resolve(fsRoot, 'servers'),
+  filesDir: version => resolve(fsRoot, version.files),
+  logs: serverLogs,
+  optionsFor: (site, version) => restartOptions(site, version),
+})
 const deps = buildDeps(config, {
   live,
   fsRoot,
   apiBaseUrl: `http://localhost:${API_PORT}`,
   routeTable,
-  store: new Records(table),
+  store,
+  blobs,
+  serverLogs,
+  ...(config.servers.publish.kind === 'off' ? {} : { servers }),
 })
+restartOptions = async (site, version) => {
+  const record = await store.findSite(site.name)
+  const v = record?.id === site.id ? await store.getVersion(record, version.id) : null
+  if (!record || !v?.server) return null
+  return (await optionsFor(deps, record, v.server)).options
+}
+process.on('exit', () => void servers.close())
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void servers.close()
+    process.exit(0)
+  })
+}
 await routeTable.put(SITE_HMAC_KVS_KEY, config.secrets.siteHmacKey)
 
 // The notifications outbox's tick, every minute as on the platforms (with a mail driver set).
@@ -150,6 +199,19 @@ sites.all('*', async c => {
     headers: c.req.header(),
   })
   const result = await router(event)
+  if (isInvoke(result) && deps.servers) {
+    const header = (name: string) => result.headers?.[name]?.value ?? null
+    const site = parseServerSiteHeader(header(SERVER_SITE_HEADER))
+    if (site) {
+      const request = new Request(c.req.raw, { headers: c.req.raw.headers })
+      return runInvoke({ ...deps, servers: deps.servers }, request, {
+        site: { id: site.siteId, name: (c.req.header('host') ?? url.host).split('.')[0] ?? '' },
+        v: site.v,
+        private: site.private,
+        viewer: parseViewerHeader(header(VIEWER_HEADER)),
+      })
+    }
+  }
   if (isResponse(result)) {
     const headers = new Headers()
     for (const [name, v] of Object.entries(result.headers ?? {})) headers.set(name, v.value)

@@ -467,6 +467,15 @@ async function bySitePass(
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
 
 /**
+ * SERVER_SITE_HEADER's value for an invoke: `<siteId>/<v>`, then `/private` on a site that isn't
+ * public, so the shell running the server knows the version and the caching rule
+ * (site-server.ts serverCacheControl).
+ */
+export function serverSiteHeader(decision: Pick<SiteInvoke, 'siteId' | 'v' | 'private'>): string {
+  return decision.siteId + '/' + decision.v + (decision.private ? '/private' : '')
+}
+
+/**
  * The viewer id of `email` on site `siteId`: `v_` and the first 8 bytes of
  * HMAC(key, `viewer:<siteId>:<email>`) in base32 (lowercase, unpadded: 13 characters), under the
  * site cookie key. One person has one id per site and a different one on every other site, so a

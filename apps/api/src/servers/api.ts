@@ -4,8 +4,8 @@
  *
  *   GET    /api/sites/:name/secrets            the site secrets by name, who set each and when, and
  *                                              the names the live version declares (`site.secrets`)
- *   PUT    /api/sites/:name/secrets/:secret    { value } set one; the live server runs with it
- *   DELETE /api/sites/:name/secrets/:secret    remove one
+ *   PUT    /api/sites/:name/secrets/:secret    { value } set one, then redeploy (below)
+ *   DELETE /api/sites/:name/secrets/:secret    remove one, then redeploy the live server
  *   GET    /api/sites/:name/logs?since&limit    the server's log (`site.logs`)
  *   PUT    /api/admin/sites/:name/server       { stopped?, limits? } the kill switch and the site's
  *                                              limits (`site.server`: admins, browser session)
@@ -13,19 +13,36 @@
  *                                              (`admin.viewers.resolve`, audited)
  *
  * A site is resolved through policy (`requireSite`), so a refusal is a 404 like a missing site.
+ *
+ * Setting or removing a secret redeploys, as `wrangler secret put` does:
+ *   - the live version's server is reconfigured with the site's secrets as they now are and
+ *     probed again (`live`); a failed probe is reported, not undone: the secret stays as set and
+ *     that version keeps serving with it;
+ *   - a set that leaves none of the waiting publish's declared secrets unset
+ *     (`SiteServerState.awaiting`, publication.ts) publishes it, as finalizing it again would, by
+ *     the one who set the secret (`deployed`: live at its URL, or the publish's refusal); with
+ *     some still unset, `missing` names them.
  */
-import type { ServerLogLine, SiteSecret, SiteSecretsResponse } from '@fling/shared'
+import type {
+  DeleteSiteSecretResponse,
+  PutSiteSecretResponse,
+  SecretDeployedOutcome,
+  SecretLiveOutcome,
+  ServerLogLine,
+  SiteSecretsResponse,
+} from '@fling/shared'
 import { z } from 'zod'
 import { ensure } from '../admin.ts'
 import type { ServerLimits } from '../config.ts'
-import { notFound } from '../lib/errors.ts'
+import { ApiError, notFound } from '../lib/errors.ts'
 import type { Principal } from '../policy.ts'
+import { publish } from '../publication.ts'
 import { auditAdmin, requireSite, requireSiteAs, save } from '../sites.ts'
 import type { SiteRecord, User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { reconfigureLive, serverSite, serversOn } from './index.ts'
+import { probeServer, reconfigureLive, serverSite, serversOn } from './index.ts'
 import { readLogs, resolveViewer, sinceOf } from './logs.ts'
-import { listSecrets, removeSecret, setSecret } from './secrets.ts'
+import { listSecrets, removeSecret, secretValues, setSecret } from './secrets.ts'
 
 /** 404 unless the instance runs site servers: the routes are not there without them. */
 export function requireServers(deps: Deps) {
@@ -39,9 +56,59 @@ async function declared(deps: Deps, site: SiteRecord): Promise<string[]> {
   return version?.server?.secrets ?? []
 }
 
-/** The live server runs with the site's secrets as they are now; the route follows its target. */
-async function afterSecretsChange(deps: Deps, site: SiteRecord) {
-  if (await reconfigureLive(deps, site)) await save(deps, site)
+/** The live server runs with the site's secrets as they are now, and is probed again. */
+async function redeployLive(deps: Deps, site: SiteRecord): Promise<SecretLiveOutcome | undefined> {
+  const live = await reconfigureLive(deps, site)
+  if (!live || !serversOn(deps)) return undefined
+  if (live.moved) await save(deps, site)
+  const probe = await probeServer(deps, site, live.version.id, live.version.server)
+  if (probe.ok) return { versionId: live.version.id, ok: true }
+  return {
+    versionId: live.version.id,
+    ok: false,
+    error: 'server_failed_to_start',
+    message: `Version ${live.version.id} is still the one serving "${site.name}", with the secrets as they are now, but ${probe.message}`,
+    logs: probe.logs,
+  }
+}
+
+/** The publish that waited for secrets: published once every one it declares is set. */
+async function deployAwaiting(
+  deps: Deps,
+  user: User,
+  site: SiteRecord
+): Promise<{ deployed?: SecretDeployedOutcome; missing?: string[] }> {
+  const awaiting = site.server?.awaiting
+  if (!awaiting) return {}
+  const version = await deps.store.getVersion(site, awaiting.versionId)
+  if (version?.status !== 'pending' || !version.server) return {}
+  const { missing } = await secretValues(deps, site.id, version.server.secrets)
+  if (missing.length > 0) return { missing }
+  try {
+    const published = await publish(deps, user, site.name, version.id)
+    return { deployed: { versionId: version.id, url: published.site.url } }
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err
+    if (err.code !== 'secrets_missing') await stopWaiting(deps, site.name, version.id)
+    const logs = err.extra?.logs
+    return {
+      deployed: {
+        versionId: version.id,
+        error: err.code,
+        message: err.message,
+        ...(Array.isArray(logs) ? { logs: logs as string[] } : {}),
+      },
+    }
+  }
+}
+
+/** A waiting publish refused for another reason waits no more: it is published again by hand. */
+async function stopWaiting(deps: Deps, name: string, versionId: string) {
+  const site = await deps.store.findSite(name)
+  if (site?.server?.awaiting?.versionId !== versionId) return
+  const { awaiting: _, ...rest } = site.server
+  site.server = rest
+  await save(deps, site)
 }
 
 export async function siteSecrets(
@@ -60,19 +127,26 @@ export async function putSiteSecret(
   name: string,
   secret: string,
   value: string
-): Promise<SiteSecret> {
+): Promise<PutSiteSecretResponse> {
   requireServers(deps)
   const site = await requireSite(deps, user, name, 'site.secrets')
   const set = await setSecret(deps, site, secret, value, user.email)
-  await afterSecretsChange(deps, site)
-  return set
+  const live = await redeployLive(deps, site)
+  const waiting = await deployAwaiting(deps, user, site)
+  return { ...set, ...(live ? { live } : {}), ...waiting }
 }
 
-export async function deleteSiteSecret(deps: Deps, user: User, name: string, secret: string) {
+export async function deleteSiteSecret(
+  deps: Deps,
+  user: User,
+  name: string,
+  secret: string
+): Promise<DeleteSiteSecretResponse> {
   requireServers(deps)
   const site = await requireSite(deps, user, name, 'site.secrets')
   await removeSecret(deps, site, secret)
-  await afterSecretsChange(deps, site)
+  const live = await redeployLive(deps, site)
+  return { name: secret, ...(live ? { live } : {}) }
 }
 
 export async function siteLogs(

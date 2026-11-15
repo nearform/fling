@@ -28,11 +28,10 @@
  * `SERVERS/SITE#` index item counts it, and `site.server_published` is audited.
  */
 import {
-  CLI_PACKAGE,
   type ManifestFile,
   SERVER_BUNDLE,
   SERVER_BUNDLE_MAX_BYTES,
-  SERVER_HELPER_SUFFIX,
+  SERVER_HELPER_MODULE,
   SERVER_PROBE_DEFAULT_PATH,
   SERVER_PROBE_TIMEOUT_MS,
   SERVER_START_LOG_LINES,
@@ -52,7 +51,7 @@ import { secretValues } from './secrets.ts'
 import type { ServerOptions, ServerSite, ServerVersion, SiteServers } from './types.ts'
 
 /** The module a server imports Fling's helpers from: the CLI package's `/server`. */
-export const SERVER_HELPER_MODULE = `${CLI_PACKAGE}${SERVER_HELPER_SUFFIX}`
+export { SERVER_HELPER_MODULE }
 
 /** The folder name a site server takes over: `/api/*` of the site. */
 export const SERVER_PATH_FOLDER = 'api'
@@ -216,35 +215,70 @@ export async function optionsFor(
   }
 }
 
-const secretsMissing = (site: SiteRecord, versionId: string, missing: string[]) =>
-  conflict(
-    `Version ${versionId} of "${site.name}" needs the site secrets ${missing.join(', ')}, which aren't set: set them (fling secrets set ${site.name} NAME) and publish again`,
+/**
+ * 409 `secrets_missing`. A pending version (a publish) waits for them: setting the last one takes
+ * it live (servers/api.ts). A complete one (a rollback) is rolled back to again.
+ */
+const secretsMissing = (
+  site: SiteRecord,
+  version: Pick<VersionRecord, 'id' | 'status'>,
+  missing: string[]
+) => {
+  const names = missing.join(', ')
+  const set = `fling secrets set ${site.name} NAME`
+  return conflict(
+    version.status === 'pending'
+      ? `Version ${version.id} of "${site.name}" needs the site secrets ${names}, which aren't set. It goes live as soon as they are: set ${missing.length === 1 ? 'it' : 'them'} (${set}); nothing needs publishing again`
+      : `Version ${version.id} of "${site.name}" needs the site secrets ${names}, which aren't set: set them (${set}) and roll back again`,
     'secrets_missing',
-    { secrets: missing }
+    { secrets: missing, versionId: version.id }
   )
+}
 
 /**
  * Make a version's server ready to go live (see the header): returns where it is reached, for
- * the route value. Throws 403 `servers_not_allowed`, 409 `secrets_missing` or `too_many_servers`,
- * 422 `server_failed_to_start`.
+ * the route value. Throws 403 `servers_not_allowed`, 409 `secrets_missing` (with `secrets` and
+ * `versionId`) or `too_many_servers`, 422 `server_failed_to_start`.
  */
 export async function startServer(
   deps: Deps,
   p: Principal,
   site: SiteRecord,
-  version: Pick<VersionRecord, 'id' | 'server'>
+  version: Pick<VersionRecord, 'id' | 'server' | 'status'>
 ): Promise<string | null> {
   const mark = version.server
   if (!mark) return null
   if (!serversOn(deps) || !(await mayPublishServer(deps, p))) throw notAllowed(deps)
   await checkServerRoom(deps, site)
   const { options, missing } = await optionsFor(deps, site, mark)
-  if (missing.length > 0) throw secretsMissing(site, version.id, missing)
+  if (missing.length > 0) throw secretsMissing(site, version, missing)
   const ref = serverSite(site)
   const ver = serverVersion(site.id, version.id)
   const { target } = await deps.servers.activate(ref, ver, options)
+  const probe = await probeServer(deps, site, version.id, mark)
+  if (!probe.ok) {
+    throw new ApiError(422, 'server_failed_to_start', `Not published: ${probe.message}`, {
+      logs: probe.logs,
+      ...(probe.status === undefined ? {} : { status: probe.status }),
+    })
+  }
+  return target
+}
+
+/** What a start probe found, by the core's rules (see the header). */
+export type ProbeOutcome =
+  | { ok: true; status: number }
+  | { ok: false; message: string; logs: string[]; status?: number }
+
+/** The start probe of an activated version's server, judged. */
+export async function probeServer(
+  deps: Deps & { servers: SiteServers },
+  site: Pick<SiteRecord, 'id' | 'name'>,
+  versionId: string,
+  mark: ServerMark
+): Promise<ProbeOutcome> {
   const path = mark.health ?? SERVER_PROBE_DEFAULT_PATH
-  const result = await deps.servers.probe(ref, ver, {
+  const result = await deps.servers.probe(serverSite(site), serverVersion(site.id, versionId), {
     method: 'GET',
     path,
     timeoutMs: SERVER_PROBE_TIMEOUT_MS,
@@ -255,15 +289,13 @@ export async function startServer(
   else if (mark.health && (result.status < 200 || result.status > 299)) {
     problem = `GET ${path} answered ${result.status}, and the health path must answer 2xx`
   }
-  if (problem) {
-    throw new ApiError(
-      422,
-      'server_failed_to_start',
-      `Not published: the server of version ${version.id} didn't start (${problem}).${logs.length ? ` Its log:\n${logs.join('\n')}` : ' It printed nothing.'}`,
-      { logs, ...(result.ok ? { status: result.status } : {}) }
-    )
+  if (!problem && result.ok) return { ok: true, status: result.status }
+  return {
+    ok: false,
+    message: `the server of version ${versionId} didn't start (${problem}).${logs.length ? ` Its log:\n${logs.join('\n')}` : ' It printed nothing.'}`,
+    logs,
+    ...(result.ok ? { status: result.status } : {}),
   }
-  return target
 }
 
 /**
@@ -275,7 +307,8 @@ export function applyServer(
   version: Pick<VersionRecord, 'server'>,
   target: string | null
 ) {
-  const { live: _live, target: _target, ...kept } = site.server ?? {}
+  // Any version going live ends a wait for secrets (servers/api.ts).
+  const { live: _live, target: _target, awaiting: _awaiting, ...kept } = site.server ?? {}
   if (version.server) site.server = { ...kept, live: true, ...(target ? { target } : {}) }
   else if (site.server) site.server = { ...kept, ...(_target ? { target: _target } : {}) }
 }
@@ -304,17 +337,23 @@ export async function noteLive(
  * The live version's server runs with new options (a secret set or removed, an admin's limits):
  * tell the platform, and keep the target it answers with. Nothing for a site without one.
  */
-export async function reconfigureLive(deps: Deps, site: SiteRecord): Promise<boolean> {
-  if (!serversOn(deps) || !site.currentVersionId || !site.server?.live) return false
+export async function reconfigureLive(
+  deps: Deps,
+  site: SiteRecord
+): Promise<{ version: VersionRecord & { server: ServerMark }; moved: boolean } | null> {
+  if (!serversOn(deps) || !site.currentVersionId || !site.server?.live) return null
   const version = await deps.store.getVersion(site, site.currentVersionId)
-  if (!version?.server) return false
+  if (!version?.server) return null
   const { options } = await optionsFor(deps, site, version.server)
   const { target } = await deps.servers.reconfigure(
     serverSite(site),
     serverVersion(site.id, version.id),
     options
   )
-  if ((target ?? undefined) === site.server.target) return false
+  const live = version as VersionRecord & { server: ServerMark }
+  if ((target ?? undefined) === site.server.target) return { version: live, moved: false }
+  const { awaiting } = site.server
   applyServer(site, version, target)
-  return true
+  if (awaiting) site.server = { ...site.server, awaiting }
+  return { version: live, moved: true }
 }

@@ -4,13 +4,16 @@
  * SiteServers that records what it was asked; the adapters' own behaviour is in
  * packages/conformance.
  */
+
+import { randomBytes } from 'node:crypto'
 import { SITE_SECRETS_MAX, siteKvsKey } from '@fling/shared'
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 import type { Config } from '../src/config.ts'
+import { buildDeps } from '../src/deps.ts'
 import { publishBytes } from '../src/publication.ts'
 import { logInvoke, viewerIdFor } from '../src/servers/logs.ts'
 import { MemoryServerLogs } from '../src/servers/memory-logs.ts'
-import { openSecret, sealSecret } from '../src/servers/secrets.ts'
+import { openSecret, parseSiteSecretsKey, sealSecret } from '../src/servers/secrets.ts'
 import type {
   ProbeRequest,
   ProbeResult,
@@ -323,36 +326,116 @@ describe('the start probe', () => {
 })
 
 describe('site secrets', () => {
-  it('are refused until set, reach the server, and are never returned', async () => {
+  it('a first publish waits for its secrets, and setting the last one takes it live', async () => {
     const alice = await createUser(env, ALICE)
-    const fling = { server: { secrets: ['SLACK_WEBHOOK_URL'] } }
+    const fling = { server: { secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'] } }
     const missing = await deploy(alice.key, 'srv', site(), fling)
     expect(missing.status).toBe(409)
-    expect(await json(missing)).toMatchObject({
-      error: { code: 'secrets_missing', secrets: ['SLACK_WEBHOOK_URL'] },
+    const refused = await json(missing)
+    expect(refused).toMatchObject({
+      error: { code: 'secrets_missing', secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'] },
     })
-    // Not live yet, but its owner may set them.
-    const set = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/SLACK_WEBHOOK_URL', {
+    const versionId = refused.error.versionId
+    expect(refused.error.message).toContain('goes live as soon as')
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toEqual({
+      versionId,
+      secrets: ['SLACK_WEBHOOK_URL', 'TOKEN'],
+    })
+    // One of two: it still waits, and says for what.
+    const first = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/SLACK_WEBHOOK_URL', {
       value: 'https://hooks.slack.com/services/T/B/X',
     })
-    expect(set.status).toBe(200)
-    expect(await json(set)).toEqual({
+    expect(first.status).toBe(200)
+    expect(await json(first)).toEqual({
       name: 'SLACK_WEBHOOK_URL',
       setBy: ALICE,
       setAt: env.deps.clock.now().toISOString(),
+      missing: ['TOKEN'],
     })
-    const live = await json(await deploy(alice.key, 'srv', site(), fling))
-    expect(servers.options.get(live.versionId)?.secrets).toEqual({
+    expect(await route('srv')).toBeNull()
+    // The last one: published, as if finalized again.
+    const last = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/TOKEN', { value: 't0k3n' })
+    )
+    expect(last.deployed).toEqual({ versionId, url: expect.stringContaining('srv') })
+    expect(last.missing).toBeUndefined()
+    expect(await route('srv')).toMatchObject({ v: versionId, f: 1 })
+    expect(servers.options.get(versionId)?.secrets).toEqual({
       SLACK_WEBHOOK_URL: 'https://hooks.slack.com/services/T/B/X',
+      TOKEN: 't0k3n',
     })
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
     const listed = await api(env, alice.key, 'GET', '/api/sites/srv/secrets')
     const text = await listed.text()
     expect(text).not.toContain('hooks.slack.com')
     expect(JSON.parse(text)).toMatchObject({
-      secrets: [{ name: 'SLACK_WEBHOOK_URL', setBy: ALICE }],
-      declared: ['SLACK_WEBHOOK_URL'],
+      declared: ['SLACK_WEBHOOK_URL', 'TOKEN'],
       missing: [],
     })
+  })
+
+  it('a newer publish ends the wait: only the latest waits for secrets', async () => {
+    const alice = await createUser(env, ALICE)
+    const old = await json(await deploy(alice.key, 'srv', site(), { server: { secrets: ['A'] } }))
+    const versionId = old.error.versionId
+    // Staged, not finalized: a newer publish all the same.
+    await api(env, alice.key, 'POST', '/api/sites/srv/deploys', {
+      manifest: { files: site(`${FETCH_SERVER}//2`).map(f => f.meta) },
+    })
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
+    const set = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'a' })
+    )
+    expect(set.deployed).toBeUndefined()
+    expect(await route('srv')).toBeNull()
+    void versionId
+  })
+
+  it('a waiting publish whose server then fails to start says so, and waits no more', async () => {
+    const alice = await createUser(env, ALICE)
+    const refused = await json(
+      await deploy(alice.key, 'srv', site(), { server: { secrets: ['A'] } })
+    )
+    servers.answer = { ok: false, error: 'exited with code 1', logs: ['A is not a URL'] }
+    const set = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/A', { value: 'a' })
+    )
+    expect(set.deployed).toMatchObject({
+      versionId: refused.error.versionId,
+      error: 'server_failed_to_start',
+      logs: ['A is not a URL'],
+    })
+    expect(await route('srv')).toBeNull()
+    expect((await env.store.findSite('srv'))?.server?.awaiting).toBeUndefined()
+  })
+
+  it('a change probes the live server again, and reports a failure without undoing it', async () => {
+    const alice = await createUser(env, ALICE)
+    await deploy(alice.key, 'srv', [file('index.html', 'static')])
+    await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/KEY', { value: 'one' })
+    const live = await json(
+      await deploy(alice.key, 'srv', site(), { server: { secrets: ['KEY'] } })
+    )
+    const ok = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/KEY', { value: 'two' })
+    )
+    expect(ok.live).toEqual({ versionId: live.versionId, ok: true })
+    servers.answer = { ok: false, error: 'exited with code 1', logs: ['KEY rejected'] }
+    const bad = await json(
+      await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/KEY', { value: 'bad' })
+    )
+    expect(bad.live).toMatchObject({
+      versionId: live.versionId,
+      ok: false,
+      error: 'server_failed_to_start',
+      logs: ['KEY rejected'],
+    })
+    expect(bad.live.message).toContain('still the one serving')
+    expect(servers.options.get(live.versionId)?.secrets).toEqual({ KEY: 'bad' })
+    expect(await route('srv')).toMatchObject({ v: live.versionId, f: 1 })
+    const removed = await api(env, alice.key, 'DELETE', '/api/sites/srv/secrets/KEY')
+    expect(removed.status).toBe(200)
+    expect(await json(removed)).toMatchObject({ name: 'KEY', live: { versionId: live.versionId } })
   })
 
   it('only those the version declares reach it, and a change reconfigures the live one', async () => {
@@ -439,10 +522,27 @@ describe('site secrets', () => {
     expect(openSecret(env.deps, 'S1', 'KEY', sealed)).toBe('value')
     expect(openSecret(env.deps, 'S2', 'KEY', sealed)).toBeNull()
     expect(openSecret(env.deps, 'S1', 'OTHER', sealed)).toBeNull()
-    const other = {
-      config: { ...env.config, secrets: { ...env.config.secrets, sessionSecret: 'z'.repeat(40) } },
-    }
-    expect(openSecret(other, 'S1', 'KEY', sealed)).toBeNull()
+    expect(sealed).toMatch(/^[\w-]{8}\./)
+    const withSecrets = (secrets: Partial<Config['secrets']>) => ({
+      config: { ...env.config, secrets: { ...env.config.secrets, ...secrets } },
+    })
+    // Its own key: the session secret and the site cookie key don't touch it.
+    const rotated = withSecrets({ sessionSecret: 'z'.repeat(40), siteHmacKey: 'y'.repeat(40) })
+    expect(openSecret(rotated, 'S1', 'KEY', sealed)).toBe('value')
+    expect(
+      openSecret(withSecrets({ siteSecretsKey: 'c3'.repeat(32) }), 'S1', 'KEY', sealed)
+    ).toBeNull()
+    // The same key as base64 is the same key.
+    const b64 = Buffer.from('a1'.repeat(32), 'hex').toString('base64')
+    expect(openSecret(withSecrets({ siteSecretsKey: b64 }), 'S1', 'KEY', sealed)).toBe('value')
+  })
+
+  it('SITE_SECRETS_KEY is 32 bytes, and required with servers on', () => {
+    expect(() => parseSiteSecretsKey('short')).toThrow(/SITE_SECRETS_KEY/)
+    expect(() => parseSiteSecretsKey('a1'.repeat(31))).toThrow(/SITE_SECRETS_KEY/)
+    expect(parseSiteSecretsKey(randomBytes(32).toString('base64url'))).toHaveLength(32)
+    const config = { ...env.config, secrets: { ...env.config.secrets, siteSecretsKey: undefined } }
+    expect(() => buildDeps(config, { servers })).toThrow(/SITE_SECRETS_KEY is required/)
   })
 })
 
@@ -526,6 +626,35 @@ describe('the kill switch', () => {
     expect(audit.find(e => e.action === 'site.change')).toMatchObject({ change: 'site.server' })
     await browser(boss.session, 'PUT', '/api/admin/sites/srv/server', { stopped: false })
     expect((await route('srv')).x).toBeUndefined()
+  })
+
+  it("shows the site's server on its page and its review: stopped, the limits and the raised ones", async () => {
+    const alice = await createUser(env, ALICE)
+    const boss = await createUser(env, BOSS)
+    await deploy(alice.key, 'srv', site())
+    const before = await json(await api(env, alice.key, 'GET', '/api/sites/srv'))
+    expect(before.server).toEqual({
+      stopped: false,
+      limits: env.config.servers.limits,
+      raised: {},
+    })
+    await browser(boss.session, 'PUT', '/api/admin/sites/srv/server', {
+      stopped: true,
+      limits: { rps: 500 },
+    })
+    const after = await json(await api(env, alice.key, 'GET', '/api/sites/srv'))
+    expect(after.server).toMatchObject({
+      stopped: true,
+      limits: { rps: 500 },
+      raised: { rps: 500 },
+    })
+    const comments = await json(await api(env, alice.key, 'GET', '/api/sites/srv/comments'))
+    expect(comments.site.hasServer).toBe(true)
+    await deploy(alice.key, 'plain', [file('index.html', '<h1>hi</h1>')])
+    const plain = await json(await api(env, alice.key, 'GET', '/api/sites/plain'))
+    expect(plain.server).toBeUndefined()
+    const plainComments = await json(await api(env, alice.key, 'GET', '/api/sites/plain/comments'))
+    expect(plainComments.site.hasServer).toBeUndefined()
   })
 
   it('archiving takes the server dark, deleting retires it', async () => {

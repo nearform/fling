@@ -64,19 +64,22 @@ const reviewShell = resolve(repoRoot, 'apps/web/dist-review/review-shell.html')
 const robotsTxt = resolve(repoRoot, 'apps/web/sites-robots.txt')
 
 /** The dev secrets, made once per root and kept, so sessions and site passes survive a restart. */
-const devSecrets = ((): { session: string; siteHmac: string } => {
+const devSecrets = ((): { session: string; siteHmac: string; siteSecrets: string } => {
   const file = resolve(fsRoot, 'dev-secrets.json')
+  let kept: { session?: string; siteHmac?: string; siteSecrets?: string } = {}
   try {
-    return JSON.parse(readFileSync(file, 'utf8'))
-  } catch {
-    const made = {
-      session: randomBytes(32).toString('base64url'),
-      siteHmac: randomBytes(32).toString('base64url'),
-    }
+    kept = JSON.parse(readFileSync(file, 'utf8'))
+  } catch {}
+  const made = {
+    session: kept.session ?? randomBytes(32).toString('base64url'),
+    siteHmac: kept.siteHmac ?? randomBytes(32).toString('base64url'),
+    siteSecrets: kept.siteSecrets ?? randomBytes(32).toString('hex'),
+  }
+  if (JSON.stringify(made) !== JSON.stringify(kept)) {
     mkdirSync(fsRoot, { recursive: true })
     writeFileSync(file, JSON.stringify(made), { mode: 0o600 })
-    return made
   }
+  return made
 })()
 const appOrigin = `http://fling.lvh.me:${process.env.UI_PORT ?? 47100}`
 const env = {
@@ -95,6 +98,7 @@ const env = {
   ...process.env,
   SESSION_SECRET: process.env.SESSION_SECRET ?? devSecrets.session,
   SITE_HMAC_KEY: process.env.SITE_HMAC_KEY ?? devSecrets.siteHmac,
+  SITE_SECRETS_KEY: process.env.SITE_SECRETS_KEY ?? devSecrets.siteSecrets,
 }
 
 const base = loadBaseConfig(env)

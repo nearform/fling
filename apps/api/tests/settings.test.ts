@@ -110,6 +110,7 @@ describe('GET /api/admin/settings', () => {
       googleClientSecret: 'google-secret-value-0123456789',
       sessionSecret: 'session-secret-value-0123456789abcdef',
       siteHmacKey: 'hmac-key-value-0123456789abcdefghijk',
+      siteSecretsKey: 'b2'.repeat(32),
       originVerifySecret: 'origin-verify-value-0123456789',
     }
     const env = setup({ adminEmails: [BOSS], secrets })

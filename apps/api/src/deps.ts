@@ -19,6 +19,7 @@ import type { Mailer } from './mail/types.ts'
 import { MemoryRouteTable } from './route-table/memory.ts'
 import type { RouteTable } from './route-table/types.ts'
 import { MemoryServerLogs } from './servers/memory-logs.ts'
+import { parseSiteSecretsKey } from './servers/secrets.ts'
 import type { ServerLogs, SiteServers } from './servers/types.ts'
 import { Records } from './store/records.ts'
 import type { Store } from './store/types.ts'
@@ -68,6 +69,10 @@ export function buildDeps(
   const live = config.live ? (opts.live ?? noLiveHub) : noLiveHub
   const mailer = mailerFor(config, opts)
   const serversOn = config.servers.publish.kind !== 'off'
+  if (serversOn && !config.secrets.siteSecretsKey) {
+    throw new Error('SITE_SECRETS_KEY is required when SERVERS is on: it seals site secrets')
+  }
+  if (config.secrets.siteSecretsKey) parseSiteSecretsKey(config.secrets.siteSecretsKey)
   const servers = opts.servers ?? (serversOn ? missing('site servers') : undefined)
   const serverLogs = opts.serverLogs ?? (servers ? new MemoryServerLogs() : undefined)
   return {

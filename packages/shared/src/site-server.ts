@@ -7,6 +7,7 @@
 // server (the Worker, the local runtime, the AWS entry) use them.
 
 import { z } from 'zod'
+import { CLI_PACKAGE } from './distribution.ts'
 import { SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
 import { type SiteInvoke, type SiteViewer, serverSiteHeader } from './site-routing.ts'
 
@@ -32,6 +33,8 @@ export const SERVER_START_LOG_LINES = 20
 export const SERVER_LOG_DAYS = 7
 /** The module a server imports for Fling's helpers (the CLI package's `/server` sub-path). */
 export const SERVER_HELPER_SUFFIX = '/server'
+/** The module specifier a server imports Fling's helpers by: the CLI package's `/server`. */
+export const SERVER_HELPER_MODULE = `${CLI_PACKAGE}${SERVER_HELPER_SUFFIX}`
 
 /** A site secret's name, checked. */
 export const SiteSecretNameSchema = z
@@ -74,6 +77,93 @@ export const SiteSecretsResponseSchema = z.object({
   missing: z.array(z.string()),
 })
 export type SiteSecretsResponse = z.infer<typeof SiteSecretsResponseSchema>
+
+/**
+ * The live version's server after a secret changed: it runs with the site's secrets as they are
+ * now, and answered its start probe (`ok`), or didn't (`server_failed_to_start`: that version is
+ * still the one serving, with the new secrets, and its log says why).
+ */
+export const SecretLiveOutcomeSchema = z.union([
+  z.object({ versionId: z.string(), ok: z.literal(true) }),
+  z.object({
+    versionId: z.string(),
+    ok: z.literal(false),
+    error: z.literal('server_failed_to_start'),
+    message: z.string(),
+    logs: z.array(z.string()),
+  }),
+])
+export type SecretLiveOutcome = z.infer<typeof SecretLiveOutcomeSchema>
+
+/**
+ * The publish that waited for secrets, once the last was set: live at `url`, or refused (`error`:
+ * the code a publish would give, e.g. `server_failed_to_start` with the server's log). Refused,
+ * it stays pending and waits no more: publish again.
+ */
+export const SecretDeployedOutcomeSchema = z.union([
+  z.object({ versionId: z.string(), url: z.string() }),
+  z.object({
+    versionId: z.string(),
+    error: z.string(),
+    message: z.string(),
+    logs: z.array(z.string()).optional(),
+  }),
+])
+export type SecretDeployedOutcome = z.infer<typeof SecretDeployedOutcomeSchema>
+
+/**
+ * PUT /api/sites/:name/secrets/:secret: the secret as listed, and what setting it did. `live`: the
+ * live server reconfigured and probed (a site whose live version has a server). `deployed`: the
+ * publish that waited for secrets went live, or was refused. `missing`: that publish still waits
+ * for these.
+ */
+export const PutSiteSecretResponseSchema = SiteSecretSchema.extend({
+  live: SecretLiveOutcomeSchema.optional(),
+  deployed: SecretDeployedOutcomeSchema.optional(),
+  missing: z.array(z.string()).optional(),
+})
+export type PutSiteSecretResponse = z.infer<typeof PutSiteSecretResponseSchema>
+
+/** DELETE /api/sites/:name/secrets/:secret: the name removed, and the live server after it. */
+export const DeleteSiteSecretResponseSchema = z.object({
+  name: z.string(),
+  live: SecretLiveOutcomeSchema.optional(),
+})
+export type DeleteSiteSecretResponse = z.infer<typeof DeleteSiteSecretResponseSchema>
+
+/** The limits one site's server runs with (the instance's `SERVER_*`, or an admin's raise). */
+export const ServerLimitsSchema = z.object({
+  /** wall time per request, streams included */
+  timeoutSeconds: z.number(),
+  /** CPU per request, where the platform measures it */
+  cpuMs: z.number(),
+  /** requests per second to the site */
+  rps: z.number(),
+  /** environments the site may run at once, where the platform has them */
+  environments: z.number(),
+  /** the largest request body */
+  bodyBytes: z.number(),
+})
+export type ServerLimits = z.infer<typeof ServerLimitsSchema>
+
+/**
+ * A site's server as its site page shows it (`SiteDetail.server`, while the current version has
+ * one): whether an admin stopped it (`/api/*` answers 503), the limits it runs with, and those an
+ * admin raised for it (the rest are the instance's).
+ */
+export const SiteServerSchema = z.object({
+  stopped: z.boolean(),
+  limits: ServerLimitsSchema,
+  raised: ServerLimitsSchema.partial(),
+})
+export type SiteServer = z.infer<typeof SiteServerSchema>
+
+/** PUT /api/admin/sites/:name/server answers the site's server as it now is. */
+export const AdminServerStateSchema = SiteServerSchema.extend({
+  name: z.string(),
+  hasServer: z.boolean(),
+})
+export type AdminServerState = z.infer<typeof AdminServerStateSchema>
 
 /** PUT /api/sites/:name/secrets/:secret */
 export const PutSiteSecretRequestSchema = z.object({ value: z.string() })

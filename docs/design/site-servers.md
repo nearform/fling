@@ -267,7 +267,16 @@ $ fling secrets rm workshop-quote SLACK_WEBHOOK_URL
 - **They belong to the site, not the version.** A rollback runs the old code with today's secrets,
   so a rotated key never comes back.
 - **The version declares them**: `"secrets": [...]` in `fling.json`. A publish or rollback to a
-  version whose secrets aren't all set is 409 `secrets_missing`, naming them.
+  version whose secrets aren't all set is 409 `secrets_missing`, naming them. A publish then waits
+  for them: the version stays pending, and setting the last one takes it live, as if the publish
+  were retried (the start probe included). Only the latest publish waits; staging another version
+  of the site, or any version going live, ends the wait. A rollback is retried by hand.
+- **Setting one redeploys**, like `wrangler secret put`. The live version's server runs with the
+  secrets as they now are and is probed again; a failed probe is reported in the answer, and the
+  secret stays set (that version keeps serving with it, so the fix is another set or a rollback).
+  The answer to a set says what happened: `live` (the live server's probe), `deployed` (the
+  waiting publish, live at its URL or refused with the server's log), `missing` (what the waiting
+  publish still needs).
 - **Owners and publishers set them**, from stdin or with `--from .env NAME…`, which reads only the
   keys named, never as a command-line value. `fling deploy` never uploads `.env`: a local file
   doesn't silently become production secrets. Path publishers can't set them.
@@ -276,8 +285,11 @@ $ fling secrets rm workshop-quote SLACK_WEBHOOK_URL
 - **They reach the server** as `env.NAME` and `process.env.NAME` on both clouds, and
   `secret('NAME')` from the helper. On Cloudflare a changed secret gets a fresh isolate; on AWS it
   makes a new revision of the current version.
-- **Encrypted at rest** with a key derived from the instance's secret, in the Table. At most 20
-  per site, 8 KB each.
+- **Encrypted at rest** in the Table with AES-256-GCM, under the instance's own `SITE_SECRETS_KEY`
+  (32 random bytes, required when servers are on), with the site and the name bound to each value.
+  Nothing else uses that key, so rotating the session secret or the site cookie key leaves secrets
+  alone. Each value carries the id of the key that sealed it, so a later rotation can keep old
+  keys to open what they sealed. At most 20 per site, 8 KB each.
 
 **Publishers can read secrets.** "Never shown" protects against the UI and the API, not against
 the code: anyone who can deploy can publish a server that echoes `process.env.SLACK_WEBHOOK_URL`.

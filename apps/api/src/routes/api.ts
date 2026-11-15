@@ -6,6 +6,7 @@ import {
   ConnectionListSchema,
   CreateCommentRequestSchema,
   CreateGroupRequestSchema,
+  DeleteSiteSecretResponseSchema,
   DeployResponseSchema,
   FinalizeResponseSchema,
   FormsResponseSchema,
@@ -24,6 +25,7 @@ import {
   PathListSchema,
   PullResponseSchema,
   PutSiteSecretRequestSchema,
+  PutSiteSecretResponseSchema,
   ResponseExportFormatSchema,
   ResponsesExportSchema,
   RollbackRequestSchema,
@@ -38,7 +40,6 @@ import {
   SiteListSchema,
   SitePathSchema,
   SiteSchema,
-  SiteSecretSchema,
   SiteSecretsResponseSchema,
   SiteWithAudienceSchema,
   splitEmails,
@@ -489,17 +490,17 @@ apiRoutes.put('/sites/:name/secrets/:secret', async c => {
     c.req.param('secret'),
     value
   )
-  return c.json(SiteSecretSchema.parse(set))
+  return c.json(PutSiteSecretResponseSchema.parse(set))
 })
 
 apiRoutes.delete('/sites/:name/secrets/:secret', async c => {
-  await servers.deleteSiteSecret(
+  const removed = await servers.deleteSiteSecret(
     c.get('deps'),
     c.get('user'),
     c.req.param('name'),
     c.req.param('secret')
   )
-  return c.body(null, 204)
+  return c.json(DeleteSiteSecretResponseSchema.parse(removed))
 })
 
 apiRoutes.get('/sites/:name/logs', async c => {

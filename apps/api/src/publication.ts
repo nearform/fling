@@ -87,7 +87,9 @@
  * deploy's `fling.json`). Going live reads the bundle back (`checkBundle`: 400
  * `server_not_bundled`) and starts the server (`startServer`: `secrets_missing`, the start probe,
  * 422 `server_failed_to_start`) before the version is complete and the route changes; a repointed
- * version starts it the same way.
+ * version starts it the same way. A pending version refused only for `secrets_missing` waits for
+ * them (`SiteServerState.awaiting`, until another version is staged or goes live): setting the last
+ * one publishes it (servers/api.ts).
  *
  * Forms (forms.ts): a deploy's `forms` (the folder's `fling.forms.json`) is the version's forms
  * config, a blob beside its manifest written when the deploy is made (`formsForDeploy`). Omitted,
@@ -638,9 +640,27 @@ async function prepare(
   } satisfies StoredManifest)
   await writeForms(deps, site.id, versionId, forms ?? null)
   await store.putVersion(site, version)
+  // A newer publish: the one that waited for secrets no longer goes live when they are set.
+  if (site.server?.awaiting && site.server.awaiting.versionId !== version.id) {
+    const { awaiting: _, ...rest } = site.server
+    site.server = rest
+    await save(deps, site)
+  }
   const kept = new Set(layer?.kept)
   const sent = req.manifest.files.filter(f => !kept.has(f.path))
   return { kind: 'pending', site, actor, version, files, sent, layer, storage: site.id }
+}
+
+const isSecretsMissing = (err: unknown): err is ApiError & { extra: { secrets: string[] } } =>
+  err instanceof ApiError && err.code === 'secrets_missing' && Array.isArray(err.extra?.secrets)
+
+/**
+ * A pending version refused only for unset secrets waits for them (`SiteServerState.awaiting`):
+ * setting the last one takes it live (servers/api.ts).
+ */
+async function awaitSecrets(deps: Deps, site: SiteRecord, versionId: string, secrets: string[]) {
+  site.server = { ...site.server, awaiting: { versionId, secrets } }
+  await save(deps, site)
 }
 
 /**
@@ -1037,7 +1057,14 @@ async function goLive(
       if (!bundle) throw notFound(`The server of deploy ${version.id} is gone; deploy again`)
       checkBundle(bundle)
     }
-    target = await startServer(deps, principalOfUser(user), site, version)
+    try {
+      target = await startServer(deps, principalOfUser(user), site, version)
+    } catch (err) {
+      if (version.status === 'pending' && isSecretsMissing(err)) {
+        await awaitSecrets(deps, site, version.id, err.extra.secrets)
+      }
+      throw err
+    }
   }
   if (version.status === 'pending') {
     const generatedIndex = await detectGeneratedIndex(deps, site.id, version.id, files)

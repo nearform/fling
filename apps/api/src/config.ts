@@ -300,6 +300,11 @@ export interface Secrets {
   googleClientSecret?: string
   sessionSecret: string
   siteHmacKey: string
+  /**
+   * Seals site secrets (`SITE_SECRETS_KEY`: 32 random bytes, hex or base64; servers/secrets.ts).
+   * Required when SERVERS is on (buildDeps); nothing else is derived from it.
+   */
+  siteSecretsKey?: string
   /** CloudFront adds `x-origin-verify: <secret>`; unset → no check. */
   originVerifySecret?: string
 }
@@ -314,6 +319,7 @@ export const SECRET_SETTINGS: Record<keyof Secrets, { name: string; group: Setti
   googleClientSecret: { name: 'GOOGLE_CLIENT_SECRET', group: 'sign_in' },
   sessionSecret: { name: 'SESSION_SECRET', group: 'platform' },
   siteHmacKey: { name: 'SITE_HMAC_KEY', group: 'platform' },
+  siteSecretsKey: { name: 'SITE_SECRETS_KEY', group: 'features' },
   originVerifySecret: { name: 'ORIGIN_VERIFY_SECRET', group: 'platform' },
 }
 
@@ -709,6 +715,7 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     googleClientSecret: env.GOOGLE_CLIENT_SECRET?.trim() || undefined,
     sessionSecret,
     siteHmacKey,
+    siteSecretsKey: env.SITE_SECRETS_KEY?.trim() || undefined,
     originVerifySecret: env.ORIGIN_VERIFY_SECRET?.trim() || undefined,
   }
 }

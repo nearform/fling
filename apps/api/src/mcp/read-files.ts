@@ -1,13 +1,15 @@
 /**
  * fling_read_files on the remote MCP server: a version's files, inline, for an agent that can't
  * download them. Who may read is pull's (`pullable`, pull.ts: `site.pull`); the paging, encoding
- * and wording are shared with the local server (read-files.ts in @fling/shared).
+ * and wording are shared with the local server (read-files.ts in @fling/shared). A version with a
+ * server comes with its config (`server`, its fling.json), which is no published file.
  */
 import {
   encodeForAgent,
   MCP_READ_MAX_BYTES,
   pageOfFiles,
   type ReadFile,
+  type ServerConfig,
   siteObjectKey,
 } from '@fling/shared'
 import { mapLimit } from '../lib/concurrency.ts'
@@ -31,9 +33,11 @@ export async function readFiles(
   files: ReadFile[]
   missing: string[]
   nextCursor?: string
+  /** the version's server config (its fling.json, never a published file) */
+  server?: ServerConfig
 }> {
   const path = opts.path === undefined ? undefined : normalizeFolder(opts.path)
-  const { site, storage, versionId, files } = await pullable(deps, user, name, {
+  const { site, storage, versionId, files, server } = await pullable(deps, user, name, {
     ...(opts.versionId ? { versionId: opts.versionId } : {}),
     ...(path === undefined ? {} : { path }),
   })
@@ -62,5 +66,6 @@ export async function readFiles(
     files: [...read, ...big].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
     missing,
     ...(nextCursor ? { nextCursor } : {}),
+    ...(server ? { server } : {}),
   }
 }

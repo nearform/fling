@@ -6,6 +6,7 @@
  * (`fling pull`) gets it. Browser-safe.
  */
 import { isScannablePath, looksBinary } from './secrets.ts'
+import { PULLED_SERVER_NOTE, SERVER_CONFIG_FILE, type ServerConfig } from './site-server.ts'
 
 /**
  * fling_read_files: file bytes per call. The contents go out twice (the text the model reads and
@@ -98,6 +99,7 @@ export function describeReadFiles(
     files: readonly ReadFile[]
     missing: string[]
     nextCursor?: string
+    server?: ServerConfig
   }
 ): string {
   const read = result.files.filter(f => !f.tooLarge)
@@ -115,6 +117,11 @@ export function describeReadFiles(
   if (result.nextCursor) {
     lines.push(
       `More files: call fling_read_files again with cursor "${result.nextCursor}" (or name the files you need in \`paths\`).`
+    )
+  }
+  if (result.server) {
+    lines.push(
+      `It has a site server. Its ${SERVER_CONFIG_FILE} (\`server\` in the result; a build input, not a published file): ${JSON.stringify(result.server)}. Publishing on this base with the same _fling/server.mjs keeps it; to change it, pass it as \`siteServer\`. ${PULLED_SERVER_NOTE}`
     )
   }
   lines.push(

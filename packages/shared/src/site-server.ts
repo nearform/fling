@@ -8,7 +8,7 @@
 
 import { z } from 'zod'
 import { CLI_PACKAGE } from './distribution.ts'
-import { SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
+import { SERVER_BUNDLE, SERVER_PREFIX, SERVER_SITE_HEADER, VIEWER_HEADER } from './route-keys.ts'
 import { type SiteInvoke, type SiteViewer, serverSiteHeader } from './site-routing.ts'
 
 export type { SiteViewer }
@@ -54,6 +54,12 @@ export const SERVER_LOG_DAYS = 7
 export const SERVER_HELPER_SUFFIX = '/server'
 /** The module specifier a server imports Fling's helpers by: the CLI package's `/server`. */
 export const SERVER_HELPER_MODULE = `${CLI_PACKAGE}${SERVER_HELPER_SUFFIX}`
+
+/**
+ * What a pull (or fling_read_files) of a version with a server says: the files hold the server's
+ * built bundle, never its source, which stays in the author's own repository.
+ */
+export const PULLED_SERVER_NOTE = `${SERVER_BUNDLE} is the server's built bundle, not its source: the folder deploys again as it is, but the server is changed from its source (server.ts and the rest, in the author's own repository), which Fling never stores.`
 
 /** A site secret's name, checked. */
 export const SiteSecretNameSchema = z

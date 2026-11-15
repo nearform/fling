@@ -36,6 +36,10 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
   only), `SERVER_RPS` (100), `SERVER_ENVIRONMENTS` (2, AWS only) and `SERVER_BODY_BYTES` (10 MB),
   plus the secret `SITE_SECRETS_KEY` (32 random bytes, required when servers are on), which seals
   site secrets. See [docs/site-servers.md](docs/site-servers.md) and the Guide's Site servers part.
+  `fling pull` (and `fling_pull`) of a site with a server writes its `fling.json` beside the built
+  bundle and says the folder holds the bundle, not the server's source, which Fling never stores;
+  `fling_read_files` returns the config as `server`. A publish on a base that keeps the base's
+  `_fling/server.mjs` and sends no `fling.json` keeps the base version's secrets and health path.
 - Upgrade note: on AWS the module needs the AWS provider 6.72 or later in 6.x, so run
   `terraform init -upgrade` once before the next plan, whether or not you turn servers on. To turn
   them on, set the module's `servers = { enabled = true }` (with `egress = "open"` if servers may

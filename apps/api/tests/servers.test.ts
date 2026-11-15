@@ -610,6 +610,82 @@ describe('site secrets', () => {
   })
 })
 
+describe('pull and publishing on a base', () => {
+  const FLING = { secrets: ['TOKEN'], health: '/api/health' }
+
+  /** Alice's live `srv` with a server declaring TOKEN and a health path: its version id. */
+  async function live(alice: { key: string }) {
+    const waiting = await json(await deploy(alice.key, 'srv', site(), { server: FLING }))
+    expect(waiting.error.code).toBe('secrets_missing')
+    await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/TOKEN', { value: 't0k3n' })
+    const current = (await env.store.findSite('srv'))?.currentVersionId
+    expect(current).toBe(waiting.error.versionId)
+    return current as string
+  }
+
+  const markOf = async (versionId: string) => {
+    const s = await env.store.findSite('srv')
+    return s ? (await env.store.getVersion(s, versionId))?.server : undefined
+  }
+
+  it("the pull carries the version's server config, never as one of its files", async () => {
+    const alice = await createUser(env, ALICE)
+    await live(alice)
+    const pulled = await json(await api(env, alice.key, 'GET', '/api/sites/srv/pull'))
+    expect(pulled.server).toEqual(FLING)
+    expect(pulled.files.map((f: { path: string }) => f.path)).toEqual([
+      '_fling/server.mjs',
+      'index.html',
+    ])
+    await deploy(alice.key, 'plain', [file('index.html', '<h1>plain</h1>')])
+    const plain = await json(await api(env, alice.key, 'GET', '/api/sites/plain/pull'))
+    expect(plain.server).toBeUndefined()
+  })
+
+  it("a publish on a base that keeps the base's bundle and sends no config keeps the base's", async () => {
+    const alice = await createUser(env, ALICE)
+    const base = await live(alice)
+    // Partial: the bundle is carried, not sent.
+    const partial = await json(
+      await deploy(alice.key, 'srv', [file('index.html', '<h1>v2</h1>')], {
+        base,
+        partial: true,
+      })
+    )
+    expect(partial.versionId).toBeDefined()
+    expect(await markOf(partial.versionId)).toEqual(FLING)
+    expect(servers.options.get(partial.versionId)?.secrets).toEqual({ TOKEN: 't0k3n' })
+    expect(servers.probes.at(-1)).toMatchObject({ path: '/api/health' })
+    // Whole: the same bundle sent again.
+    const whole = await json(
+      await deploy(alice.key, 'srv', site(FETCH_SERVER, [file('more.html', 'x')]), {
+        base: partial.versionId,
+      })
+    )
+    expect(await markOf(whole.versionId)).toEqual(FLING)
+  })
+
+  it('a config sent wins, and another bundle without one declares nothing', async () => {
+    const alice = await createUser(env, ALICE)
+    const base = await live(alice)
+    const sent = await json(
+      await deploy(alice.key, 'srv', [file('index.html', '<h1>v2</h1>')], {
+        base,
+        partial: true,
+        server: { secrets: [] },
+      })
+    )
+    expect(await markOf(sent.versionId)).toEqual({ secrets: [] })
+    const other = await json(
+      await deploy(alice.key, 'srv', site(`${FETCH_SERVER}//2`), { base: sent.versionId })
+    )
+    expect(await markOf(other.versionId)).toEqual({ secrets: [] })
+    // Without a base, nothing is inherited either.
+    const fresh = await json(await deploy(alice.key, 'srv', site(`${FETCH_SERVER}//3`)))
+    expect(await markOf(fresh.versionId)).toEqual({ secrets: [] })
+  })
+})
+
 describe('logs and viewer ids', () => {
   it("read the request log by the site's owners, by viewer id", async () => {
     const alice = await createUser(env, ALICE)

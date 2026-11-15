@@ -5,10 +5,11 @@
  * an owner, publisher or admin. `--path` pulls one folder of the site, its files at the top of
  * `dir`. A folder that isn't empty needs `--force`.
  *
- * `fling deploy` in the folder then publishes on the version pulled (commands/deploy.ts).
+ * `fling deploy` in the folder then publishes on the version pulled (commands/deploy.ts). A version
+ * with a server comes as its built bundle and its `fling.json`, never its source: the pull says so.
  */
 import { relative, resolve } from 'node:path'
-import { normalizePathFolder } from '@fling/shared'
+import { normalizePathFolder, PULLED_SERVER_NOTE, SERVER_CONFIG_FILE } from '@fling/shared'
 import chalk from 'chalk'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
@@ -71,6 +72,9 @@ export async function runPull(
   ctx.log.success(
     `Pulled ${name}${path ? ` /${path}/` : ''} into ${shown} ${chalk.dim(`(${pulled.fileCount} files, ${formatBytes(pulled.totalBytes)}, version ${pulled.versionId})`)}`
   )
+  if (pulled.serverConfig) {
+    ctx.log.info(`Its server's config is in ${SERVER_CONFIG_FILE}. ${PULLED_SERVER_NOTE}`)
+  }
   ctx.out.data(pulled, () =>
     chalk.dim(
       `Change what you need, then \`${ctx.binName} deploy ${shown}\`: it publishes on version ${pulled.versionId}, and stops if someone publishes ${name} before you do.`

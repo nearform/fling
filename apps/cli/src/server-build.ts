@@ -276,6 +276,8 @@ export interface ServerPlan {
   /** the entry bundled, or null for a prebuilt bundle published as it is */
   entry: string | null
   config: ServerConfig
+  /** the folder has a `fling.json`: only then does the deploy send `config` (serverRequest) */
+  configFile: boolean
   /** the bundle's size, and gzipped (bundled only) */
   size: number
   gzipped?: number
@@ -334,7 +336,13 @@ export async function buildSiteManifest(
     checkServerBundle(bytes)
     return {
       local,
-      server: { entry: null, config: source.config, size: bytes.byteLength, buildInputs },
+      server: {
+        entry: null,
+        config: source.config,
+        configFile: source.configFile,
+        size: bytes.byteLength,
+        buildInputs,
+      },
       notes,
     }
   }
@@ -356,6 +364,7 @@ export async function buildSiteManifest(
     server: {
       entry: source.entry,
       config: source.config,
+      configFile: source.configFile,
       size: bundle.size,
       gzipped: bundle.gzipped,
       buildInputs,
@@ -370,8 +379,16 @@ export function describeBundle(plan: ServerPlan): string {
   return `bundling ${plan.entry} → ${SERVER_BUNDLE} (${formatBytes(plan.size)}, ${formatBytes(plan.gzipped ?? 0)} gzipped)`
 }
 
-/** DeployRequest.server for a plan. */
-export const serverRequest = (plan: ServerPlan): ServerConfig => ({
-  secrets: plan.config.secrets,
-  ...(plan.config.health ? { health: plan.config.health } : {}),
-})
+/**
+ * DeployRequest.server for a plan: none without a `fling.json`, so a deploy on a base that keeps
+ * the base's bundle keeps the base's config (publication.ts), and any other declares nothing.
+ */
+export const serverRequest = (plan: ServerPlan): { server?: ServerConfig } =>
+  plan.configFile
+    ? {
+        server: {
+          secrets: plan.config.secrets,
+          ...(plan.config.health ? { health: plan.config.health } : {}),
+        },
+      }
+    : {}

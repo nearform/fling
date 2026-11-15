@@ -10,8 +10,9 @@
 // The function is then minified, for room under CloudFront's 10 KB limit: whitespace and local
 // names only. esbuild's syntax minification is left off, as it restructures code (an `if` into
 // `&&`, statements into one expression) and could put an `await` where the runtime refuses it.
-// The imports and `handler` keep their names: the body is minified as a script, where `cf`,
-// `crypto` and top-level declarations are globals. Every check runs on both forms, and the
+// The body is minified as a script, where top-level declarations are globals that keep their
+// names, so it is wrapped in a function first and only `handler` (which CloudFront calls) stays
+// at the top level; `cf` and `crypto`, the imports, are globals inside it. Every check runs on both forms, and the
 // readable one is written beside the deployable one (dist/site-router.readable.js) to read
 // CloudFront's errors against.
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -124,7 +125,7 @@ export function buildSiteRouter() {
   const readable = buildReadableSiteRouter()
   const importLine = /^import \w+ from "\w+";$/gm
   const imports = readable.match(importLine) ?? []
-  const body = readable.replace(importLine, '')
+  const body = `var siteRouter = (function () {\n${readable.replace(importLine, '')}\nreturn handler\n})()\nasync function handler(event) {\n  return await siteRouter(event)\n}\n`
   const code = minify(body, {})
   if (code !== minify(body, RESTRICTED)) throw new Error(`site-router: minified, ${LACKS}`)
   if (!/(^|[;}])async function handler\(/.test(code)) {

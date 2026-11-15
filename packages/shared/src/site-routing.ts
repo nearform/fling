@@ -8,7 +8,10 @@
 //   → rewrite to `/sites/<id>/<v><path>` (saying `x-fling-version: <v>`), or to MISSING_KEY
 //     (unknown host, archived site, dotfile, site whose `fling_pass` says it was refused); NOT_FOUND_PAGE and REVIEW_SHELL pass through on any host,
 //     and `/robots.txt` on any host is ROBOTS_TXT
-//   → or answer: 405 (not GET/HEAD), 302 to the app's sign-in (private site without a valid
+//   → or invoke the site's server (route value `f`): a request under SERVER_PREFIX (`/api/`), any
+//     method, after every access check below, naming the viewer they found (see SiteInvoke)
+//   → or answer: 405 (not GET/HEAD, outside a server's `/api/`), 403 `cross_origin` (a write to a
+//     server's `/api/` from another origin), 503 (a server an admin stopped, `x`), 302 to the app's sign-in (private site without a valid
 //     `fling_site` cookie, or a member's the revocation list stops; restricted site, or members-level site to a guest's `fling_site`,
 //     without a valid `fling_pass` naming it), 301 to add a trailing slash (extensionless path,
 //     not an SPA), 204 to SITE_VERSION_PATH (`/_fling-version`) with `x-fling-version: <v>`.
@@ -65,9 +68,21 @@
 // refuses a bundle that needed any syntax lowered or nests an await, and edge's tests run the
 // bundle in a harness.
 //
+// Site servers. A version with a server (SERVER_BUNDLE) has its route value say `f: 1`, and `t`
+// the host its runtime is reached at when the platform needs one (AWS: the Web Function's
+// endpoint). Requests under SERVER_PREFIX then go to it, any method; every other path keeps the
+// GET/HEAD rule, refused before any lookup. A write (any method but GET, HEAD and OPTIONS) needs
+// `Sec-Fetch-Site: same-origin` or the site's own `Origin`, or neither header (curl, another
+// server: no browser cookies), else 403 `cross_origin`: every site shares the sites domain, and
+// `fling_site` is set on it, so to a browser all sites are one site and SameSite does not stop
+// another site's page posting as the visitor. The server learns who is calling from the decision's
+// `viewer` (null on a public site or a share host), never from a credential: the shell drops the
+// browser's cookies and any VIEWER_HEADER it sent. Nothing under FLING_DIR is a site's file.
+//
 // Contracts: route-keys.ts (keys), site-labels.ts (labels), site-cookie.ts (the cookie format).
 
 import {
+  FLING_DIR,
   MISSING_KEY,
   NOT_FOUND_PAGE,
   PATHS_JSON_PATH,
@@ -75,6 +90,7 @@ import {
   REVIEW_SHELL,
   ROBOTS_TXT,
   revokedKvsKey,
+  SERVER_PREFIX,
   SITE_DENIED_TTL_SECONDS,
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
@@ -99,6 +115,10 @@ export interface SiteRequest {
   cookie: string | null
   /** the `fling_pass` cookie's value (a restricted site's pass); null when there is none */
   pass: string | null
+  /** the `Sec-Fetch-Site` header; absent or null when not sent */
+  fetchSite?: string | null
+  /** the `Origin` header; absent or null when not sent */
+  origin?: string | null
 }
 
 /** What the decision needs from the platform. Lookups return promises (no async closures). */
@@ -136,6 +156,8 @@ export interface SiteResponse {
   headers: Record<string, string>
   /** by name; only `/_fling-pass` sets one (`fling_pass`) */
   cookies?: Record<string, SiteCookie>
+  /** the body to send (JSON: `{"error":{"code","message"}}`); absent: none */
+  body?: string
 }
 
 /** Serve this object key (`/sites/<id>/<v>/<path>`, MISSING_KEY, NOT_FOUND_PAGE or REVIEW_SHELL). */
@@ -146,7 +168,36 @@ export interface SiteRewrite {
   headers: Record<string, string>
 }
 
-export type SiteDecision = SiteResponse | SiteRewrite
+/** Who the access checks found calling a site's server: what VIEWER_HEADER carries. */
+export interface SiteViewer {
+  /** the viewer id (viewerIdOf): the same for one person on one site, different on every other */
+  id: string
+  email: string
+  /** their `fling_site` says they are a guest */
+  guest: boolean
+}
+
+/**
+ * Run the site's server, version `v`, for this request. The shell drops the browser's cookies and
+ * any VIEWER_HEADER, sets VIEWER_HEADER to `viewer` (JSON) when there is one and SERVER_SITE_HEADER
+ * to `<siteId>/<v>`, and sends the request on unchanged otherwise: to `target` when there is one,
+ * else to the platform's own runtime. What the server answers goes back with its Cache-Control
+ * made safe (serverCacheControl, site-server.ts), as `private` says.
+ */
+export interface SiteInvoke {
+  action: 'invoke'
+  siteId: string
+  v: string
+  /** where the server is reached (route value `t`), when the platform needs one; else null */
+  target: string | null
+  /** the site is not public: a `public` Cache-Control becomes `private` */
+  private: boolean
+  /** who the checks found signed in; null on a public site or a share host */
+  viewer: SiteViewer | null
+  headers: Record<string, string>
+}
+
+export type SiteDecision = SiteResponse | SiteRewrite | SiteInvoke
 
 /** Route table value of a live site (KvsSiteValueSchema in kvs.ts). */
 interface RouteValue {
@@ -162,6 +213,12 @@ interface RouteValue {
   i?: string
   /** 1: the version's Markdown files have rendered pages (`.rendered/<path>.html`) */
   m?: number
+  /** 1: the version has a server (SERVER_BUNDLE), run for SERVER_PREFIX */
+  f?: number
+  /** where the server is reached, when the platform needs it (the decision's `target`) */
+  t?: string
+  /** 1: an admin stopped the server: SERVER_PREFIX answers 503 */
+  x?: number
 }
 
 // Any path segment starting with a dot (incl. `.`/`..` traversal and `.env`, `.git/…`,
@@ -407,6 +464,66 @@ async function bySitePass(
   return null
 }
 
+const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567'
+
+/**
+ * The viewer id of `email` on site `siteId`: `v_` and the first 8 bytes of
+ * HMAC(key, `viewer:<siteId>:<email>`) in base32 (lowercase, unpadded: 13 characters), under the
+ * site cookie key. One person has one id per site and a different one on every other site, so a
+ * site's logs can follow a user without two sites' logs being joined, and no log names an address.
+ */
+export function viewerIdOf(
+  key: string,
+  siteId: string,
+  email: string,
+  hmac: (key: string, data: string) => string
+): string {
+  const mac = Buffer.from(hmac(key, `viewer:${siteId}:${email}`), 'base64url')
+  let out = 'v_'
+  let bits = 0
+  let value = 0
+  for (let i = 0; i < 8; i++) {
+    value = ((value << 8) | mac[i]) & 0xfff
+    bits += 8
+    while (bits >= 5) {
+      bits -= 5
+      out += BASE32.charAt((value >> bits) & 31)
+    }
+  }
+  return out + BASE32.charAt((value << (5 - bits)) & 31)
+}
+
+/** An answer with a JSON error body: `{"error":{"code","message"}}`. */
+function refuse(status: number, description: string, code: string, message: string): SiteResponse {
+  return {
+    action: 'respond',
+    status: status,
+    statusDescription: description,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    body: JSON.stringify({ error: { code: code, message: message } }),
+  }
+}
+
+/**
+ * A write from another origin: a browser said where it came from (Sec-Fetch-Site or Origin), and
+ * it is not this site's host.
+ */
+function crossOrigin(req: SiteRequest, ctx: SiteRoutingContext, host: string): boolean {
+  const site = req.fetchSite || ''
+  const origin = req.origin || ''
+  if (!site && !origin) return false
+  return site !== 'same-origin' && origin !== `${ctx.siteScheme}://${host}`
+}
+
+function notAllowed(): SiteResponse {
+  return {
+    action: 'respond',
+    status: 405,
+    statusDescription: 'Method Not Allowed',
+    headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
+  }
+}
+
 function parseRoute(raw: string | null): RouteValue | null {
   if (!raw) return null
   try {
@@ -434,19 +551,17 @@ export async function routeSiteRequest(
 
 async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDecision> {
   const uri = req.uri
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return {
-      action: 'respond',
-      status: 405,
-      statusDescription: 'Method Not Allowed',
-      headers: { allow: 'GET, HEAD', 'cache-control': 'no-store' },
-    }
-  }
+  const readOnly = req.method === 'GET' || req.method === 'HEAD'
+  const api = uri.indexOf(SERVER_PREFIX) === 0
+  // Only a site's server takes other methods: a path it can't own is refused before any lookup.
+  if (!readOnly && !api) return notAllowed()
   // Static pages that hold no site data, on any host: the 404 page, the review shell (the site it
   // frames is requested separately and goes through the checks below), and Fling's robots.txt in
   // place of any the site has.
   if (uri === NOT_FOUND_PAGE || uri === REVIEW_SHELL) return rewrite(uri)
   if (uri === '/robots.txt') return rewrite(ROBOTS_TXT)
+  // Fling's own paths: a site's files there (its server's bundle among them) are never served.
+  if (uri.indexOf(FLING_DIR) === 0) return rewrite(MISSING_KEY)
 
   const host = req.host.toLowerCase()
   const target = routeKeyForHost(host)
@@ -457,10 +572,17 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     return rewrite(MISSING_KEY)
   }
 
-  if (site.vis !== 'public' && !target.share && site.r) {
+  const invoke = site.f === 1 && api
+  if (!readOnly && !invoke) return notAllowed()
+  if (invoke && !readOnly && req.method !== 'OPTIONS' && crossOrigin(req, ctx, host)) {
+    return refuse(403, 'Forbidden', 'cross_origin', 'Not from this site')
+  }
+
+  const checked = site.vis !== 'public' && !target.share
+  if (checked && site.r) {
     const held = await bySitePass(req, ctx, host, site.id)
     if (held) return held
-  } else if (site.vis !== 'public' && !target.share) {
+  } else if (checked) {
     const cookie = req.cookie
     let key: string | null = null
     if (cookie !== null) key = await ctx.getCookieKey()
@@ -479,6 +601,34 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
       // at sign-in, so at worst they pass through it again within that second.
       const until = await ctx.getRevocation(revokedKvsKey(ctx.hmac(key as string, claims.e)))
       if (until !== null && claims.x <= Number(until)) return toSignIn(req, ctx, host)
+    }
+  }
+
+  if (invoke) {
+    if (site.x) {
+      return refuse(503, 'Service Unavailable', 'server_stopped', 'Server stopped')
+    }
+    // Who the checks above let in: a restricted site's pass names them, else their `fling_site`
+    // (whose `g` says whether they are a guest; a pass says nothing of standing).
+    let viewer: SiteViewer | null = null
+    if (checked) {
+      let key = await ctx.getCookieKey()
+      key = key || ''
+      const claims = siteCookieClaims(req.cookie || '', key, ctx.nowSeconds, ctx.hmac)
+      const email = site.r
+        ? validSitePass(req.pass || '', key, 'pass', site.id, ctx.nowSeconds, ctx.hmac)
+        : claims.e
+      const guest = !!claims && claims.g === 1
+      viewer = { id: viewerIdOf(key, site.id, email, ctx.hmac), email: email, guest: guest }
+    }
+    return {
+      action: 'invoke',
+      siteId: site.id,
+      v: site.v,
+      target: site.t || null,
+      private: site.vis !== 'public',
+      viewer: viewer,
+      headers: {},
     }
   }
 

@@ -59,3 +59,18 @@ export const SITE_PASS_TTL_SECONDS = 5 * 60
  * until then, and someone added to its audience waits at most this long to get in.
  */
 export const SITE_DENIED_TTL_SECONDS = 10
+
+/**
+ * Requests under this prefix go to the site's server, when its current version has one (route
+ * value `f`, site-routing.ts): any method, after every access check. Elsewhere, and on a site
+ * without a server, `/api/` is an ordinary folder.
+ */
+export const SERVER_PREFIX = '/api/'
+/** A version's server: one bundled ES module, a file of the version that is never served. */
+export const SERVER_BUNDLE = '_fling/server.mjs'
+/** Who is calling, as the server reads it: `{"id","email","guest"}`, set by Fling, never the browser. */
+export const VIEWER_HEADER = 'x-fling-viewer'
+/** The site and version an invoke runs, on the request the server's runtime receives. */
+export const SERVER_SITE_HEADER = 'x-fling-site'
+/** Every path under it is Fling's: a site's own files there are never served. */
+export const FLING_DIR = '/_fling/'

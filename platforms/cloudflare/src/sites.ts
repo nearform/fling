@@ -151,6 +151,8 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
       query: normalizeQuery(url.search),
       cookie: cookieValue(request.headers.get('cookie'), SITE_COOKIE_NAME),
       pass: cookieValue(request.headers.get('cookie'), SITE_PASS_COOKIE_NAME),
+      fetchSite: request.headers.get('sec-fetch-site'),
+      origin: request.headers.get('origin'),
     },
     {
       appOrigin: opts.appOrigin,
@@ -168,8 +170,10 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
     for (const [name, cookie] of Object.entries(decision.cookies ?? {})) {
       headers.append('set-cookie', `${name}=${cookie.value}; ${cookie.attributes}`)
     }
-    return new Response(null, { status: decision.status, headers })
+    return new Response(decision.body ?? null, { status: decision.status, headers })
   }
+  // A site server's request: this host runs none yet, so it answers as a missing page.
+  if (decision.action === 'invoke') return notFound(opts, 404, request.method)
   // The host's headers on whatever is served: file, 404 page, review shell or robots.txt.
   const res = await serveRewrite(request, opts, decision.uri)
   for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)

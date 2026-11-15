@@ -23,6 +23,7 @@ import {
   type CloudFrontRequest,
   type CloudFrontResponse,
   createSiteRouter,
+  isInvoke,
   isResponse,
   renderSiteRouter,
   SITE_ROUTER_SOURCE,
@@ -56,6 +57,11 @@ const store = new Map<string, string>([
     JSON.stringify({ id: 'S8', v: 'V8', vis: 'private', spa: false, p: 1, i: 'R8' }),
   ],
   [pathKvsKey('S8', 'PAY-412'), JSON.stringify({ id: 'P8', v: 'W8' })],
+  [siteKvsKey('srv'), JSON.stringify({ id: 'S10', v: 'V10', vis: 'private', spa: false, f: 1 })],
+  [
+    siteKvsKey('srv-aws'),
+    JSON.stringify({ id: 'S11', v: 'V11', vis: 'public', spa: false, f: 1, t: 'abc.on.aws' }),
+  ],
   [
     shareKvsKey('r'.repeat(20)),
     JSON.stringify({ id: 'S7', v: 'V7', vis: 'private', spa: false, r: 1 }),
@@ -621,5 +627,68 @@ describe('deployable source', () => {
     const rendered = renderSiteRouter({ appOrigin: APP })
     expect(rendered).toContain(`"${APP}"`)
     expect(rendered).not.toMatch(/__APP_ORIGIN__|__SITE_SCHEME__/)
+  })
+})
+
+describe('site servers', () => {
+  it("sends /api/* on as it was, without the browser's cookies or viewer, naming the viewer", async () => {
+    const result = await router(
+      toCloudFrontEvent({
+        method: 'POST',
+        host: 'srv.fling.example.test',
+        path: '/api/quote',
+        cookieHeader: `${validCookie()}; other=1`,
+        headers: {
+          'x-fling-viewer': '{"id":"v_forged","email":"boss@example.test","guest":false}',
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+      })
+    )
+    expect(isInvoke(result)).toBe(true)
+    const request = result as CloudFrontRequest
+    expect(request.uri).toBe('/api/quote')
+    expect(request.cookies).toEqual({})
+    expect(request.headers.cookie).toBeUndefined()
+    expect(JSON.parse(request.headers['x-fling-viewer']?.value as string)).toMatchObject({
+      email: 'alice@example.test',
+      guest: false,
+    })
+    expect(request.headers['x-fling-site']?.value).toBe('S10/V10')
+    expect(request.headers['content-type']?.value).toBe('application/json')
+    expect(request.origin).toBeUndefined()
+  })
+
+  it("switches the origin to the decision's target, signed by origin access control", async () => {
+    const result = await router(
+      toCloudFrontEvent({
+        host: 'srv-aws.fling.example.test',
+        path: '/api/me',
+        headers: { 'x-fling-viewer': '{"id":"v_forged","email":"boss@example.test"}' },
+      })
+    )
+    const request = result as CloudFrontRequest
+    expect(isInvoke(request)).toBe(true)
+    expect(request.headers['x-fling-viewer']).toBeUndefined()
+    expect(request.origin).toMatchObject({
+      domainName: 'abc.on.aws',
+      originAccessControlConfig: { enabled: true, originType: 'lambda' },
+    })
+  })
+
+  it('answers a cross-origin write with 403 and its reason', async () => {
+    const res = await asResponse({
+      method: 'POST',
+      host: 'srv-aws.fling.example.test',
+      path: '/api/quote',
+      headers: { 'sec-fetch-site': 'same-site', origin: 'https://evil.fling.example.test' },
+    })
+    expect(res.statusCode).toBe(403)
+    expect(JSON.parse(res.body?.data as string).error.code).toBe('cross_origin')
+  })
+
+  it('takes a rewrite for an object, never an invoke', async () => {
+    const result = await router(toCloudFrontEvent({ host: PUBLIC, path: '/a.js' }))
+    expect(isInvoke(result)).toBe(false)
   })
 })

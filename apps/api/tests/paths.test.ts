@@ -51,6 +51,7 @@ async function get(env: Env, name: string, uri: string, query = '') {
       hmac: (key, data) => createHmac('sha256', key).update(data).digest('base64url'),
     }
   )
+  if (d.action === 'invoke') return 'invoked'
   if (d.action !== 'rewrite') return d.status
   const bytes = await env.blobs.get(decodeURIComponent(d.uri.slice(1)))
   return bytes ? Buffer.from(bytes).toString('utf8') : 404

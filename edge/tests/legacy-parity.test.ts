@@ -4,7 +4,9 @@
  * same events over a matrix of hosts, paths, queries, methods, cookies and route-table states, and
  * every result (rewritten request or response) must be identical, except for the headers added
  * since (every answer's `X-Robots-Tag: noindex`, a share host's `Referrer-Policy: no-referrer`),
- * checked and then set aside. `/robots.txt`, rewritten since, is not in the matrix.
+ * checked and then set aside. `/robots.txt`, rewritten since, is not in the matrix. Paths under
+ * `/_fling/` but the 404 page are Fling's own and never a site's file: checked to be missing
+ * rather than compared.
  */
 import nodeCrypto from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -149,6 +151,11 @@ describe('the generated router decides exactly as the legacy one', () => {
                   if (!host) delete (event.request.headers as Record<string, unknown>).host
                   const [was, now] = [await legacy(event), await current(event)]
                   const label = JSON.stringify({ method, host, path, query, cookieHeader })
+                  if (path.startsWith('/_fling/') && path !== '/_fling/404.html') {
+                    expect(isResponse(now) ? now : now.uri, label).toBe('/_fling/missing')
+                    compared++
+                    continue
+                  }
                   if (isResponse(now)) {
                     const policy = now.headers?.['referrer-policy']
                     const share = routeKeyForHost(host)?.share === true

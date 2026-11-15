@@ -26,6 +26,12 @@ export const KvsSiteValueSchema = z.object({
   i: z.string().optional(),
   /** present when the current version's Markdown files have rendered pages (markdown.ts) */
   m: z.literal(1).optional(),
+  /** present when the current version has a server (SERVER_BUNDLE), run for SERVER_PREFIX */
+  f: z.literal(1).optional(),
+  /** where the server is reached, when the platform needs it (AWS: the Web Function's endpoint) */
+  t: z.string().optional(),
+  /** present when an admin stopped the site's server: SERVER_PREFIX answers 503 */
+  x: z.literal(1).optional(),
 })
 export type KvsSiteValue = z.infer<typeof KvsSiteValueSchema>
 

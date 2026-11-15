@@ -10,8 +10,13 @@
 //
 // edge/build.mjs bundles this into dist/site-router.js, the code deploy.yml publishes, after
 // filling `__APP_ORIGIN__` and `__SITE_SCHEME__`. Same syntax rules as site-routing.ts.
+//
+// An invoke (a site server's `/api/*`) goes on as the request it was, minus the browser's cookies
+// and any `x-fling-viewer` it sent, with `x-fling-viewer` set from the decision and
+// `x-fling-site: <siteId>/<v>`; to the decision's `target` when it names one (the site's Web
+// Function endpoint, signed by origin access control), else to the distribution's own origin.
 
-import { SITE_HMAC_KVS_KEY } from '@fling/shared/route-keys'
+import { SERVER_SITE_HEADER, SITE_HMAC_KVS_KEY, VIEWER_HEADER } from '@fling/shared/route-keys'
 import { routeSiteRequest } from '@fling/shared/site-routing'
 import cf from 'cloudfront'
 import crypto from 'crypto'
@@ -50,6 +55,11 @@ function queryString(qs) {
   return out.length ? `?${out.join('&')}` : ''
 }
 
+function header(request, name) {
+  const h = request.headers[name]
+  return h ? h.value : null
+}
+
 async function handler(event) {
   const request = event.request
   const cookie = request.cookies && request.cookies.fling_site
@@ -57,11 +67,13 @@ async function handler(event) {
   const decision = await routeSiteRequest(
     {
       method: request.method,
-      host: request.headers.host ? request.headers.host.value : '',
+      host: header(request, 'host') || '',
       uri: request.uri,
       query: queryString(request.querystring),
       cookie: cookie ? cookie.value || '' : null,
       pass: pass ? pass.value || '' : null,
+      fetchSite: header(request, 'sec-fetch-site'),
+      origin: header(request, 'origin'),
     },
     {
       appOrigin: APP_ORIGIN,
@@ -77,6 +89,25 @@ async function handler(event) {
     request.uri = decision.uri
     return request
   }
+  if (decision.action === 'invoke') {
+    request.cookies = {}
+    delete request.headers.cookie
+    delete request.headers[VIEWER_HEADER]
+    if (decision.viewer) request.headers[VIEWER_HEADER] = { value: JSON.stringify(decision.viewer) }
+    request.headers[SERVER_SITE_HEADER] = { value: `${decision.siteId}/${decision.v}` }
+    if (decision.target) {
+      cf.updateRequestOrigin({
+        domainName: decision.target,
+        originAccessControlConfig: {
+          enabled: true,
+          signingBehavior: 'always-amz-auth',
+          signingProtocol: 'sigv4',
+          originType: 'lambda',
+        },
+      })
+    }
+    return request
+  }
   const headers = {}
   Object.keys(decision.headers).forEach(name => {
     headers[name] = { value: decision.headers[name] }
@@ -87,6 +118,7 @@ async function handler(event) {
     headers: headers,
   }
   if (decision.cookies) response.cookies = decision.cookies
+  if (decision.body) response.body = { encoding: 'text', data: decision.body }
   return response
 }
 

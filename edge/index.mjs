@@ -20,7 +20,13 @@ export function createSiteRouter({ kvs, appOrigin, siteScheme = 'https', now = D
   if (/^import\s/m.test(body)) throw new Error('the site router has an unexpected import')
 
   // Like the real KVS handle: get() rejects when the key is missing.
+  // updateRequestOrigin records the origin an invoke switched to, as `origin` on the request the
+  // handler returns (where a real CloudFront would send it).
+  let origin = null
   const cf = {
+    updateRequestOrigin(params) {
+      origin = params
+    },
     kvs: () => ({
       async get(key) {
         const value = await kvs.get(key)
@@ -32,11 +38,23 @@ export function createSiteRouter({ kvs, appOrigin, siteScheme = 'https', now = D
   const FakeDate = { now: () => now() }
   const factory = new Function('cf', 'crypto', 'Date', 'Buffer', `${body}\nreturn handler`)
   const handler = factory(cf, nodeCrypto, FakeDate, Buffer)
-  return event => handler(structuredClone(event))
+  return async event => {
+    origin = null
+    const result = await handler(structuredClone(event))
+    if (origin && !isResponse(result)) result.origin = origin
+    return result
+  }
 }
 
 /** Build a CloudFront Functions viewer-request event. */
-export function toCloudFrontEvent({ method = 'GET', host, path = '/', query, cookieHeader }) {
+export function toCloudFrontEvent({
+  method = 'GET',
+  host,
+  path = '/',
+  query,
+  cookieHeader,
+  headers: extra = {},
+}) {
   // CloudFront passes query keys/values as they appear on the wire (still percent-encoded).
   const querystring = {}
   for (const part of (query ?? '').replace(/^\?/, '').split('&')) {
@@ -66,7 +84,9 @@ export function toCloudFrontEvent({ method = 'GET', host, path = '/', query, coo
       cookies[name] = { value }
     }
   }
-  const headers = { host: { value: host } }
+  const headers = {}
+  for (const [name, value] of Object.entries(extra)) headers[name.toLowerCase()] = { value }
+  headers.host = { value: host }
   if (cookieHeader) headers.cookie = { value: cookieHeader }
   return {
     version: '1.0',
@@ -79,4 +99,12 @@ export function toCloudFrontEvent({ method = 'GET', host, path = '/', query, coo
 /** True when the router answered directly (redirect/405) rather than forwarding the request. */
 export function isResponse(result) {
   return typeof result.statusCode === 'number'
+}
+
+/**
+ * True when the router sent the request on to a site's server (an invoke) rather than to an
+ * object: its uri is the one asked for, never a rewritten object key.
+ */
+export function isInvoke(result) {
+  return !isResponse(result) && !/^\/(sites|_fling)\//.test(result.uri)
 }

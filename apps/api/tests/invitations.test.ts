@@ -398,7 +398,7 @@ describe('the revocation list', () => {
         hmac,
       }
     )
-    return d.action === 'rewrite' ? 'served' : d.status
+    return d.action === 'rewrite' ? 'served' : d.action === 'invoke' ? 'invoked' : d.status
   }
 
   const siteCookie = (env: Env, email: string) =>

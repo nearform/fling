@@ -147,6 +147,7 @@ sites.all('*', async c => {
     path: url.pathname,
     query: url.search.slice(1),
     cookieHeader: c.req.header('cookie'),
+    headers: c.req.header(),
   })
   const result = await router(event)
   if (isResponse(result)) {
@@ -155,7 +156,7 @@ sites.all('*', async c => {
     for (const [name, v] of Object.entries(result.cookies ?? {})) {
       headers.append('set-cookie', `${name}=${v.value}${v.attributes ? `; ${v.attributes}` : ''}`)
     }
-    return new Response(null, { status: result.statusCode, headers })
+    return new Response(result.body?.data ?? null, { status: result.statusCode, headers })
   }
   if (result.uri === REVIEW_SHELL_PATH) {
     // The review shell, filled in as the deploy does; no frame-blocking headers.

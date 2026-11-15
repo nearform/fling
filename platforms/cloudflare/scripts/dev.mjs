@@ -6,18 +6,21 @@
 //      http://<name>.flingcf.lvh.me:<port> (lvh.me resolves to 127.0.0.1), dev login on.
 //
 //   node scripts/dev.mjs [--port 47103] [--persist-to .wrangler/state] [--test-scheduled] [--mail]
-//     [--invites]
+//     [--invites] [--servers members|admins|groups:a,b]
 //
 // `--mail` turns email on (MAIL_DRIVER=cloudflare, MAIL_FROM=fling@mail.flingcf.lvh.me): the real
 // CloudflareMailer over wrangler's simulated `send_email` binding, which logs each message and
 // saves it to a local file instead of sending it; `/dev/mail` lists a copy of each. `--invites`
-// (with `--mail`) turns outside invitations on (INVITES=on). The e2e runs with both.
+// (with `--mail`) turns outside invitations on (INVITES=on). The e2e runs with both. `--servers`
+// turns site servers on for whom it names (SERVERS): each version's server in an isolate
+// of the local Worker Loader, as deployed, except that local workerd doesn't enforce SERVER_CPU_MS.
 //
 // Secrets: SESSION_SECRET and SITE_HMAC_KEY from the environment when both are set (the e2e),
-// else from .dev.vars, created with random values the first time.
+// else from .dev.vars, created with random values the first time. SITE_SECRETS_KEY (site servers)
+// likewise: from the environment, else .dev.vars, which gains one the first time servers are on.
 import { execFileSync, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { ROOT } from './config.mjs'
@@ -30,6 +33,7 @@ const { values: args } = parseArgs({
     'test-scheduled': { type: 'boolean', default: false },
     mail: { type: 'boolean', default: false },
     invites: { type: 'boolean', default: false },
+    servers: { type: 'string' },
   },
 })
 
@@ -49,6 +53,7 @@ if (args.mail) {
   vars.MAIL_FROM = 'fling@mail.flingcf.lvh.me'
   if (args.invites) vars.INVITES = 'on'
 }
+if (args.servers !== undefined) vars.SERVERS = args.servers.trim()
 if (process.env.SESSION_SECRET && process.env.SITE_HMAC_KEY) {
   vars.SESSION_SECRET = process.env.SESSION_SECRET
   vars.SITE_HMAC_KEY = process.env.SITE_HMAC_KEY
@@ -58,6 +63,19 @@ if (process.env.SESSION_SECRET && process.env.SITE_HMAC_KEY) {
     join(ROOT, '.dev.vars'),
     `# Local secrets for wrangler dev (gitignored).\nSESSION_SECRET=${secret()}\nSITE_HMAC_KEY=${secret()}\n`
   )
+}
+
+// SITE_SECRETS_KEY isn't among wrangler.jsonc's required secrets (only a deploy with servers on
+// requires it), so wrangler dev doesn't read it from .dev.vars: it goes as a var.
+const devVars = join(ROOT, '.dev.vars')
+const fileKey = () =>
+  existsSync(devVars) ? /^SITE_SECRETS_KEY=(.+)$/m.exec(readFileSync(devVars, 'utf8'))?.[1] : null
+if (process.env.SITE_SECRETS_KEY) vars.SITE_SECRETS_KEY = process.env.SITE_SECRETS_KEY
+else if (vars.SERVERS && vars.SESSION_SECRET) {
+  vars.SITE_SECRETS_KEY = randomBytes(32).toString('hex')
+} else if (vars.SERVERS) {
+  if (!fileKey()) appendFileSync(devVars, `SITE_SECRETS_KEY=${randomBytes(32).toString('hex')}\n`)
+  vars.SITE_SECRETS_KEY = fileKey()
 }
 
 const child = spawn(

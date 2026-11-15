@@ -34,8 +34,11 @@ $APP_HOST        Worker Custom Domain ─┬─ /api/*, /auth/*, /healthz, /mcp,
                                        ├─ GET /blob-download/* → signed downloads from R2 (pull)
                                        └─ everything else      → the web UI (Static Assets)
 *.$SITES_DOMAIN  Worker route ───────── the shared site routing decision
-                                        (route table: KV, D1 on a miss) → R2
-cron (hourly)    Worker scheduled ───── delete expired D1 items; maintenance (retention)
+                                        (route table: KV, D1 on a miss) → R2;
+                                        /api/* of a site server → its isolate
+                                        (Worker Loader binding LOADER; only with SERVERS)
+cron (hourly)    Worker scheduled ───── delete expired D1 items; maintenance (retention);
+                                        fold site servers' log pieces into hourly chunks
 cron (minutely)  Worker scheduled ───── drain the notifications' outbox → Email Service
                                         (send_email binding EMAIL; only with MAIL)
 D1 $WORKER, R2 $WORKER-sites, KV $WORKER-routes, Durable Object class LiveRoom; secrets on the
@@ -81,6 +84,10 @@ neither header (see
     (`$ZONE=flingsites.example`, `$APP_HOST=$SITES_DOMAIN=flingsites.example`): Universal SSL
     covers both, at no cost.
 - Node 24 and pnpm (the repository's), and `wrangler` comes with `pnpm install`.
+- **For site servers (optional): the Worker Loader** (Dynamic Workers), in open beta since March
+  2026, on Workers Paid only. Site servers are off unless `INSTANCE.SERVERS` turns them on
+  ([Site servers](#site-servers)); without them the Worker has no `worker_loaders` binding, so an
+  account without the beta deploys as before.
 - **For email notifications (optional): Cloudflare Email Service**, Email Sending, in public beta.
   It sends to any recipient once a sending domain is onboarded, and that domain must use
   Cloudflare DNS. Workers Paid, which Fling already needs, is required. Without it, leave `MAIL`
@@ -108,14 +115,18 @@ neither header (see
    `--invites on` (optional, not asked for; `''` removes it) turns on outside invitations
    (`INVITES`), which need [Email](#email): the deploy refuses `INVITES` on without `MAIL`.
    `--invites-per-day 20` sets how many new outside addresses a person may invite a day
-   (`INVITES_PER_DAY`).
+   (`INVITES_PER_DAY`). `--servers members` (optional, not asked for; `''` removes it) lets
+   members publish site servers (`SERVERS`; see [Site servers](#site-servers) first).
 
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
-   namespace unless they exist, writes the deploy config to `--out` (nothing in it is secret, but
+   namespace unless they exist, gives the bucket a lifecycle rule that deletes site servers' logs
+   (`server-logs/`) after 7 days, writes the deploy config to `--out` (nothing in it is secret, but
    it is the instance's, not Fling's: point `--out` at the instance's own private repository, e.g.
    `--out ../my-instance-infra/cloudflare/deploy-config.json`; the default,
    `platforms/cloudflare/deploy-config.json`, is gitignored) and the deployable `dist/wrangler.jsonc`, applies the D1 schema, and sets the Worker's missing secrets:
-   `SESSION_SECRET` and `SITE_HMAC_KEY` (random) and `OIDC_CLIENT_SECRET` (asked for, never echoed;
+   `SESSION_SECRET`, `SITE_HMAC_KEY` and `SITE_SECRETS_KEY` (random; the last seals site servers'
+   secrets, and a new one would leave every stored site secret unreadable, so it is never
+   replaced) and `OIDC_CLIENT_SECRET` (asked for, never echoed;
    leave it blank to set it later with `wrangler secret put OIDC_CLIENT_SECRET --config
    dist/wrangler.jsonc`). Secrets are only ever added: rerunning it keeps the existing ones.
 3. **DNS for the sites**: in the zone, a proxied record covering the wildcard, e.g.
@@ -173,7 +184,9 @@ the `d1`/`r2`/`workers-kv` drivers, and `INSTANCE`, never the dev login. `LIVE=f
 turns the live rooms off. With `MAIL` it also gets the `send_email` binding `EMAIL`
 (`allowed_sender_addresses: [FROM]`), the every-minute cron `* * * * *` beside the hourly one, and
 `MAIL_DRIVER=cloudflare`, `MAIL_FROM`, `MAIL_FROM_NAME` and `MAIL_REPLY_TO`; without it, none of
-them.
+them. With `INSTANCE.SERVERS` on it keeps the `worker_loaders` binding `LOADER` and the rate limit
+`SERVER_RATE_LIMIT`, and requires the `SITE_SECRETS_KEY` secret ([Site servers](#site-servers));
+without it, none of them.
 
 **Live rooms** (review mode's realtime) are a Durable Object per site, `LiveRoom` (binding
 `LIVE_ROOMS`), declared with its SQLite migration in `wrangler.jsonc`: the first deploy creates the
@@ -226,6 +239,67 @@ revoked member's `fling_site` cookie stops opening members-level sites everywher
 minute; the one-minute cron takes entries off the list after 30 days. Invited people sign in with single-use links emailed to
 them, so it needs [Email](#email): the deploy refuses `INVITES` on without `MAIL`. Set both with
 `setup.mjs` (`--invites on`, `--invites-per-day`) or in `INSTANCE` in the deploy config, then deploy.
+
+## Site servers
+
+A site server is a version's `_fling/server.mjs`, run for the site's `/api/*` (the Guide's site
+servers page, and `docs/site-servers.md`). On Cloudflare each version's server runs in an isolate
+of its own through the **Worker Loader**: the Fling Worker asks its `LOADER` binding for the isolate
+named `site:<siteId>:<version>:<run>`, which the loader starts the first time from the bundle in R2
+and keeps warm after. `<run>` is a keyed hash of what the version runs with (its site secrets, the
+egress, the limits), so setting a secret or raising a limit starts a fresh isolate and the old one
+idles out; rolling back to a version whose isolate is still warm costs nothing.
+
+They are **off by default**, because the Worker Loader is in beta. To turn them on:
+
+1. Check the account has Workers Paid and the Worker Loader (Dynamic Workers) beta.
+2. Set `SERVERS` in `INSTANCE` (`admins`, `members`, or `groups:<slug>,<slug>`; setup's
+   `--servers`), and any of the values below; rerun `setup.mjs` if `SITE_SECRETS_KEY` isn't on the
+   Worker yet (it is added once, never replaced).
+3. Deploy. `/.well-known/fling` then advertises the `servers` capability.
+
+The instance values ([the AWS guide's table](../aws/DEPLOY.md#instance-configuration)) and what
+the Worker does with each:
+
+| Key | Default | On Cloudflare |
+| --- | --- | --- |
+| `SERVERS` | `off` | Who may publish one; anything but `off` renders the `LOADER` and `SERVER_RATE_LIMIT` bindings |
+| `SERVERS_EGRESS` | `none` | `none`: the isolate's `globalOutbound` is null, so its `fetch()` and sockets reach nothing; `open`: the internet |
+| `SERVERS_MAX_SITES` | `50` | Enforced by the core at publish |
+| `SERVER_TIMEOUT_SECONDS` | `30` | A timer in the Fling Worker: 504 `server_timeout` before the answer starts, a stream cut off after |
+| `SERVER_CPU_MS` | `1000` | The isolate's `limits.cpuMs`, enforced by Cloudflare |
+| `SERVER_RPS` | `100` | The `SERVER_RATE_LIMIT` binding allows each site `SERVER_RPS` × 10 requests per 10 s (429 `rate_limited`); a site an admin raised is counted over as many keys as the raise multiplies it. Cloudflare counts per location, so the limit is approximate |
+| `SERVER_ENVIRONMENTS` | `2` | Not used: isolates have no environments to count |
+| `SERVER_BODY_BYTES` | `10485760` | 413 `too_large`, from the length or as the body streams |
+
+An isolate's env is the version's declared site secrets (also `process.env`), `PORT` and `FILES`,
+the version's own files read-only (the `SiteFiles` entrypoint of the Fling Worker; never a dotfile
+or `_fling/`); it has no other binding, and nothing of the Worker's. A fetch handler and a plain
+`node:http` server both run (`nodejs_compat`; the server on `PORT` is reached through
+`httpServerHandler`). What each run is given is sealed in R2 under the site
+(`sites/<siteId>/_servers/<version>/<run>.json`, AES-256-GCM under a key from `SITE_SECRETS_KEY`),
+so any isolate of the Worker can start the run the route names; deleting a site deletes them with
+its files, and retention with the version.
+
+**Logs.** Each isolate is loaded with a tail consumer, the Fling Worker's `ServerTail` entrypoint,
+which writes what the server prints and its uncaught exceptions to R2, beside Fling's request line
+for every invoke (`server-logs/<siteId>/<hour>/…`), gathered for a second at a time so a busy site
+costs about one write a second per Worker isolate. The hourly cron folds each past hour into one
+chunk, and the bucket's lifecycle rule (setup) deletes them after 7 days. What a server prints
+while its module loads is kept and written with its first request. `fling logs` and the site page
+read them.
+
+**The kill switch** (an admin stopping a site's server) is the route value's `x`: the sites host
+answers 503 `server_stopped` without reaching the isolate, everywhere within the KV delay ([Routes](#routes-consistency-and-the-kv-fallback)). A changed secret reaches every location
+in the same time: until then a location may run the previous run.
+
+**Costs.** Worker Loader requests and CPU are billed as Workers requests and CPU, plus $0.002 per
+unique Worker loaded per day (waived during the beta): keyed by version and run, at most about one
+a day per live site server. Logs are R2 writes (Class A, about a second's worth at a time) and
+storage for 7 days.
+
+**If the beta's terms change**, the fallback is Workers for Platforms (a dispatch namespace, the
+bundle uploaded at activate): everything Cloudflare-specific is in `src/servers/` and `src/sites.ts`.
 
 ## Sign-in (OpenID Connect)
 
@@ -366,7 +440,11 @@ pnpm --filter @fling/platform-cloudflare dev
 `scripts/dev.mjs` applies the D1 schema and the data migrations to local state
 (`.wrangler/state`), then runs `wrangler dev`: the app at `http://flingcf.lvh.me:47103`, sites at
 `http://<name>.flingcf.lvh.me:47103`, dev login on, local D1/R2/KV (nothing touches your account).
-Secrets come from `.dev.vars`, created with random values the first time. The live rooms run in
+Secrets come from `.dev.vars`, created with random values the first time. `--servers members` turns
+site servers on, in local Worker Loader isolates (`SITE_SECRETS_KEY` is added to `.dev.vars` the
+first time); local workerd does not enforce `SERVER_CPU_MS`, and its isolates share a thread with
+the Worker, so a server's busy loop holds up every request, the wall-time limit's included, until
+it ends. The live rooms run in
 local Durable Objects at `ws://flingcf.lvh.me:47103/api/live`. `pnpm e2e` (part of
 `pnpm gate`) runs the scenario here and on the AWS-flavoured dev server.
 
@@ -391,4 +469,5 @@ writes. Live rooms are Durable Object requests (each socket message, each publis
 changes) and duration, which hibernation keeps to the moments a room is busy. Email, with `MAIL`:
 3,000 emails a month are included, then $0.35 per 1,000 (hard bounces count, refused sends such as
 suppressed recipients don't); the every-minute cron is a short Worker invocation each time, about
-43,000 a month. Check Cloudflare's current pricing pages before relying on these numbers.
+43,000 a month. Site servers, when on, are Worker requests and CPU, plus the Worker Loader's charge
+per Worker loaded a day ([Site servers](#site-servers)). Check Cloudflare's current pricing pages before relying on these numbers.

@@ -132,3 +132,37 @@ describe('MAIL', () => {
     ).toThrow(/INSTANCE.MAIL_DRIVER is not allowed/)
   })
 })
+
+describe('INSTANCE.SERVERS', () => {
+  const render = (instance: Record<string, string>) =>
+    renderWranglerConfig(
+      readJsonc(TEMPLATE),
+      config({ ALLOWED_EMAIL_DOMAINS: 'example.test', ...instance }),
+      '/tmp/dist'
+    ) as unknown as Record<string, unknown> & {
+      ratelimits?: { name: string; simple: { limit: number; period: number } }[]
+    }
+
+  it('renders no Worker Loader or rate limit unless servers are on', () => {
+    for (const instance of [{}, { SERVERS: 'off' }, { SERVERS: '' }] as Record<string, string>[]) {
+      const out = render(instance)
+      expect(out.worker_loaders).toBeUndefined()
+      expect(out.ratelimits).toBeUndefined()
+    }
+  })
+
+  it('renders both with servers on, the rate limit from SERVER_RPS over 10 s', () => {
+    const out = render({ SERVERS: 'members' })
+    expect(out.worker_loaders).toEqual([{ binding: 'LOADER' }])
+    expect((out.secrets as { required: string[] }).required).toContain('SITE_SECRETS_KEY')
+    expect((render({}).secrets as { required: string[] }).required).not.toContain(
+      'SITE_SECRETS_KEY'
+    )
+    expect(out.ratelimits?.[0]).toMatchObject({
+      name: 'SERVER_RATE_LIMIT',
+      simple: { limit: 1000, period: 10 },
+    })
+    expect(render({ SERVERS: 'admins', SERVER_RPS: '25' }).ratelimits?.[0]?.simple.limit).toBe(250)
+    expect(() => render({ SERVERS: 'admins', SERVER_RPS: 'lots' })).toThrow(/SERVER_RPS/)
+  })
+})

@@ -10,10 +10,18 @@
  * response carries the decision's headers: `X-Robots-Tag: noindex`, on a share host
  * `Referrer-Policy: no-referrer`, so its address never leaks as a Referer, and on a site's files
  * `X-Fling-Version`, the version served.
+ *
+ * A site server's request (the decision's `invoke`, `/api/*` of a site whose version has one) goes
+ * through the core's shell (`runInvoke`: the server's request headers, its Cache-Control, the
+ * request line) to the version's isolate (servers/runtime.ts), in the run the route value names
+ * (`t`). With no SiteServers (SERVERS off) it answers as a missing page.
  */
 import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
 import type { RouteTable } from '@fling/api/route-table'
+import { runInvoke } from '@fling/api/servers/shell'
+import type { ServerLogs, SiteServers } from '@fling/api/servers/types'
+import type { Clock } from '@fling/api/types'
 import {
   MISSING_KEY,
   NOT_FOUND_PAGE,
@@ -22,8 +30,9 @@ import {
   SITE_PASS_COOKIE_NAME,
 } from '@fling/shared/route-keys'
 import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
-import { normalizeQuery, routeSiteRequest } from '@fling/shared/site-routing'
+import { normalizeQuery, routeSiteRequest, type SiteInvoke } from '@fling/shared/site-routing'
 import type { Bindings } from './env.ts'
+import type { CloudflareSiteServers } from './servers/runtime.ts'
 
 export interface SitesOptions {
   appOrigin: string
@@ -38,6 +47,8 @@ export interface SitesOptions {
   revocations: RouteTable
   bucket: R2Bucket
   assets: Bindings['ASSETS']
+  /** runs site servers (SERVERS on), with their logs and the clock the request lines take */
+  servers?: { runtime: CloudflareSiteServers; logs: ServerLogs; clock: Clock }
   now?: () => number
   /** how long a site pass lasts (default: the routing decision's, 5 minutes) */
   passTtlSeconds?: number
@@ -172,12 +183,41 @@ export async function handleSiteRequest(request: Request, opts: SitesOptions): P
     }
     return new Response(decision.body ?? null, { status: decision.status, headers })
   }
-  // A site server's request: this host runs none yet, so it answers as a missing page.
-  if (decision.action === 'invoke') return notFound(opts, 404, request.method)
+  if (decision.action === 'invoke') {
+    if (!opts.servers) return notFound(opts, 404, request.method)
+    const res = await invoke(request, opts.servers, decision)
+    for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)
+    return res
+  }
   // The host's headers on whatever is served: file, 404 page, review shell or robots.txt.
   const res = await serveRewrite(request, opts, decision.uri)
   for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)
   return res
+}
+
+/** The request through the shell to the version's server, in the run the route names. */
+async function invoke(
+  request: Request,
+  servers: NonNullable<SitesOptions['servers']>,
+  decision: SiteInvoke
+): Promise<Response> {
+  const { runtime } = servers
+  // The shell asks the port; this host answers with the route's run.
+  const atRun: SiteServers = {
+    activate: (...a) => runtime.activate(...a),
+    probe: (...a) => runtime.probe(...a),
+    reconfigure: (...a) => runtime.reconfigure(...a),
+    setEnabled: (...a) => runtime.setEnabled(...a),
+    retire: (...a) => runtime.retire(...a),
+    invoke: (site, version, req) => runtime.serve(site, version, req, decision.target),
+  }
+  const label = new URL(request.url).hostname.split('.')[0] ?? ''
+  return runInvoke({ servers: atRun, serverLogs: servers.logs, clock: servers.clock }, request, {
+    site: { id: decision.siteId, name: label },
+    v: decision.v,
+    private: decision.private,
+    viewer: decision.viewer,
+  })
 }
 
 function serveRewrite(request: Request, opts: SitesOptions, uri: string): Promise<Response> {

@@ -1,8 +1,9 @@
 /**
  * The Cloudflare adapters for the drivers config selects (`d1`, `r2`, `workers-kv`; the Worker
  * defaults to them), the live rooms' Durable Objects and, with MAIL_DRIVER=cloudflare, the Email
- * Service mailer over the `EMAIL` binding, handed to the core's buildDeps. Any other driver is the
- * core's own memory/fs adapter.
+ * Service mailer over the `EMAIL` binding, and, with SERVERS on, site servers on the Worker Loader
+ * (`LOADER`) with their logs in R2 (src/servers/), handed to the core's buildDeps. Any other driver
+ * is the core's own memory/fs adapter.
  */
 import type { Config } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
@@ -15,6 +16,8 @@ import { DurableObjectLiveHub } from './live.ts'
 import { CloudflareMailer } from './mail/email.ts'
 import { CachedRouteTable } from './route-table/cached.ts'
 import { WorkersKvRouteTable } from './route-table/kv.ts'
+import { serverLogsIn } from './servers/logs.ts'
+import { CloudflareSiteServers, type ServerBindings } from './servers/runtime.ts'
 import { D1Table } from './table/d1.ts'
 
 /** What the Worker sets unless its vars say otherwise. */
@@ -25,8 +28,34 @@ export const CLOUDFLARE_DRIVERS = {
   KVS_DRIVER: 'workers-kv',
 } as const
 
-export function buildCloudflareDeps(config: Config, env: Bindings): Deps {
+/**
+ * The site servers SERVERS asks for, on the Worker Loader. Throws when it is on and the Worker
+ * has no `worker_loaders` binding: the deploy config renders one only with INSTANCE.SERVERS.
+ */
+function siteServers(config: Config, env: Bindings, bindings?: ServerBindings) {
+  if (config.servers.publish.kind === 'off') return undefined
+  if (!env.LOADER || !bindings) {
+    throw new Error(
+      'SERVERS is on, but the Worker has no Worker Loader binding (LOADER): see DEPLOY.md, Site servers'
+    )
+  }
+  return new CloudflareSiteServers({
+    loader: env.LOADER,
+    bucket: env.BUCKET,
+    bindings,
+    key: config.secrets.siteSecretsKey ?? '',
+    rateLimit: env.SERVER_RATE_LIMIT,
+    baseRps: config.servers.limits.rps,
+  })
+}
+
+export function buildCloudflareDeps(
+  config: Config,
+  env: Bindings,
+  opts: { serverBindings?: ServerBindings } = {}
+): Deps {
   const table = new D1Table(env.DB)
+  const servers = siteServers(config, env, opts.serverBindings)
   const deps = buildDeps(config, {
     store: config.storeDriver === 'd1' ? new Records(table) : undefined,
     blobs:
@@ -45,6 +74,7 @@ export function buildCloudflareDeps(config: Config, env: Bindings): Deps {
       config.mail?.driver === 'cloudflare' && env.EMAIL
         ? new CloudflareMailer(env.EMAIL)
         : undefined,
+    ...(servers ? { servers, serverLogs: serverLogsIn(env.BUCKET) } : {}),
   })
   return {
     ...deps,

@@ -9,17 +9,21 @@
 //     [--site-default-access only_me|members]   (optional, never asked for; '' removes it)
 //     [--invites on|off] [--invites-per-day 20]   (optional, never asked for; '' removes them;
 //                                                   on needs MAIL in the deploy config)
+//     [--servers off|admins|members|groups:a,b]   (optional, never asked for; '' removes it:
+//                                                   site servers, on the Worker Loader's beta)
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
 //
 // Anything not passed is asked for (defaults from an earlier run's --out file). It:
 //   1. checks wrangler is signed in (`wrangler login`, or CLOUDFLARE_API_TOKEN);
-//   2. creates the D1 database, the R2 bucket and the KV namespace unless they exist;
+//   2. creates the D1 database, the R2 bucket and the KV namespace unless they exist, and the
+//      bucket's lifecycle rule that deletes site servers' logs (`server-logs/`) after 7 days;
 //   3. writes the deploy config (CF_DEPLOY_CONFIG) to --out, and dist/wrangler.jsonc from it;
 //   4. applies the D1 schema;
-//   5. sets the Worker's secrets that are missing: SESSION_SECRET and SITE_HMAC_KEY (random) and
-//      OIDC_CLIENT_SECRET (asked for, never echoed);
+//   5. sets the Worker's secrets that are missing: SESSION_SECRET, SITE_HMAC_KEY and
+//      SITE_SECRETS_KEY (random; never replaced, since a new SITE_SECRETS_KEY leaves every stored
+//      site secret unreadable) and OIDC_CLIENT_SECRET (asked for, never echoed);
 //   6. prints what is left to do by hand: DNS, the certificate, GitHub, the first deploy.
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -27,7 +31,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { parseArgs } from 'node:util'
-import { checkDeployConfig, ROOT } from './config.mjs'
+import { checkDeployConfig, ROOT, serversOn } from './config.mjs'
 
 const { values: args } = parseArgs({
   options: {
@@ -42,6 +46,7 @@ const { values: args } = parseArgs({
     'site-default-access': { type: 'string' },
     invites: { type: 'string' },
     'invites-per-day': { type: 'string' },
+    servers: { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'oidc-client-secret-file': { type: 'string' },
@@ -179,6 +184,16 @@ if (args['invites-per-day'] !== undefined) {
   if (perDay) instance.INVITES_PER_DAY = perDay
   else delete instance.INVITES_PER_DAY
 }
+// Who may publish site servers (off by default: the Worker Loader is in beta, on Workers Paid):
+// only from the flag, like the admins.
+if (args.servers !== undefined) {
+  const servers = args.servers.trim()
+  if (servers && !/^(off|admins|members|groups:[a-z0-9-]+(,[a-z0-9-]+)*)$/.test(servers)) {
+    throw new Error('--servers must be off, admins, members or groups:<slug>,<slug>')
+  }
+  if (servers) instance.SERVERS = servers
+  else delete instance.SERVERS
+}
 instance.INSTANCE_NAME = await value(
   'instance-name',
   'Instance name',
@@ -216,6 +231,27 @@ if (new RegExp(`^name:\\s+${bucket}\\s*$`, 'm').test(buckets)) {
     'create',
     bucket,
     ...(args.location ? ['--location', args.location] : []),
+  ])
+}
+
+// Site servers' logs are kept 7 days (SERVER_LOG_DAYS): R2 deletes them, whether servers are on
+// yet or not.
+const LOGS_RULE = 'server-logs-7-days'
+const rules = wrangler(['r2', 'bucket', 'lifecycle', 'list', bucket], { quiet: true })
+if (rules.includes(LOGS_RULE)) {
+  console.log(`R2 ${bucket} lifecycle ${LOGS_RULE}: exists`)
+} else {
+  wrangler([
+    'r2',
+    'bucket',
+    'lifecycle',
+    'add',
+    bucket,
+    LOGS_RULE,
+    'server-logs/',
+    '--expire-days',
+    '7',
+    '--force',
   ])
 }
 
@@ -270,6 +306,9 @@ for (const name of ['SESSION_SECRET', 'SITE_HMAC_KEY']) {
   if (existing.includes(name)) console.log(`${name}: set`)
   else secrets[name] = randomBytes(32).toString('base64url')
 }
+// Seals site secrets: set once, never replaced (a new one leaves every stored secret unreadable).
+if (existing.includes('SITE_SECRETS_KEY')) console.log('SITE_SECRETS_KEY: set')
+else secrets.SITE_SECRETS_KEY = randomBytes(32).toString('hex')
 if (instance.OIDC_ISSUER && !existing.includes('OIDC_CLIENT_SECRET')) {
   const oidcSecret = args['oidc-client-secret-file']
     ? readFileSync(resolve(args['oidc-client-secret-file']), 'utf8').trim()
@@ -286,6 +325,12 @@ if (Object.keys(secrets).length) {
 }
 
 const sitesParent = sitesDomain === zone ? null : sitesDomain
+const serversNote = serversOn(instance)
+  ? `
+  Site servers are on (SERVERS=${instance.SERVERS}): the account needs Workers Paid and the
+  Worker Loader (Dynamic Workers) beta, or the deploy fails at its worker_loaders binding.
+`
+  : ''
 console.log(`
 Done. Left to do by hand (DEPLOY.md has the details):
 
@@ -306,4 +351,4 @@ Done. Left to do by hand (DEPLOY.md has the details):
   4. Deploy: run the "Deploy (Cloudflare)" workflow, or locally:
        CF_DEPLOY_CONFIG="$(cat platforms/cloudflare/${args.out})" \\
          pnpm --filter @fling/platform-cloudflare run deploy
-`)
+${serversNote}`)

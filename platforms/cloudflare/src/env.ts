@@ -1,8 +1,8 @@
 /**
  * What the Worker gets from wrangler.jsonc: the bindings, the instance's configuration as plain
  * vars (the same env-style keys @fling/api/config reads on every platform) and its secrets
- * (`SESSION_SECRET`, `SITE_HMAC_KEY`, `OIDC_CLIENT_SECRET`, and `GOOGLE_CLIENT_ID` and
- * `GOOGLE_CLIENT_SECRET` for a Google client; `wrangler secret put`).
+ * (`SESSION_SECRET`, `SITE_HMAC_KEY`, `OIDC_CLIENT_SECRET`, `SITE_SECRETS_KEY` with site servers,
+ * and `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` for a Google client; `wrangler secret put`).
  */
 import type {
   D1Database,
@@ -10,7 +10,9 @@ import type {
   Fetcher,
   KVNamespace,
   R2Bucket,
+  RateLimit,
   SendEmail,
+  WorkerLoader,
 } from '@cloudflare/workers-types'
 
 export interface Bindings {
@@ -29,6 +31,13 @@ export interface Bindings {
    * Absent without it.
    */
   EMAIL?: SendEmail
+  /**
+   * The Worker Loader: each site server's version in an isolate of its own (src/servers/). In
+   * the template for `wrangler dev`; a deploy keeps it only when INSTANCE.SERVERS is on.
+   */
+  LOADER?: WorkerLoader
+  /** Requests per site server (SERVER_RPS over 10 s), with LOADER (src/servers/runtime.ts). */
+  SERVER_RATE_LIMIT?: RateLimit
 }
 
 export type Env = Bindings & Record<string, unknown>

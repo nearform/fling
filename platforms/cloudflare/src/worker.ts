@@ -7,12 +7,14 @@
  * - The live rooms (src/live.ts): `GET /api/live?ticket=` WebSocket upgrades on the app origin go
  *   to the site's `LiveRoom` Durable Object, exported from here for the LIVE_ROOMS binding.
  * - The sites host (`*.<SITES_DOMAIN>`): the shared routing decision over the route table and R2
- *   (sites.ts).
+ *   (sites.ts), and site servers' `/api/*` through the Worker Loader (src/servers/), whose isolates
+ *   are handed the `SiteFiles` and `ServerTail` entrypoints exported from here.
  * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`) drains the
  *   notifications outbox (@fling/api/notifications) and takes due revocations off the edge's
  *   revocation list (@fling/api/revocations); hourly, deletes expired items from D1. Reads
  *   already ignore them; that reclaims the space; and runs maintenance (@fling/api/maintenance:
- *   version retention, replaced rendered pages).
+ *   version retention, replaced rendered pages), and, with site servers, folds the past hours' log
+ *   pieces into hourly chunks (src/servers/logs.ts).
  *
  * Data migrations are not run here: scripts/migrate.ts runs them from the deploy, through a
  * remote binding to the same D1 database, so the Worker has no admin surface (DEPLOY.md).
@@ -21,6 +23,7 @@
  * and OIDC_CLIENT_SECRET, read by the same @fling/api/config every platform uses. Deps are built
  * once per isolate.
  */
+import { exports } from 'cloudflare:workers'
 import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-types'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
@@ -33,10 +36,14 @@ import { buildCloudflareDeps, CLOUDFLARE_DRIVERS } from './deps.ts'
 import { type Env, stringVars } from './env.ts'
 import { handleLiveUpgrade, LIVE_PATH } from './live.ts'
 import { CachedRouteTable } from './route-table/cached.ts'
+import { serverBindings } from './servers/entrypoints.ts'
+import { R2ServerLogs, serverLogsIn } from './servers/logs.ts'
+import { CloudflareSiteServers } from './servers/runtime.ts'
 import { handleSiteRequest } from './sites.ts'
 import { D1Table } from './table/d1.ts'
 
 export { LiveRoom } from './live.ts'
+export { ServerTail, SiteFiles } from './servers/entrypoints.ts'
 
 /**
  * The app paths the API answers (the rest is the web UI): the AWS module's `api_paths`, plus
@@ -109,7 +116,7 @@ let instance: Instance | undefined
 function init(env: Env): Instance {
   const vars = { ...CLOUDFLARE_DRIVERS, ...stringVars(env) }
   const config: Config = { ...loadBaseConfig(vars), secrets: secretsFromEnv(vars) }
-  const deps = buildCloudflareDeps(config, env)
+  const deps = buildCloudflareDeps(config, env, { serverBindings: serverBindings(exports) })
   return { config, deps, app: createApp(deps), appHost: new URL(config.appOrigin).host }
 }
 
@@ -154,6 +161,15 @@ export default {
           deps.routeTable instanceof CachedRouteTable ? deps.routeTable.cache : deps.routeTable,
         bucket: env.BUCKET,
         assets: env.ASSETS,
+        ...(deps.servers instanceof CloudflareSiteServers
+          ? {
+              servers: {
+                runtime: deps.servers,
+                logs: serverLogsIn(env.BUCKET).later(p => ctx.waitUntil(p as never)),
+                clock: deps.clock,
+              },
+            }
+          : {}),
       })
     }
 
@@ -203,5 +219,24 @@ export default {
           )
         )
     )
+    if (deps.serverLogs instanceof R2ServerLogs) {
+      ctx.waitUntil(
+        deps.serverLogs
+          .compact(Date.now() + MAINTAIN_BUDGET_MS)
+          .then(n => {
+            if (n)
+              console.log(JSON.stringify({ level: 'info', msg: 'server logs compacted', count: n }))
+          })
+          .catch(err =>
+            console.warn(
+              JSON.stringify({
+                level: 'warn',
+                msg: 'server log compaction failed',
+                err: errorName(err),
+              })
+            )
+          )
+      )
+    }
   },
 }

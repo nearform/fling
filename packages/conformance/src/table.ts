@@ -397,6 +397,26 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
         }
       })
 
+      it('fieldEquals guards a put in a transaction on a counter, set or not yet set', async () => {
+        const { table, pk } = await setup()
+        await table.put({ pk, sk: 'A' })
+        const write = (rev: number | undefined, next: number) =>
+          table.transact([
+            { put: { pk, sk: 'A', rev: next }, cond: fieldEquals('rev', rev) },
+            { put: { pk, sk: 'copy', rev: next } },
+          ])
+        await fails(write(1, 2))
+        await write(undefined, 1)
+        await fails(write(undefined, 1))
+        await fails(write(2, 3))
+        await write(1, 2)
+        expect(await table.get(pk, 'A')).toEqual({ pk, sk: 'A', rev: 2 })
+        expect(await table.get(pk, 'copy')).toEqual({ pk, sk: 'copy', rev: 2 })
+        await table.delete(pk, 'A')
+        await fails(write(2, 3))
+        expect(await table.get(pk, 'A')).toBeNull()
+      })
+
       it('a dead item satisfies ifAbsent inside a transaction', async () => {
         const { table, pk } = await setup()
         await table.put({ pk, sk: 'A', expiresAt: PAST })

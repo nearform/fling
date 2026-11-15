@@ -227,8 +227,26 @@ export interface SiteRecord {
    * raised for it (each over the instance's `SERVER_*`).
    */
   server?: SiteServerState
+  /**
+   * How many times the site has been saved (`putSite`): each save writes the next one, and only
+   * while the stored site still has the one its caller read, so a save never writes over a change
+   * it did not see (`SiteChanged`). Absent counts as 0: a site created and never saved since, or
+   * last saved by code without revisions.
+   */
+  revision?: number
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * The site changed (or was deleted) after the copy being saved was read: nothing was written. The
+ * caller reads it again and decides afresh (`writeSite`, sites.ts).
+ */
+export class SiteChanged extends Error {
+  override name = 'SiteChanged'
+  constructor() {
+    super('The site changed since it was read')
+  }
 }
 
 export interface SiteServerState {
@@ -692,7 +710,10 @@ export interface Store extends NotificationStore {
    * gain one; and when the listing (`SharedListing`) changed, every grant and group-site item is
    * rewritten. Every person (but the creator, whose index item stands in) and group holding a role
    * has a role item, rewritten with each save; one that no longer holds one loses it.
-   * `ifCurrentVersion`: only while the stored site's current version is that one, else
+   * Only while the stored site has the `revision` `site` carries (absent: none), else
+   * `SiteChanged` and nothing is written; it is written with the next one, which `site` then
+   * carries. The other items are kept in step with that stored site, the one the condition
+   * guards. `ifCurrentVersion`: only while the stored site's current version is that one, else
    * `ConditionFailed` and the site is unchanged.
    */
   putSite(site: SiteRecord, opts?: { ifCurrentVersion?: string }): Promise<void>

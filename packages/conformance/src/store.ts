@@ -8,19 +8,20 @@
  * JavaScript orders differently to check.
  */
 import { randomUUID } from 'node:crypto'
-import type {
-  ApiKeyRecord,
-  AuditRecord,
-  CommentRecord,
-  GrantRecord,
-  GroupRecord,
-  LiveConnectionRecord,
-  PathRecord,
-  RefreshTokenRecord,
-  SiteRecord,
-  Store,
-  UploadFileRecord,
-  VersionRecord,
+import {
+  type ApiKeyRecord,
+  type AuditRecord,
+  type CommentRecord,
+  type GrantRecord,
+  type GroupRecord,
+  type LiveConnectionRecord,
+  type PathRecord,
+  type RefreshTokenRecord,
+  SiteChanged,
+  type SiteRecord,
+  type Store,
+  type UploadFileRecord,
+  type VersionRecord,
 } from '@fling/api/store'
 import { ConditionFailed, compareSk } from '@fling/api/table'
 import { describe, expect, it } from 'vitest'
@@ -539,7 +540,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         for (const e of [...many.owners.emails.slice(1), ...publishers]) {
           expect(await store.listRoleSites(e)).toHaveLength(1)
         }
-        await store.putSite(s)
+        await store.putSite({ ...many, owners: s.owners, publishers: s.publishers })
         for (const e of [...many.owners.emails, ...publishers]) {
           expect(await store.listRoleSites(e)).toEqual([])
         }
@@ -556,6 +557,43 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.findSite(s.name)).toEqual(s)
         await store.putSite(next, { ifCurrentVersion: 'v1' })
         expect(await store.findSite(s.name)).toEqual(next)
+      })
+
+      it('putSite writes the next revision, only over the one its copy was read at', async () => {
+        const store = await factory()
+        const [stays, removed, publisher] = [email(), email(), email()]
+        const s = site(email(), siteName(), { restricted: true })
+        await store.createSite(s)
+        // A site created and never saved has no revision: the first save writes 1.
+        s.audience = { emails: [stays, removed], groups: [] }
+        s.publishers = { emails: [publisher], groups: [] }
+        await store.putSite(s)
+        expect(s.revision).toBe(1)
+        expect((await store.findSite(s.name))?.revision).toBe(1)
+        const stale = structuredClone(s)
+        s.audience = { emails: [stays], groups: [] }
+        s.publishers = { emails: [], groups: [] }
+        await store.putSite(s)
+        expect(s.revision).toBe(2)
+        // A copy read before that save writes nothing, so it brings back nothing it removed.
+        stale.thumbnail = { versionId: 'v1', updatedAt: LATER }
+        await expect(store.putSite(stale)).rejects.toThrow(SiteChanged)
+        expect(await store.findSite(s.name)).toEqual(s)
+        expect((await store.listSiteGrants(removed)).filter(g => g.siteId === s.id)).toEqual([])
+        expect(await store.listRoleSites(publisher)).toEqual([])
+        expect((await store.listSiteGrants(stays)).filter(g => g.siteId === s.id)).toHaveLength(1)
+      })
+
+      it('putSite of a site deleted since it was read writes nothing', async () => {
+        const store = await factory()
+        const s = site(email(), siteName(), { audience: { emails: [email()], groups: [] } })
+        await store.createSite(s)
+        const copy = structuredClone(s)
+        await store.deleteSite(s)
+        await expect(store.putSite(copy)).rejects.toThrow(SiteChanged)
+        expect(await store.findSite(s.name)).toBeNull()
+        expect(await store.listSites(s.email)).toEqual([])
+        expect((await store.listAllSites({ max: 1000, prefix: s.name })).sites).toEqual([])
       })
 
       it('deleteSite of a site that does not exist is a no-op', async () => {
@@ -694,11 +732,13 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.createGroup(g, [])
         const s = site(email())
         await store.createSite(s)
-        const withGroup = { ...s, audience: { emails: [], groups: [g.id] } }
+        const withGroup: SiteRecord = { ...s, audience: { emails: [], groups: [g.id] } }
         await store.putSite(withGroup)
         expect(await store.listGroupSites(g.id)).toEqual([{ groupId: g.id, ...listing(withGroup) }])
-        await store.putSite(s)
+        withGroup.audience = s.audience
+        await store.putSite(withGroup)
         expect(await store.listGroupSites(g.id)).toEqual([])
+        withGroup.audience = { emails: [], groups: [g.id] }
         await store.putSite(withGroup)
         await store.deleteSite(withGroup)
         expect(await store.listGroupSites(g.id)).toEqual([])
@@ -1516,7 +1556,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         const store = await factory()
         const owner = email()
         const s = site(owner)
-        await store.putSite(s)
+        await store.createSite(s)
         expect(await store.listSiteSecrets(s.id)).toEqual([])
         expect(await store.putSiteSecret(secret(s.id, 'B_KEY'), 2)).toBe(true)
         expect(await store.putSiteSecret(secret(s.id, 'A_KEY'), 2)).toBe(true)
@@ -1537,7 +1577,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       it('the sites with a server: counted, each once, and forgotten when the site goes', async () => {
         const store = await factory()
         const s = site(email())
-        await store.putSite(s)
+        await store.createSite(s)
         const before = await store.serverSites(s.id)
         expect(before.listed).toBe(false)
         await store.markServerSite(s.id, s.name, true)

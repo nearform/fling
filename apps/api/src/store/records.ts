@@ -109,20 +109,31 @@
  * one transaction. `putSite` rewrites the directory item with the site whenever its listing or
  * access level changed.
  *
+ * Revisions: every `putSite` writes the site with the next `revision`, conditioned on the stored
+ * record still having the one the caller read (a record without one counts as 0, and is replaced
+ * only while it still has none, so records from before revisions need no migration). A save of a
+ * copy read before another save, or of a site deleted meanwhile, writes nothing and throws
+ * `SiteChanged`; the caller reads the site again and decides afresh (`writeSite`, sites.ts). So a
+ * request that read the site at its start (a finalize, a rollback, a thumbnail) never undoes what
+ * an owner or admin changed while it ran. Code from before revisions, after a rollback by one
+ * release, writes back the revision it read unchanged, so its saves are unguarded until the newer
+ * code is back.
+ *
  * Direct grants and group-site items (v2) carry a copy of the site's listing (`SharedListing`),
- * so Shared with me reads no site. `putSite` compares the site with the one stored and keeps
- * them in step: emails and groups that leave the audience lose their item, those that join gain
- * one, and when a listed field changed (a deploy or rollback, archive or unarchive, an audience or
- * visibility change) every item is rewritten. Nothing is written when nothing listed changed. The
- * caps (100 addresses, 10 groups) bound that to a handful of transactions. Removals go first, in
- * their own batches, while the stored site still names them; then the site, its index item and
- * as many grant and group-site writes as fit (25 operations); the rest follow in batches. So an
+ * so Shared with me reads no site. `putSite` compares the site with the one stored (the record
+ * its condition guards) and keeps them in step: emails and groups that leave the audience lose
+ * their item, those that join gain one, and when a listed field changed (a deploy or rollback,
+ * archive or unarchive, an audience or visibility change) every item is rewritten. Nothing is
+ * written when nothing listed changed. The caps (100 addresses, 10 groups) bound that to a
+ * handful of transactions. Removals go in the site's own transaction (the site, its index item and
+ * as many grant and group-site writes as fit in 25 operations) when they fit, else first, in their
+ * own batches, while the stored site still names them; the rest follow in batches. So an
  * interrupted write can leave an item missing, or with an out-of-date listing, until the site is
  * next saved (every save changes `updatedAt`, so it rewrites them all), but never one for someone
- * the stored audience doesn't name. Two saves of one site racing can: an item the audience no
- * longer backs, which lists the site's name to that user until the audience next names and drops
- * them, or the site is deleted. Policy reads the audience, never these items, so opening such a
- * site is still refused. No release wrote v1 items (name and owner only), only development
+ * the stored audience doesn't name. A save that overlaps the trailing batches of another can: an
+ * item the audience no longer backs, which lists the site's name to that user until the audience
+ * next names and drops them, or the site is deleted. Policy reads the audience, never these items,
+ * so opening such a site is still refused. No release wrote v1 items (name and owner only), only development
  * builds, so no migration fills them in: Shared with me reads the site for any item without a
  * listing.
  *
@@ -278,6 +289,7 @@ import {
   type SentNotificationRecord,
   type SharedListing,
   type SignInLinkRecord,
+  SiteChanged,
   type SiteDirectoryRecord,
   type SiteGrantRecord,
   type SiteRecord,
@@ -776,69 +788,95 @@ export class Records implements Store {
   }
 
   async putSite(site: SiteRecord, opts: { ifCurrentVersion?: string } = {}) {
-    const stored = await this.storedSite(site)
-    const before = stored?.audience ?? { emails: [], groups: [] }
-    const after = site.audience
-    const listing = listingOf(site)
-    const relist = !stored || !sameListing(listingOf(stored), listing)
-    const entry = directoryOf(site)
-    const rewriteDirectory = relist || !stored || directoryOf(stored).access !== entry.access
+    // The stored site this save may replace: the one the condition below guards, and the one the
+    // other items are kept in step with. A save of a copy read before another save fails here,
+    // before anything is written, so a stale audience or role list never brings back the items
+    // that save removed.
+    const { stored, record } = await this.storedSite(site)
+    if (!stored) throw new SiteChanged()
+    if (opts.ifCurrentVersion !== undefined && stored.currentVersionId !== opts.ifCurrentVersion) {
+      throw new ConditionFailed()
+    }
+    // Absent counts as 0: a record without a revision is replaced only while it still has none.
+    const read = site.revision || undefined
+    if ((stored.revision || undefined) !== read) throw new SiteChanged()
+    const next: SiteRecord = { ...site, revision: (read ?? 0) + 1 }
+    const before = stored.audience
+    const after = next.audience
+    const listing = listingOf(next)
+    const relist = !sameListing(listingOf(stored), listing)
+    const entry = directoryOf(next)
+    const rewriteDirectory = relist || directoryOf(stored).access !== entry.access
     const removed: TransactOp[] = [
       ...before.emails
-        .filter(email => !after.emails.includes(email) && email !== site.email)
-        .map(email => ({ delete: key.siteGrant(email, site.id) })),
+        .filter(email => !after.emails.includes(email) && email !== next.email)
+        .map(email => ({ delete: key.siteGrant(email, next.id) })),
       ...before.groups
         .filter(groupId => !after.groups.includes(groupId))
-        .map(groupId => ({ delete: key.groupSite(groupId, site.id) })),
+        .map(groupId => ({ delete: key.groupSite(groupId, next.id) })),
     ]
-    const holders = roleHolders(site)
+    const holders = roleHolders(next)
     for (const holder of roleHolders(stored).keys()) {
-      if (!holders.has(holder)) removed.push({ delete: roleKey(holder, site.id) })
+      if (!holders.has(holder)) removed.push({ delete: roleKey(holder, next.id) })
     }
     const written: TransactOp[] = [
       ...after.emails
-        .filter(email => email !== site.email && (relist || !before.emails.includes(email)))
+        .filter(email => email !== next.email && (relist || !before.emails.includes(email)))
         .map(email => {
           const grant: SiteGrantRecord = { email, ...listing }
-          return { put: encode('sitegrant', key.siteGrant(email, site.id), grant) }
+          return { put: encode('sitegrant', key.siteGrant(email, next.id), grant) }
         }),
       ...after.groups
         .filter(groupId => relist || !before.groups.includes(groupId))
         .map(groupId => {
           const item: GroupSiteRecord = { groupId, ...listing }
-          return { put: encode('groupsite', key.groupSite(groupId, site.id), item) }
+          return { put: encode('groupsite', key.groupSite(groupId, next.id), item) }
         }),
       ...[...holders].map(([holder, role]) => {
-        const item: SiteRoleRecord = { ...site, role }
-        return { put: encode('siterole', roleKey(holder, site.id), item) }
+        const item: SiteRoleRecord = { ...next, role }
+        return { put: encode('siterole', roleKey(holder, next.id), item) }
       }),
     ]
-    // Removals land before the site stops naming them, so an interrupted write never leaves an
-    // item for someone outside the stored audience (the header has the rest of the story).
-    for (let i = 0; i < removed.length; i += TRANSACT_MAX) {
-      await this.table.transact(removed.slice(i, i + TRANSACT_MAX))
-    }
-    const ops: TransactOp[] = [
+    // The record is the copy guarded. LEGACY (expand phase): a site with only its index item
+    // guards that instead, and gains its record only while it still has none.
+    const guard = fieldEquals('revision', read)
+    const head: TransactOp[] = [
+      { put: encode('site', key.site(next.id), next), cond: record ? guard : ifAbsent },
       {
-        put: encode('site', key.site(site.id), site),
-        ...(opts.ifCurrentVersion === undefined
-          ? {}
-          : { cond: fieldEquals('currentVersionId', opts.ifCurrentVersion) }),
+        put: encode('site', key.siteIndex(next.email, next.name), next),
+        ...(record ? {} : { cond: guard }),
       },
-      { put: encode('site', key.siteIndex(site.email, site.name), site) },
       ...(rewriteDirectory
-        ? [{ put: encode('sitedirectory', key.siteDirectory(site.name), entry) }]
+        ? [{ put: encode('sitedirectory', key.siteDirectory(next.name), entry) }]
         : []),
-      ...written,
     ]
-    for (let i = 0; i < ops.length; i += TRANSACT_MAX) {
+    // Removals go in the site's own transaction when they fit, so they land only with it. When
+    // there are more, they land first in their own batches, while the stored site still names
+    // them, so an interrupted write never leaves an item for someone outside the stored audience
+    // (the header has the rest of the story).
+    let ops: TransactOp[] = [...head, ...removed, ...written]
+    if (head.length + removed.length > TRANSACT_MAX) {
+      for (let i = 0; i < removed.length; i += TRANSACT_MAX) {
+        await this.table.transact(removed.slice(i, i + TRANSACT_MAX))
+      }
+      ops = [...head, ...written]
+    }
+    try {
+      await this.table.transact(ops.slice(0, TRANSACT_MAX))
+    } catch (err) {
+      // The site's own ops are the only conditional ones: someone saved it since the read above.
+      if (err instanceof ConditionFailed) throw new SiteChanged()
+      throw err
+    }
+    site.revision = next.revision
+    for (let i = TRANSACT_MAX; i < ops.length; i += TRANSACT_MAX) {
       await this.table.transact(ops.slice(i, i + TRANSACT_MAX))
     }
   }
 
   /**
-   * The site as stored, by its id: the newer of its record and its index item. LEGACY (expand
-   * phase): the index item may be the newer copy, as in `findSite`.
+   * The site as stored, by its id: the newer of its record and its index item, and the record.
+   * LEGACY (expand phase): the index item may be the newer copy, as in `findSite`, or the only one.
    */
   private async storedSite(site: SiteRecord) {
     const [record, index] = await Promise.all([
@@ -846,10 +884,11 @@ export class Records implements Store {
       this.read<SiteRecord>('site', key.siteIndex(site.email, site.name)),
     ])
     const copies = [record, index].filter((s): s is SiteRecord => s?.id === site.id)
-    return copies.reduce<SiteRecord | null>(
+    const stored = copies.reduce<SiteRecord | null>(
       (newest, s) => (newest && newest.updatedAt >= s.updatedAt ? newest : s),
       null
     )
+    return { stored, record: record?.id === site.id ? record : null }
   }
 
   async listAllSites(opts: { max: number; prefix?: string; pageSize?: number }) {

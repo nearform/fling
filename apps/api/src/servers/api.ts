@@ -41,7 +41,7 @@ import type { ServerLimits } from '../config.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import type { Principal } from '../policy.ts'
 import { publish } from '../publication.ts'
-import { auditAdmin, requireSite, requireSiteAs, save } from '../sites.ts'
+import { auditAdmin, changeSite, requireSite, requireSiteAs, writeSite } from '../sites.ts'
 import type { SiteRecord, User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
 import { limitsOf, probeServer, reconfigureLive, serverSite, serversOn } from './index.ts'
@@ -76,7 +76,15 @@ async function declared(deps: Deps, site: SiteRecord): Promise<string[]> {
 async function redeployLive(deps: Deps, site: SiteRecord): Promise<SecretLiveOutcome | undefined> {
   const live = await reconfigureLive(deps, site)
   if (!live || !serversOn(deps)) return undefined
-  if (live.moved) await save(deps, site)
+  if (live.moved) {
+    const target = site.server?.target
+    await writeSite(deps, site, s => {
+      if (!s.server || s.currentVersionId !== live.version.id) return false
+      const { target: _, ...rest } = s.server
+      s.server = { ...rest, ...(target ? { target } : {}) }
+      return true
+    })
+  }
   const probe = await probeServer(deps, site, live.version.id, live.version.server)
   if (probe.ok) return { versionId: live.version.id, ok: true }
   return {
@@ -127,10 +135,13 @@ const KEEPS_WAITING = new Set(['secrets_missing', 'server_failed_to_start'])
 /** A waiting publish refused for another reason waits no more: it is published again by hand. */
 async function stopWaiting(deps: Deps, name: string, versionId: string) {
   const site = await deps.store.findSite(name)
-  if (site?.server?.awaiting?.versionId !== versionId) return
-  const { awaiting: _, ...rest } = site.server
-  site.server = rest
-  await save(deps, site)
+  if (!site) return
+  await writeSite(deps, site, s => {
+    if (s.server?.awaiting?.versionId !== versionId) return false
+    const { awaiting: _, ...rest } = s.server
+    s.server = rest
+    return true
+  })
 }
 
 export async function siteSecrets(
@@ -239,32 +250,36 @@ export async function adminSetServer(
     )
   }
   await auditAdmin(deps, actor, site, 'site.server')
-  const state = { ...site.server }
-  if (req.stopped !== undefined) {
-    if (req.stopped) state.stopped = true
-    else delete state.stopped
-  }
-  if (req.limits) {
-    const limits: Partial<ServerLimits> = { ...state.limits }
-    for (const [k, v] of Object.entries(req.limits) as [keyof ServerLimits, number | null][]) {
-      if (v === null) delete limits[k]
-      else if (v !== undefined) limits[k] = v
+  // The admin's change is made to the site as it is when written: a publish meanwhile keeps it.
+  await changeSite(deps, actor, site, ['site.server'], async s => {
+    const state = { ...s.server }
+    if (req.stopped !== undefined) {
+      if (req.stopped) state.stopped = true
+      else delete state.stopped
     }
-    if (Object.keys(limits).length) state.limits = limits
-    else delete state.limits
-  }
-  site.server = state
-  if (req.limits) await reconfigureLive(deps, site)
-  await save(deps, site)
+    if (req.limits) {
+      const limits: Partial<ServerLimits> = { ...state.limits }
+      for (const [k, v] of Object.entries(req.limits) as [keyof ServerLimits, number | null][]) {
+        if (v === null) delete limits[k]
+        else if (v !== undefined) limits[k] = v
+      }
+      if (Object.keys(limits).length) state.limits = limits
+      else delete state.limits
+    }
+    s.server = state
+    if (req.limits) await reconfigureLive(deps, s)
+    return true
+  })
+  const server = site.server ?? {}
   if (req.stopped !== undefined && deps.servers) {
-    await deps.servers.setEnabled(serverSite(site), !site.archived && !site.server.stopped)
+    await deps.servers.setEnabled(serverSite(site), !site.archived && !server.stopped)
   }
   return {
     name: site.name,
-    hasServer: site.server.live === true,
-    stopped: site.server.stopped === true,
+    hasServer: server.live === true,
+    stopped: server.stopped === true,
     limits: limitsOf(deps, site),
-    raised: { ...site.server.limits },
+    raised: { ...server.limits },
   }
 }
 

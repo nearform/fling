@@ -125,7 +125,7 @@ describe('site-centric keys', () => {
     const table = new MemoryTable()
     const records = new Records(table)
     const stale = site('a@example.test', 'hello', { id: 'stale' })
-    await records.putSite(stale)
+    await records.createSite(stale)
     await table.put(old.claim('hello', 'b@example.test', 'other'))
     await records.deleteSite(stale)
     expect(await table.get('SITE#stale', 'SITE')).toBeNull()
@@ -268,10 +268,12 @@ describe('listing copies', () => {
     s.audience = { emails, groups: [] }
     await records.putSite(s)
     const transact = vi.spyOn(table, 'transact')
-    await records.putSite({ ...s, spa: true })
+    s.spa = true
+    await records.putSite(s)
     expect(transact).toHaveBeenCalledTimes(1)
     expect(transact.mock.calls[0]?.[0]).toHaveLength(2)
-    await records.putSite({ ...s, updatedAt: '2026-02-01T00:00:00.000Z' })
+    s.updatedAt = '2026-02-01T00:00:00.000Z'
+    await records.putSite(s)
     // The site, its index and directory items, and every grant.
     expect(transact.mock.calls.slice(1).flatMap(([ops]) => ops)).toHaveLength(3 + emails.length)
     expect((await records.listSiteGrants('u29@example.test'))[0]?.updatedAt).toBe(
@@ -283,7 +285,7 @@ describe('listing copies', () => {
 describe('record versions', () => {
   it('writes type and v with the record', async () => {
     const table = new MemoryTable()
-    await new Records(table).putSite(site('a@example.test', 'hello'))
+    await new Records(table).createSite(site('a@example.test', 'hello'))
     expect(await table.get('SITE#site1', 'SITE')).toEqual({
       pk: 'SITE#site1',
       sk: 'SITE',

@@ -5,7 +5,7 @@ order: 40
 summary: Publish Markdown as it is; Fling serves it as a formatted page.
 requires: [markdown]
 sources: [packages/shared/src/markdown.ts, packages/shared/src/markdown-path.ts, apps/api/src/rendering.ts, packages/shared/src/site-routing.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Publish a plan, a spec or notes written in Markdown without turning them into HTML first. Each

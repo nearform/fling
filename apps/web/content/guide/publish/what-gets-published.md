@@ -4,7 +4,7 @@ part: publish
 order: 30
 summary: The files Fling leaves out, the secrets it refuses, the home page it can make, and the limits.
 sources: [apps/cli/src/manifest.ts, apps/cli/src/gitignore.ts, apps/cli/src/inputs.ts, packages/shared/src/secrets.ts, packages/shared/src/limits.ts, apps/api/src/publication.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Fling publishes the files a browser needs and nothing else. It leaves out what is private to your
@@ -27,6 +27,11 @@ From a folder (or a zip), Fling skips:
   ```
 
 - **Links that point outside the folder.** Links within it are followed.
+<!-- requires: servers -->
+- **A site server's build inputs**, in a folder with one: the server's entry (`server.ts`), the
+  `server/` folder, `fling.json`, `package.json` and the lockfile. The server is published as one
+  bundled file that is never served. See [What a site server is](/guide/servers/what-is-a-site-server).
+<!-- /requires -->
 
 ## Secrets stop the publish
 
@@ -73,4 +78,6 @@ A Markdown file can be the home page too: see [Markdown pages](/guide/publish/ma
 
 - One publish holds up to {{fact:max-deploy}} and {{fact:max-files}} files, none over
   {{fact:max-file}}.
-- Fling hosts files only: no server code runs, so keep anything private out of the files.
+- Anyone who can open a site can fetch every file it publishes, so keep anything private out of
+  the files.<!-- requires: servers --> Data only a [site server](/guide/servers/what-is-a-site-server)
+  should see goes in its `server/` folder, and keys in [site secrets](/guide/servers/secrets).<!-- /requires -->

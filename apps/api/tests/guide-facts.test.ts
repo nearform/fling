@@ -21,5 +21,9 @@ describe('the Guide facts pinned from the API', () => {
 
   it('match the default an instance gets when it configures nothing', () => {
     expect(PINNED_GUIDE_FACTS['invites-per-day']).toBe(String(loadBaseConfig({}).invitesPerDay))
+    const { limits } = loadBaseConfig({}).servers
+    expect(PINNED_GUIDE_FACTS['server-timeout']).toBe(`${limits.timeoutSeconds} seconds`)
+    expect(PINNED_GUIDE_FACTS['server-body-max']).toBe(`${limits.bodyBytes / 1024 / 1024} MB`)
+    expect(PINNED_GUIDE_FACTS['server-rps']).toBe(String(limits.rps))
   })
 })

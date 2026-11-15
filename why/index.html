@@ -1444,13 +1444,13 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
       ['p', '$ '], ['t', 'fling dev --as ada@example.com\n'], ['w', 400],
       ['c', '  serving quote/ at http://localhost:47180\n'],
       ['c', '  secrets: SLACK_WEBHOOK_URL (from .env)\n'], ['w', 700],
-      ['p', '$ '], ['t', 'fling secrets set quote --from .env SLACK_WEBHOOK_URL\n'], ['w', 400],
-      ['ok', '  ✓ SLACK_WEBHOOK_URL set (nothing else read)\n'], ['w', 600],
       ['p', '$ '], ['t', 'fling deploy . --name quote --access members\n'], ['w', 500],
-      ['c', '  bundling server.ts → _fling/server.mjs (102 KB gzipped)\n'], ['w', 500],
-      ['c', '  starting server… GET /api/health 200\n'], ['w', 400],
-      ['ok', '  ✓ live  '], ['u', 'https://quote.' + sites + '/\n'],
-      ['c', '          server: /api/* · members only\n']
+      ['c', '  bundling server.ts → _fling/server.mjs (100 KB gzipped)\n'], ['w', 500],
+      ['c', '  waiting for the site secret SLACK_WEBHOOK_URL\n'], ['w', 600],
+      ['p', '$ '], ['t', 'fling secrets set quote --from .env SLACK_WEBHOOK_URL\n'], ['w', 400],
+      ['ok', '  ✓ SLACK_WEBHOOK_URL set (nothing else read)\n'], ['w', 400],
+      ['ok', '  ✓ live now  '], ['u', 'https://quote.' + sites + '/\n'],
+      ['c', '    server: /api/* · members only\n']
     ];
     for (var i = 0; i < lines.length; i++) {
       var kind = lines[i][0], val = lines[i][1];

@@ -5,7 +5,7 @@ order: 10
 summary: See who has signed in, act as someone to help them, and invite people from outside.
 audience: admin
 sources: [apps/web/src/pages/AdminUsers.tsx, apps/web/src/pages/AdminInvitations.tsx, apps/web/src/components/ImpersonationBanner.tsx, apps/web/src/lib/admin.ts, apps/api/src/admin.ts, apps/api/src/invitations.ts, apps/api/src/policy.ts, apps/api/src/audit.ts, apps/api/src/config.ts]
-verified: 98b7f5e
+verified: 32545014b
 ---
 
 As an admin of {{instance:name}} you can see everyone who has signed in, and act as one of them to
@@ -48,7 +48,8 @@ next page.
 
 Below the list, **Recent activity** shows every impersonation's start and stop, every invitation
 made or revoked, and what admins changed on other people's sites or opened of their restricted
-ones. Entries are kept for {{fact:audit-days}}.
+ones.<!-- requires: servers --> It also shows each site server published, and each viewer id an
+admin looked up.<!-- /requires --> Entries are kept for {{fact:audit-days}}.
 
 ### Impersonate someone
 

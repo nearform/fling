@@ -5,7 +5,7 @@ order: 20
 summary: A secret link that opens a private site to anyone who has it, without signing in.
 requires: [shareLinks]
 sources: [apps/api/src/sites.ts, apps/api/src/policy.ts, packages/shared/src/hosts.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteAccess.tsx, packages/shared/src/mcp-tools.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 A share link opens a private site to anyone who has the link, without signing in. Use one for a
@@ -61,3 +61,7 @@ Refresh and revoke ask you to confirm first.
 - Someone with a share link can open the site, but can't comment on it or download its files. The
   review page needs sign-in.
 - A public site doesn't need a link: anyone can already open it.
+<!-- requires: servers -->
+- Through a share link, a site's server runs without knowing who is calling, as on a public site.
+  See [Visitors, reviews and limits](/guide/servers/visitors-and-limits#who-can-call-it).
+<!-- /requires -->

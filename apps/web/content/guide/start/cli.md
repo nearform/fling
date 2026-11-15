@@ -4,7 +4,7 @@ part: start
 order: 50
 summary: Install the fling command, sign in, and keep it up to date.
 sources: [apps/cli/src/cli.ts, apps/cli/src/commands/setup.ts, apps/cli/src/commands/auth.ts, apps/cli/src/commands/doctor.ts, apps/cli/src/doctor.ts, apps/cli/src/update-check.ts, apps/cli/src/config.ts, apps/cli/package.json, apps/web/src/pages/GetStarted.tsx]
-verified: 60d6113
+verified: 32545014b
 ---
 
 The `fling` command publishes from a terminal: a build folder, a page, a zip. It suits scripts,
@@ -97,5 +97,8 @@ problem, each warning and problem with its fix. It only looks; it changes nothin
 
 - Each `fling login` makes a key for this computer. See and revoke them under **CLI logins** on the
   **Connections** page of the web app.
+<!-- requires: servers -->
+- `fling dev`, `fling secrets` and `fling logs` are for [site servers](/guide/servers/what-is-a-site-server).
+<!-- /requires -->
 - `fling help <command>` explains any command. Add `--json` to any command for output a script can
   read.

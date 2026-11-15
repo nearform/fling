@@ -5,7 +5,7 @@ order: 60
 summary: Every publish is kept as a version; put an earlier one back in an instant.
 requires: [rollback]
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteVersions.tsx, apps/web/src/components/site/PathVersions.tsx, apps/web/src/lib/site-tabs.ts]
-verified: 60d6113
+verified: 32545014b
 ---
 
 Each time you publish new files, Fling keeps them as a version and serves the newest. The earlier
@@ -64,7 +64,13 @@ A Path's own page has the same **Versions** section for that Path.
 
 ## Good to know
 
-- Rolling back changes only the files. Who can open the site, and its share link, stay as they are.
+- Rolling back changes only the files<!-- requires: servers --> and the site server they carry<!-- /requires -->. Who can open the site, and its share link, stay as
+  they are.
+<!-- requires: servers -->
+- A rollback runs the old version's server with the site's secrets as they are today. If that
+  version needs a secret that isn't set, the rollback is refused (`secrets_missing`): set it and
+  roll back again. See [Site secrets](/guide/servers/secrets).
+<!-- /requires -->
 - Delete the site and its versions go with it. Archiving keeps them.
 - Whoever runs {{instance:name}} can limit how many versions each site keeps; older ones beyond
   that are deleted. The one being served is always kept.

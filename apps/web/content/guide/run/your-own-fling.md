@@ -4,7 +4,7 @@ part: run
 order: 10
 summary: What an instance is, AWS or Cloudflare, and how its name, sign-in and brand are set.
 sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
-verified: 98b7f5e
+verified: 32545014b
 ---
 
 Fling is open source. Anyone can run their own, on their own cloud account, under their own
@@ -37,6 +37,7 @@ Both run the same Fling with the same features. Pick the cloud you already use.
 | Set up with | A Terraform module you call from your own Terraform | A setup script, run once |
 | Deployed by | A GitHub workflow, on each release | A deploy script, by hand or from a GitHub workflow |
 | Email, optional | Amazon SES | Cloudflare Email Service |
+| Site servers, optional | Lambda Web Functions | The Worker Loader, in beta |
 | Cost when idle | About nothing; you pay for use | The Workers Paid plan, plus a certificate add-on for some domain layouts |
 
 The deploy guides list current costs for each.
@@ -65,6 +66,7 @@ deploy. The main ones:
 | Brand | `BRAND_PRIMARY`, `BRAND_ACCENT`, `BRAND_LOGO_URL` and the other `BRAND_*` values |
 | Who can open a new site | `SITE_DEFAULT_ACCESS`: its owner alone, or everyone signed in |
 | Feature switches | `COMMENTS`, `LIVE` (on unless turned off), `INVITES` (off unless turned on; needs email) |
+| Site servers | `SERVERS`: nobody (the default), admins, named groups or every member; `SERVERS_EGRESS` for whether they reach the internet, and the `SERVER_*` limits |
 | Versions kept | `VERSION_RETENTION` (every version, unless set) |
 
 The domains come from the infrastructure: Terraform's inputs on AWS, the setup script's on

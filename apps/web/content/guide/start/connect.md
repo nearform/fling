@@ -5,7 +5,7 @@ order: 20
 summary: Add your Fling as a connector, so your assistant can publish what it makes for you.
 requires: [remoteMcp]
 sources: [apps/api/src/config.ts, apps/api/src/mcp/**, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
-verified: 98b7f5e
+verified: 32545014b
 ---
 
 Connect {{instance:name}} to your assistant once, and it can publish the pages, reports and
@@ -47,6 +47,11 @@ Then ask for what you want:
 Your assistant sends the files it made straight to {{instance:name}}: up to {{fact:max-inline}} in
 one go, and bigger sites in parts. It gives you back the site's address and, where your Fling has
 comments, a review link to share for feedback.
+
+<!-- requires: servers -->
+Over the connector, an assistant can also publish a [site server](/guide/servers/what-is-a-site-server),
+as long as it has no npm packages: it starts from a small server and writes the routes into it.
+<!-- /requires -->
 
 ## In the web app
 

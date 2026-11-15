@@ -56,9 +56,10 @@ curl -s https://<your Fling>/.well-known/fling | jq '.capabilities | {servers, s
 - `servers`: whether you may publish a server. The operator chooses who: nobody (`SERVERS=off`,
   the default), admins, named groups, or every member. If you aren't allowed, a deploy with a
   server answers 403 `servers_not_allowed`.
-- `serversEgress`: what a server may reach. `none` (the default) means no outbound network at
-  all: `fetch` to another host throws. `open` means the public internet. An LLM proxy or a Slack
-  webhook needs `open`.
+- `serversEgress`: whether a server may reach the internet. `false` (the operator's
+  `SERVERS_EGRESS=none`, the default) means no outbound network at all: `fetch` to another host
+  throws. `true` (`SERVERS_EGRESS=open`) means the public internet. An LLM proxy or a Slack webhook
+  needs it.
 
 You also need the CLI, version 0.13 or later:
 
@@ -80,7 +81,7 @@ Write the server in either style; both are first-class:
 | `node:http` servers; Express where the platform's Node compatibility allows | `child_process`, writing to disk |
 | `node:crypto`, `Buffer`, streams, `fetch` | WebSockets |
 | Pure-JavaScript npm packages, bundled in | Keeping state in memory between requests: the server can stop at any time |
-| Secrets as `process.env.NAME`, `env.NAME` or `secret('NAME')` | Calling other hosts when the instance's `serversEgress` is `none` |
+| Secrets as `process.env.NAME`, `env.NAME` or `secret('NAME')` | Calling other hosts when the instance's `serversEgress` is false |
 | Timers and I/O inside a request | On Cloudflare, timers or I/O at the module's top level, while it loads: the start fails. Start them in the first request instead |
 | Time from `Date.now()` across I/O | On Cloudflare, `Date.now()` stands still during a request except across I/O, so a busy loop timed by it never ends (and is stopped at the CPU limit, 502 `server_cpu_limit`) |
 | | A secret named `AWS_*`, `LAMBDA_*`, `FLING_*`, `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER` or `FILES` (Fling's and the platforms'): refused with 400 `invalid_secret_name` everywhere |
@@ -187,9 +188,11 @@ neither import.
 fling dev                        # this folder
 fling dev ./my-site --as ada@example.com
 fling dev --as ada@example.com --guest
+fling dev --port 8080 --spa      # another port; index.html for unknown paths, as deploy's --spa
 ```
 
-`fling dev` serves the folder the way the sites host does, at `http://localhost:47180`, and runs
+`fling dev` serves the folder the way the sites host does, at `http://localhost:47180` (else a
+free port), and runs
 the server beside it, bundled with deploy's settings and rebuilt when you save:
 
 - Static files exactly as published: trailing slashes, the 404 page, dotfiles hidden, `/api/*` to
@@ -198,8 +201,11 @@ the server beside it, bundled with deploy's settings and rebuilt when you save:
 - **Secrets come from `.env`, with `.env.local` overriding it.** Only the names in `fling.json`'s
   `secrets` reach the server, as in production; anything else in `.env` (a local database URL,
   `DEBUG`) stays out. A declared secret missing from both files is a warning when it starts.
-- **`--as <email>`** makes requests arrive as that signed-in viewer, and `--guest` as a guest.
-  Without `--as` the viewer is null, as on a public site.
+- **`--as <email>`** makes requests arrive as that signed-in viewer, with a viewer id made as
+  production makes one, and `--guest` as a guest. Without `--as` the viewer is null, as on a
+  public site.
+- Every request line and everything the server prints appear in the terminal, as `fling logs`
+  prints them. A bundle that fails to build keeps the last one running.
 
 The local server runs in Node, which allows more than some platforms do. The bundler targets a
 neutral platform, so an import that won't exist in production fails at bundle time rather than
@@ -223,7 +229,8 @@ again, by the CLI, the API or the web app.
 
 ```sh
 fling secrets set my-site SLACK_WEBHOOK_URL < webhook.txt     # the value from stdin
-fling secrets set my-site --from .env SLACK_WEBHOOK_URL       # only the keys you name
+fling secrets set my-site SLACK_WEBHOOK_URL                   # asked for, not shown, on a terminal
+fling secrets set my-site --from .env SLACK_WEBHOOK_URL API_KEY  # only the keys you name
 fling secrets ls my-site
 fling secrets rm my-site SLACK_WEBHOOK_URL
 ```
@@ -239,7 +246,8 @@ $ fling secrets ls my-site
 ```
 
 - A value never goes on the command line, where it would land in your shell history.
-- `--from .env NAME…` reads only the names you list, nothing else in the file.
+- `--from .env NAME…` reads only the names you list, nothing else in the file. Without `--from`,
+  set one at a time.
 - `fling deploy` never uploads `.env`: a local file never quietly becomes production secrets.
 - Secrets belong to the site, not the version. A rollback runs the old code with today's secrets,
   so a rotated key never comes back.
@@ -249,17 +257,19 @@ $ fling secrets ls my-site
 - `fling secrets ls` lists the names, who set each and when, the names the live version declares
   but aren't set, and, while a version waits for its secrets, which version it is, what it
   declares and what it still needs.
-- The site page in the web app lists them too, with who set each and when, and can set them.
+- The Secrets section of the site page's Server tab lists them too, with who set each and when,
+  and sets, replaces and removes them. A version waiting for secrets marks the Server tab.
 
-> **Warning** Anyone who can publish the site can read its secrets, by publishing a server that
-> prints them. Choose publishers with that in mind.
+> **Warning** Anyone who can publish the site, and may publish servers, can read its secrets, by
+> publishing a server that prints them. Choose publishers with that in mind.
 
 ## Publish: fling deploy
 
 ```sh
-fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
 fling deploy . --name workshop-quote --access members
 ```
+
+Once the site's secrets are set, a deploy goes straight live:
 
 ```text
   bundling server.ts → _fling/server.mjs (465 KB, 100 KB gzipped)
@@ -286,13 +296,14 @@ with `server_failed_to_start` and the first lines of the server's log.
 
 **A secret not set yet holds the version back, not the deploy.** The files upload and the version
 waits; the deploy names the secrets it needs. Set them, and the version goes live as soon as the
-last one is set, with no second deploy:
+last one is set, with no second deploy. This is also how a new site starts: secrets belong to a
+site, so the first deploy makes the site and waits, and `fling secrets set` then takes it live:
 
 ```text
 $ fling deploy . --name workshop-quote
-  ✖ Version f12ba1d8273dc664 of "workshop-quote" needs the site secrets SLACK_WEBHOOK_URL, which aren't set. …
+  ✖ Version f12ba1d8273dc664 of "workshop-quote" needs the site secrets SLACK_WEBHOOK_URL, which aren't set. It goes live as soon as they are: set it (fling secrets set workshop-quote NAME); nothing needs publishing again
     Set it: `fling secrets set workshop-quote SLACK_WEBHOOK_URL < file`, or
-    `fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL`. The version goes live as soon as the last is set
+    `fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL`. The version goes live as soon as the last is set; there is nothing to deploy again.
 
 $ fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
   ✓ SLACK_WEBHOOK_URL set on workshop-quote (from .env; nothing else read)
@@ -301,8 +312,8 @@ $ fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
 
 If that start fails instead, `fling secrets set` prints the failure and the server's log and exits
 non-zero. The version keeps waiting: if a secret was wrong, set it again (or remove one) and the
-version is tried again; if the code was wrong, fix it and deploy again, and the new version waits
-in its place.
+version is tried again; if the code was wrong, fix it and deploy again: the new version replaces the
+waiting one, and goes live at once if its secrets are set.
 
 **A server on a public site asks first.** Anyone can call a public site's `/api/*` directly,
 without the page, and use its secrets through it. The CLI asks you to confirm, on `fling deploy`
@@ -325,19 +336,24 @@ fling logs workshop-quote --follow      # new lines every 2 seconds
 Fling writes one line per request (method, path, status, duration, viewer id, version), and your
 server's `console.log` and `console.error` lines appear beside them. Logs are kept for 7 days.
 The site's owners and publishers read them, from the CLI, `fling_logs` on either MCP server, or the
-Logs panel on the site page.
+Logs section of the site page's Server tab (the last hour, with Refresh and Follow). Admins read
+them from the site page too.
 
 **Log the viewer id, not the email.** Everyone who publishes the site can read its logs. The id
 (`v_3f9a2c71`) is the same for one person on one site, so you can follow a user through the log,
 and different on every other site, so nobody can join two sites' logs. An admin can resolve an id
-to a person when there's a reason, and that lookup is audited.
+to a person when there's a reason, by clicking it in the site page's Logs section, and that
+lookup is audited (`viewer.resolved`).
 
 ## From an agent
 
 ### Claude Code, Claude Desktop and the local MCP
 
 The local MCP server runs on your computer, so it does everything the CLI does: `fling_deploy`
-bundles the server, `fling_dev` runs the folder locally, and `fling_logs` reads the log. Ask:
+bundles the server, `fling_dev` runs the folder locally, and `fling_logs` reads the log. The
+Claude Desktop extension ships without esbuild, so there a server with npm dependencies asks for
+the CLI ("Bundling a site server needs the Fling CLI"), and a dependency-free
+`_fling/server.mjs` publishes as it is. Ask:
 
 - "Add a server to this site that proxies the Anthropic API with a key I'll set as a secret, and
   run it with fling dev."
@@ -432,7 +448,7 @@ fling dev --as ada@example.com
 [`examples/site-servers/workshop-quote/`](../examples/site-servers/workshop-quote/): a page that
 prices a workshop and lets a signed-in member ask the team to book it. The rates stay on the
 server, the page only sees the answer, and the request goes to Slack with the webhook URL held as a
-site secret. Needs `serversEgress: open` for the Slack call.
+site secret. Needs `serversEgress` (`SERVERS_EGRESS=open`) for the Slack call.
 
 `server.ts`:
 
@@ -539,14 +555,14 @@ fling dev --as ada@example.com
 
 ```text
   serving workshop-quote/ at http://localhost:47180  (server: server.ts, rebuilt on save)
-  viewer: ada@example.com · secrets: SLACK_WEBHOOK_URL (from .env)
+  viewer: ada@example.com (v_3f9a2c71) · secrets: SLACK_WEBHOOK_URL (from .env)
 ```
 
-Publish it:
+Publish it: the first deploy waits for the secret, and setting it takes the version live.
 
 ```sh
-fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
 fling deploy . --name workshop-quote --access members
+fling secrets set workshop-quote --from .env SLACK_WEBHOOK_URL
 ```
 
 What visitors get, signed in as a member:
@@ -617,8 +633,8 @@ to `/api/ask`; the server calls the Anthropic Messages API with a key held as a 
 streams the answer back as plain text, which the page appends as it arrives. It shows:
 
 - **`secret()`** for the key, which never reaches the page, the published files or the bundle.
-- **Egress.** The call needs `serversEgress: open`. With `none`, `fetch` throws and `/api/ask`
-  answers 502 "The server could not reach the model"; the log says why.
+- **Egress.** The call needs `serversEgress` (`SERVERS_EGRESS=open`). Without it, `fetch`
+  throws and `/api/ask` answers 502 "The server could not reach the model"; the log says why.
 - **The 30-second limit.** It covers the whole stream. The server stops the upstream call at 25 s
   so the answer ends with a note instead of being cut off mid-word, and caps `max_tokens`.
 - **Refusing a null viewer.** On a public site or through a share link anyone could call
@@ -769,8 +785,8 @@ cd examples/site-servers/llm-proxy
 npm install
 echo 'ANTHROPIC_API_KEY=sk-ant-…' >> .env.local
 fling dev --as ada@example.com
-fling secrets set ask-claude --from .env.local ANTHROPIC_API_KEY
-fling deploy . --name ask-claude --access members
+fling deploy . --name ask-claude --access members                # waits for its secret
+fling secrets set ask-claude --from .env.local ANTHROPIC_API_KEY  # and goes live
 ```
 
 ### d. Private data and published files
@@ -855,7 +871,7 @@ curl -s -o /dev/null -w '%{http_code}\n' localhost:47180/server/costs.json    # 
 curl -s localhost:47180/data/products.json   # the public catalogue
 ```
 
-It needs no outbound network, so it runs on an instance with `serversEgress: none`.
+It needs no outbound network, so it runs on an instance whose `serversEgress` is false.
 
 ### e. A dependency-free server for the remote MCP
 
@@ -928,9 +944,15 @@ with the three files.
 | `public_server` (MCP) / a confirmation (CLI) | The site is public, so anyone can call `/api/*` and use its secrets through it | Make sure that's intended. CLI: answer the prompt or pass `--yes`. MCP: ask the user, then repeat with `confirmPublicServer: true` |
 | 403 `cross_origin` | A POST (or other write) to `/api/*` came from another site's page | Call `/api/…` from the site's own pages. Cross-origin calls can't be opted in to yet |
 | 405 | A method other than GET or HEAD outside `/api/` | Post forms to a path under `/api/` |
-| 502 from your own code, "could not reach" in the log | The server's `fetch` to another host failed. On an instance with `serversEgress: none`, every outbound call does | Check the capability; ask an admin whether servers may reach the internet |
-| 503 on `/api/*` | An admin has switched this site's server off | Ask an admin |
-| Cut off at 30 s | A request, or a streamed response, ran past the time limit | Do less per request, stop upstream calls earlier, or ask an admin to raise the limit for the site (on AWS at most 120 s) |
+| 502 from your own code, "could not reach" in the log | The server's `fetch` to another host failed. On an instance whose `serversEgress` is false, every outbound call does | Check the capability; ask an admin whether servers may reach the internet |
+| 503 `server_stopped` on `/api/*` | An admin has stopped this site's server (the site page's Server tab says so) | Ask an admin |
+| 504 `server_timeout`, or a stream cut off at 30 s | A request, or a streamed response, ran past the time limit | Do less per request, stop upstream calls earlier, or ask an admin to raise the limit for the site (on AWS at most 120 s) |
+| 502 `server_failed` | The server crashed, threw, or isn't running | Read `fling logs`; run it with `fling dev` |
+| 429 | More requests than `SERVER_RPS` allows the site (`rate_limited` on Cloudflare) | Slow down, or ask an admin to raise the site's limit |
+| 413 `too_large` | A request body over `SERVER_BODY_BYTES` (10 MB), a bundle over 5 MB, or a secret's value over 8 KB | Send less; leave large dependencies out of the bundle; keep data out of secrets |
+| 409 `too_many_servers` | The instance already runs `SERVERS_MAX_SITES` site servers | Publish without the server, or ask an admin |
+| 409 `too_many_secrets` | The site has 20 secrets already | Remove one first |
+| 409 `servers_egress_unavailable`, `servers_quota` (AWS, operators) | `SERVERS_EGRESS=none` without the Terraform `servers.egress` connector; or `SERVERS_MAX_SITES` × `SERVER_ENVIRONMENTS` × 2 vCPU is over the account's Web Functions quota | See the AWS deploy guide's Site servers section |
 | 502 `server_cpu_limit` (Cloudflare) | Cloudflare stopped the server for using more CPU time in one request than `SERVER_CPU_MS` allows (1 s by default) | Do less work per request, or move it out of the loop. A loop timed by `Date.now()` never ends on Cloudflare (see [What works](#what-works-what-doesnt-and-the-limits)). An admin can raise the limit for the site |
 | 400 `limit_too_high` (admins) | A time per request past what the platform serves: on AWS, 120 s | Set 120 s or less |
 | 400 `invalid_secret_name` | A secret name that isn't A-Z, 0-9 and `_`, or one Fling and the platforms keep (`PORT`, `FILES`, `AWS_*`…), set or declared in `fling.json` | Rename it in `fling.json`, the server and the secret |

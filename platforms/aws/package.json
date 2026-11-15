@@ -28,7 +28,7 @@
     "@fling/shared": "workspace:*",
     "@smithy/signature-v4": "^5.7.5",
     "fflate": "^0.8.3",
-    "hono": "^4.13.5"
+    "hono": "^4.13.16"
   },
   "devDependencies": {
     "@fling/conformance": "workspace:*",

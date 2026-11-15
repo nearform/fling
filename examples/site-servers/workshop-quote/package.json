@@ -2,7 +2,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "hono": "^4.10.0",
+    "hono": "^4.13.16",
     "zod": "^4.1.0"
   },
   "devDependencies": {

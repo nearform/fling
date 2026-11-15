@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   isMarkdownPath,
+  MAX_MARKDOWN_BYTES,
   markdownHomePages,
+  markdownPages,
   renderedMarkdownKey,
   renderMarkdownPage,
 } from '../src/markdown'
@@ -153,5 +155,26 @@ describe('isMarkdownPath', () => {
 describe('renderedMarkdownKey', () => {
   it('lives under a dot folder that no site path can use', () => {
     expect(renderedMarkdownKey('docs/plan.md')).toBe('.rendered/docs/plan.md.html')
+  })
+})
+
+describe('markdownPages', () => {
+  it('stores each page at its rendered key and as the home page of the folders it stands in for', () => {
+    const pages = markdownPages([
+      { path: 'README.md', size: 10 },
+      { path: 'docs/plan.md', size: 10 },
+      { path: 'site/index.html', size: 10 },
+      { path: 'site/notes.md', size: 10 },
+      { path: 'big.md', size: MAX_MARKDOWN_BYTES + 1 },
+    ])
+    const keys = new Map(pages.map(p => [p.path, p.keys]))
+    expect(keys.get('README.md')).toEqual([renderedMarkdownKey('README.md'), 'index.html'])
+    expect(keys.get('docs/plan.md')).toEqual([
+      renderedMarkdownKey('docs/plan.md'),
+      'docs/index.html',
+    ])
+    expect(keys.get('site/notes.md')).toEqual([renderedMarkdownKey('site/notes.md')])
+    expect(keys.has('big.md')).toBe(false)
+    expect(keys.has('site/index.html')).toBe(false)
   })
 })

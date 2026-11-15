@@ -50,7 +50,9 @@ serving my-app/ at http://localhost:47180  (server: server.ts, rebuilt on save)
 viewer: ana@example.com (v_3f9a2c71) · secrets: SLACK_WEBHOOK_URL (from .env)
 ```
 
-- **The files are served as they will be**: the 404 page, dotfiles hidden, `/api/…` to the server.
+- **The files are served as they will be**: the 404 page, dotfiles hidden, `/api/…` to the server,
+  and Markdown rendered as a published site renders it (`?raw=1` for the source, a README as a
+  folder's home page when it has no `index.html`).
 - **Secrets come from `.env`**, with `.env.local` overriding it. Only the secrets `fling.json`
   names reach the server; anything else in those files stays out. A named secret in neither file is
   a warning.

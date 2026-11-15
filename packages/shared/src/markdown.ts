@@ -26,6 +26,32 @@ export { isMarkdownPath, markdownHomePages }
  */
 export const renderedMarkdownKey = (path: string): string => `.rendered/${path}.html`
 
+/** Where a folder's home page lives inside a version's prefix (`''` is the root). */
+export const homePageKey = (folder: string): string =>
+  folder ? `${folder}/index.html` : 'index.html'
+
+/**
+ * What go-live renders from a version's files: each Markdown file it renders (at most
+ * MAX_RENDERED_MARKDOWN of at most MAX_MARKDOWN_BYTES, the rest served as they are), with the keys
+ * its page is stored at: `renderedMarkdownKey(path)`, and the home page of every folder it stands
+ * in for (markdownHomePages). Publish and `fling dev` both serve what this says.
+ */
+export function markdownPages(
+  files: readonly { path: string; size: number }[]
+): { path: string; keys: string[] }[] {
+  const homes = markdownHomePages(files.map(f => f.path))
+  const homeOf = new Map<string, string[]>()
+  for (const [folder, source] of homes)
+    homeOf.set(source, [...(homeOf.get(source) ?? []), homePageKey(folder)])
+  return files
+    .filter(f => isMarkdownPath(f.path) && f.size <= MAX_MARKDOWN_BYTES)
+    .slice(0, MAX_RENDERED_MARKDOWN)
+    .map(f => ({
+      path: f.path,
+      keys: [renderedMarkdownKey(f.path), ...(homeOf.get(f.path) ?? [])],
+    }))
+}
+
 const escapeHtml = (text: string): string =>
   text
     .replace(/&/g, '&amp;')

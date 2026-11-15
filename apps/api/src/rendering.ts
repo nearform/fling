@@ -15,14 +15,7 @@
  * Rendering never fails a publish: a file that can't be rendered is served as it is.
  */
 import { cacheControlFor, type ManifestFile, siteObjectKey } from '@fling/shared'
-import {
-  isMarkdownPath,
-  MAX_MARKDOWN_BYTES,
-  MAX_RENDERED_MARKDOWN,
-  markdownHomePages,
-  renderedMarkdownKey,
-  renderMarkdownPage,
-} from '@fling/shared/markdown'
+import { markdownHomePages, markdownPages, renderMarkdownPage } from '@fling/shared/markdown'
 import { hasPathsBlock } from '@fling/shared/paths-index'
 import { mapLimit } from './lib/concurrency.ts'
 import type { VersionRecord } from './store/types.ts'
@@ -60,25 +53,18 @@ export async function renderVersion(
   files: readonly ManifestFile[]
 ): Promise<Pick<VersionRecord, 'markdown' | 'home' | 'title'>> {
   const key = (path: string) => siteObjectKey(storageId, versionId, path)
-  const markdown = files
-    .filter(f => isMarkdownPath(f.path) && f.size <= MAX_MARKDOWN_BYTES)
-    .slice(0, MAX_RENDERED_MARKDOWN)
   const homes = markdownHomePages(files.map(f => f.path))
-  const homeOf = new Map<string, string[]>()
-  for (const [folder, source] of homes) homeOf.set(source, [...(homeOf.get(source) ?? []), folder])
-
   let rootTitle = ''
-  const rendered = await mapLimit(markdown, RENDER_CONCURRENCY, async f => {
+  const rendered = await mapLimit(markdownPages(files), RENDER_CONCURRENCY, async f => {
     try {
       const bytes = await deps.blobs.get(key(f.path))
       if (!bytes) return false
       const page = renderMarkdownPage(decode(bytes), { path: f.path })
       const body = new TextEncoder().encode(page.html)
       const opts = { contentType: HTML, cacheControl: cacheControlFor(`${f.path}.html`) }
-      await deps.blobs.put(key(renderedMarkdownKey(f.path)), body, opts)
-      for (const folder of homeOf.get(f.path) ?? []) {
-        await deps.blobs.put(key(folder ? `${folder}/index.html` : 'index.html'), body, opts)
-        if (folder === '') rootTitle = page.title
+      for (const k of f.keys) {
+        await deps.blobs.put(key(k), body, opts)
+        if (k === 'index.html') rootTitle = page.title
       }
       return true
     } catch {

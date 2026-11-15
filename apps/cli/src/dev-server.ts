@@ -6,7 +6,10 @@
  * decision (`routeSiteRequest`, packages/shared site-routing.ts) for a public site whose version is
  * the folder, so trailing slashes, dotfiles, `/_fling/`, the GET/HEAD rule, `/api/*` and the
  * cross-origin rule are exactly the edge's. A rewrite is served from the files a deploy would
- * publish (build inputs and what is never flung left out); a missing one gets a 404 page. An invoke
+ * publish (build inputs and what is never flung left out), or from the pages go-live would render
+ * from them (`markdownPages`, markdown.ts in shared: each Markdown file's page, served unless
+ * `?raw=1`, and the home page of a folder its Markdown stands in for), rendered in memory; a
+ * missing one gets a 404 page. An invoke
  * goes through the core's shell (`runInvoke`: the request as the server gets it, the Cache-Control
  * rule, the request line) to the core's local runtime (`NodeSiteServers`: a child process behind
  * the core's Node entry, with only the declared secrets in its environment).
@@ -36,6 +39,7 @@ import {
   SERVER_PROBE_TIMEOUT_MS,
   type SiteViewer,
 } from '@fling/shared'
+import { markdownPages, renderMarkdownPage } from '@fling/shared/markdown'
 import { normalizeQuery, routeSiteRequest, viewerIdOf } from '@fling/shared/site-routing'
 import { localSecrets } from './dotenv.ts'
 import { CliError } from './errors.ts'
@@ -184,6 +188,8 @@ export async function startDevServer(opts: DevServerOptions): Promise<DevServer>
 
   let source: ServerSource | null = null
   let files = new Set<string>()
+  /** the pages go-live would render (markdownPages), by key in the version */
+  let rendered = new Map<string, string>()
   let generation = 0
   let live: string | null = null
   let liveKey = ''
@@ -206,6 +212,17 @@ export async function startDevServer(opts: DevServerOptions): Promise<DevServer>
         exclude: current ? (p, isDir) => isBuildInput(current, p, isDir) : undefined,
       })
       files = new Set(local.files.map(f => f.path))
+      const pages = new Map<string, string>()
+      for (const page of markdownPages(local.files)) {
+        try {
+          const text = await readFile(join(dir, page.path), 'utf8')
+          const { html } = renderMarkdownPage(text, { path: page.path })
+          for (const k of page.keys) pages.set(k, html)
+        } catch {
+          // as at go-live: a file that can't be rendered is served as it is
+        }
+      }
+      rendered = pages
     } catch (error) {
       note({ level: 'error', text: (error as Error).message })
     }
@@ -301,6 +318,7 @@ export async function startDevServer(opts: DevServerOptions): Promise<DevServer>
       v: live ?? 'static',
       vis: 'public',
       ...(live ? { f: 1 } : {}),
+      ...(rendered.size > 0 ? { m: 1 } : {}),
       ...(opts.spa ? { spa: true } : {}),
     }
     const header = (n: string) => {
@@ -359,6 +377,20 @@ export async function startDevServer(opts: DevServerOptions): Promise<DevServer>
       } catch {
         path = null
       }
+    }
+    const page = path === null ? undefined : rendered.get(path)
+    if (page !== undefined) {
+      return send(
+        res,
+        new Response(page, {
+          headers: {
+            ...extra,
+            'content-type': 'text/html; charset=utf-8',
+            'cache-control': 'no-cache',
+          },
+        }),
+        head
+      )
     }
     if (path !== null && files.has(path)) {
       const body = await readFile(join(dir, path)).catch(() => null)

@@ -6,6 +6,8 @@ export type CloudFrontRequest = {
   querystring: Record<string, CfValue>
   headers: Record<string, CfValue>
   cookies: Record<string, CfValue>
+  /** an invoke to a `target`: the origin the function switched to (`cf.updateRequestOrigin`) */
+  origin?: { domainName: string; originAccessControlConfig?: Record<string, unknown> }
 }
 
 export type CloudFrontResponse = {
@@ -14,6 +16,7 @@ export type CloudFrontResponse = {
   headers?: Record<string, CfValue>
   /** cookies to set, by name (the site pass) */
   cookies?: Record<string, { value: string; attributes?: string }>
+  body?: { encoding: 'text' | 'base64'; data: string }
 }
 
 export type CloudFrontEvent = {
@@ -53,8 +56,15 @@ export declare function toCloudFrontEvent(opts: {
   /** Raw query string without `?`, e.g. `a=1&b=2` */
   query?: string
   cookieHeader?: string
+  /** other request headers, by name (`sec-fetch-site`, `origin`, …) */
+  headers?: Record<string, string>
 }): CloudFrontEvent
 
 export declare function isResponse(
   result: CloudFrontRequest | CloudFrontResponse
 ): result is CloudFrontResponse
+
+/** The router sent the request on to a site's server (an invoke), not to an object. */
+export declare function isInvoke(
+  result: CloudFrontRequest | CloudFrontResponse
+): result is CloudFrontRequest

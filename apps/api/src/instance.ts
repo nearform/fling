@@ -76,6 +76,9 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       ...notificationCapabilities(config),
       // People invited from outside the email policy, and the sign-in links they use (INVITES).
       invites: config.invites,
+      // Site servers (SERVERS), and whether they reach the internet (SERVERS_EGRESS).
+      servers: config.servers.publish.kind !== 'off',
+      serversEgress: config.servers.publish.kind !== 'off' && config.servers.egress === 'open',
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,

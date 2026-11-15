@@ -58,6 +58,8 @@ export type Kind =
   | 'signinlinkused'
   | 'revocation'
   | 'counter'
+  | 'sitesecret'
+  | 'serversite'
 
 export type Fields = Record<string, unknown>
 export type Upgrade = (fields: Fields) => Fields

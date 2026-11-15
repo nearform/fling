@@ -1,7 +1,9 @@
 /**
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
  * check): the users list, every site's listing, the audit log, the mail page (settings, health
- * and a test email), the instance's settings, the invitations (list, invite, revoke), and starting and stopping an impersonation. admin.ts
+ * and a test email), the instance's settings, the invitations (list, invite, revoke), a site
+ * server's kill switch and limits, resolving a viewer id, and starting and stopping an
+ * impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
@@ -20,14 +22,18 @@ import {
   MeSchema,
 } from '@fling/shared'
 import { Hono } from 'hono'
+import { z } from 'zod'
 import * as admin from '../admin.ts'
 import { principalOf } from '../auth/middleware.ts'
 import { IMPERSONATION_TTL_SECONDS, reissueSession } from '../auth/session.ts'
 import { notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
+import * as servers from '../servers/api.ts'
 import type { AppEnv } from '../types.ts'
 
 export const adminRoutes = new Hono<AppEnv>()
+
+const ResolveViewerRequestSchema = z.object({ id: z.string().min(1).max(40) })
 
 adminRoutes.get('/users', async c => {
   const limit = c.req.query('limit')
@@ -42,6 +48,25 @@ adminRoutes.get('/users', async c => {
 adminRoutes.get('/sites', async c => {
   const list = await admin.listSites(c.get('deps'), principalOf(c))
   return c.json(AdminSiteListSchema.parse(list))
+})
+
+// Site servers (servers/api.ts): an admin's kill switch and limits, and resolving a viewer id.
+adminRoutes.put('/sites/:name/server', async c => {
+  const req = await jsonBody(c, servers.AdminServerRequestSchema)
+  const state = await servers.adminSetServer(c.get('deps'), c.get('user'), c.req.param('name'), req)
+  return c.json(state)
+})
+
+adminRoutes.post('/sites/:name/viewers/resolve', async c => {
+  const { id } = await jsonBody(c, ResolveViewerRequestSchema)
+  const found = await servers.adminResolveViewer(
+    c.get('deps'),
+    c.get('user'),
+    principalOf(c),
+    c.req.param('name'),
+    id
+  )
+  return c.json(found)
 })
 
 adminRoutes.get('/audit', async c => {

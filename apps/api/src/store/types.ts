@@ -13,6 +13,7 @@ import type {
   Visibility,
 } from '@fling/shared'
 import { accessLevelOf } from '@fling/shared'
+import type { ServerLimits } from '../config.ts'
 import { isRestricted, restrictsToAudience } from '../policy.ts'
 
 export interface User {
@@ -58,6 +59,10 @@ export type AuditAction =
   | 'invitation.revoke'
   | 'site.change'
   | 'site.open'
+  /** a version with a site server went live (publication, rollback): who, which site and version */
+  | 'site.server_published'
+  /** an admin learned whose a viewer id is (`target`: the site; `change`: the id) */
+  | 'viewer.resolved'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -216,8 +221,35 @@ export interface SiteRecord {
    * last: maintenance.ts deletes their objects once nothing can still be serving them.
    */
   homeOld?: { sha: string; at: string }[]
+  /**
+   * Its site server, once a version with one has been live: whether the current version has one,
+   * where the platform reaches it (the route value's `t`), whether an admin stopped it (`/api/*` answers 503), and the limits an admin
+   * raised for it (each over the instance's `SERVER_*`).
+   */
+  server?: SiteServerState
   createdAt: string
   updatedAt: string
+}
+
+export interface SiteServerState {
+  /** its current version has a server (the site's `hasServer`) */
+  live?: true
+  target?: string
+  stopped?: true
+  limits?: Partial<ServerLimits>
+}
+
+/**
+ * A site secret (`SITE#<siteId>/SECRET#<name>`): its value encrypted (servers/secrets.ts), who set
+ * it and when. Deleted with the site.
+ */
+export interface SiteSecretRecord {
+  siteId: string
+  name: string
+  /** AES-256-GCM: base64url of iv ‖ ciphertext ‖ tag */
+  sealed: string
+  setBy: string
+  setAt: string
 }
 
 /** A role a person or group holds on a site (policy.ts). */
@@ -384,7 +416,18 @@ export interface VersionRecord {
   home?: 'block' | 'none'
   /** its home page's title (`<title>`, or a rendered Markdown home page's first heading) */
   title?: string
+  /**
+   * The server mark: it has a site server (`_fling/server.mjs`), run for `/api/*`, and what its
+   * `fling.json` said: the site secrets it needs and the start probe's health path.
+   */
+  server?: ServerMark
   createdAt: string
+}
+
+/** A version's site server, as its deploy described it (ServerConfig in @fling/shared). */
+export interface ServerMark {
+  secrets: string[]
+  health?: string
 }
 
 /**
@@ -583,6 +626,23 @@ export interface Store extends NotificationStore {
   }): Promise<{ users: UserSummary[]; cursor?: string }>
 
   // --- audit (admin actions) ---
+  /** The site secrets of a site, by name. */
+  listSiteSecrets(siteId: string): Promise<SiteSecretRecord[]>
+  /**
+   * Set a site secret. A new name is written only while the site has fewer than `max` (false
+   * when it has as many already); an existing one is replaced.
+   */
+  putSiteSecret(secret: SiteSecretRecord, max: number): Promise<boolean>
+  /** false when there was none */
+  deleteSiteSecret(siteId: string, name: string): Promise<boolean>
+  /**
+   * Note that the site's current version has a server (`SERVERS/SITE#<siteId>`), or no longer
+   * has: what SERVERS_MAX_SITES counts.
+   */
+  markServerSite(siteId: string, name: string, on: boolean): Promise<void>
+  /** How many sites have a server now, and whether `siteId` is one of them. */
+  serverSites(siteId: string): Promise<{ count: number; listed: boolean }>
+
   addAuditEntry(entry: AuditRecord): Promise<void>
   /** The latest `limit` entries, newest first. */
   listAuditEntries(limit: number): Promise<AuditRecord[]>

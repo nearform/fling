@@ -127,6 +127,10 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'comment.delete.own': takesPart,
   // Everyone's responses to an `own` form; the rest see only their own (canSeeResponse).
   'response.read.all': ownerReads,
+  // Not a Path's publishers: those hold their role on the Path, not the site.
+  'site.secrets': publishes,
+  'site.logs': { public: 'opd', private: 'opd', restricted: 'opd' },
+  'site.server': { public: 'd', private: 'd', restricted: 'd' },
 }
 
 /** A site as stored at each access level; `restricted` absent: a record from before them. */
@@ -262,6 +266,8 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'account.revoke': 'atgu',
   'account.notifications.change': 'atgu',
   'account.notifications.sent': 'atgu',
+  'server.publish': 'atiu',
+  'admin.viewers.resolve': 'at',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {

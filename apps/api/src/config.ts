@@ -149,6 +149,35 @@ const envSchema = z.object({
   INVITES: flag,
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
   VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
+  /** Who may publish a site server: `off`, `admins`, `members` or `groups:<slug>,<slug>`. */
+  SERVERS: z.preprocess(
+    value => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+    z.preprocess(
+      blank,
+      z
+        .string()
+        .regex(
+          /^(off|admins|members|groups:[a-z0-9-]+(,[a-z0-9-]+)*)$/,
+          'must be off, admins, members or groups:<slug>,<slug>'
+        )
+        .default('off')
+    )
+  ),
+  SERVERS_EGRESS: z.preprocess(blank, z.enum(['none', 'open']).default('none')),
+  SERVERS_MAX_SITES: z.preprocess(blank, z.coerce.number().int().min(0).default(50)),
+  SERVER_TIMEOUT_SECONDS: z.preprocess(blank, z.coerce.number().int().min(1).max(900).default(30)),
+  SERVER_CPU_MS: z.preprocess(blank, z.coerce.number().int().min(10).max(300_000).default(1000)),
+  SERVER_RPS: z.preprocess(blank, z.coerce.number().int().min(1).max(100_000).default(100)),
+  SERVER_ENVIRONMENTS: z.preprocess(blank, z.coerce.number().int().min(1).max(10_000).default(2)),
+  SERVER_BODY_BYTES: z.preprocess(
+    blank,
+    z.coerce
+      .number()
+      .int()
+      .min(1024)
+      .max(100 * 1024 * 1024)
+      .default(10 * 1024 * 1024)
+  ),
 })
 
 export type EnvKey = keyof typeof envSchema.shape
@@ -193,6 +222,14 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   INVITES: 'features',
   INVITES_PER_DAY: 'features',
   VERSION_RETENTION: 'features',
+  SERVERS: 'features',
+  SERVERS_EGRESS: 'features',
+  SERVERS_MAX_SITES: 'features',
+  SERVER_TIMEOUT_SECONDS: 'features',
+  SERVER_CPU_MS: 'features',
+  SERVER_RPS: 'features',
+  SERVER_ENVIRONMENTS: 'features',
+  SERVER_BODY_BYTES: 'features',
   MAIL_DRIVER: 'mail',
   MAIL_FROM: 'mail',
   MAIL_FROM_NAME: 'mail',
@@ -324,6 +361,47 @@ export interface MailConfig {
   sesConfigurationSet?: string
 }
 
+/** Who may publish a site server (`SERVERS`): nobody, admins, every member, or members of groups. */
+export type ServersPublish =
+  | { kind: 'off' }
+  | { kind: 'admins' }
+  | { kind: 'members' }
+  | { kind: 'groups'; slugs: string[] }
+
+/**
+ * What one site's server may use per request and in all (`SERVER_*`): each platform enforces what
+ * it can (servers/types.ts). Admins may raise them for one site (`SiteRecord.server.limits`).
+ */
+export interface ServerLimits {
+  /** wall time per request, streams included (`SERVER_TIMEOUT_SECONDS`, default 30) */
+  timeoutSeconds: number
+  /** CPU per request, where the platform measures it (`SERVER_CPU_MS`, default 1000) */
+  cpuMs: number
+  /** requests per second to one site (`SERVER_RPS`, default 100) */
+  rps: number
+  /** environments one site may run at once, where the platform has them (`SERVER_ENVIRONMENTS`, default 2) */
+  environments: number
+  /** the largest request body (`SERVER_BODY_BYTES`, default 10 MB) */
+  bodyBytes: number
+}
+
+/** Site servers (`SERVERS*`, `SERVER_*`). */
+export interface ServersConfig {
+  /** who may publish one (`SERVERS`, default off: the `servers` capability is off) */
+  publish: ServersPublish
+  /** what a server may reach (`SERVERS_EGRESS`): `none` (the default) or `open` */
+  egress: 'none' | 'open'
+  /** how many sites may have a server at once (`SERVERS_MAX_SITES`, default 50) */
+  maxSites: number
+  limits: ServerLimits
+}
+
+/** `SERVERS` as config holds it. */
+export function parseServersPublish(value: string): ServersPublish {
+  if (value === 'admins' || value === 'members' || value === 'off') return { kind: value }
+  return { kind: 'groups', slugs: value.slice('groups:'.length).split(',') }
+}
+
 export interface Config {
   appEnv: 'production' | 'development'
   /** The instance's display name (`INSTANCE_NAME`, default "Fling"). */
@@ -393,6 +471,8 @@ export interface Config {
    * (`VERSION_RETENTION`, default 0: every version kept); maintenance.ts deletes the rest.
    */
   versionRetention: number
+  /** Site servers: who publishes them, what they reach, their limits (`SERVERS*`, `SERVER_*`). */
+  servers: ServersConfig
   /** `/auth/dev-login` enabled (never in production) */
   devLogin: boolean
   /** cookies get `Secure` (and the session cookie the `__Host-` prefix) */
@@ -507,6 +587,18 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     invites: e.INVITES,
     invitesPerDay: e.INVITES_PER_DAY,
     versionRetention: e.VERSION_RETENTION,
+    servers: {
+      publish: parseServersPublish(e.SERVERS),
+      egress: e.SERVERS_EGRESS,
+      maxSites: e.SERVERS_MAX_SITES,
+      limits: {
+        timeoutSeconds: e.SERVER_TIMEOUT_SECONDS,
+        cpuMs: e.SERVER_CPU_MS,
+        rps: e.SERVER_RPS,
+        environments: e.SERVER_ENVIRONMENTS,
+        bodyBytes: e.SERVER_BODY_BYTES,
+      },
+    },
     settings: [],
   }
   const mail = mailConfig(e, cfg)

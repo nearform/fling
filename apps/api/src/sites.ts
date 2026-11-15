@@ -120,6 +120,15 @@ import {
   userActor,
 } from './policy.ts'
 import {
+  applyServer,
+  noteLive,
+  principalOfUser,
+  publicServerMessage,
+  serverSite,
+  serversOn,
+  startServer,
+} from './servers/index.ts'
+import {
   accessOfSite,
   firstOwner,
   hasListing,
@@ -206,6 +215,7 @@ export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
     ...(role ? { role } : {}),
     canPull: canPullCurrent(actor, site),
     ...(site.thumbnail ? { thumbnail: site.thumbnail } : {}),
+    ...(site.server?.live ? { hasServer: true } : {}),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
   }
@@ -266,7 +276,9 @@ export async function rolesView(
 /**
  * Make the route table reflect the site: live (not archived, has a version) → keys present, else
  * gone. The value says whether the current version's Markdown has rendered pages (`m`: read from
- * the version), whether the site has live Paths (`p`) and its rendered home page (`i`; paths.ts).
+ * the version), whether the site has live Paths (`p`) and its rendered home page (`i`; paths.ts),
+ * and whether the version has a site server (`f`, with `t`, where it is reached, and `x` when an
+ * admin stopped it or the instance runs no servers: `/api/*` then answers 503).
  */
 export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken?: string) {
   const { routeTable } = deps
@@ -289,6 +301,13 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
     ...(site.paths ? { p: 1 as const } : {}),
     ...(site.paths && site.home ? { i: site.home } : {}),
     ...(version?.markdown ? { m: 1 as const } : {}),
+    ...(version?.server
+      ? {
+          f: 1 as const,
+          ...(site.server?.target ? { t: site.server.target } : {}),
+          ...(site.server?.stopped || !serversOn(deps) ? { x: 1 as const } : {}),
+        }
+      : {}),
   }
   const json = JSON.stringify(value)
   await routeTable.put(siteKvsKey(label), json)
@@ -873,6 +892,7 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
         ...(v.publishedBy ? { publishedBy: v.publishedBy } : {}),
         ...(v.path ? { path: v.path } : {}),
         ...(v.base ? { base: v.base } : {}),
+        ...(v.server ? { server: true } : {}),
         createdAt: v.createdAt,
       })),
   }
@@ -920,6 +940,7 @@ export async function updateSite(
     access?: AccessLevel
     owners?: SiteRoleInput
     publishers?: SiteRoleInput
+    confirmPublicServer?: boolean
   },
   principal: Principal
 ): Promise<Site & { audience?: Audience; owners?: SiteRoleMembers; publishers?: SiteRoleMembers }> {
@@ -939,6 +960,11 @@ export async function updateSite(
   ]
   const [first = 'site.settings', ...rest] = actions
   const site = await requireSite(deps, user, name, first, ...rest)
+  const goesPublic =
+    site.visibility !== 'public' && (patch.visibility === 'public' || patch.access === 'public')
+  if (goesPublic && site.server?.live && !patch.confirmPublicServer) {
+    throw conflict(publicServerMessage(site.name), 'public_server')
+  }
   const roles = patch.owners !== undefined || patch.publishers !== undefined
   const rolesBefore = { owners: site.owners, publishers: site.publishers }
   if (roles) await applyRoles(deps, site, patch)
@@ -965,12 +991,22 @@ export async function updateSite(
   }
 }
 
+/**
+ * Make a complete version current again. A version with a site server starts it first, as a
+ * publish does (servers/index.ts `startServer`: its secrets set, the start probe).
+ */
 export async function rollback(deps: Deps, user: User, name: string, versionId: string) {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.rollback')
   const version = await reviveVersion(deps, site, await deps.store.getVersion(site, versionId))
   if (version?.status !== 'complete') throw notFound(`No version ${versionId} for "${name}"`)
+  const target =
+    site.currentVersionId === versionId
+      ? (site.server?.target ?? null)
+      : await startServer(deps, principalOfUser(user), site, version)
   site.currentVersionId = versionId
+  applyServer(site, version, target)
   await save(deps, site)
+  await noteLive(deps, user.email, site, version)
   // The home page is the version's: with Paths, render it again.
   if (site.paths) await refreshHome(deps, site)
   return toSite(deps, actor, site)
@@ -998,6 +1034,10 @@ export async function setArchived(deps: Deps, user: User, name: string, archived
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.archive')
   site.archived = archived
   await save(deps, site)
+  // An archived site's server goes dark with it; restored, it runs again unless an admin stopped it.
+  if (site.server && deps.servers) {
+    await deps.servers.setEnabled(serverSite(site), !archived && !site.server.stopped)
+  }
   return toSite(deps, actor, site)
 }
 
@@ -1097,6 +1137,7 @@ export async function deleteSite(deps: Deps, user: User, name: string) {
   await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
   if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
   for (const path of await deps.store.listPaths(site.id)) await removePath(deps, site, path)
+  if (site.server && deps.servers) await deps.servers.retire(serverSite(site))
   await deps.blobs.deletePrefix(sitePrefix(site.id))
   await deps.store.deleteSite(site)
 }

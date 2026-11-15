@@ -80,6 +80,15 @@
  *   - Rollback needs nothing new: a version on a base is complete, so rolling back to the base
  *     undoes it.
  *
+ * Site servers (servers/index.ts): a version whose files include `_fling/server.mjs` has a server,
+ * run for `/api/*`. Admission checks it from the manifest (`admitServer`: who may publish one, its
+ * size, a Path at `api`, the instance's cap, a public site's confirmation; a Path publish carrying
+ * `_fling/` is 400 `server_on_path`), and the version records the server mark (`server`: the
+ * deploy's `fling.json`). Going live reads the bundle back (`checkBundle`: 400
+ * `server_not_bundled`) and starts the server (`startServer`: `secrets_missing`, the start probe,
+ * 422 `server_failed_to_start`) before the version is complete and the route changes; a repointed
+ * version starts it the same way.
+ *
  * Forms (forms.ts): a deploy's `forms` (the folder's `fling.forms.json`) is the version's forms
  * config, a blob beside its manifest written when the deploy is made (`formsForDeploy`). Omitted,
  * a publish on a base keeps the base's and any other new version has none; `null` removes them. A
@@ -112,7 +121,9 @@ import {
   NEVER_PUBLISHED_NOTE,
   type PublishHint,
   SECRET_SCAN_MAX_FILE_BYTES,
+  SERVER_BUNDLE,
   type SecretFinding,
+  type ServerConfig,
   SITE_NAME_MAX,
   type Site,
   scanBytesForSecrets,
@@ -146,6 +157,16 @@ import {
 } from './policy.ts'
 import { renderVersion } from './rendering.ts'
 import {
+  admitServer,
+  applyServer,
+  checkBundle,
+  noteLive,
+  principalOfUser,
+  SERVER_PATH_FOLDER,
+  serverVersion,
+  startServer,
+} from './servers/index.ts'
+import {
   type AccessFields,
   actorOn,
   applySettings,
@@ -160,7 +181,7 @@ import {
   siteActor,
   toSite,
 } from './sites.ts'
-import type { PathRecord, SiteRecord, User, VersionRecord } from './store/types.ts'
+import type { PathRecord, ServerMark, SiteRecord, User, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
@@ -525,6 +546,15 @@ async function prepare(
     await checkDeployChanges(deps, actor, existing, deployChanges(existing, req, asked))
     await checkRestore(deps, actor, existing)
   }
+  const mark = await admitServer(deps, principal, {
+    name,
+    site: existing,
+    files: req.manifest.files,
+    ...(req.path === undefined ? {} : { path: req.path }),
+    ...(req.server ? { server: req.server } : {}),
+    visibility: req.visibility ?? access?.visibility ?? existing?.visibility ?? 'private',
+    ...(req.confirmPublicServer ? { confirmPublicServer: true } : {}),
+  })
   if (existing && access && req.access !== undefined) {
     const before = existing.audience
     Object.assign(existing, access)
@@ -571,10 +601,14 @@ async function prepare(
     }
     if (version?.status === 'complete') {
       if (forms !== undefined) await writeForms(deps, existing.id, versionId, forms)
+      const live = await withMark(deps, existing, version, mark)
+      const target = await startServer(deps, principal, existing, live)
       existing.currentVersionId = versionId
       existing.archived = false
       applySettings(existing, req)
+      applyServer(existing, live, target)
       await saveOnBase(deps, existing, layer)
+      await noteLive(deps, user.email, existing, live)
       return {
         kind: 'done',
         result: { status: 'repointed', versionId, site: toSite(deps, actor, existing) },
@@ -595,6 +629,7 @@ async function prepare(
     visibility: req.visibility,
     publishedBy: user.email,
     ...(layer ? { base: layer.base } : {}),
+    ...(mark ? { server: mark } : {}),
     createdAt: now,
   }
   await blobs.putJson(manifestKey(site.id, versionId), {
@@ -606,6 +641,22 @@ async function prepare(
   const kept = new Set(layer?.kept)
   const sent = req.manifest.files.filter(f => !kept.has(f.path))
   return { kind: 'pending', site, actor, version, files, sent, layer, storage: site.id }
+}
+
+/**
+ * A complete version deployed again with its `fling.json` (`mark`): it keeps the mark the deploy
+ * sends, as a version is named by its files alone.
+ */
+async function withMark(
+  deps: Deps,
+  site: SiteRecord,
+  version: VersionRecord,
+  mark: ServerMark | undefined
+): Promise<VersionRecord> {
+  if (!mark || JSON.stringify(mark) === JSON.stringify(version.server)) return version
+  const marked = { ...version, server: mark }
+  await deps.store.putVersion(site, marked)
+  return marked
 }
 
 /**
@@ -665,6 +716,12 @@ async function preparePath(
   if (site.currentVersionId === null) await publishDefaultHome(deps, user, actor, site, acting)
   let path = await store.getPath(site.id, folder)
   if (!path) {
+    if (folder === SERVER_PATH_FOLDER && site.server?.live) {
+      throw conflict(
+        `"${site.name}" has a server, which answers /${SERVER_PATH_FOLDER}/: publish the Path to another folder`,
+        'path_conflict'
+      )
+    }
     if ((await store.listPaths(site.id)).length >= MAX_PATHS_PER_SITE) {
       throw tooLarge(
         `"${site.name}" has ${MAX_PATHS_PER_SITE} Paths, the most a site may have: delete one, or publish to an existing one`
@@ -972,6 +1029,16 @@ async function goLive(
   layer: Layer | null = null
 ): Promise<Published> {
   const first = site.currentVersionId === null
+  // A server starts before anything about the version changes: a refusal leaves it as it was.
+  let target = site.server?.target ?? null
+  if (version.server && site.currentVersionId !== version.id) {
+    if (version.status === 'pending') {
+      const bundle = await deps.blobs.get(serverVersion(site.id, version.id).bundle)
+      if (!bundle) throw notFound(`The server of deploy ${version.id} is gone; deploy again`)
+      checkBundle(bundle)
+    }
+    target = await startServer(deps, principalOfUser(user), site, version)
+  }
   if (version.status === 'pending') {
     const generatedIndex = await detectGeneratedIndex(deps, site.id, version.id, files)
     await deps.blobs.putJson(manifestKey(site.id, version.id), {
@@ -990,12 +1057,14 @@ async function goLive(
   site.currentVersionId = version.id
   site.archived = false
   applySettings(site, settingsFor(actor, site, version))
+  applyServer(site, version, target)
   try {
     await saveOnBase(deps, site, layer)
   } catch (err) {
     if (version.status === 'pending') await deps.store.putVersion(site, version)
     throw err
   }
+  await noteLive(deps, user.email, site, version)
   if (first && isRestricted(site)) {
     await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
   }
@@ -1152,6 +1221,10 @@ export async function publishBytes(
     audience?: AudienceInput
     /** the version's forms config (null: none); omitted, as DeployRequest.forms */
     forms?: FormsConfig | null
+    /** the folder's `fling.json`, for a version with a server (DeployRequest.server) */
+    server?: ServerConfig
+    /** a server on a public site (DeployRequest.confirmPublicServer) */
+    confirmPublicServer?: boolean
   }
 ): Promise<Published> {
   const bytesByPath = new Map(input.map(f => [f.path, f.bytes]))
@@ -1176,7 +1249,11 @@ export async function publishBytes(
     access: opts.access,
     audience: opts.audience,
     ...(opts.forms === undefined ? {} : { forms: opts.forms }),
+    ...(opts.server ? { server: opts.server } : {}),
+    ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
   })
+  const bundle = bytesByPath.get(SERVER_BUNDLE)
+  if (bundle && opts.path === undefined) checkBundle(bundle)
   // Scan exactly the bytes we are about to write, before anything is stored.
   const findings = input.flatMap(f => scanBytesForSecrets(f.bytes, f.path))
   if (findings.length > 0) throw secretDetected(findings)

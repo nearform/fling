@@ -183,6 +183,10 @@ export const CONFIGURED_CAPABILITIES = [
   'notifications',
   'email',
   'invites',
+  /** site servers (site-server.ts): a version's `_fling/server.mjs`, run for `/api/*` */
+  'servers',
+  /** a site server may reach the internet (`SERVERS_EGRESS=open`); without it, nothing outside */
+  'serversEgress',
 ] as const
 
 /** Every capability name an instance may advertise. */

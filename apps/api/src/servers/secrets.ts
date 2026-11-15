@@ -5,13 +5,15 @@
  * (`fling.json` `secrets`); only those reach its server, and a publish or rollback to it while any
  * is unset is 409 `secrets_missing` (servers/index.ts).
  *
- * Stored in the Table (`SITE#<siteId>/SECRET#<name>`, Records) sealed with AES-256-GCM under a key
- * derived from the instance's SESSION_SECRET (HMAC-SHA256 over a fixed label), with the site id and
- * the name as associated data, so a sealed value moved to another site or name does not open.
- * Rotating SESSION_SECRET makes every stored secret unreadable: they must be set again. At most
- * SITE_SECRETS_MAX per site, SITE_SECRET_MAX_BYTES each.
+ * Stored in the Table (`SITE#<siteId>/SECRET#<name>`, Records) sealed with AES-256-GCM, with the
+ * site id and the name as associated data, so a sealed value moved to another site or name does
+ * not open. The key is the instance's SITE_SECRETS_KEY (32 random bytes, hex or base64), through
+ * HKDF-SHA256 with a fixed label, and nothing else: rotating SESSION_SECRET or SITE_HMAC_KEY
+ * leaves secrets alone. A sealed value is `<keyId>.<iv ‖ ciphertext ‖ tag, base64url>`, its key id
+ * the first 8 characters of the key's SHA-256 (base64url), so a keyring of several keys can open
+ * values sealed under an older one. At most SITE_SECRETS_MAX per site, SITE_SECRET_MAX_BYTES each.
  */
-import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
 import {
   SITE_SECRET_MAX_BYTES,
   SITE_SECRET_NAME_RE,
@@ -26,9 +28,54 @@ import type { Deps } from '../types.ts'
 const LABEL = 'fling:site-secrets:v1'
 const IV_BYTES = 12
 const TAG_BYTES = 16
+const KEY_BYTES = 32
 
-const keyOf = (deps: Pick<Deps, 'config'>) =>
-  createHmac('sha256', deps.config.secrets.sessionSecret).update(LABEL).digest()
+/**
+ * SITE_SECRETS_KEY's 32 bytes: 64 hex characters, or base64 / base64url of 32 bytes. Throws,
+ * naming the variable, on anything else.
+ */
+export function parseSiteSecretsKey(value: string): Buffer {
+  const v = value.trim()
+  const bytes = /^[0-9a-fA-F]{64}$/.test(v)
+    ? Buffer.from(v, 'hex')
+    : /^[A-Za-z0-9+/_-]{43}={0,1}$/.test(v)
+      ? Buffer.from(v.replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, ''), 'base64url')
+      : null
+  if (!bytes || bytes.length !== KEY_BYTES) {
+    throw new Error(
+      'SITE_SECRETS_KEY must be 32 random bytes as 64 hex characters or base64 (e.g. openssl rand -hex 32)'
+    )
+  }
+  return bytes
+}
+
+interface SealingKey {
+  id: string
+  key: Buffer
+}
+
+const keys = new Map<string, SealingKey>()
+
+/** The sealing key for a SITE_SECRETS_KEY value, with its id. */
+function sealingKey(raw: string): SealingKey {
+  let k = keys.get(raw)
+  if (!k) {
+    const bytes = parseSiteSecretsKey(raw)
+    k = {
+      id: createHash('sha256').update(bytes).digest('base64url').slice(0, 8),
+      key: Buffer.from(hkdfSync('sha256', bytes, Buffer.alloc(0), LABEL, KEY_BYTES)),
+    }
+    keys.set(raw, k)
+  }
+  return k
+}
+
+/** The keyring: the key new values are sealed with first, then any that only open old ones. */
+function keyring(deps: Pick<Deps, 'config'>): SealingKey[] {
+  const raw = deps.config.secrets.siteSecretsKey
+  if (!raw) throw new Error('SITE_SECRETS_KEY is not set: site secrets need it')
+  return [sealingKey(raw)]
+}
 
 const aad = (siteId: string, name: string) => Buffer.from(`${siteId}\n${name}`)
 
@@ -39,26 +86,30 @@ export function sealSecret(
   name: string,
   value: string
 ): string {
+  const [current] = keyring(deps) as [SealingKey]
   const iv = randomBytes(IV_BYTES)
-  const cipher = createCipheriv('aes-256-gcm', keyOf(deps), iv)
+  const cipher = createCipheriv('aes-256-gcm', current.key, iv)
   cipher.setAAD(aad(siteId, name))
   const body = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
-  return Buffer.concat([iv, body, cipher.getAuthTag()]).toString('base64url')
+  return `${current.id}.${Buffer.concat([iv, body, cipher.getAuthTag()]).toString('base64url')}`
 }
 
-/** A sealed value opened, or null when it doesn't open (another key, site or name). */
+/** A sealed value opened, or null when it doesn't open (no key of that id, another site or name). */
 export function openSecret(
   deps: Pick<Deps, 'config'>,
   siteId: string,
   name: string,
   sealed: string
 ): string | null {
+  const dot = sealed.indexOf('.')
+  const k = keyring(deps).find(k => k.id === sealed.slice(0, dot))
+  if (dot < 0 || !k) return null
   try {
-    const raw = Buffer.from(sealed, 'base64url')
+    const raw = Buffer.from(sealed.slice(dot + 1), 'base64url')
     const iv = raw.subarray(0, IV_BYTES)
     const tag = raw.subarray(raw.length - TAG_BYTES)
     const body = raw.subarray(IV_BYTES, raw.length - TAG_BYTES)
-    const decipher = createDecipheriv('aes-256-gcm', keyOf(deps), iv)
+    const decipher = createDecipheriv('aes-256-gcm', k.key, iv)
     decipher.setAAD(aad(siteId, name))
     decipher.setAuthTag(tag)
     return Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8')

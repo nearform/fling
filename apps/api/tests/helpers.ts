@@ -38,6 +38,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
       oidcClientSecret: IDP_CLIENT_SECRET,
       sessionSecret: 's'.repeat(40),
       siteHmacKey: 'h'.repeat(40),
+      siteSecretsKey: 'a1'.repeat(32),
     },
     ...overrides,
   }

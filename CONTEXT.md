@@ -42,9 +42,14 @@ or through a share link). Writes from another origin are refused (403 `cross_ori
 resolves one to an address (`POST /api/admin/sites/:name/viewers/resolve`, audited).
 
 **Site secret** — a value a site's server reads as `process.env.NAME` (`apps/api/src/servers/secrets.ts`,
-`SITE#<id>/SECRET#<name>`): set by owners and publishers, sealed in the Table, never returned. A
-version gets only the ones its `fling.json` declares; going live with one unset is 409
-`secrets_missing`.
+`SITE#<id>/SECRET#<name>`): set by owners and publishers, sealed in the Table under the instance's
+`SITE_SECRETS_KEY`, never returned. A version gets only the ones its `fling.json` declares; going
+live with one unset is 409 `secrets_missing`. Setting or removing one redeploys: the live server is
+reconfigured and probed again (servers/api.ts).
+
+**Waiting for secrets** — a pending version a publish could not take live only for unset secrets
+(`SiteServerState.awaiting`, publication.ts): setting the last of them publishes it. Only the latest
+publish waits; staging another version, or any version going live, ends the wait.
 
 **Start probe** — the one request a server answers before its version goes live (servers/index.ts
 `startServer`): its health path must answer 2xx, else any answer from `/api/` will do. No answer is

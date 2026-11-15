@@ -237,6 +237,13 @@ export interface SiteServerState {
   target?: string
   stopped?: true
   limits?: Partial<ServerLimits>
+  /**
+   * The pending version a publish could not take live only because these declared secrets were
+   * unset (409 `secrets_missing`): setting the last of them takes it live (servers/api.ts). Only
+   * the latest such publish waits: staging another version of the site, or any version going
+   * live, ends the wait.
+   */
+  awaiting?: { versionId: string; secrets: string[] }
 }
 
 /**

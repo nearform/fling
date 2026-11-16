@@ -5,7 +5,7 @@ import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { ZodError } from 'zod'
-import { ApiError } from './lib/errors.ts'
+import { ApiError, errorRef, logUnexpected, reportFault } from './lib/errors.ts'
 import type { AppEnv } from './types.ts'
 
 /** Minimal security headers on every response (JSON API and the odd server-rendered page, never framed). */
@@ -82,13 +82,8 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
     const code = status === 413 ? 'too_large' : 'http_error'
     return c.json({ error: { code, message: err.message || 'Request failed' } }, status)
   }
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      path: c.req.path,
-      err: String(err),
-      stack: (err as Error).stack,
-    })
-  )
-  return c.json({ error: { code: 'internal', message: 'Internal server error' } }, 500)
+  const ref = errorRef()
+  logUnexpected(ref, { path: c.req.path }, err)
+  const message = `Something went wrong in Fling, not in what you sent. ${reportFault(ref)}`
+  return c.json({ error: { code: 'internal', message, ref } }, 500)
 }

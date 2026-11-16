@@ -204,16 +204,24 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
+/** For a fault in Fling that came without its own words (an older Fling, a proxy in front). */
+const FAULT_HINT =
+  "The fault is in Fling, not in your site. Try again in a minute; if it keeps happening, tell your Fling's admin what you ran and when."
+
 function errorFromResponse(status: number, body: unknown, method: string, path: string) {
   const envelope = ErrorEnvelopeSchema.safeParse(body)
   if (envelope.success) {
     const { code } = envelope.data.error
+    // A Fling that names a reference has already said what happened and what to do.
+    const bare =
+      status >= 500 && typeof (body as { error: { ref?: unknown } }).error.ref !== 'string'
     const error = new CliApiError({
       status,
       code,
       body,
-      message: envelope.data.error.message,
-      hint: code ? ERROR_HINTS[code] : undefined,
+      message:
+        bare && code === 'internal' ? 'Something went wrong in Fling' : envelope.data.error.message,
+      hint: (code ? ERROR_HINTS[code] : undefined) ?? (bare ? FAULT_HINT : undefined),
     })
     // The server's secret checks (the guarantee behind the CLI's own): keep the details for --json.
     const extra = (body as { error?: Record<string, unknown> }).error
@@ -224,6 +232,14 @@ function errorFromResponse(status: number, body: unknown, method: string, path: 
       if (Array.isArray(extra?.[key])) Object.assign(error, { [key]: extra[key] })
     }
     return error
+  }
+  if (status >= 500) {
+    return new CliApiError({
+      status,
+      body,
+      message: `Fling didn't answer properly (HTTP ${status} to ${method} ${path})`,
+      hint: FAULT_HINT,
+    })
   }
   return new CliApiError({ status, body, message: `${method} ${path} failed with HTTP ${status}` })
 }

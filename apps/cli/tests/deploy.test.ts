@@ -220,6 +220,36 @@ describe('deploy flow', () => {
     const e = await captureError(deploy(deps(unauth.fetch), { dir }))
     expect(e).toMatchObject({ exitCode: 2, message: 'Bad key', code: 'unauthorized' })
   })
+
+  it("puts a fault in Fling in words: its own when it names a reference, the CLI's when not", async () => {
+    const dir = await folder()
+    const said = 'Fling couldn\'t set up the server for "my-app". … reference: ab12cd34ef'
+    const withRef = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse(
+          { error: { code: 'server_setup_failed', message: said, ref: 'ab12cd34ef' } },
+          500
+        ),
+    })
+    const e = await captureError(deploy(deps(withRef.fetch), { dir }))
+    expect(e).toMatchObject({ exitCode: 1, message: said, hint: undefined })
+
+    const bare = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        jsonResponse({ error: { code: 'internal', message: 'Internal server error' } }, 500),
+    })
+    const old = await captureError(deploy(deps(bare.fetch), { dir }))
+    expect(old.message).toBe('Something went wrong in Fling')
+    expect(old.hint).toMatch(/not in your site.*tell your Fling's admin/)
+
+    const proxy = mockFetch({
+      'POST /api/sites/my-app/deploys': () =>
+        new Response('<html>Bad gateway</html>', { status: 502 }),
+    })
+    const gateway = await captureError(deploy(deps(proxy.fetch), { dir }))
+    expect(gateway.message).toMatch(/Fling didn't answer properly \(HTTP 502/)
+    expect(gateway.hint).toMatch(/not in your site/)
+  })
 })
 
 describe('fling [dir] command', () => {

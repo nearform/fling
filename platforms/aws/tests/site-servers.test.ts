@@ -266,6 +266,24 @@ describe('AwsSiteServers', () => {
     expect(spec).toMatchObject({ roleArn: SETTINGS.roleArn, connectorArn: SETTINGS.connectorArn })
   })
 
+  it('a server with no secrets, or an empty one, sets no empty environment value (Lambda refuses one)', async () => {
+    const h = make()
+    const s = site()
+    const v = await h.putVersion(s, 'v1', { '_fling/server.mjs': SERVER_FIXTURES.fetch() })
+    const fn = `${PREFIX}${s.id}`
+    await h.servers.activate(s, v, options({ secrets: { EMPTY: '', GREETING: 'hi' } }))
+    const [revision] = await h.functions.listRevisions(fn)
+    const env = revision?.spec.environment ?? {}
+    expect(env).not.toHaveProperty('EMPTY')
+    expect(env.FLING_SECRET_NAMES).toBe('GREETING')
+
+    const bare = site()
+    const w = await h.putVersion(bare, 'v1', { '_fling/server.mjs': SERVER_FIXTURES.fetch() })
+    await h.servers.activate(bare, w, options({ secrets: {} }))
+    const [only] = await h.functions.listRevisions(`${PREFIX}${bare.id}`)
+    expect(only?.spec.environment).not.toHaveProperty('FLING_SECRET_NAMES')
+  })
+
   it('reconfigure with the same options makes no revision; a new secret makes one, live at once', async () => {
     const h = make()
     const s = site()

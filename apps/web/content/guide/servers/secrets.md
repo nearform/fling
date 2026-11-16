@@ -83,6 +83,7 @@ There is nothing to publish again. Each set or removal says what it did:
 | `secrets_missing` after a rollback | The version you rolled back to needs a secret that isn't set | Set it, then roll back again |
 | "A secret value never goes on the command line" | You wrote `NAME=value` | Pass the value on stdin, or use `--from` |
 | `invalid_secret_name` | The name isn't `A-Z`, `0-9` and `_`, or is one the platform keeps (`PORT`, `PATH`, `FILES`, `AWS_*`…) | Choose another name, in `fling.json` and the server too |
+| `invalid_secret_value` | The value is empty | Give it a value, or remove the secret and let the server fall back to its default |
 | `too_many_secrets` | The site has {{fact:site-secrets-max}} secrets, the most it may have | Remove one first |
 | `too_large` | The value is over {{fact:site-secret-max-size}} | Secrets are for keys and addresses, not data |
 | "No site … with a server that you can manage" | You aren't an owner or publisher of the site, or it's a Path you publish | Ask one of the site's owners |

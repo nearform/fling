@@ -415,11 +415,16 @@ export class AwsSiteServers implements SiteServers {
         { secrets: reserved }
       )
     }
-    const secrets = sortedSecrets(opts.secrets)
+    // Lambda refuses an empty environment value, so neither an empty secret (the core refuses
+    // setting one) nor the names of no secrets reaches the revision; the entry reads both as unset.
+    const secrets = Object.fromEntries(
+      Object.entries(sortedSecrets(opts.secrets)).filter(([, value]) => value !== '')
+    )
+    const names = Object.keys(secrets).join(',')
     const environment: Record<string, string> = {
       ...secrets,
       [ENTRY_ENV.version]: version.id,
-      [ENTRY_ENV.secretNames]: Object.keys(secrets).join(','),
+      ...(names ? { [ENTRY_ENV.secretNames]: names } : {}),
       [ENTRY_ENV.timeoutSeconds]: String(opts.limits.timeoutSeconds),
       [ENTRY_ENV.bodyBytes]: String(opts.limits.bodyBytes),
     }

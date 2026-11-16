@@ -174,7 +174,8 @@ export async function listSecrets(
 }
 
 /**
- * Set a secret: 400 `invalid_secret_name`, 413 `too_large` over SITE_SECRET_MAX_BYTES, 409
+ * Set a secret: 400 `invalid_secret_name`, 400 `invalid_secret_value` for an empty one (one
+ * platform's environment can't hold it; a server that wants a default omits the secret), 413 `too_large` over SITE_SECRET_MAX_BYTES, 409
  * `too_many_secrets` for a new name once the site has SITE_SECRETS_MAX.
  */
 export async function setSecret(
@@ -185,6 +186,13 @@ export async function setSecret(
   by: string
 ): Promise<SiteSecret> {
   checkSecretName(name)
+  if (value === '') {
+    throw new ApiError(
+      400,
+      'invalid_secret_value',
+      `A secret's value can't be empty: give ${name} a value, or remove it`
+    )
+  }
   if (Buffer.byteLength(value, 'utf8') > SITE_SECRET_MAX_BYTES) {
     throw new ApiError(
       413,

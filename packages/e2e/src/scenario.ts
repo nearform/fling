@@ -474,6 +474,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     })
     // Access levels: a new site says who can open it (`--access`); older instances, `--public`.
     const levels = meta.capabilities.accessLevels === true
+    const deployedAt = Date.now()
     const first = (await fling(
       'deploy',
       v1,
@@ -536,6 +537,19 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `/_fling-version: ${servedNow.status}, x-fling-version ${servedNow.headers.get('x-fling-version')} (current ${v1Id}), cache-control ${servedNow.headers.get('cache-control')}`
     )
     step('/_fling-version says the current version')
+    // Arrival, which the sites' 404 page asks at the root of a host the edge doesn't know yet: a
+    // site just published is arriving for 30 s; a name with no site never is, and its host's
+    // /_fling-version is the 404 the page tells it by.
+    const arrival = await (await api('GET', `/api/sites/${name}/arrival`)).json()
+    if (Date.now() - deployedAt < 25_000) {
+      check(arrival.arriving === true, `arrival of ${name}: ${JSON.stringify(arrival)}`)
+    }
+    const nowhere = `no-site-${nonce}`
+    const none = await (await api('GET', `/api/sites/${nowhere}/arrival`)).json()
+    check(none.arriving === false, `arrival of ${nowhere}: ${JSON.stringify(none)}`)
+    const unknown = await get(`${siteUrl.replace(`//${name}.`, `//${nowhere}.`)}_fling-version`)
+    check(unknown.status === 404, `/_fling-version on a host with no site: ${unknown.status}`)
+    step('arrival: a site just published is arriving, a missing one is not, its host 404s')
 
     const css = await get(`${siteUrl}style.css`)
     check(css.status === 200 && css.text.includes('rebeccapurple'), `style.css: ${css.status}`)

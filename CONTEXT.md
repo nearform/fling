@@ -57,6 +57,11 @@ live, ends the wait, and so does any other refusal.
 `startServer`): its health path must answer 2xx, else any answer from `/api/` will do. No answer is
 422 `server_failed_to_start`, with the first lines it printed.
 
+**Arrival** — a site just published that the edge may not have yet (`sites.ts` `siteArrival`):
+live, the visitor's to open, and changed in the last 30 s. The sites' 404 page asks the API only at
+the root of a host whose `/_fling-version` is a 404, and then holds ("Your fling is flung, but
+hasn't fully arrived yet") and reloads once the edge has it (`apps/web/src/lib/arrival.ts`).
+
 **Error reference** — the short id an unexpected failure is given (`lib/errors.ts` `errorRef`):
 logged beside the real error and shown to whoever hit it, with what to do next, so they can send it
 to an admin, who finds the log line by searching for it. A 500 `internal`, and a server the platform

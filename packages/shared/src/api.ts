@@ -403,6 +403,14 @@ export const ErrorEnvelopeSchema = z.object({
 })
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>
 
+/**
+ * GET /api/sites/:name/arrival — asked by the sites' 404 page on that site's own host, with the
+ * visitor's session: whether the site is live, theirs to open, and new enough that the edge may
+ * not have it yet. `false` for every site they can't open.
+ */
+export const SiteArrivalSchema = z.object({ arriving: z.boolean() })
+export type SiteArrival = z.infer<typeof SiteArrivalSchema>
+
 /** POST /api/sites/:name/share — creates or rotates the share link */
 export const ShareResponseSchema = z.object({ shareUrl: z.string() })
 export type ShareResponse = z.infer<typeof ShareResponseSchema>

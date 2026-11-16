@@ -959,6 +959,35 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
   )
 }
 
+/**
+ * How long after a site last changed its root page may still be missing at the edge: routes
+ * reach it eventually, usually within seconds, so the sites' 404 page asks `siteArrival` before
+ * saying a site that was just published is missing.
+ */
+export const ARRIVAL_WINDOW_SECONDS = 30
+
+/**
+ * Whether a site of this name is on its way to the edge for this viewer: it is live, they can
+ * open it, and it changed in the last ARRIVAL_WINDOW_SECONDS. Anyone who can't open it, and any
+ * name with no live site, gets the same `false`, so the answer says nothing about a private site.
+ */
+export async function siteArrival(
+  deps: Deps,
+  user: User,
+  name: string
+): Promise<{ arriving: boolean }> {
+  let site: SiteRecord
+  try {
+    ;({ site } = await requireSiteAs(deps, user, name, 'site.view'))
+  } catch (err) {
+    if (err instanceof ApiError) return { arriving: false }
+    throw err
+  }
+  if (site.archived || !site.currentVersionId) return { arriving: false }
+  const age = deps.clock.now().getTime() - Date.parse(site.updatedAt)
+  return { arriving: age >= 0 && age < ARRIVAL_WINDOW_SECONDS * 1000 }
+}
+
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.read', 'version.list')
   const [versions, audience, roles] = await Promise.all([

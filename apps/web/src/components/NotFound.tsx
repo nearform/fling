@@ -4,9 +4,10 @@
  * `404.html` the sites distribution serves on every site host (`homeHref` the app's absolute URL).
  * It deliberately uses a plain `<a>` and no router, so the standalone bundle stays small. The
  * standalone page in a frame (a site's page in review mode) passes the site's own home instead, so
- * following it keeps the frame on the site.
+ * following it keeps the frame on the site. While a just-published site is still on its way to the
+ * edge (lib/arrival.ts), the standalone page says so instead (`arriving`) and offers a reload.
  */
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { ArrowLeftIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
 import { useInstance } from '../hooks/instance'
 import { useThreadTone } from '../hooks/useDocumentTheme'
@@ -32,10 +33,13 @@ export function pickMessage(random: () => number = Math.random): string {
 export function NotFound({
   homeHref = '/',
   homeLabel,
+  arriving = false,
 }: {
   homeHref?: string
   /** the button's words; default "Back to <instance> home" */
   homeLabel?: string
+  /** the site was just published and the edge doesn't have it yet: hold, don't say 404 */
+  arriving?: boolean
 }) {
   const [message] = useState(pickMessage)
   const tone = useThreadTone()
@@ -52,23 +56,44 @@ export function NotFound({
         <ThemeToggle />
       </header>
       <main className="flex-1 grid place-items-center px-6 pb-16 text-center">
-        <div className="max-w-xl">
-          <p
-            className="font-medium leading-none tracking-tighter text-[clamp(6rem,22vw,12rem)]"
-            aria-hidden="true"
-          >
-            404
-          </p>
-          <h1 className="mt-4 text-2xl md:text-3xl">{message}</h1>
-          <p className="mt-3 text-secondary">
-            There's nothing at this address. The site may have been archived or deleted, or the link
-            was mistyped.
-          </p>
-          <a href={homeHref} className="btn btn-primary mt-8">
-            <ArrowLeftIcon className="h-4 w-4" />
-            {homeLabel ?? `Back to ${name} home`}
-          </a>
-        </div>
+        {arriving ? (
+          // Solid, so the words read clearly over the moving thread while it waits.
+          <div className="surface-panel max-w-xl !p-8 md:!p-10 shadow-lg" role="status">
+            <h1 className="text-2xl md:text-3xl">
+              Your fling is flung, but hasn't fully arrived yet.
+            </h1>
+            <p className="mt-3 text-secondary">
+              It usually lands within a few seconds. This page reloads by itself as soon as it's
+              here.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary mt-8"
+              onClick={() => window.location.reload()}
+            >
+              <ArrowPathIcon className="h-4 w-4" />
+              Reload now
+            </button>
+          </div>
+        ) : (
+          <div className="max-w-xl">
+            <p
+              className="font-medium leading-none tracking-tighter text-[clamp(6rem,22vw,12rem)]"
+              aria-hidden="true"
+            >
+              404
+            </p>
+            <h1 className="mt-4 text-2xl md:text-3xl">{message}</h1>
+            <p className="mt-3 text-secondary">
+              There's nothing at this address. The site may have been archived or deleted, or the
+              link was mistyped.
+            </p>
+            <a href={homeHref} className="btn btn-primary mt-8">
+              <ArrowLeftIcon className="h-4 w-4" />
+              {homeLabel ?? `Back to ${name} home`}
+            </a>
+          </div>
+        )}
       </main>
     </div>
   )

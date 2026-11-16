@@ -36,12 +36,15 @@ import {
   ServerLogsResponseSchema,
   SharedSiteListSchema,
   ShareResponseSchema,
+  SiteArrivalSchema,
   SiteDetailSchema,
   SiteListSchema,
   SitePathSchema,
   SiteSchema,
   SiteSecretsResponseSchema,
   SiteWithAudienceSchema,
+  siteLabel,
+  siteUrl,
   splitEmails,
   ThumbnailSchema,
   UpdateCommentRequestSchema,
@@ -84,7 +87,26 @@ apiRoutes.use(
     },
   })
 )
+// The sites' 404 page asks about its own host's site, with the visitor's session: the one
+// cross-origin, credentialed call. Only `https://<name>.<sites domain>` may ask about `name`, so
+// no site's script learns anything about another.
+apiRoutes.use('/sites/:name/arrival', async (c, next) => {
+  const origin = c.req.header('origin')
+  const { config } = c.get('deps')
+  if (origin && origin === siteHostOrigin(config, c.req.param('name'))) {
+    c.header('Access-Control-Allow-Origin', origin)
+    c.header('Access-Control-Allow-Credentials', 'true')
+  }
+  c.header('Vary', 'Origin')
+  c.header('Cache-Control', 'no-store')
+  await next()
+})
 apiRoutes.use('*', requireAuth)
+
+/** The origin of a site's own host, `https://<name>.<sites domain>` (with the port in dev). */
+function siteHostOrigin(config: { sitesDomain: string; siteScheme: string }, name: string) {
+  return new URL(siteUrl(siteLabel(name), config.sitesDomain, `${config.siteScheme}:`)).origin
+}
 
 /** The admin acting as the user, if any: what they do then notifies nobody. */
 function acting(c: Context<AppEnv>): Acting {
@@ -222,6 +244,11 @@ apiRoutes.get('/sites', async c => {
 apiRoutes.get('/shared', async c => {
   const list = await sites.listShared(c.get('deps'), c.get('user'))
   return c.json(SharedSiteListSchema.parse({ sites: list }))
+})
+
+apiRoutes.get('/sites/:name/arrival', async c => {
+  const arrival = await sites.siteArrival(c.get('deps'), c.get('user'), c.req.param('name'))
+  return c.json(SiteArrivalSchema.parse(arrival))
 })
 
 apiRoutes.get('/sites/:name', async c => {

@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **A brand-new site's home page waits for it rather than showing a 404.** For a few seconds after a first publish, the edge may not have the site's address yet. If you're signed in to Fling and can open the site, its home page now says "Your fling is flung, but hasn't fully arrived yet" and reloads by itself once the site is there (it gives up after 30 s). It asks the API only at the root of an address the edge doesn't know, and anyone who can't open the site sees the usual 404, so it says nothing about private sites.
+
 ## 0.13.2 (2026-11-16)
 
 - **Site servers without secrets publish on AWS.** A server that declared no secrets failed its first publish with a bare 500: Lambda refuses an empty environment value, and Fling set its list of secret names to an empty one. It now leaves the list out. Setting a secret to an empty value is refused on every platform (400 `invalid_secret_value`) because Lambda can't hold one.

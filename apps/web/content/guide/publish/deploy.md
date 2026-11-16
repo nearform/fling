@@ -3,7 +3,7 @@ title: Publish a site
 part: publish
 order: 10
 summary: Fling a folder, a page or a zip and get its address back.
-sources: [apps/cli/src/commands/deploy.ts, apps/cli/src/deploy.ts, apps/cli/src/inputs.ts, apps/cli/src/cli.ts, apps/api/src/publication.ts, packages/shared/src/mcp-tools.ts]
+sources: [apps/web/src/lib/arrival.ts, apps/cli/src/commands/deploy.ts, apps/cli/src/deploy.ts, apps/cli/src/inputs.ts, apps/cli/src/cli.ts, apps/api/src/publication.ts, packages/shared/src/mcp-tools.ts]
 verified: 32545014b
 ---
 
@@ -84,6 +84,10 @@ published before and that version is put back at once, without uploading anythin
   offers to make a home page that lists them (press `L`), or you can fling it anyway and its
   address shows a 404 (`f`). Often you flung the project instead of its build output: try
   `./dist`. `--list-html` and `--no-list-html` decide up front.
+- **A brand-new site shows a 404 for a few seconds.** A new address takes a moment to reach
+  everywhere. If you're signed in to Fling in the browser, its home page says "Your fling is
+  flung, but hasn't fully arrived yet" and reloads by itself as soon as it's there. Other pages,
+  and anyone not signed in, see a 404 until then: reload after a few seconds.
 - **"is taken by someone else".** Someone else has that name. Pick one of the suggestions:
   see [Site names](/guide/publish/names).
 - **"Refusing to publish" or "found secrets".** Fling never publishes keys, credentials or files

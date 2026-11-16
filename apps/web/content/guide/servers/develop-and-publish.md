@@ -131,6 +131,7 @@ with a server asks you to confirm too.
 | What you see | What it means | What to do |
 |---|---|---|
 | `server_failed_to_start` | The server crashed, didn't listen, said nothing for {{fact:server-probe-timeout}}, or its `health` path didn't answer 2xx | Read the log lines that come with it. Run `fling dev` and call the health path; check its secrets are set and right |
+| `server_setup_failed` | Fling couldn't create or update the server on its platform. The fault is in Fling, not in your site | Publish again in a minute. If it fails again, send your Fling's admin the reference in the message |
 | `secrets_missing` | A secret `fling.json` names isn't set. The version waits for it | Set it: the version then goes live by itself |
 | `public_server`, or a question | The site is public and the version has a server | Make sure anyone may call it, then confirm (`--yes`) |
 | "Could not bundle server.ts" | The bundler couldn't build the server | Fix the file and line it names; try `fling dev` |

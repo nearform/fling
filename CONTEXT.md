@@ -57,6 +57,11 @@ live, ends the wait, and so does any other refusal.
 `startServer`): its health path must answer 2xx, else any answer from `/api/` will do. No answer is
 422 `server_failed_to_start`, with the first lines it printed.
 
+**Error reference** — the short id an unexpected failure is given (`lib/errors.ts` `errorRef`):
+logged beside the real error and shown to whoever hit it, with what to do next, so they can send it
+to an admin, who finds the log line by searching for it. A 500 `internal`, and a server the platform
+can't set up (500 `server_setup_failed`), carry one as `ref`.
+
 **Server log** — a site server's output and Fling's request line for each invoke (method, path,
 status, duration, viewer id, version), kept `SERVER_LOG_DAYS` (`ServerLogs`, servers/types.ts;
 `GET /api/sites/:name/logs`).

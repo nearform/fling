@@ -34,8 +34,11 @@ class FakeServers implements SiteServers {
   probes: ProbeRequest[] = []
   options = new Map<string, ServerOptions>()
   answer: ProbeResult = { ok: true, status: 200, logs: [] }
+  /** what the platform throws on activate, as an SDK would */
+  fail?: Error
   async activate(_site: ServerSite, v: ServerVersion, opts: ServerOptions) {
     this.calls.push(`activate ${v.id}`)
+    if (this.fail) throw this.fail
     this.options.set(v.id, opts)
     return { target: 'fn-1.servers.example.test' }
   }
@@ -173,6 +176,30 @@ describe('admission', () => {
       target: 'srv',
       change: body.versionId,
     })
+  })
+
+  it("says in words when the platform can't set up the server, with a reference to its log line", async () => {
+    const alice = await createUser(env, ALICE)
+    servers.fail = Object.assign(new Error('1 validation error detected: Value at …'), {
+      name: 'ValidationException',
+    })
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation(line => logged.push(String(line)))
+    try {
+      const res = await deploy(alice.key, 'srv', site())
+      expect(res.status).toBe(500)
+      const { error } = await json(res)
+      expect(error.code).toBe('server_setup_failed')
+      expect(error.message).toContain(`Fling couldn't set up the server for "srv"`)
+      expect(error.message).toContain('not in your site')
+      expect(error.message).toContain(error.ref)
+      expect(error.message).not.toContain('ValidationException')
+      expect(logged.some(l => l.includes(error.ref) && l.includes('ValidationException'))).toBe(
+        true
+      )
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('leaves /api/ an ordinary folder on a site without a server', async () => {

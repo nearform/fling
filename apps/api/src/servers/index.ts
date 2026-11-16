@@ -47,7 +47,14 @@ import {
 } from '@fling/shared'
 import { audit } from '../audit.ts'
 import type { ServerLimits } from '../config.ts'
-import { ApiError, conflict, forbidden } from '../lib/errors.ts'
+import {
+  ApiError,
+  conflict,
+  errorRef,
+  forbidden,
+  logUnexpected,
+  reportFault,
+} from '../lib/errors.ts'
 import { canPublishServer, type Principal } from '../policy.ts'
 import type { ServerMark, SiteRecord, User, VersionRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
@@ -266,7 +273,9 @@ export async function startServer(
   if (missing.length > 0) throw secretsMissing(site, version, missing)
   const ref = serverSite(site)
   const ver = serverVersion(site.id, version.id)
-  const { target } = await deps.servers.activate(ref, ver, options)
+  const { target } = await onPlatform(site, 'set up the server', () =>
+    deps.servers.activate(ref, ver, options)
+  )
   const probe = await probeServer(deps, site, version.id, mark)
   if (!probe.ok) {
     throw new ApiError(422, 'server_failed_to_start', `Not published: ${probe.message}`, {
@@ -274,8 +283,34 @@ export async function startServer(
       ...(probe.status === undefined ? {} : { status: probe.status }),
     })
   }
-  await deps.servers.goLive?.(ref, ver)
+  await onPlatform(site, 'put the server live', async () => deps.servers.goLive?.(ref, ver))
   return target
+}
+
+/**
+ * A platform call for a site's server. The platform's own refusal (a quota, a missing network
+ * connector) is already an ApiError and passes through; anything else is a fault in Fling, not
+ * in the site, so the person publishing is told that in words, with a reference to the log line
+ * holding the platform's error: 500 `server_setup_failed` with `ref`.
+ */
+async function onPlatform<T>(
+  site: Pick<SiteRecord, 'name'>,
+  what: string,
+  work: () => Promise<T>
+): Promise<T> {
+  try {
+    return await work()
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    const ref = errorRef()
+    logUnexpected(ref, { site: site.name, step: what }, err)
+    throw new ApiError(
+      500,
+      'server_setup_failed',
+      `Fling couldn't ${what} for "${site.name}". The fault is in Fling, not in your site or its server code. ${reportFault(ref)}`,
+      { ref }
+    )
+  }
 }
 
 /** What a start probe found, by the core's rules (see the header). */
@@ -358,10 +393,8 @@ export async function reconfigureLive(
   const version = await deps.store.getVersion(site, site.currentVersionId)
   if (!version?.server) return null
   const { options } = await optionsFor(deps, site, version.server)
-  const { target } = await deps.servers.reconfigure(
-    serverSite(site),
-    serverVersion(site.id, version.id),
-    options
+  const { target } = await onPlatform(site, 'update the server', () =>
+    deps.servers.reconfigure(serverSite(site), serverVersion(site.id, version.id), options)
   )
   const live = version as VersionRecord & { server: ServerMark }
   if ((target ?? undefined) === site.server.target) return { version: live, moved: false }

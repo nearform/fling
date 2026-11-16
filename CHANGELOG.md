@@ -13,6 +13,9 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Site servers without secrets publish on AWS.** A server that declared no secrets failed its first publish with a bare 500: Lambda refuses an empty environment value, and Fling set its list of secret names to an empty one. It now leaves the list out. Setting a secret to an empty value is refused on every platform (400 `invalid_secret_value`) because Lambda can't hold one.
+- **A fault in Fling says what happened and what to do.** An unexpected error answers "Something went wrong in Fling, not in what you sent", says to try again, and gives a short reference to send your Fling's admin. The same reference is in the API's log line with the real error, so an admin can search for it. A server Fling can't set up on its platform answers 500 `server_setup_failed`, which names the site and says the fault is not in it. The CLI and MCP tools say the same in plain words when an older Fling or a proxy answers a bare 5xx.
+
 ## 0.13.1 (2026-11-15)
 
 - **Security: a change to a site is never undone by a request already in flight.** A publish, a rollback, a thumbnail, a home page refresh or a server change read the site when it started and wrote it back whole when it finished, so an owner's change made meanwhile (removing a publisher, narrowing the audience, revoking the share link, archiving, deleting) or an admin's server stop could be silently reversed. Each save of a site now carries a revision and lands only over the one it read; otherwise the site is read again, the request's rights are checked again, and only its own change is made to the newer copy. A publisher removed meanwhile gets 404, a site archived meanwhile stays archived (400 `owner_only` for a publisher), a deleted site stays deleted, and a change that keeps losing the race answers 409 `site_changed`. Sites saved before this release need no migration.

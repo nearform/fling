@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.13.2 (2026-11-16)
+
 - **Site servers without secrets publish on AWS.** A server that declared no secrets failed its first publish with a bare 500: Lambda refuses an empty environment value, and Fling set its list of secret names to an empty one. It now leaves the list out. Setting a secret to an empty value is refused on every platform (400 `invalid_secret_value`) because Lambda can't hold one.
 - **A fault in Fling says what happened and what to do.** An unexpected error answers "Something went wrong in Fling, not in what you sent", says to try again, and gives a short reference to send your Fling's admin. The same reference is in the API's log line with the real error, so an admin can search for it. A server Fling can't set up on its platform answers 500 `server_setup_failed`, which names the site and says the fault is not in it. The CLI and MCP tools say the same in plain words when an older Fling or a proxy answers a bare 5xx.
 

@@ -528,7 +528,7 @@ describe('site secrets', () => {
     expect(await route('srv')).toMatchObject({ f: 1 })
   })
 
-  it('checks names, sizes and the count', async () => {
+  it('checks names, sizes (never empty) and the count', async () => {
     const alice = await createUser(env, ALICE)
     await deploy(alice.key, 'srv', site())
     const bad = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/lower', { value: 'x' })
@@ -549,6 +549,9 @@ describe('site secrets', () => {
       value: 'x'.repeat(8 * 1024 + 1),
     })
     expect(big.status).toBe(413)
+    const empty = await api(env, alice.key, 'PUT', '/api/sites/srv/secrets/EMPTY', { value: '' })
+    expect(empty.status).toBe(400)
+    expect((await json(empty)).error.code).toBe('invalid_secret_value')
     for (let i = 0; i < SITE_SECRETS_MAX; i++) {
       const res = await api(env, alice.key, 'PUT', `/api/sites/srv/secrets/S${i}`, { value: 'v' })
       expect(res.status).toBe(200)

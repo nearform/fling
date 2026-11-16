@@ -4,7 +4,7 @@
  * far as Fling can tell: its zip unpacked, `node index.mjs` with the revision's environment plus
  * what Lambda adds (AWS_LAMBDA_HTTP_ENDPOINT, credentials, HOME), requests sent to the endpoint's
  * domain going to the revision its weights name, `lambda-web-logstream` on every answer, rateLimit
- * 0 answering 503 EndpointDisabled, and what the process prints written to its log group as JSON
+ * 0 answering 503 EndpointDisabled, an empty environment value refused as Lambda refuses it, and what the process prints written to its log group as JSON
  * events in a `YYYY/MM/DD/<fn>[<revisionId>]…` stream. Signing, quotas beyond the vCPU one, and
  * timing are not faked.
  */
@@ -147,6 +147,16 @@ export class FakeWebFunctions implements WebFunctionsApi {
   }
 
   private revision(f: FakeFunction, spec: RevisionSpec): FakeRevision {
+    // Lambda's own check: every environment value is at least one character.
+    const empty = Object.entries(spec.environment).find(([, v]) => v.length === 0)
+    if (empty) {
+      throw Object.assign(
+        new Error(
+          `1 validation error detected: Value at 'revisionConfig.serviceConfig.environmentVariables' failed to satisfy constraint: Map value must satisfy constraint: [Member must have length greater than or equal to 1] (${empty[0]})`
+        ),
+        { name: 'ValidationException' }
+      )
+    }
     const revisionId = `rev-${++this.n}`
     const r: FakeRevision = {
       revisionId,

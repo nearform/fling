@@ -96,7 +96,7 @@ Limits, per site. Admins can raise them for one site; authors can't.
 | Copies running at once (AWS only, `SERVER_ENVIRONMENTS`) | 2 |
 | Request body | 10 MB |
 | Bundle (`_fling/server.mjs`) | 5 MB |
-| Site secrets | 20 per site, 8 KB each |
+| Site secrets | 20 per site, 8 KB each, never empty |
 | Sites with a server, across the instance | 50 |
 
 The 30 seconds is the whole request: if a streamed answer is still going at 30 s, it is cut off.
@@ -985,4 +985,5 @@ with the three files.
 | 502 `server_cpu_limit` (Cloudflare) | Cloudflare stopped the server for using more CPU time in one request than `SERVER_CPU_MS` allows (1 s by default) | Do less work per request, or move it out of the loop. A loop timed by `Date.now()` never ends on Cloudflare (see [What works](#what-works-what-doesnt-and-the-limits)). An admin can raise the limit for the site |
 | 400 `limit_too_high` (admins) | A time per request past what the platform serves: on AWS, 120 s | Set 120 s or less |
 | 400 `invalid_secret_name` | A secret name that isn't A-Z, 0-9 and `_`, or one Fling and the platforms keep (`PORT`, `FILES`, `AWS_*`…), set or declared in `fling.json` | Rename it in `fling.json`, the server and the secret |
+| 400 `invalid_secret_value` | A secret set to an empty value (one platform's environment can't hold one) | Give it a value, or remove the secret |
 | Your 403 or 404 arrives as 300 with `x-fling-status` (AWS) | The function that puts it back isn't published yet: the deploy after servers are turned on publishes it | Ask the operator to deploy |

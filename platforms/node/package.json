@@ -1,0 +1,32 @@
+{
+  "name": "@fling/platform-node",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Fling on Node: the Postgres Table, for the platforms that run on Node. Consumed as TypeScript source.",
+  "type": "module",
+  "exports": {
+    "./table/postgres": "./src/table/postgres.ts",
+    "./table/schema": "./src/table/schema.ts",
+    "./table/sql": "./src/table/sql.ts"
+  },
+  "scripts": {
+    "build": "echo 'platform-node: consumed as source'",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.17",
+    "@fling/api": "workspace:*",
+    "@fling/shared": "workspace:*",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@fling/conformance": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

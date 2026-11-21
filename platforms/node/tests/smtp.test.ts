@@ -184,6 +184,9 @@ describe('SmtpMailer', () => {
       'quota'
     )
     expect(reply(552, '552 Mailbox over quota')).toMatchObject({ reason: 'rejected' })
+    // A full mailbox without an enhanced code is the recipient's, not a quota of ours.
+    expect(reply(452, '452 Mailbox over quota')).toMatchObject({ reason: 'transient' })
+    expect(reply(452, '452 Mailbox over quota')).not.toHaveProperty('quota')
     // Greylisting asks for a later try: transient, not a rate limit.
     expect(reply(451, '451 4.7.1 Greylisted, please try again later')).toMatchObject({
       reason: 'transient',

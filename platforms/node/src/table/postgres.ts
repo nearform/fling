@@ -71,7 +71,7 @@ import {
   type SQL,
   sql,
 } from 'drizzle-orm'
-import type { FlingDatabase } from './database.ts'
+import type { Database, FlingDatabase } from './database.ts'
 import { DEFAULT_SCHEMA, type ItemsTable, itemsIn } from './items.ts'
 
 type Row = { pk: string; sk: string; data: Record<string, unknown> }
@@ -220,7 +220,7 @@ export class PostgresTable implements Table {
   private now: () => number
 
   constructor(
-    private db: FlingDatabase,
+    private database: Database,
     opts: PostgresTableOptions = {}
   ) {
     this.items = itemsIn(opts.schema ?? DEFAULT_SCHEMA)
@@ -251,22 +251,16 @@ export class PostgresTable implements Table {
     const locks = [...new Set(keys.map(lockId))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.db.transaction(
-          async tx => {
-            for (const id of locks) {
-              await tx.execute(sql`SELECT pg_advisory_xact_lock(${String(id)}::bigint)`)
-            }
-            const rows = await tx
-              .select(this.columns())
-              .from(this.items)
-              .where(and(or(...keys.map(k => this.at(k))), this.live()))
-            return fn(
-              tx as unknown as FlingDatabase,
-              new Map(rows.map(r => [keyOf(r), fromRow(r)]))
-            )
-          },
-          { isolationLevel: 'read committed' }
-        )
+        return await this.database.transaction(async tx => {
+          for (const id of locks) {
+            await tx.execute(sql`SELECT pg_advisory_xact_lock(${String(id)}::bigint)`)
+          }
+          const rows = await tx
+            .select(this.columns())
+            .from(this.items)
+            .where(and(or(...keys.map(k => this.at(k))), this.live()))
+          return fn(tx, new Map(rows.map(r => [keyOf(r), fromRow(r)])))
+        })
       } catch (err) {
         const code = sqlState(err)
         if (attempt < RETRIES && code !== undefined && RETRYABLE.has(code)) {
@@ -299,7 +293,7 @@ export class PostgresTable implements Table {
 
   async get(pk: string, sk: string) {
     if (!storable({ pk, sk })) return null
-    const [row] = await this.db
+    const [row] = await this.database.db
       .select(this.columns())
       .from(this.items)
       .where(and(this.at({ pk, sk }), this.live()))
@@ -320,7 +314,7 @@ export class PostgresTable implements Table {
       const bound = cursorBound(decodeCursor(opts.cursor), opts.reverse)
       where.push(bound.op(this.items.sk, bound.sk))
     }
-    const q = this.db
+    const q = this.database.db
       .select(this.columns())
       .from(this.items)
       .where(and(...where))
@@ -339,7 +333,7 @@ export class PostgresTable implements Table {
         or(gt(this.items.pk, pk), and(eq(this.items.pk, pk), gt(this.items.sk, sk))) as SQL
       )
     }
-    const q = this.db
+    const q = this.database.db
       .select(this.columns())
       .from(this.items)
       .where(and(...where))
@@ -416,8 +410,8 @@ export class PostgresTable implements Table {
     let total = 0
     for (;;) {
       const dead = () => and(isNotNull(expiresAt), lte(expiresAt, this.now())) as SQL
-      const batch = this.db.select({ pk, sk }).from(this.items).where(dead()).limit(size)
-      const rows = await this.db
+      const batch = this.database.db.select({ pk, sk }).from(this.items).where(dead()).limit(size)
+      const rows = await this.database.db
         .delete(this.items)
         .where(and(sql`(${pk}, ${sk}) IN ${batch}`, dead()))
         .returning({ pk })

@@ -41,18 +41,26 @@ export function pgNotifier(pool: pg.Pool): Notifier {
       let stopped = false
       let client: pg.PoolClient | undefined
       const connect = async (): Promise<void> => {
+        if (stopped) return
+        let c: pg.PoolClient | undefined
+        let dropped = false
+        // This attempt's connection, gone (an error, or LISTEN failed): destroyed, never handed
+        // back to the pool, and one more attempt after a pause. Once per attempt.
+        const drop = (err: Error) => {
+          if (dropped) return
+          dropped = true
+          if (c) c.release(err)
+          if (client === c) client = undefined
+          if (!stopped) setTimeout(() => void connect(), RECONNECT_MS)
+        }
         try {
-          const c = await pool.connect()
-          client = c
+          c = await pool.connect()
           c.on('notification', n => {
             if (n.channel === channel && n.payload !== undefined) onPayload(n.payload)
           })
-          c.on('error', () => {
-            c.release(true)
-            client = undefined
-            if (!stopped) setTimeout(() => void connect(), RECONNECT_MS)
-          })
+          c.on('error', drop)
           await drizzle(c).execute(sql`LISTEN ${sql.identifier(channel)}`)
+          client = c
         } catch (err) {
           console.warn(
             JSON.stringify({
@@ -61,7 +69,7 @@ export function pgNotifier(pool: pg.Pool): Notifier {
               error: String(err),
             })
           )
-          if (!stopped) setTimeout(() => void connect(), RECONNECT_MS)
+          drop(err instanceof Error ? err : new Error(String(err)))
         }
       }
       await connect()

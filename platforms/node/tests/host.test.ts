@@ -59,7 +59,7 @@ async function world(
   if (!opts.db) closing.push(() => database.close())
   const schema = `h_${randomBytes(4).toString('hex')}`
   await database.migrate(schema)
-  const table = new PostgresTable(database.db, { schema })
+  const table = new PostgresTable(database, { schema })
   const fsRoot = mkdtempSync(join(tmpdir(), 'fling-node-host-'))
   const base = loadBaseConfig({
     APP_ORIGIN: APP,
@@ -261,14 +261,14 @@ describe('CachedRouteTable', () => {
     const database = pgliteDatabase(await PGlite.create())
     closing.push(() => database.close())
     await database.migrate()
-    return new CachedRouteTable(new TableRouteTable(new PostgresTable(database.db)))
+    return new CachedRouteTable(new TableRouteTable(new PostgresTable(database)))
   })
 
   it('sees a new key at once, and another writer’s change within its ttl', async () => {
     const database = pgliteDatabase(await PGlite.create())
     closing.push(() => database.close())
     await database.migrate()
-    const source = new TableRouteTable(new PostgresTable(database.db))
+    const source = new TableRouteTable(new PostgresTable(database))
     let now = 0
     const cached = new CachedRouteTable(source, { ttlMs: 5_000, now: () => now })
     expect(await cached.get('site:a')).toBeUndefined()

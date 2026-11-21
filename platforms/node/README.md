@@ -33,7 +33,7 @@ configuration), and these of its own:
 | `PORT` | `8080` | Where it listens |
 | `MAX_REQUEST_BYTES` | `33554432` (32 MiB) | The largest request body it takes; more is a 413 |
 | `FS_ROOT` | `.fling-node` | Site files, site servers' working copies and, without `DATABASE_URL`, PGlite's database |
-| `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms |
+| `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms. A direct or session-mode connection: a pooler in transaction mode (PgBouncer's, or a provider's "transaction" endpoint) breaks the migrations' lock and search_path and the live rooms' LISTEN, and start-up fails saying so |
 | `DATABASE_SCHEMA` | `public` | The Postgres schema the Table is in, so instances can share a database |
 | `TICK_SECRET` (secret, 32 characters or more) | none: the tick endpoints answer 404 | The bearer token for `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate` |
 

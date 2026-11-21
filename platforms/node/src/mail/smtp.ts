@@ -13,8 +13,9 @@
  * - the recipient's mailbox is full (`452 4.2.2`, `552 5.2.2`, "over quota") → `transient` for a
  *   4xx, `rejected` for a 5xx: it is their quota, never the sender's;
  * - our daily or sending quota, a policy reply that says so (`454 4.7.0 Daily sending quota
- *   exceeded`, any 4.7.x or 5.7.x) or a 4xx without an enhanced code that does (SES's
- *   `454 Throttling failure: Daily message quota exceeded.`) → `throttled`, `quota`, which holds
+ *   exceeded`, any 4.7.x or 5.7.x) or a 4xx without an enhanced code that names a daily or
+ *   sending quota (SES's `454 Throttling failure: Daily message quota exceeded.`; a bare
+ *   `452 Mailbox over quota` is the recipient's) → `throttled`, `quota`, which holds
  *   the batches until the next UTC day;
  * - a rate limit, or `421` (the server sheds load) → `throttled`;
  * - any other 4xx (greylisting's `451 4.7.1 Try again later` included), and a connection that
@@ -53,6 +54,8 @@ export interface SmtpOptions {
 type Failure = Extract<MailResult, { ok: false }>
 
 const QUOTA = /quota|daily (sending )?limit|sending limit/i
+/** A quota that is the sender's by its words alone: a daily or sending one, not a mailbox's. */
+const SENDER_QUOTA = /\b(daily|sending|send|message)\s+(sending\s+|message\s+)?(quota|limit)\b/i
 const RATE = /rate.?limit|too many|throttl|slow down/i
 const SUPPRESSED = /suppress|block.?list|black.?list|inactive (recipient|address)|unsubscribed/i
 const ENHANCED = /\b([245])\.(\d{1,3})\.(\d{1,3})\b/
@@ -83,10 +86,13 @@ export function smtpFailure(err: unknown): Failure {
       ? { ok: false, retry: true, reason: 'transient', detail }
       : { ok: false, retry: false, reason: 'rejected', detail }
   }
-  // Ours: a policy reply (x.7.x), or a 4xx with no enhanced code at all (Amazon SES's
-  // `454 Throttling failure: Daily message quota exceeded.`).
-  const policy = parts ? parts[2] === '7' : status < 500
-  if (policy && QUOTA.test(reply)) {
+  // Ours: a policy reply (x.7.x) that names a quota, or a 4xx with no enhanced code that names a
+  // daily or sending one (Amazon SES's `454 Throttling failure: Daily message quota exceeded.`);
+  // `452 Mailbox over quota` without a code is the recipient's.
+  const ours = parts
+    ? parts[2] === '7' && QUOTA.test(reply)
+    : status < 500 && SENDER_QUOTA.test(reply)
+  if (ours) {
     return { ok: false, retry: true, reason: 'throttled', quota: true, detail }
   }
   if (status === 421 || RATE.test(reply)) {

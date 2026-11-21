@@ -14,9 +14,9 @@ import {
 } from '@fling/conformance'
 import { sql } from 'drizzle-orm'
 import pg from 'pg'
-import { afterAll, describe, expect, it } from 'vitest'
-import { PostgresFanout, pgliteNotifier } from '../src/live/postgres-fanout.ts'
-import type { Database } from '../src/table/database.ts'
+import { afterAll, describe, expect, it, vi } from 'vitest'
+import { PostgresFanout, pgliteNotifier, pgNotifier } from '../src/live/postgres-fanout.ts'
+import { type Database, pgDatabase } from '../src/table/database.ts'
 import { PostgresTable } from '../src/table/postgres.ts'
 import { databases, freshSchema, POSTGRES_URL } from './services.ts'
 
@@ -36,14 +36,14 @@ const suites = (name: string, open: () => Promise<Database>) => {
   const table = async () => {
     const db = await open()
     shared ??= freshSchema(db)
-    return new PostgresTable(db.db, { schema: await shared })
+    return new PostgresTable(db, { schema: await shared })
   }
   tableConformance(name, table)
   storeConformance(`Records on ${name}`, async () => new Records(await table()))
   // Migrations scan the whole table: an empty one per test.
   migrationsConformance(name, async () => {
     const db = await open()
-    return new PostgresTable(db.db, { schema: await freshSchema(db) })
+    return new PostgresTable(db, { schema: await freshSchema(db) })
   })
   routeTableConformance(
     `TableRouteTable on ${name}`,
@@ -79,7 +79,7 @@ describe('PostgresTable migrations and purge', () => {
     )
     await db.db.execute(sql`INSERT INTO ${s}.items (pk, sk, data) VALUES ('P', 'A', '{"v":1}')`)
     expect(await db.migrate(schema)).toBe(JOURNAL.entries.length)
-    const table = new PostgresTable(db.db, { schema })
+    const table = new PostgresTable(db, { schema })
     expect(await table.get('P', 'A')).toEqual({ pk: 'P', sk: 'A', v: 1 })
   })
 
@@ -95,7 +95,7 @@ describe('PostgresTable migrations and purge', () => {
     ]
     for (const schema of hostile) {
       await expect(db.migrate(schema)).rejects.toThrow(/schema/)
-      expect(() => new PostgresTable(db.db, { schema })).toThrow(/schema/)
+      expect(() => new PostgresTable(db, { schema })).toThrow(/schema/)
       expect(() => new PostgresFanout(pgliteNotifier(null as never), { schema })).toThrow(/schema/)
     }
     // The live channel is `fling_live_<schema>`, an identifier too: 52 characters at most.
@@ -108,7 +108,7 @@ describe('PostgresTable migrations and purge', () => {
   it('purges dead items and keeps the rest', async () => {
     const db = await dbs.pglite()
     let now = Date.parse('2030-01-01T00:00:00.000Z')
-    const table = new PostgresTable(db.db, { schema: await freshSchema(db), now: () => now })
+    const table = new PostgresTable(db, { schema: await freshSchema(db), now: () => now })
     await table.put({ pk: 'P', sk: 'dead', expiresAt: '2030-01-01T00:01:00.000Z' })
     await table.put({ pk: 'P', sk: 'later', expiresAt: '2031-01-01T00:00:00.000Z' })
     await table.put({ pk: 'P', sk: 'kept' })
@@ -122,7 +122,7 @@ describe('PostgresTable migrations and purge', () => {
   it('keeps a schema whose name is a reserved word apart', async () => {
     const db = await dbs.pglite()
     await db.migrate('user')
-    const table = new PostgresTable(db.db, { schema: 'user' })
+    const table = new PostgresTable(db, { schema: 'user' })
     await table.put({ pk: 'P', sk: 'A', v: 1 })
     expect(await table.get('P', 'A')).toEqual({ pk: 'P', sk: 'A', v: 1 })
   })
@@ -130,7 +130,7 @@ describe('PostgresTable migrations and purge', () => {
   it('stores a string jsonb cannot hold escaped, and only such items', async () => {
     const db = await dbs.pglite()
     const schema = await freshSchema(db)
-    const table = new PostgresTable(db.db, { schema })
+    const table = new PostgresTable(db, { schema })
     await table.put({ pk: 'P', sk: 'odd', v: 'a\u0000b' })
     await table.put({ pk: 'P', sk: 'plain', v: 'ab' })
     const raw = await rows<{ sk: string; data: unknown }>(
@@ -152,7 +152,7 @@ describe.runIf(POSTGRES_URL)('PostgresTable purge against a writer (Postgres)', 
     const db = await dbs.postgres()
     let now = Date.parse('2030-01-01T00:00:00.000Z')
     const schema = await freshSchema(db)
-    const table = new PostgresTable(db.db, { schema, now: () => now })
+    const table = new PostgresTable(db, { schema, now: () => now })
     await table.put({ pk: 'LEASE', sk: 'L', owner: 'a', expiresAt: '2030-01-01T00:01:00.000Z' })
     now += 120_000
     // A writer takes the dead lease (ifAbsent over it) and holds its row until it commits.
@@ -171,5 +171,51 @@ describe.runIf(POSTGRES_URL)('PostgresTable purge against a writer (Postgres)', 
     await pool.end()
     expect(await purge).toBe(0)
     expect(await table.get('LEASE', 'L')).toMatchObject({ owner: 'b' })
+  })
+})
+
+/** A `pg` Pool whose one client answers `query` with `answer` (by the SQL's text). */
+function fakePool(answer: (text: string) => unknown) {
+  const client = {
+    on: vi.fn(),
+    release: vi.fn(),
+    query: vi.fn(async (q: string | { text: string }) => {
+      const out = answer(typeof q === 'string' ? q : q.text)
+      if (out instanceof Error) throw out
+      return { rows: [], fields: [], command: '', rowCount: 0 }
+    }),
+  }
+  const pool = { connect: vi.fn(async () => client) } as unknown as pg.Pool
+  return { pool, client }
+}
+
+describe('the pg driver', () => {
+  it('discards a connection whose ROLLBACK failed, and throws the error that caused it', async () => {
+    const rollback = new Error('connection lost')
+    const { pool, client } = fakePool(text => (/rollback/i.test(text) ? rollback : null))
+    const deadlock = Object.assign(new Error('deadlock detected'), { code: '40P01' })
+    await expect(
+      pgDatabase(pool).transaction(async () => {
+        throw deadlock
+      })
+    ).rejects.toBe(deadlock)
+    expect(client.release).toHaveBeenCalledWith(expect.objectContaining({ cause: rollback }))
+  })
+
+  it('destroys a listening connection whose LISTEN failed, and tries again only while listening', async () => {
+    vi.useFakeTimers()
+    try {
+      const refused = new Error('LISTEN refused')
+      const { pool, client } = fakePool(() => refused)
+      const stop = await pgNotifier(pool).listen('fling_live_x', () => {})
+      expect(client.release).toHaveBeenCalledWith(expect.objectContaining({ cause: refused }))
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(client.release).toHaveBeenCalledTimes(2)
+      await stop()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(client.release).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

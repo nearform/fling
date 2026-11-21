@@ -68,7 +68,7 @@ const pool = url ? new pg.Pool({ connectionString: url }) : undefined
 const lite = url ? undefined : await PGlite.create(resolve(fsRoot, 'pglite'))
 const database = pool ? pgDatabase(pool) : pgliteDatabase(lite as PGlite)
 const applied = await database.migrate(schema)
-const table = new PostgresTable(database.db, { schema })
+const table = new PostgresTable(database, { schema })
 const migrated = await runMigrations(table, { migrations: MIGRATIONS })
 console.log(
   JSON.stringify({

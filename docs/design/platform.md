@@ -159,8 +159,9 @@ Each element uses the same headings:
   - A hub whose connections outlive one process keeps them as live connection records through the
     Store, as AWS does.
   - The transport is WebSockets at `LIVE_URL`.
-- **Conformance:** `storeConformance` covers the live connection records. The hubs have
-  per-platform tests only (§6).
+- **Conformance:** `liveHubConformance`: welcome, join and leave, pointers to the room's others
+  only, `publish` to the site's room and no other, and a closed or gone connection forgotten.
+  `storeConformance` covers the live connection records.
 - **Gates:** `live`.
 
 ### 3.5 Mailer
@@ -301,9 +302,7 @@ that routes* shape, on a Node runtime. Writing the parts they share once keeps "
      `apps/api/src/publication.ts` already reads scannable files back for the secret scan.
 
   Option 2 keeps uploads direct and is the proposal. The decision belongs to the core.
-- **No shared conformance for live hubs or edge shells.** Each platform tests its own
-  (`platforms/aws/tests/live.test.ts`, `platforms/cloudflare/tests/live.test.ts`). The AWS route
-  table (`CloudFrontRouteTable`) has no emulator and is stub-tested. A `liveHubConformance` suite
-  should come before a third hub.
+- **No shared conformance for edge shells.** Each sites host tests its own. The AWS route table
+  (`CloudFrontRouteTable`) has no emulator and is stub-tested.
 - **CI knows two platforms.** `scripts/check-terraform.mjs` checks one Terraform module, and
   `ci.yml` starts only DynamoDB Local and MinIO. Each new platform adds its module and emulators.

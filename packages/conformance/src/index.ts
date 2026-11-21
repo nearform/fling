@@ -4,6 +4,7 @@
  * `tableConformance('DynamoTable', () => new DynamoTable(table, client))`.
  */
 export { type BlobsHarness, blobsConformance } from './blobs.ts'
+export { type LiveHubClient, type LiveHubHarness, liveHubConformance } from './live-hub.ts'
 export {
   type DeliveredMail,
   EXPECTED_FAILURE,

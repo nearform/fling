@@ -1,16 +1,17 @@
 import { z } from 'zod'
-import { MAX_DEPLOY_BYTES, MAX_FILE_BYTES, MAX_FILES, MAX_PATH_LENGTH } from './limits.ts'
+import { MAX_DEPLOY_BYTES, MAX_FILE_BYTES, MAX_FILES, MAX_PATH_BYTES } from './limits.ts'
 import { isSecretPath } from './secrets.ts'
-import { isStorableText } from './text.ts'
+import { isStorableText, utf8Length } from './text.ts'
 
 /**
  * A site-relative POSIX path: no leading slash, no backslashes, no empty segments, and no segment
  * starting with `.` — so no `.`/`..`, and never a dotfile or dot-directory (`.env`, `.dev.vars`,
  * `.git/…`, `.well-known/…`). Fling never publishes dotfiles; there is no override. A path becomes
- * part of stored keys, so it is storable text too (no NUL, no lone surrogate: text.ts).
+ * part of stored keys, so it is storable text too (no NUL, no lone surrogate: text.ts), of at most
+ * MAX_PATH_BYTES bytes of UTF-8.
  */
 export function isValidSitePath(path: string): boolean {
-  if (!path || path.length > MAX_PATH_LENGTH) return false
+  if (!path || path.length > MAX_PATH_BYTES || utf8Length(path) > MAX_PATH_BYTES) return false
   if (path.startsWith('/') || path.includes('\\') || !isStorableText(path)) return false
   return path.split('/').every(seg => seg !== '' && !seg.startsWith('.'))
 }

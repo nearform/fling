@@ -2,7 +2,7 @@
  * The server-side guarantee: dotfiles, secret files and secrets are refused whatever the client
  * (old CLIs, custom scripts, Claude's inline publish).
  */
-import { siteKvsKey, siteObjectKey } from '@fling/shared'
+import { MAX_PATH_BYTES, siteKvsKey, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { manifestKey } from '../src/blobs/types.ts'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
@@ -41,6 +41,19 @@ describe('deploy API paths', () => {
       expect(await env.store.findSite('hello')).toBeNull()
     }
   )
+
+  it('a path over MAX_PATH_BYTES bytes of UTF-8 → 400, however few its characters', async () => {
+    const path = `${'😀'.repeat(MAX_PATH_BYTES / 4)}.html`
+    const res = await api(
+      env,
+      key,
+      'POST',
+      '/api/sites/hello/deploys',
+      deployReq([file('index.html', 'x'), file(path, 'x')])
+    )
+    expect(res.status).toBe(400)
+    expect(await env.store.findSite('hello')).toBeNull()
+  })
 
   it.each(['server.key', 'certs/a.pem', 'id_rsa', 'terraform.tfstate', 'credentials.json'])(
     '%s → 400 secret_file',

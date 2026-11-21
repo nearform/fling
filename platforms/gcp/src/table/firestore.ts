@@ -16,6 +16,11 @@
  *   so no field name is reserved. It is exempt from indexing;
  * - `ttl`, a Timestamp of `expiresAt` when the item has one, for the database's TTL policy.
  *
+ * Firestore indexes only the first 1,500 bytes of a value, and orders and ranges on those alone,
+ * so `put` and `transact` refuse a pk or sk longer than that in UTF-8 (the core keeps every key
+ * well under it: MAX_PATH_BYTES), and a query on a longer pk or prefix finds nothing, as no item
+ * can have one.
+ *
  * Writes that depend on what is there (every condition, `update`, a `delete` that returns the old
  * item, `transact`) run in a Firestore transaction: reads take locks, conflicting transactions are
  * retried by the client, and a false condition aborts with `ConditionFailed` (carrying the op's
@@ -68,6 +73,26 @@ const utf8 = (s: string) => Buffer.from(s, 'utf8')
 const docId = (pk: string, sk: string) =>
   createHash('sha256').update(`${pk}\u0000${sk}`).digest('base64url')
 
+/** The most bytes of a value Firestore indexes, orders and compares. */
+export const MAX_KEY_BYTES = 1500
+
+const fits = (s: string) => Buffer.byteLength(s, 'utf8') <= MAX_KEY_BYTES
+
+/** checkKey, and both parts within what Firestore indexes. */
+function checkFirestoreKey(k: { pk: string; sk: string }): void {
+  checkKey(k)
+  if (!fits(k.pk) || !fits(k.sk)) {
+    throw new Error(`table keys may not be over ${MAX_KEY_BYTES} bytes of UTF-8 on Firestore`)
+  }
+}
+
+/** A page's limit, when there is one, is a whole number of items, at least one. */
+function checkLimit(limit: number | undefined): void {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    throw new Error('limit must be a positive integer')
+  }
+}
+
 /** The bytes just past every key that starts with `prefix`. */
 const pastPrefix = (prefix: Buffer) => Buffer.concat([prefix, Buffer.from([0xff])])
 
@@ -106,7 +131,8 @@ function holds(cond: Condition | undefined, item: TableItem | null): boolean {
 function patched(item: TableItem, patch: Patch): TableItem {
   const next: Record<string, unknown> = { ...item }
   for (const [k, v] of Object.entries(patch.set ?? {})) {
-    if (k === 'pk' || k === 'sk') throw new Error(`"${k}" cannot be updated`)
+    // An item's key is where it is: update never moves it (the caller sets pk and sk back).
+    if (k === 'pk' || k === 'sk') continue
     if (v === undefined) delete next[k]
     else next[k] = v
   }
@@ -165,7 +191,11 @@ export class FirestoreTable implements Table {
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
-    if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
+    const skPrefix = opts.skPrefix ?? ''
+    if (!storableKey(pk) || !storableKey(skPrefix) || !fits(pk) || !fits(skPrefix)) {
+      return { items: [] }
+    }
+    checkLimit(opts.limit)
     let base: Query = this.db.collection(this.collection).where('pk', '==', pk)
     if (opts.skPrefix) {
       const prefix = utf8(opts.skPrefix)
@@ -198,6 +228,7 @@ export class FirestoreTable implements Table {
 
   /** Migrations only (see the Table port): in document ID order; the cursor is the last ID. */
   async scan(opts: ScanOptions = {}): Promise<Page> {
+    checkLimit(opts.limit)
     const items: TableItem[] = []
     let after = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor)
     const now = this.now()
@@ -220,7 +251,7 @@ export class FirestoreTable implements Table {
   }
 
   async put(item: TableItem, cond?: Condition) {
-    checkKey(item)
+    checkFirestoreKey(item)
     const doc = toDoc(clean(item))
     const ref = this.ref(item.pk, item.sk)
     if (!cond) {
@@ -263,7 +294,7 @@ export class FirestoreTable implements Table {
   async transact(ops: TransactOp[]) {
     if (ops.length > TRANSACT_MAX) throw new Error(`transact takes at most ${TRANSACT_MAX} ops`)
     const keys = ops.map(op => ('put' in op ? op.put : op.delete))
-    for (const key of keys) checkKey(key)
+    for (const key of keys) checkFirestoreKey(key)
     const ids = keys.map(k => docId(k.pk, k.sk))
     if (new Set(ids).size !== ids.length) throw new Error('transact ops must be on distinct items')
     const docs = ops.map(op => ('put' in op ? toDoc(clean(op.put)) : null))

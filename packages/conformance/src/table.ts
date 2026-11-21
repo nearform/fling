@@ -16,6 +16,7 @@ import {
   type Table,
   type TableItem,
 } from '@fling/api/table'
+import { MAX_PATH_BYTES } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 
 const PAST = '2001-01-01T00:00:00.000Z'
@@ -176,6 +177,22 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
         const q = async (skPrefix: string) => sks((await table.query(pk, { skPrefix })).items)
         expect(await q('FILE#é')).toEqual(['FILE#é', 'FILE#é/a'])
         expect(await q('FILE#😀')).toEqual(['FILE#😀', 'FILE#😀x'])
+      })
+
+      it("orders, matches and pages the longest keys a site's paths make", async () => {
+        const { table, pk } = await setup()
+        // A path of MAX_PATH_BYTES in 4-byte characters, and keys that differ only past it.
+        const path = '😀'.repeat(MAX_PATH_BYTES / 4)
+        const all = [`FILE#${path}`, `FILE#${path}/a`, `FILE#${path}/b`, `FILE#${path}é`]
+        for (const sk of [...all].reverse()) await table.put({ pk, sk })
+        expect(sks((await table.query(pk)).items)).toEqual(all)
+        expect(sks((await table.query(pk, { skPrefix: `FILE#${path}/` })).items)).toEqual(
+          all.slice(1, 3)
+        )
+        expect((await pages(table, pk, {}, 1)).flatMap(sks)).toEqual(all)
+        expect((await pages(table, pk, { reverse: true }, 3)).flatMap(sks)).toEqual(
+          [...all].reverse()
+        )
       })
 
       it('pages through with limit and cursor, forwards and backwards', async () => {

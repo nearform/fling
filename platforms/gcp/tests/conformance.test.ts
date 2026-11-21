@@ -17,9 +17,9 @@ import {
 } from '@fling/conformance'
 import { CachedRouteTable } from '@fling/platform-node/route-table/cached'
 import type { Storage } from '@google-cloud/storage'
-import { beforeAll, describe } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { GcsBlobs } from '../src/blobs/gcs.ts'
-import { FirestoreTable } from '../src/table/firestore.ts'
+import { FirestoreTable, MAX_KEY_BYTES } from '../src/table/firestore.ts'
 import {
   FIRESTORE_EMULATOR_HOST,
   firestoreCollection,
@@ -46,6 +46,30 @@ describe.runIf(FIRESTORE_EMULATOR_HOST)('Firestore emulator', () => {
     'CachedRouteTable over TableRouteTable on FirestoreTable',
     () => new CachedRouteTable(new TableRouteTable(table()))
   )
+
+  it('refuses a key longer than Firestore indexes, and finds nothing under one', async () => {
+    const long = 'é'.repeat(MAX_KEY_BYTES / 2 + 1)
+    await expect(table().put({ pk: 'P#long', sk: long })).rejects.toThrow(/1500 bytes/)
+    await expect(
+      table().transact([{ put: { pk: long, sk: 'S' } }, { put: { pk: 'P#ok', sk: 'S' } }])
+    ).rejects.toThrow(/1500 bytes/)
+    expect(await table().get('P#ok', 'S')).toBeNull()
+    expect((await table().query('P#long', { skPrefix: long })).items).toEqual([])
+  })
+
+  it('takes a patch that names the key, and leaves the item where it is', async () => {
+    await table().put({ pk: 'P#patch', sk: 'S', n: 1 })
+    const next = await table().update('P#patch', 'S', { set: { pk: 'X', sk: 'Y', n: 2 } })
+    expect(next).toEqual({ pk: 'P#patch', sk: 'S', n: 2 })
+    expect(await table().get('X', 'Y')).toBeNull()
+  })
+
+  it('refuses a limit that is not a positive whole number', async () => {
+    for (const limit of [0, -1, 1.5, Number.NaN]) {
+      await expect(table().query('P#limit', { limit })).rejects.toThrow(/limit/)
+      await expect(table().scan({ limit })).rejects.toThrow(/limit/)
+    }
+  })
 })
 
 describe.runIf(GCS_ENDPOINT)('fake-gcs-server', () => {

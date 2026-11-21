@@ -120,9 +120,11 @@ resource "azurerm_role_assignment" "deploy_apps" {
 }
 
 # Purge Front Door's cache after a deploy, and nothing else: CDN Profile Contributor (or Reader)
-# on the profile could read the rule set, and with it the origin-verify secret.
+# on the profile could read the rule set, and with it the origin-verify secret. A custom role's
+# name is unique in the directory, so it carries a hash of the profile's id (subscription and
+# resource group included).
 resource "azurerm_role_definition" "purge" {
-  name        = "${local.name} Front Door purge"
+  name        = "${local.name} Front Door purge ${substr(sha256(azurerm_cdn_frontdoor_profile.this.id), 0, 8)}"
   scope       = azurerm_cdn_frontdoor_profile.this.id
   description = "Purge the cache of one Fling instance's Front Door endpoint."
 

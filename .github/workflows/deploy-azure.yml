@@ -197,8 +197,9 @@ jobs:
           jq -e --arg origin "$APP_ORIGIN" '.appOrigin == $origin' <<<"$meta" >/dev/null || {
             echo "::error::spoofed host headers changed what $APP_ORIGIN answered"; exit 1; }
 
-      # Everything, on both domains: every client-side route is served as index.html, and the sites'
-      # 404 and review pages come from the image. Hashed assets are fetched again once, by name.
+      # Everything on the app's domain: every client-side route is served as index.html. Hashed
+      # assets are fetched again once, by name. The sites hosts need none: Front Door holds their
+      # responses for at most a minute, and the sites' 404 and review pages are never stored.
       - name: Purge Front Door
         env:
           GROUP: ${{ steps.config.outputs.resourceGroup }}
@@ -207,7 +208,7 @@ jobs:
           DOMAINS: ${{ steps.config.outputs.frontDoorDomains }}
         run: |
           set -euo pipefail
-          # The custom domains by name, so the purge covers what visitors are served under.
+          # The app's custom domain by name, so the purge covers what visitors are served under.
           read -ra domains <<<"$DOMAINS"
           az afd endpoint purge --resource-group "$GROUP" --profile-name "$PROFILE" \
             --endpoint-name "$ENDPOINT" --domains "${domains[@]}" --content-paths '/*'

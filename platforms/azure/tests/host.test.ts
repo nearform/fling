@@ -78,21 +78,59 @@ describe('behind Front Door', () => {
     expect(seen.headers.has('x-fling-host')).toBe(false)
   })
 
-  it("keeps a response to a site cookie out of Front Door's cache", async () => {
-    const cached = async () =>
-      new Response('file', { headers: { 'cache-control': 'public, max-age=31536000, immutable' } })
-    const fetch = behindFrontDoor(cached, { secret: SECRET })
-    const get = (cookie?: string) =>
-      fetch(
+  describe("Front Door's cache on the sites hosts", () => {
+    const IMMUTABLE = 'public, max-age=31536000, immutable'
+    const REVALIDATE = 'public, max-age=0, must-revalidate, s-maxage=31536000'
+    const control = async (host: string, served: string | null, cookie?: string) => {
+      const fetch = behindFrontDoor(
+        async () =>
+          new Response('file', served === null ? {} : { headers: { 'cache-control': served } }),
+        { secret: SECRET, sitesDomain: 'sites.example.test' }
+      )
+      const res = await fetch(
         new Request(`${ORIGIN}/app.js`, {
-          headers: { 'x-origin-verify': SECRET, ...(cookie ? { cookie } : {}) },
+          headers: {
+            'x-origin-verify': SECRET,
+            'x-fling-host': host,
+            ...(cookie ? { cookie } : {}),
+          },
         })
       )
-    const control = async (cookie?: string) => (await get(cookie)).headers.get('cache-control')
-    expect(await control()).toBe('public, max-age=31536000, immutable')
-    expect(await control('theme=dark')).toBe('public, max-age=31536000, immutable')
-    expect(await control('a=1; fling_site=x')).toBe('private, max-age=31536000, immutable')
-    expect(await control('fling_pass=y')).toBe('private, max-age=31536000, immutable')
+      return res.headers.get('cache-control')
+    }
+    const SITE = 'hello.sites.example.test'
+
+    it('holds a public response for at most a minute, browsers keeping its max-age', async () => {
+      expect(await control(SITE, IMMUTABLE)).toBe(`${IMMUTABLE}, s-maxage=60`)
+      expect(await control(SITE, REVALIDATE)).toBe(
+        'public, max-age=0, must-revalidate, s-maxage=60'
+      )
+      expect(await control(SITE, 'public, max-age=300')).toBe('public, max-age=300, s-maxage=60')
+      expect(await control(SITE, 'public, max-age=10')).toBe('public, max-age=10, s-maxage=10')
+      expect(await control(SITE, IMMUTABLE, 'theme=dark')).toBe(`${IMMUTABLE}, s-maxage=60`)
+    })
+
+    it("makes a response to a site cookie private, the viewer's own", async () => {
+      expect(await control(SITE, IMMUTABLE, 'a=1; fling_site=x')).toBe(
+        'private, max-age=31536000, immutable'
+      )
+      expect(await control(SITE, REVALIDATE, 'fling_pass=y')).toBe(
+        'private, max-age=0, must-revalidate'
+      )
+    })
+
+    it('leaves what Front Door never stores, and stores nothing without a Cache-Control', async () => {
+      expect(await control(SITE, 'no-store')).toBe('no-store')
+      expect(await control(SITE, 'private, max-age=31536000, immutable')).toBe(
+        'private, max-age=31536000, immutable'
+      )
+      expect(await control(SITE, 'no-cache')).toBe('no-cache')
+      expect(await control(SITE, null)).toBe('no-cache')
+    })
+
+    it("leaves the app host's responses as the app sent them", async () => {
+      expect(await control('fling.example.test', IMMUTABLE, 'fling_site=x')).toBe(IMMUTABLE)
+    })
   })
 
   it('leaves a request without X-Fling-Host or X-Forwarded-Host as it came', () => {

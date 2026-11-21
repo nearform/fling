@@ -22,7 +22,8 @@ output "deploy" {
       frontDoor = {
         profile  = azurerm_cdn_frontdoor_profile.this.name
         endpoint = azurerm_cdn_frontdoor_endpoint.this.name
-        domains  = values(local.domains)
+        # The app's domain: the sites hosts' responses are held for at most a minute.
+        domains = [var.hostname]
       }
       appOrigin   = local.url
       sitesDomain = local.sites_domain

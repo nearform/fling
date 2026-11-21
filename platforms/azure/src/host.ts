@@ -49,6 +49,7 @@ export function createAzureHost(opts: AzureHostOptions) {
     fetch: behindFrontDoor(route, {
       ...(config.secrets.originVerifySecret ? { secret: config.secrets.originVerifySecret } : {}),
       allowMissing: config.appEnv === 'development',
+      sitesDomain: config.sitesDomain,
     }),
   }
 }

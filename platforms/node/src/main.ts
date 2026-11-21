@@ -2,7 +2,8 @@
  * The Node host as a process of its own, configured from the environment like every platform
  * (@fling/api/config), with this package's adapters:
  *
- * - **Table**: PostgresTable on `DATABASE_URL` (`postgres://…`), in `DATABASE_SCHEMA`; without
+ * - **Table**: PostgresTable on `DATABASE_URL` (`postgres://…`, its TLS verified against
+ *   `DATABASE_CA_CERT` when set), in `DATABASE_SCHEMA`; without
  *   one, on PGlite (Postgres in process) under `<FS_ROOT>/pglite`, for one process on one machine.
  *   Its schema migrations, then the data migrations, run on start, as a deploy runs them.
  * - **Route table**: the Table itself (TableRouteTable), cached for a few seconds per process.
@@ -44,7 +45,7 @@ import { createNodeHost, sharedSecretTicks } from './host.ts'
 import { PostgresFanout, pgNotifier } from './live/postgres-fanout.ts'
 import { smtpMailerFor } from './mail/smtp.ts'
 import { CachedRouteTable } from './route-table/cached.ts'
-import { pgDatabase, pgliteDatabase } from './table/database.ts'
+import { pgDatabase, pgliteDatabase, pgPoolConfig } from './table/database.ts'
 import { PostgresTable } from './table/postgres.ts'
 import { drain, maintain } from './ticks.ts'
 
@@ -68,7 +69,7 @@ const schema = config.databaseSchema
 
 // The Table: a Postgres server, or Postgres in process.
 const url = config.secrets.databaseUrl
-const pool = url ? new pg.Pool({ connectionString: url }) : undefined
+const pool = url ? new pg.Pool(pgPoolConfig(url, process.env.DATABASE_CA_CERT)) : undefined
 const lite = url ? undefined : await PGlite.create(resolve(fsRoot, 'pglite'))
 const database = pool ? pgDatabase(pool) : pgliteDatabase(lite as PGlite)
 const applied = await database.migrate(schema)

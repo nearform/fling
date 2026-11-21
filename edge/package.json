@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@fling/shared": "workspace:*",
-    "esbuild": "^0.25.12"
+    "esbuild": "^0.28.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

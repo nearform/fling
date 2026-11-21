@@ -71,7 +71,7 @@ import {
   type SQL,
   sql,
 } from 'drizzle-orm'
-import type { Database, FlingDatabase } from './database.ts'
+import type { Database, FlingTransaction } from './database.ts'
 import { DEFAULT_SCHEMA, type ItemsTable, itemsIn } from './items.ts'
 
 type Row = { pk: string; sk: string; data: Record<string, unknown> }
@@ -246,7 +246,7 @@ export class PostgresTable implements Table {
    */
   private async writing<T>(
     keys: Key[],
-    fn: (tx: FlingDatabase, live: Map<string, TableItem>) => Promise<T>
+    fn: (tx: FlingTransaction, live: Map<string, TableItem>) => Promise<T>
   ): Promise<T> {
     const locks = [...new Set(keys.map(lockId))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     for (let attempt = 1; ; attempt++) {
@@ -272,7 +272,7 @@ export class PostgresTable implements Table {
     }
   }
 
-  private async write(tx: FlingDatabase, item: TableItem) {
+  private async write(tx: FlingTransaction, item: TableItem) {
     await tx
       .insert(this.items)
       .values({
@@ -287,7 +287,7 @@ export class PostgresTable implements Table {
       })
   }
 
-  private async remove(tx: FlingDatabase, k: Key) {
+  private async remove(tx: FlingTransaction, k: Key) {
     await tx.delete(this.items).where(this.at(k))
   }
 

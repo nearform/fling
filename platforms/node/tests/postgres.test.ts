@@ -105,6 +105,14 @@ describe('PostgresTable migrations and purge', () => {
     expect(await db.migrate('a'.repeat(63))).toBe(JOURNAL.entries.length)
   })
 
+  it('gives a transaction no transaction of its own (Postgres has no BEGIN inside BEGIN)', async () => {
+    const db = await dbs.pglite()
+    await db.transaction(async tx => {
+      // @ts-expect-error: nesting must not compile
+      void tx.transaction
+    })
+  })
+
   it('purges dead items and keeps the rest', async () => {
     const db = await dbs.pglite()
     let now = Date.parse('2030-01-01T00:00:00.000Z')
@@ -147,6 +155,27 @@ describe('PostgresTable migrations and purge', () => {
   })
 })
 
+describe.runIf(POSTGRES_URL)('migrations beside another migrator (Postgres)', () => {
+  it('waits for the lock another host holds, then migrates', async () => {
+    const db = await dbs.postgres()
+    const pool = new pg.Pool({ connectionString: POSTGRES_URL, max: 1 })
+    const other = await pool.connect()
+    await other.query('SELECT pg_advisory_lock(7316843257)')
+    const schema = `t_lock_${Date.now()}`
+    let done = false
+    const migrating = db.migrate(schema).then(n => {
+      done = true
+      return n
+    })
+    await new Promise(resolve => setTimeout(resolve, 1_200))
+    expect(done).toBe(false)
+    await other.query('SELECT pg_advisory_unlock(7316843257)')
+    other.release()
+    await pool.end()
+    expect(await migrating).toBe(JOURNAL.entries.length)
+  })
+})
+
 describe.runIf(POSTGRES_URL)('PostgresTable purge against a writer (Postgres)', () => {
   it('keeps an item put again while the purge waited for it', async () => {
     const db = await dbs.postgres()
@@ -174,7 +203,7 @@ describe.runIf(POSTGRES_URL)('PostgresTable purge against a writer (Postgres)', 
   })
 })
 
-/** A `pg` Pool whose one client answers `query` with `answer` (by the SQL's text). */
+/** A `pg` Pool whose one client answers `query` with `answer` (by the SQL's text): an error to throw, or rows. */
 function fakePool(answer: (text: string) => unknown) {
   const client = {
     on: vi.fn(),
@@ -182,7 +211,8 @@ function fakePool(answer: (text: string) => unknown) {
     query: vi.fn(async (q: string | { text: string }) => {
       const out = answer(typeof q === 'string' ? q : q.text)
       if (out instanceof Error) throw out
-      return { rows: [], fields: [], command: '', rowCount: 0 }
+      const rows = Array.isArray(out) ? out : []
+      return { rows, fields: [], command: '', rowCount: rows.length }
     }),
   }
   const pool = { connect: vi.fn(async () => client) } as unknown as pg.Pool
@@ -200,6 +230,21 @@ describe('the pg driver', () => {
       })
     ).rejects.toBe(deadlock)
     expect(client.release).toHaveBeenCalledWith(expect.objectContaining({ cause: rollback }))
+  })
+
+  it('refuses to migrate, taking no lock, when the session does not stick (a transaction pooler)', async () => {
+    let pid = 0
+    const sent: string[] = []
+    const { pool, client } = fakePool(text => {
+      sent.push(text)
+      if (/server_encoding/.test(text)) return [{ server_encoding: 'UTF8' }]
+      // Each statement on another server connection, its own search_path.
+      if (/pg_backend_pid/.test(text)) return [{ pid: ++pid, path: '"$user", public' }]
+      return null
+    })
+    await expect(pgDatabase(pool).migrate('s1')).rejects.toThrow(/session-mode/)
+    expect(sent.some(t => /advisory_lock/.test(t))).toBe(false)
+    expect(client.release).toHaveBeenCalledWith(expect.any(Error))
   })
 
   it('destroys a listening connection whose LISTEN failed, and tries again only while listening', async () => {

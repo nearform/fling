@@ -34,13 +34,16 @@ import { DEFAULT_SCHEMA, schemaName } from './items.ts'
 /** What PostgresTable needs of a database: Drizzle's Postgres database, on either driver. */
 export type FlingDatabase = PgDatabase<PgQueryResultHKT>
 
+/** The database inside `Database.transaction`: no `transaction` of its own, so none nests. */
+export type FlingTransaction = Omit<FlingDatabase, 'transaction'>
+
 export interface Database {
   db: FlingDatabase
   /**
    * `fn` in one READ COMMITTED transaction on one connection: committed when it resolves, rolled
    * back when it throws, with `fn`'s error
    */
-  transaction<T>(fn: (tx: FlingDatabase) => Promise<T>): Promise<T>
+  transaction<T>(fn: (tx: FlingTransaction) => Promise<T>): Promise<T>
   /** apply the migrations `schema` lacks (see the header); returns how many it applied */
   migrate(schema?: string): Promise<number>
   /** release the connections (a pool's, or PGlite's database) */
@@ -88,22 +91,19 @@ async function migrating(
   if (encoding?.server_encoding !== 'UTF8') {
     throw new Error(`the database's encoding must be UTF8, not ${encoding?.server_encoding}`)
   }
-  const [locked] = rowsOf<{ pid: number }>(
-    await db.execute(sql`SELECT pg_advisory_lock(${MIGRATE_LOCK}), pg_backend_pid() AS pid`)
-  )
+  // The session must stick before anything is taken in it: behind a pooler in transaction mode
+  // the lock could be taken on one server connection and never let go on another.
+  await db.execute(sql`SET search_path TO ${sql.identifier(name)}`)
+  const pid = await stickySession(db)
+  let locked = false
   try {
-    const before = await migrations(db, name)
+    locked = await lock(db, pid)
     await db.execute(sql`CREATE SCHEMA IF NOT EXISTS ${sql.identifier(name)}`)
-    await db.execute(sql`SET search_path TO ${sql.identifier(name)}`)
-    const [session] = rowsOf<{ schema: string | null; pid: number }>(
-      await db.execute(sql`SELECT current_schema() AS schema, pg_backend_pid() AS pid`)
+    const before = await migrations(db, name)
+    const [session] = rowsOf<{ schema: string | null }>(
+      await db.execute(sql`SELECT current_schema() AS schema`)
     )
-    if (session?.pid !== locked?.pid || session?.schema !== name) {
-      throw new Error(
-        'the database connection does not keep its session (a pooler in transaction mode?): ' +
-          'DATABASE_URL must be a direct or session-mode connection'
-      )
-    }
+    if (session?.schema !== name) throw new Error(SESSION_LOST)
     await run({
       migrationsFolder: MIGRATIONS,
       migrationsSchema: name,
@@ -112,7 +112,51 @@ async function migrating(
     return (await migrations(db, name)) - before
   } finally {
     await db.execute(sql`RESET search_path`)
-    await db.execute(sql`SELECT pg_advisory_unlock(${MIGRATE_LOCK})`)
+    if (locked) await db.execute(sql`SELECT pg_advisory_unlock(${MIGRATE_LOCK})`)
+  }
+}
+
+const SESSION_LOST =
+  'the database connection does not keep its session (a pooler in transaction mode?): ' +
+  'DATABASE_URL must be a direct or session-mode connection'
+
+/** The server connection's pid, once two reads find it and its search_path the same. */
+async function stickySession(db: FlingDatabase): Promise<number> {
+  const read = async () =>
+    rowsOf<{ pid: number; path: string }>(
+      await db.execute(sql`SELECT pg_backend_pid() AS pid, current_setting('search_path') AS path`)
+    )[0]
+  const [a, b] = [await read(), await read()]
+  if (!a || !b || a.pid !== b.pid || a.path !== b.path) throw new Error(SESSION_LOST)
+  return a.pid
+}
+
+/** How long a migrator waits for another one (a host starting beside it) to finish. */
+const LOCK_WAIT_MS = 5 * 60_000
+const LOCK_POLL_MS = 500
+
+/**
+ * The migrations' session advisory lock, on server connection `pid`, polled with
+ * `pg_try_advisory_lock` until LOCK_WAIT_MS: true once held; throws past the deadline, saying
+ * another migrator holds it.
+ */
+async function lock(db: FlingDatabase, pid: number): Promise<boolean> {
+  const deadline = Date.now() + LOCK_WAIT_MS
+  for (;;) {
+    const [row] = rowsOf<{ ok: boolean; pid: number }>(
+      await db.execute(
+        sql`SELECT pg_try_advisory_lock(${MIGRATE_LOCK}) AS ok, pg_backend_pid() AS pid`
+      )
+    )
+    if (row?.pid !== pid) throw new Error(SESSION_LOST)
+    if (row.ok) return true
+    if (Date.now() > deadline) {
+      throw new Error(
+        `another host has held the migrations' lock for ${LOCK_WAIT_MS / 60_000} minutes: ` +
+          'if none is migrating, a connection still holds it (pg_locks, advisory)'
+      )
+    }
+    await new Promise(resolve => setTimeout(resolve, LOCK_POLL_MS))
   }
 }
 

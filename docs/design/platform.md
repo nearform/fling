@@ -2,9 +2,9 @@
 
 # Design: the logical platform
 
-Status: describes the contract AWS and Cloudflare meet today, and the building blocks for new
-platforms ([§5](#5-shared-building-blocks-for-new-platforms)), built in `platforms/node` and run
-as the e2e's third local runtime. No instance runs on them yet.
+Status: describes the contract AWS, Cloudflare, and DigitalOcean and self-host meet today, and the
+building blocks for new platforms ([§5](#5-shared-building-blocks-for-new-platforms)), built in
+`platforms/node` and run as the e2e's third local runtime.
 
 Fling is one core and several **platforms**. The core holds every rule. A platform is
 `platforms/<cloud>/`: an entry point plus adapters that put the core on one cloud's primitives.
@@ -350,6 +350,15 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
    `MAIL_DRIVER=smtp`), which every transactional provider also offers, passing
    `mailerConformance` against a fake SMTP server. A provider's own HTTP API, where SMTP is
    blocked, is a further adapter beside it.
+4. **S3-compatible storage**: `S3Blobs` (`platforms/s3`), which AWS uses too, configured from the
+   environment (`s3FromEnv`: `SITES_BUCKET`, `S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT` for the address
+   presigned URLs name, `S3_REGION`, `S3_FORCE_PATH_STYLE`, `S3_UPLOAD_DIGEST`, the keys). The
+   Node host takes it with `STORAGE_DRIVER=s3` and serves the host's upload routes beside a store
+   bound by MD5 (§3.2).
+5. **One image**: `platforms/node/Dockerfile` bundles an entry point (`scripts/build.mjs`; the
+   Node host's own by default, another platform's with `FLING_ENTRY`) with the web build into an
+   image configured entirely from the environment, which answers `/healthz` to probes on any
+   address. Self-host (Compose, Helm) and DigitalOcean run it.
 
 ## 6. Known gaps in the contract
 

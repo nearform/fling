@@ -64,8 +64,9 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
       # The Cosmos DB Linux emulator (vNext, HTTP on 8081 by default) and Azurite for
       # platforms/azure. The emulator has no health command; its suites wait for it to answer.
+      # Its only tag is a moving preview, so it is pinned by digest (the vnext-preview index).
       cosmos:
-        image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+        image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator@sha256:09dcd04e7149975f0427e6cb09781681f407fc74d01e54fc9d6410c36795cda3
         ports: ['8081:8081']
       azurite:
         image: mcr.microsoft.com/azure-storage/azurite:3.38.0

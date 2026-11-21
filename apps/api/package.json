@@ -7,12 +7,16 @@
   "type": "module",
   "exports": {
     "./app": "./src/app.ts",
+    "./app-host": "./src/app-host.ts",
     "./config": "./src/config.ts",
     "./errors": "./src/lib/errors.ts",
+    "./lib/mime": "./src/lib/mime.ts",
     "./deps": "./src/deps.ts",
     "./types": "./src/types.ts",
     "./live": "./src/live.ts",
     "./live-memory": "./src/live-memory.ts",
+    "./live-ws": "./src/live-ws.ts",
+    "./sites-host": "./src/sites-host.ts",
     "./mail": "./src/mail/types.ts",
     "./mail/memory": "./src/mail/memory.ts",
     "./mail/file": "./src/mail/file.ts",
@@ -39,6 +43,7 @@
     "./servers/logs": "./src/servers/logs.ts",
     "./servers/memory-logs": "./src/servers/memory-logs.ts",
     "./servers/node": "./src/servers/node/runtime.ts",
+    "./servers/node/restart": "./src/servers/node/restart.ts",
     "./servers/node/entry": "./src/servers/node/entry.mjs",
     "./servers/node/helper": "./src/servers/node/helper.mjs"
   },
@@ -55,6 +60,7 @@
     "hono": "^4.13.16",
     "jose": "^6.2.12",
     "oauth4webapi": "^3.8.8",
+    "ws": "^8.21.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -63,7 +69,6 @@
     "@types/ws": "^8.18.2",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.12",
-    "ws": "^8.21.0"
+    "vitest": "^4.1.12"
   }
 }

@@ -14,7 +14,8 @@ import { FsBlobs } from '@fling/api/blobs/fs'
 import { HostUploads } from '@fling/api/blobs/host-uploads'
 import { loadBaseConfig } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
-import { MemoryLiveHub } from '@fling/api/live-memory'
+import type { Admission } from '@fling/api/live'
+import { LocalFanout, MemoryLiveHub } from '@fling/api/live-memory'
 import type { MailResult } from '@fling/api/mail'
 import { FileMailer } from '@fling/api/mail/file'
 import { MemoryMailer } from '@fling/api/mail/memory'
@@ -150,29 +151,42 @@ mailerConformance('FileMailer', () => {
   }
 })
 
-/** MemoryLiveHub as dev.ts drives it: the socket's messages and close go to its connection. */
+/** A MemoryLiveHub connection as live-ws.ts drives it; `gone` makes its socket's sends fail. */
+async function memoryClient(hub: MemoryLiveHub, admission: Admission, gone: WeakSet<object>) {
+  const got: LiveHubClient['got'][number][] = []
+  const client: LiveHubClient = {
+    got,
+    send: async m => conn.message(JSON.stringify(m)),
+    close: async () => conn.close(),
+  }
+  const conn = await hub.connect(admission, {
+    send(data) {
+      if (gone.has(client)) throw new Error('gone')
+      got.push(JSON.parse(data))
+    },
+  })
+  return client
+}
+
 liveHubConformance('MemoryLiveHub', () => {
   const hub = new MemoryLiveHub()
-  const gone = new WeakSet<LiveHubClient>()
+  const gone = new WeakSet<object>()
   return {
     publish: (siteId, message) => hub.publish(siteId, message),
-    async connect(admission) {
-      const got: LiveHubClient['got'][number][] = []
-      const client: LiveHubClient = {
-        got,
-        send: async m => conn.message(JSON.stringify(m)),
-        close: async () => conn.close(),
-      }
-      const conn = await hub.connect(admission, {
-        send(data) {
-          if (gone.has(client)) throw new Error('gone')
-          got.push(JSON.parse(data))
-        },
-      })
-      return client
-    },
-    async drop(client) {
-      gone.add(client)
-    },
+    connect: admission => memoryClient(hub, admission, gone),
+    drop: async client => void gone.add(client),
+  }
+})
+
+/** Two processes' hubs sharing a fan-out: connections alternate between them. */
+liveHubConformance('MemoryLiveHub across processes (a shared fan-out)', () => {
+  const fanout = new LocalFanout()
+  const hubs = [new MemoryLiveHub({ fanout }), new MemoryLiveHub({ fanout })]
+  const gone = new WeakSet<object>()
+  let n = 0
+  return {
+    publish: (siteId, message) => (hubs[0] as MemoryLiveHub).publish(siteId, message),
+    connect: admission => memoryClient(hubs[n++ % 2] as MemoryLiveHub, admission, gone),
+    drop: async client => void gone.add(client),
   }
 })

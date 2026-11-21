@@ -217,6 +217,47 @@ describe('a store bound by MD5', () => {
     expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
   })
 
+  it('checks the copy it serves, so a PUT racing the finalize changes nothing served', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>checked</h1>')]
+    const { uploads, versionId } = await stageUploads(files)
+    const id = (await env.store.findSite('hello'))?.id as string
+    const staged = stagedObjectKey(id, versionId, 'index.html')
+    await upload(env, uploads, files)
+    // A colliding body (same size) PUT to the staging URL the moment the copy is made, before
+    // the check reads anything.
+    const copy = env.blobs.copy.bind(env.blobs)
+    env.blobs.copy = async (from: string, to: string) => {
+      await copy(from, to)
+      if (from === staged) await env.blobs.put(staged, Buffer.from('<h1>collide</h1>'))
+    }
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+    expect(await env.blobs.head(staged)).toBeNull()
+  })
+
+  it('refuses a colliding body PUT before the copy, and keeps nothing', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>checked</h1>')]
+    const { uploads, versionId } = await stageUploads(files)
+    const id = (await env.store.findSite('hello'))?.id as string
+    const staged = stagedObjectKey(id, versionId, 'index.html')
+    await upload(env, uploads, files)
+    const copy = env.blobs.copy.bind(env.blobs)
+    env.blobs.copy = async (from: string, to: string) => {
+      if (from === staged) await env.blobs.put(staged, Buffer.from('<h1>collide</h1>'))
+      await copy(from, to)
+    }
+    await expect(publish(env.deps, user, 'hello', versionId)).rejects.toMatchObject({
+      status: 409,
+      code: 'upload_mismatch',
+    })
+    expect(await stored(versionId, 'index.html')).toBeNull()
+    expect(await env.blobs.head(staged)).toBeNull()
+  })
+
   it('scans the staged bytes and keeps nothing when they hold a secret', async () => {
     md5Bound()
     const files = [file('a.js', `k="${FAKE_AWS_KEY}"`, 'text/javascript')]

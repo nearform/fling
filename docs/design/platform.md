@@ -131,11 +131,12 @@ Each element uses the same headings:
     the bytes.
   - An MD5 is the client's word, not the manifest's SHA-256, which the version id and kept-file
     reuse trust. So a store bound by MD5 says so (`Blobs.uploadDigest = 'md5'`), and its uploads
-    are presigned to a staging key outside every version (`stagedObjectKey`). Publication reads
-    each staged file, checks its SHA-256 and scans it there (409 `upload_mismatch` or 422, nothing
-    kept), then copies it into the version and deletes the staging copy. A URL is still good after
-    the check, so a colliding body PUT to it lands at the staging key, never in what is served;
-    maintenance deletes such leftovers with the version. On such a store a deploy reads each
+    are presigned to a staging key outside every version (`stagedObjectKey`). Publication first
+    copies each staged file into the version, which no URL can write, then checks the copy's size
+    and SHA-256 and scans it (409 `upload_mismatch` or 422, nothing kept), and deletes the staging
+    copies. A URL is still good meanwhile, so a colliding body PUT to it lands at the staging key,
+    never in what is checked and served; the hourly maintenance deletes such leftovers once the
+    URLs expire. On such a store a deploy reads each
     uploaded byte once more.
   - A presigned GET expires and is tied to its key.
   - `deletePrefix` pages past one listing.
@@ -333,6 +334,9 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
      again on each row, so an item put again over a dead one meanwhile stays;
    - a string jsonb can't hold (NUL, a lone surrogate) is stored escaped and read back as it was,
      so the Table keeps what the other backends keep;
+   - `DATABASE_URL` is a direct or session-mode connection, never a pooler in transaction mode,
+     which would hand the migrator's lock and search_path and the fan-out's LISTEN to different
+     server connections; the migrator checks its session holds and fails at start if not;
    - its SQL is Drizzle's: the query builder wherever it can express a statement, the `sql`
      template (values as parameters, names quoted) for the advisory locks, `starts_with`, the
      `::jsonb` cast and the purge's `(pk, sk) IN (…)`; `tests/sql-guard.test.ts` fails on SQL

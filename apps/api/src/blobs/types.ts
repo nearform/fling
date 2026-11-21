@@ -26,8 +26,8 @@ export interface Blobs {
    * The digest presigned uploads are bound to (default `sha256`). With `md5`, nothing ties an
    * upload to the manifest's SHA-256, which the version id and kept-file reuse trust, and an MD5
    * collision could replace a file after it was checked while its URL is still good. So uploads
-   * go to a staging key (`stagedObjectKey`), and publication checks each file's SHA-256 and scans
-   * it there before copying it into the version, which no presigned URL can write.
+   * go to a staging key (`stagedObjectKey`), and publication copies each file into the version,
+   * which no presigned URL can write, before it checks the copy's SHA-256 and scans it.
    */
   readonly uploadDigest?: 'sha256' | 'md5'
   /**
@@ -69,10 +69,13 @@ export interface Blobs {
   deletePrefix(prefix: string): Promise<void>
 }
 
+/** Upload URLs from publication's stage() live this long; the CLI uploads straight away. */
+export const UPLOAD_URL_TTL_SECONDS = 15 * 60
+
 /**
  * Where an upload to a store bound by MD5 lands (`uploadDigest: 'md5'`): under the site prefix and
- * outside every version, so the edge never serves it. Publication checks the bytes here, then
- * copies them into the version; a presigned URL never names the version's own keys on such a store.
+ * outside every version, so the edge never serves it. Publication copies the bytes into the
+ * version and checks them there; a presigned URL never names the version's own keys on such a store.
  */
 export const stagedObjectKey = (siteId: string, versionId: string, path: string) =>
   `sites/${siteId}/_staged/${versionId}/${path}`

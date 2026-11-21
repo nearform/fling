@@ -3,6 +3,11 @@
 **Throw it. Get a link.** Fling turns a folder, an HTML file or a zip, made by you or by any agent,
 into `https://<name>.<your Fling>`: private to your team, live in seconds.
 
+> **Fling runs in your own cloud.** It isn't a hosted service you sign up to: first someone deploys
+> a Fling for your organisation, at an address like `fling.yourcompany.com`, on AWS or Cloudflare.
+> Then everyone installs the CLI or adds the connector and points it at that address.
+> **[Deploy your Fling →](#deploy)** Already have one? Start below.
+
 ```sh
 npm install -g @nearform/fling
 fling setup https://<your Fling>     # sign in, add Fling to Claude Code and Claude Desktop
@@ -213,8 +218,10 @@ Terms are defined in [CONTEXT.md](CONTEXT.md), and what each release changed in
 
 ## Deploy
 
-Each cloud is a platform under `platforms/`, with its own entry point, adapters, infrastructure and
-deploy guide. Pick one per instance:
+To run your own Fling, pick a platform below and follow its guide. You need a domain you control
+(the app at e.g. `fling.yourcompany.com`, sites at `*.fling.yourcompany.com`) and an OpenID Connect
+sign-in such as Google, Microsoft Entra ID or Okta. Each cloud is a platform under `platforms/`,
+with its own entry point, adapters, infrastructure and deploy guide. Pick one per instance:
 
 | Platform | Guide | Infrastructure |
 |---|---|---|

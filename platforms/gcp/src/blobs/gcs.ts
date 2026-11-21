@@ -71,6 +71,8 @@ export class GcsBlobs implements Blobs {
       version: 'v4',
       action: 'read',
       expires: Date.now() + (opts.expiresIn ?? 900) * 1000,
+      // A site's file, read from the store's own origin: downloaded, never rendered there.
+      responseDisposition: 'attachment',
     })
     return url
   }

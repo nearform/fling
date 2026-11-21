@@ -1,0 +1,10 @@
+{
+  "name": "fling-gcp-server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google-cloud/firestore": "9.4.1",
+    "@google-cloud/storage": "9.0.0",
+    "google-auth-library": "11.3.4"
+  }
+}

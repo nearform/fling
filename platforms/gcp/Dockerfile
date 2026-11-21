@@ -5,11 +5,11 @@
 # (deploy-gcp.yml does both):
 #   docker build -f platforms/gcp/Dockerfile -t <image> .
 
-# The Google clients, at the versions the bundle was built against (dist/server/package.json).
+# The Google clients and everything they need, exactly as server/package-lock.json pins them.
 FROM node:24-slim AS deps
 WORKDIR /app
-COPY platforms/gcp/dist/server/package.json ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY platforms/gcp/dist/server/package.json platforms/gcp/dist/server/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 FROM node:24-slim
 ENV NODE_ENV=production

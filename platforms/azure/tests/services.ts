@@ -45,10 +45,25 @@ export const CONTAINER_SETTINGS = {
 
 let client: CosmosClient | undefined
 
+/** The emulator takes a while to start (a CI service container is up before it listens). */
+async function ready<T>(attempt: () => Promise<T>, ms = 90_000): Promise<T> {
+  const until = Date.now() + ms
+  for (;;) {
+    try {
+      return await attempt()
+    } catch (err) {
+      if (Date.now() > until) throw err
+      await new Promise(resolve => setTimeout(resolve, 2_000))
+    }
+  }
+}
+
 /** A fresh container on the emulator, with the instance's settings. */
 export async function cosmosContainer() {
   client ??= new CosmosClient({ endpoint: COSMOS_ENDPOINT as string, key: COSMOS_EMULATOR_KEY })
-  const { database } = await client.databases.createIfNotExists({ id: `fling-${run}` })
+  const { database } = await ready(() =>
+    (client as CosmosClient).databases.createIfNotExists({ id: `fling-${run}` })
+  )
   const { container } = await database.containers.createIfNotExists({
     id: `items-${containers++}`,
     ...CONTAINER_SETTINGS,
@@ -61,6 +76,6 @@ export async function azuriteContainer() {
   const credential = new StorageSharedKeyCredential(AZURITE_ACCOUNT, AZURITE_KEY)
   const service = new BlobServiceClient(AZURITE_ENDPOINT as string, credential)
   const container = service.getContainerClient(`fling-${run}-${containers++}`)
-  await container.createIfNotExists()
+  await ready(() => container.createIfNotExists())
   return { service, container, credential }
 }

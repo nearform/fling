@@ -9,6 +9,11 @@ export const MAX_FILES = 5000
  */
 export const MAX_PATH_BYTES = 900
 /**
+ * The longest path a stored file may already have, in characters: files deployed while the cap
+ * counted characters keep serving, and a partial publish's `remove` can still name them.
+ */
+export const MAX_STORED_PATH_LENGTH = 1024
+/**
  * A publish on a base (after a pull) copies the base's files it keeps forward into the new
  * version, one copy per file in the request that makes it live. Capped so that request stays well
  * inside a Worker's subrequest budget (an R2 copy is a read and a write) and a Lambda's timeout.

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { FormsConfigSchema } from './forms.ts'
-import { MAX_FILES, MAX_PATH_BYTES } from './limits.ts'
+import { MAX_FILES, MAX_STORED_PATH_LENGTH } from './limits.ts'
 import { DeployManifestSchema } from './manifest.ts'
 import { PublishPathSchema } from './publish-path.ts'
 import {
@@ -289,7 +289,7 @@ export const DeployRequestSchema = z
     path: PublishPathSchema.optional(),
     base: z.string().min(1).max(100).optional(),
     partial: z.boolean().optional(),
-    remove: z.array(z.string().min(1).max(MAX_PATH_BYTES)).max(MAX_FILES).optional(),
+    remove: z.array(z.string().min(1).max(MAX_STORED_PATH_LENGTH)).max(MAX_FILES).optional(),
     spa: z.boolean().optional(),
     visibility: VisibilitySchema.optional(),
     access: AccessLevelSchema.optional(),

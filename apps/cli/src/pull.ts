@@ -26,7 +26,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import {
   FORMS_FILE,
-  isValidSitePath,
+  isSitePath,
   PULL_URL_TTL_SECONDS,
   type PullFile,
   PullResponseSchema,
@@ -196,7 +196,7 @@ export async function pullSite(
   const prefix = opts.path === undefined ? '' : `${opts.path}/`
   const local = (f: PullFile) => {
     const rel = f.path.slice(prefix.length)
-    if (!f.path.startsWith(prefix) || !isValidSitePath(rel)) {
+    if (!f.path.startsWith(prefix) || !isSitePath(rel)) {
       throw new CliError(`The server sent a file outside the site: ${f.path}`)
     }
     return rel
@@ -238,7 +238,7 @@ export async function pullSite(
     for (const path of Object.keys(before.files)) {
       if (now.has(path) || !path.startsWith(beforePrefix)) continue
       const rel = path.slice(beforePrefix.length)
-      if (isValidSitePath(rel)) await rm(join(opts.dir, rel), { force: true })
+      if (isSitePath(rel)) await rm(join(opts.dir, rel), { force: true })
     }
   }
   await writeSiteLink(opts.dir, {

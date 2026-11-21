@@ -4,7 +4,7 @@
  * (`base_changed`) when the deploy is made and at finalize, who may, the MAX_KEPT_FILES cap, and
  * publication's own interface (`publishBytes`, the remote MCP's).
  */
-import { MAX_KEPT_FILES, siteObjectKey } from '@fling/shared'
+import { MAX_KEPT_FILES, MAX_PATH_BYTES, siteObjectKey } from '@fling/shared'
 import { describe, expect, it, vi } from 'vitest'
 import { manifestKey } from '../src/blobs/types.ts'
 import type { Principal } from '../src/policy.ts'
@@ -101,6 +101,35 @@ describe('publish on a base', () => {
     const detail = await json(await api(env, alice.key, 'GET', '/api/sites/team'))
     expect(detail.versions[0]).toMatchObject({ id: done.body.versionId, base, fileCount: 4 })
     expect(detail.versions[0].path).toBeUndefined()
+  })
+
+  it('a stored file with a path longer than an upload may be can be removed by name', async () => {
+    const { env, bob, base } = await world()
+    // 1,000 characters: a file stored when paths could be up to 1,024 of them. Only the base's
+    // manifest names it (its bytes would pass macOS's 1,024-byte limit on a file's whole path).
+    const long = `${'a'.repeat(995)}.html`
+    expect(long.length).toBeGreaterThan(MAX_PATH_BYTES)
+    const site = await env.store.findSite('team')
+    const key = manifestKey(site?.id as string, base)
+    const manifest = await env.blobs.getJson<{ files: object[] }>(key)
+    const stored = file(long, '<h1>long</h1>')
+    await env.blobs.putJson(key, { files: [...(manifest?.files ?? []), stored.meta] })
+    // An upload at that path is refused.
+    expect((await stageAs(env, bob.key, 'team', [stored], { base, partial: true })).status).toBe(
+      400
+    )
+    const removed = await deploy(env, bob.key, 'team', [edited], {
+      base,
+      partial: true,
+      remove: [long],
+    })
+    expect(removed.status).toBe(200)
+    expect(Object.keys(await served(env)).sort()).toEqual([
+      'about.html',
+      'css/site.css',
+      'index.html',
+      'old.html',
+    ])
   })
 
   it('partial: only what changed is sent, `remove` leaves files out, the rest is kept', async () => {

@@ -139,7 +139,7 @@ import {
 import { pathsTemplate } from '@fling/shared/paths-templates'
 import { computeVersionId } from '@fling/shared/version-id'
 import { guestRefusal } from './auth/middleware.ts'
-import { manifestKey } from './blobs/types.ts'
+import { manifestKey, stagedObjectKey, stagedPrefix } from './blobs/types.ts'
 import { formsForDeploy, writeForms } from './forms.ts'
 import { inviterOf } from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
@@ -398,8 +398,7 @@ function secretDetected(findings: readonly SecretFinding[]): ApiError {
  */
 async function scanStoredVersion(
   deps: Deps,
-  siteId: string,
-  versionId: string,
+  keyOf: (f: ManifestFile) => string,
   files: readonly ManifestFile[],
   verify = false
 ): Promise<{ findings: SecretFinding[]; mismatched: string[] }> {
@@ -407,7 +406,7 @@ async function scanStoredVersion(
     isScannablePath(f.path) && f.size > 0 && f.size <= SECRET_SCAN_MAX_FILE_BYTES
   const toRead = verify ? files : files.filter(scannable)
   const results = await mapLimit(toRead, SCAN_CONCURRENCY, async f => {
-    const bytes = await deps.blobs.get(siteObjectKey(siteId, versionId, f.path))
+    const bytes = await deps.blobs.get(keyOf(f))
     if (!bytes) return { findings: [], mismatched: verify ? [f.path] : [] }
     const wrong = verify && createHash('sha256').update(bytes).digest('hex') !== f.sha256
     return {
@@ -1111,9 +1110,13 @@ async function finalizePath(
 /**
  * Every file uploaded, at its size (409 `missing_uploads` otherwise), and read back and scanned
  * for secrets: the server never saw these bytes. A secret → what was uploaded is deleted (the
- * version stays pending with no manifest; deploying again starts over) and 422. On a store whose
- * uploads are bound only to an MD5 (`Blobs.uploadDigest`), every file's SHA-256 is checked too, and
- * one that isn't the manifest's is deleted the same way, with 409 `upload_mismatch`.
+ * version stays pending with no manifest; deploying again starts over) and 422.
+ *
+ * On a store whose uploads are bound only to an MD5 (`Blobs.uploadDigest`), the uploads are at
+ * their staging keys: each one's SHA-256 is checked and it is scanned there, then it is copied into
+ * the version and the staging copy deleted, so what is served is what was checked, whatever is
+ * PUT to its URL afterwards. One that isn't the manifest's is deleted like a secret, with 409
+ * `upload_mismatch`. A file already copied in (a finalize that stopped part way) was checked.
  */
 async function checkUploads(
   deps: Deps,
@@ -1122,11 +1125,16 @@ async function checkUploads(
   sent: readonly ManifestFile[]
 ) {
   const { blobs } = deps
+  const staging = blobs.uploadDigest === 'md5'
+  const finalKey = (f: ManifestFile) => siteObjectKey(storage, versionId, f.path)
+  const stagedKey = (f: ManifestFile) => stagedObjectKey(storage, versionId, f.path)
+  const sized = async (key: string, f: ManifestFile) => (await blobs.head(key))?.size === f.size
   const checks = await mapLimit(sent, HEAD_CONCURRENCY, async file => {
-    const head = await blobs.head(siteObjectKey(storage, versionId, file.path))
-    return head && head.size === file.size ? null : file.path
+    if (!staging) return { file, state: (await sized(finalKey(file), file)) ? 'here' : 'missing' }
+    if (await sized(stagedKey(file), file)) return { file, state: 'staged' }
+    return { file, state: (await sized(finalKey(file), file)) ? 'here' : 'missing' }
   })
-  const missing = checks.filter((p): p is string => p !== null)
+  const missing = checks.filter(c => c.state === 'missing').map(c => c.file.path)
   if (missing.length > 0) {
     const listed = missing.slice(0, MAX_MISSING_LISTED)
     const more = missing.length > listed.length ? ` (+${missing.length - listed.length} more)` : ''
@@ -1136,15 +1144,16 @@ async function checkUploads(
       { missing }
     )
   }
+  const toCheck = staging ? checks.filter(c => c.state === 'staged').map(c => c.file) : sent
   const { findings, mismatched } = await scanStoredVersion(
     deps,
-    storage,
-    versionId,
-    sent,
-    blobs.uploadDigest === 'md5'
+    staging ? stagedKey : finalKey,
+    toCheck,
+    staging
   )
   if (findings.length > 0 || mismatched.length > 0) {
     await blobs.deletePrefix(siteVersionPrefix(storage, versionId))
+    if (staging) await blobs.deletePrefix(stagedPrefix(storage, versionId))
     await blobs.delete(manifestKey(storage, versionId))
     if (findings.length > 0) throw secretDetected(findings)
     const listed = mismatched.slice(0, MAX_MISSING_LISTED)
@@ -1156,6 +1165,10 @@ async function checkUploads(
       'upload_mismatch',
       { mismatched }
     )
+  }
+  if (staging) {
+    await mapLimit(toCheck, HEAD_CONCURRENCY, f => blobs.copy(stagedKey(f), finalKey(f)))
+    await blobs.deletePrefix(stagedPrefix(storage, versionId))
   }
 }
 
@@ -1286,7 +1299,12 @@ export async function stage(
   const { storage, version, sent, path } = prepared
   const asSent = (p: string) => (path ? `${path.folder}/${p}` : p)
   const uploads = await mapLimit(sent, PRESIGN_CONCURRENCY, async file => {
-    const signed = await deps.blobs.presignPut(siteObjectKey(storage, version.id, file.path), {
+    // A store bound by MD5 takes uploads at a staging key, checked and copied in at finalize.
+    const key =
+      deps.blobs.uploadDigest === 'md5'
+        ? stagedObjectKey(storage, version.id, file.path)
+        : siteObjectKey(storage, version.id, file.path)
+    const signed = await deps.blobs.presignPut(key, {
       contentType: file.contentType,
       cacheControl: cacheControlFor(file.path),
       sha256: file.sha256,

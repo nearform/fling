@@ -4,6 +4,7 @@
 // are not here: they render server data and live in the core. Browser-safe (zod only).
 
 import { z } from 'zod'
+import { EmailInputSchema } from './text.ts'
 
 /** The channels a notification can go out on. `email` is the only one so far. */
 export const CHANNEL_IDS = ['email'] as const
@@ -331,7 +332,7 @@ export type MailAdmin = z.infer<typeof MailAdminSchema>
 
 /** `POST /api/admin/mail/test`: send a test email to any address. */
 export const MailTestRequestSchema = z.object({
-  to: z.string().trim().toLowerCase().min(3).max(254),
+  to: EmailInputSchema,
 })
 export type MailTestRequest = z.infer<typeof MailTestRequestSchema>
 

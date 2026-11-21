@@ -130,10 +130,13 @@ Each element uses the same headings:
     sends exactly the headers `presignPut` returns. Clients upload directly; the API never sees
     the bytes.
   - An MD5 is the client's word, not the manifest's SHA-256, which the version id and kept-file
-    reuse trust. So a store bound by MD5 says so (`Blobs.uploadDigest = 'md5'`), and publication
-    reads every uploaded file back and checks its SHA-256 before the version goes live (409
-    `upload_mismatch`, nothing kept). The secret scan already reads the text files back; this adds
-    the rest, so on such a store a deploy reads each uploaded byte once more.
+    reuse trust. So a store bound by MD5 says so (`Blobs.uploadDigest = 'md5'`), and its uploads
+    are presigned to a staging key outside every version (`stagedObjectKey`). Publication reads
+    each staged file, checks its SHA-256 and scans it there (409 `upload_mismatch` or 422, nothing
+    kept), then copies it into the version and deletes the staging copy. A URL is still good after
+    the check, so a colliding body PUT to it lands at the staging key, never in what is served;
+    maintenance deletes such leftovers with the version. On such a store a deploy reads each
+    uploaded byte once more.
   - A presigned GET expires and is tied to its key.
   - `deletePrefix` pages past one listing.
   - The port has no multipart upload. Large uploads through MCP are chunked in the Table and

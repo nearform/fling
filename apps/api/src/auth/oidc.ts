@@ -20,6 +20,7 @@
  *
  * Both are Web Crypto + fetch only, so this runs unchanged on Node and on Workers.
  */
+import { isStorableText } from '@fling/shared'
 import { createRemoteJWKSet, customFetch, type JWTPayload, jwtVerify } from 'jose'
 import * as oauth from 'oauth4webapi'
 import type { Config } from '../config.ts'
@@ -275,11 +276,15 @@ function verifiedOf(v: unknown): boolean | undefined {
   return undefined
 }
 
+const emailOf = (email: string | undefined) =>
+  email !== undefined && isStorableText(email) ? email : undefined
+
 function identityOf(claims: JWTPayload): Identity {
   if (!claims.sub) throw new Error('ID token has no sub')
   return {
     subject: claims.sub,
-    email: str(claims.email),
+    // An address keys the user's records, so one that isn't storable text counts as none.
+    email: emailOf(str(claims.email)),
     emailVerified: verifiedOf(claims.email_verified),
     name: str(claims.name),
     picture: str(claims.picture),

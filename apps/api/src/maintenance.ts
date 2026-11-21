@@ -25,7 +25,7 @@
  * instance has this tick, mail or not.
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
-import { formsKey, manifestKey } from './blobs/types.ts'
+import { formsKey, manifestKey, stagedPrefix } from './blobs/types.ts'
 import { pathRef } from './paths.ts'
 import { sweepRevocations } from './revocations.ts'
 import { serverSite, serverVersion } from './servers/index.ts'
@@ -132,6 +132,8 @@ export async function maintainTarget(
         await deps.servers.retire(serverSite(site), serverVersion(storage, v.id))
       }
       await deps.blobs.deletePrefix(siteVersionPrefix(storage, v.id))
+      // What was PUT to a staging URL after its version was checked (a store bound by MD5).
+      await deps.blobs.deletePrefix(stagedPrefix(storage, v.id))
       await deps.blobs.delete(manifestKey(storage, v.id))
       await deps.blobs.delete(formsKey(storage, v.id))
       await deps.store.deleteVersion(ref, v.id)

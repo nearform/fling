@@ -29,10 +29,10 @@
  * (D1 can't).
  */
 
-const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+import { isStorableText } from '@fling/shared'
 
 /** Whether a string can be a pk or an sk: no NUL, no lone surrogate. */
-export const storableKey = (s: string) => !s.includes('\0') && !LONE_SURROGATE.test(s)
+export const storableKey = isStorableText
 
 /** Whether a key can be stored (both parts `storableKey`). */
 export const storable = (k: Key) => storableKey(k.pk) && storableKey(k.sk)

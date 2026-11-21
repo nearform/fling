@@ -7,6 +7,7 @@
 // Browser-safe (zod only).
 
 import { z } from 'zod'
+import { EmailInputSchema } from './text.ts'
 
 /** The most addresses an audience holds. */
 export const AUDIENCE_EMAILS_MAX = 100
@@ -58,7 +59,7 @@ export type Audience = z.infer<typeof AudienceSchema>
  */
 export const AudienceInputSchema = z.object({
   emails: z
-    .array(z.string().trim().toLowerCase().min(3).max(254))
+    .array(EmailInputSchema)
     .max(AUDIENCE_EMAILS_MAX, `An audience holds at most ${AUDIENCE_EMAILS_MAX} addresses`),
   groups: z
     .array(z.string().trim().toLowerCase().min(1).max(100))

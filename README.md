@@ -135,3 +135,5 @@ a platform doc that maps it onto its cloud: [AWS](docs/platforms/aws.md),
 [Fly.io](docs/platforms/fly.md) and [Vercel](docs/platforms/vercel.md). They build on
 [`platforms/node`](platforms/node), which runs a whole Fling in one Node server on Postgres. See
 [docs/platforms/](docs/platforms/README.md) for the comparison.
+
+[![banner](https://raw.githubusercontent.com/nearform/.github/refs/heads/master/assets/os-banner-green.svg)](https://www.nearform.com/contact/?utm_source=open-source&utm_medium=banner&utm_campaign=os-project-pages)

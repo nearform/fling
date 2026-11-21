@@ -16,7 +16,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test && node --test 'scripts/*.test.mjs'",
     "build": "pnpm -r build",
-    "infra": "node scripts/check-terraform.mjs",
+    "infra": "node scripts/check-terraform.mjs && node scripts/check-helm.mjs",
     "gate": "pnpm lint && pnpm infra && pnpm typecheck && pnpm test && pnpm build && pnpm e2e",
     "cli": "tsx apps/cli/src/cli.ts",
     "e2e": "pnpm --filter @fling/e2e e2e",

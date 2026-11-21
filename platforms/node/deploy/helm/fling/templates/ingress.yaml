@@ -1,0 +1,40 @@
+{{- if .Values.ingress.enabled }}
+{{- $sites := include "fling.sitesHost" . }}
+{{- /* The sites are the names under the sites domain; the domain itself is the app host or nothing. */}}
+{{- $hosts := list .Values.instance.appHost (printf "*.%s" $sites) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "fling.fullname" . }}
+  labels:
+    {{- include "fling.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - secretName: {{ .Values.ingress.tls.secretName }}
+      hosts:
+        {{- range $hosts }}
+        - {{ . | quote }}
+        {{- end }}
+  {{- end }}
+  rules:
+    {{- range $hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "fling.fullname" $ }}
+                port:
+                  name: http
+    {{- end }}
+{{- end }}

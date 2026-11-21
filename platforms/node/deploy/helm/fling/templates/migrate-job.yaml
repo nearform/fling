@@ -1,0 +1,79 @@
+{{- if and .Values.migrate.enabled (or .Values.secrets.tickSecret .Values.secrets.existingSecret) }}
+# The data migrations, after the new pods are up: POST /ticks/migrate on the Service, as the app
+# host, until it reports done. Every migration is safe to repeat and to run beside traffic. With
+# an existing Secret without TICK_SECRET the host answers 404 and the job says so.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "fling.fullname" . }}-migrate
+  labels:
+    {{- include "fling.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "fling.selector" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "fling.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: TARGET
+              value: {{ printf "http://%s:%v" (include "fling.fullname" .) .Values.service.port | quote }}
+            - name: APP_HOST
+              value: {{ .Values.instance.appHost | quote }}
+            - name: TICK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "fling.secretName" . }}
+                  key: TICK_SECRET
+          command:
+            - node
+            - -e
+            - |
+              const http = require('node:http')
+              const target = new URL('/ticks/migrate', process.env.TARGET)
+              const call = () => new Promise((resolve, reject) => {
+                const req = http.request(target, {
+                  method: 'POST',
+                  headers: { host: process.env.APP_HOST, authorization: `Bearer ${process.env.TICK_SECRET}` },
+                }, res => {
+                  let body = ''
+                  res.on('data', d => { body += d })
+                  res.on('end', () => resolve({ status: res.statusCode, body }))
+                })
+                req.on('error', reject)
+                req.end()
+              })
+              ;(async () => {
+                for (let i = 1; i <= 60; i++) {
+                  const { status, body } = await call().catch(e => ({ status: 0, body: String(e) }))
+                  if (status === 200) {
+                    const report = JSON.parse(body)
+                    console.log(JSON.stringify(report))
+                    if (report.done) process.exit(0)
+                  } else {
+                    console.log(`attempt ${i}: ${status} ${body.slice(0, 200)}`)
+                    if (status === 404) process.exit(1)
+                  }
+                  await new Promise(r => setTimeout(r, 5000))
+                }
+                process.exit(1)
+              })()
+{{- end }}

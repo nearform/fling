@@ -1,0 +1,6 @@
+Fling {{ .Values.image.tag }} is starting on https://{{ .Values.instance.appHost }}, its sites on
+https://<name>.{{ .Values.instance.sitesDomain }}.
+
+- DNS: point {{ .Values.instance.appHost }} and *.{{ .Values.instance.sitesDomain }} at the Ingress.
+- TLS: the Secret {{ .Values.ingress.tls.secretName }} needs a certificate for both (a wildcard needs DNS-01).
+- Check: curl https://{{ .Values.instance.appHost }}/.well-known/fling

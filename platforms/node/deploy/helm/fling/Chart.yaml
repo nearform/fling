@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fling
+description: >-
+  Fling on Kubernetes: the Node host image behind an Ingress for the app host and every site
+  (*.<sites domain>), on a Postgres and an S3-compatible store you provide.
+type: application
+# The chart's own version. The Fling release it runs is the image tag (values: image.tag).
+version: 0.1.0
+keywords: [fling, static-sites]

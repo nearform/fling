@@ -1,0 +1,186 @@
+name: Deploy (DigitalOcean)
+
+# Deploys a release of Fling to DigitalOcean: the Node host image (platforms/node/Dockerfile) on the
+# App Platform app that platforms/digitalocean/infra provisions. By hand only (workflow_dispatch),
+# with a release tag as `ref`; an older tag rolls back. Merging to main deploys nothing.
+#
+# Terraform owns the shape (the app, Postgres, Spaces, the registry, the domains, the environment);
+# this workflow owns the code: it builds the image of the tag, pushes it to the registry and points
+# the app's service at it. Terraform ignores the image tag, so an apply never rolls a deploy back.
+#
+# Everything instance-specific is one repository variable, DO_DEPLOY_CONFIG (the JSON of the
+# module's `deploy` output: APP_ID, APP_ORIGIN, REGISTRY, REPOSITORY, SERVICE), and secrets of the
+# `digitalocean` environment:
+# - DIGITALOCEAN_ACCESS_TOKEN: DigitalOcean has no GitHub OIDC, so a long-lived API token, scoped
+#   to what this needs (app read and update, registry read and write);
+# - FLING_TICK_SECRET: the module's `tick_secret` output, for the migrate endpoint;
+# - FLING_E2E_API_KEY (and optionally FLING_E2E_MEMBER_API_KEY, FLING_E2E_ADMIN_API_KEY,
+#   FLING_E2E_OUTSIDER_API_KEY): test users' API keys for the smoke test; without the first it is
+#   skipped with a warning.
+# See platforms/digitalocean/DEPLOY.md.
+#
+# Order:
+#   1. the image, built from the tag with the instance's app origin baked into the Claude Desktop
+#      extension, pushed as <registry>/<repository>:<release>;
+#   2. the app's spec with only the service's image tag changed, and wait for the deployment
+#      (App Platform starts the new containers, checks /healthz, then moves traffic; each new
+#      container migrates the schema and the data on start);
+#   3. /.well-known/fling answers for this instance and this release;
+#   4. the data migrations through POST /ticks/migrate until it reports done (normally already
+#      done by the start-up run; this is the deploy's own check, as on AWS and Cloudflare);
+#   5. the e2e scenario as a smoke test.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The release tag to deploy, e.g. v0.14.0. An older tag rolls back.'
+        type: string
+        required: true
+
+concurrency:
+  group: deploy-digitalocean
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to DigitalOcean
+    runs-on: ubuntu-24.04
+    environment: digitalocean
+    timeout-minutes: 40
+    env:
+      DO_DEPLOY_CONFIG: ${{ vars.DO_DEPLOY_CONFIG }}
+      TAG: ${{ inputs.ref }}
+    steps:
+      - name: Check the release tag and the deploy config
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+            { echo "::error::'$TAG' is not a release tag (v<x.y.z>)"; exit 1; }
+          echo "RELEASE=${TAG#v}" >> "$GITHUB_ENV"
+          [ -n "$DO_DEPLOY_CONFIG" ] ||
+            { echo "::error::DO_DEPLOY_CONFIG is not set (see platforms/digitalocean/DEPLOY.md)"; exit 1; }
+          for key in APP_ID APP_ORIGIN REGISTRY REPOSITORY SERVICE; do
+            value="$(jq -er --arg k "$key" '.[$k] | strings | select(length > 0)' <<<"$DO_DEPLOY_CONFIG")" ||
+              { echo "::error::DO_DEPLOY_CONFIG has no $key"; exit 1; }
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.ref }}
+          fetch-depth: 0
+
+      # Only ever ship a release whose commit is on main.
+      - name: Check the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main ||
+            { echo "::error::$TAG is not on main; only releases on main can be deployed"; exit 1; }
+          echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to the registry
+        run: doctl registry login --expiry-seconds 1800
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: platforms/node/Dockerfile
+          push: true
+          tags: registry.digitalocean.com/${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.RELEASE }}
+          build-args: |
+            FLING_MCPB_SERVER_URL=${{ env.APP_ORIGIN }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The spec App Platform holds (secrets come back encrypted and are kept as they are) with only
+      # the service's image tag changed; `--wait` returns when the deployment is live or failed.
+      - name: Deploy the image
+        run: |
+          set -euo pipefail
+          spec="$RUNNER_TEMP/spec.json"
+          doctl apps spec get "$APP_ID" --format json |
+            jq --arg service "$SERVICE" --arg tag "$RELEASE" \
+              '.services |= map(if .name == $service then .image.tag = $tag else . end)' > "$spec"
+          jq -e --arg service "$SERVICE" --arg tag "$RELEASE" \
+            'any(.services[]; .name == $service and .image.tag == $tag)' "$spec" >/dev/null ||
+            { echo "::error::the app has no service $SERVICE"; exit 1; }
+          doctl apps update "$APP_ID" --spec "$spec" --wait >/dev/null
+          # A failed deployment leaves the previous one active: check what is live, not the spec.
+          live="$(doctl apps get "$APP_ID" --output json |
+            jq -r --arg service "$SERVICE" \
+              '.[0].active_deployment | "\(.phase) \(.spec.services[] | select(.name == $service) | .image.tag)"')"
+          [ "$live" = "ACTIVE $RELEASE" ] ||
+            { echo "::error::$RELEASE is not live (active deployment: $live); see the app's deployment logs"; exit 1; }
+
+      - name: Check the release answers
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if meta="$(curl -fsS -H 'Cache-Control: no-cache' "$APP_ORIGIN/.well-known/fling?deploy=$SHA")" &&
+              jq -e --arg origin "$APP_ORIGIN" --arg release "$RELEASE" \
+                '.version >= 1 and .appOrigin == $origin and .release == $release' <<<"$meta" >/dev/null; then
+              jq -c '{name, appOrigin, sitesDomain, release, auth: .auth.kind}' <<<"$meta"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance and release $RELEASE"; exit 1
+
+      # Each call runs migration pages for up to 50 s and returns the runner's report; call again
+      # until `done`. `busy` means another run (a starting container's) holds a migration's lock.
+      - name: Run data migrations
+        env:
+          TICK_SECRET: ${{ secrets.FLING_TICK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TICK_SECRET" ]; then
+            echo "::warning::FLING_TICK_SECRET is not set: the data migrations were left to the containers' start (platforms/digitalocean/DEPLOY.md)"
+            exit 0
+          fi
+          out="$RUNNER_TEMP/migrate.json"
+          for attempt in $(seq 1 40); do
+            curl -fsS -X POST -H "Authorization: Bearer $TICK_SECRET" --max-time 90 \
+              "$APP_ORIGIN/ticks/migrate" -o "$out"
+            jq -r '.migrations[] | "\(.id) \(.title): \(.status)"' "$out"
+            if jq -e '.done' "$out" >/dev/null; then
+              jq -r '.migrations[] | "- \(.id) \(.title): \(.status)"' "$out" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if jq -e 'any(.migrations[]; .status == "busy")' "$out" >/dev/null; then sleep 20; fi
+          done
+          echo "::error::Data migrations still not done after 40 calls"; exit 1
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Smoke test
+        env:
+          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
+          FLING_E2E_MEMBER_API_KEY: ${{ secrets.FLING_E2E_MEMBER_API_KEY }}
+          FLING_E2E_ADMIN_API_KEY: ${{ secrets.FLING_E2E_ADMIN_API_KEY }}
+          FLING_E2E_OUTSIDER_API_KEY: ${{ secrets.FLING_E2E_OUTSIDER_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FLING_E2E_API_KEY" ]; then
+            echo "::warning::FLING_E2E_API_KEY is not set: the smoke test was skipped"
+            exit 0
+          fi
+          pnpm install --frozen-lockfile
+          pnpm --filter @fling/e2e smoke "$APP_ORIGIN" --propagation-seconds 30
+
+      - name: Summary
+        run: echo "### Deployed $TAG (\`$SHA\`) to $APP_ORIGIN" >> "$GITHUB_STEP_SUMMARY"

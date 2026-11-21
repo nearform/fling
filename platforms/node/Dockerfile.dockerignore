@@ -15,3 +15,5 @@
 .claude
 coverage
 platforms/cloudflare/deploy-config.json
+**/fling.env
+**/*.tfvars

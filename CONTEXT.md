@@ -549,9 +549,17 @@ list through policy. A **live ticket** (`POST /api/sites/:name/live`, `comment.r
 HMAC-signed pass naming the room and the peer; the client opens `${url}?ticket=…`, says `hello`
 and is answered `welcome`. The core publishes through the **LiveHub** port (`publish(siteId,
 message)`); the room logic (`relay`, `joinRoom`, `receive`, `leaveRoom`) is the core's and every
-hub only keeps connections: in memory locally (`live-memory.ts`), a Durable Object per site on
-Cloudflare, API Gateway WebSockets with live connection records (`SITE#<id>/LIVE#<connectionId>`)
-on AWS. `LIVE_URL` says where clients connect; `LIVE=false` turns rooms off (the `live`
+hub only keeps connections: in memory locally and in the **Node host** (`live-memory.ts`), a
+Durable Object per site on Cloudflare, API Gateway WebSockets with live connection records
+(`SITE#<id>/LIVE#<connectionId>`) on AWS. Every hub passes `liveHubConformance`.
+
+**Live fan-out** — how the processes of one instance share their live rooms (`LiveFanout`,
+`apps/api/src/live-memory.ts`): each `MemoryLiveHub` tells the fan-out every room event (a join, a
+message, a leave, a publish) and hears the others', keeping the peers of other processes as
+remote presence that expires after `LIVE_CONNECTION_TTL_SECONDS` should their process stop
+without saying so. In process by default (`LocalFanout`); Postgres `LISTEN`/`NOTIFY` on the
+instance's channel for processes that share a Postgres (`PostgresFanout`,
+`platforms/node/src/live/postgres-fanout.ts`). `LIVE_URL` says where clients connect; `LIVE=false` turns rooms off (the `live`
 capability).
 
 **Event** — something that happened that may concern people, such as a site shared with them or
@@ -620,8 +628,15 @@ expires after 30 days (`SUPPRESSION_MS`, `apps/api/src/notifications/drain.ts`).
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three
 ports:
 **Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),
-**Blobs** (site files and manifests, including upload URLs bound to a sha256) and **RouteTable**
-(the keys the edge routes site hosts by).
+**Blobs** (site files and manifests, including upload URLs bound to the file's digest) and
+**RouteTable** (the keys the edge routes site hosts by).
+
+**Upload binding** — what holds a presigned upload to the exact bytes the manifest names: the
+SHA-256 (`x-amz-checksum-sha256`) where the store checks one, the MD5 (`Content-MD5`, from the
+manifest's optional `md5`) where it checks only that. A store that checks neither, or an upload
+whose manifest has no MD5, goes through **host uploads** (`HostUploads`,
+`apps/api/src/blobs/host-uploads.ts`): signed `/blob-upload` and `/blob-download` routes on the
+app host that check the SHA-256 themselves before writing to the store.
 
 **Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of
@@ -644,8 +659,11 @@ scans the table.
 
 **Site routing** — how a request to a sites host becomes a site version's file, a sign-in redirect
 or the 404 page: one pure decision, `routeSiteRequest` (`packages/shared/src/site-routing.ts`).
-The edge only rewrites: the CloudFront Function (`edge/`, generated around it) and the Cloudflare
-Worker's sites host are thin shells that do the lookups and map the decision to their runtime.
+The edge only rewrites: the CloudFront Function (`edge/`, generated around it) maps the decision
+onto CloudFront; a host that serves the sites itself (the Cloudflare Worker, the **Node host**)
+carries it out through the core's **sites host** (`handleSiteRequest`,
+`apps/api/src/sites-host.ts`): the lookups, the cookies, the decision's headers on every answer,
+and the platform's own ways to read an object, one of Fling's pages, or invoke a site server.
 
 **Indexing** — sites are not indexed. `/robots.txt` on every sites host is Fling's own
 `Disallow: /` (`ROBOTS_TXT`, from `apps/web/sites-robots.txt`), in place of any the site has, and
@@ -655,7 +673,24 @@ makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shel
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one
-Worker, D1, R2, Workers KV with D1 behind it). Every adapter, including the core's memory/fs ones,
+Worker, D1, R2, Workers KV with D1 behind it). `platforms/node` holds what platforms on Node share
+and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer.
+
+**Node host** — all of an instance in one Node HTTP server (`createNodeHost`,
+`platforms/node/src/host.ts`), routing by host as the Cloudflare Worker does: the API, the UI, host
+uploads and the **tick endpoints** on the app host; the sites host on `*.<sites domain>`; live
+rooms over WebSockets (`apps/api/src/live-ws.ts`) with a **Live fan-out**. Every adapter is passed
+in. `platforms/node/src/main.ts` runs it from the environment; the e2e's `node` runtime runs that.
+
+**Tick endpoints** — the Node host's `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate`
+on the app host, for a scheduler or a deploy, behind a caller check the platform supplies
+(`TickAuthorizer`; by default `Authorization: Bearer <TICK_SECRET>`). Without one they answer 404.
+
+**Postgres Table** — the Table on Postgres (`PostgresTable`, `platforms/node/src/table/postgres.ts`),
+over `pg` or PGlite: one `items(pk, sk COLLATE "C", data jsonb, expires_at)` table in a schema of
+its own, conditions checked under per-key advisory locks so exactly one of racing writers wins, and
+its own schema migrations (`table/schema.ts`, `<schema>.fling_schema`). Expired items are hidden
+at once and purged hourly. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
 

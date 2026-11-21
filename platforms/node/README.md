@@ -1,0 +1,40 @@
+<!-- markdownlint-disable MD013 -->
+
+# @fling/platform-node
+
+What every Fling platform on a Node runtime shares, and a platform of its own. The design is
+[§5 of the logical platform](../../docs/design/platform.md#5-shared-building-blocks-for-new-platforms).
+
+| Module | What |
+|---|---|
+| `src/host.ts` | The Node host: one HTTP server for the API, the web app, the sites and the live rooms, routed by host |
+| `src/table/` | The Postgres Table (`PostgresTable`) over `pg` or PGlite, and its schema migrations |
+| `src/live/postgres-fanout.ts` | Live rooms shared by the processes on one Postgres (`LISTEN`/`NOTIFY`) |
+| `src/route-table/cached.ts` | The route table behind a short per-process cache |
+| `src/mail/smtp.ts` | The SMTP mailer (`MAIL_DRIVER=smtp`) |
+| `src/ticks.ts` | The notifications and maintenance ticks |
+| `src/main.ts` | All of the above as one process, configured from the environment |
+
+## Running it
+
+Build the web app first (`pnpm --filter "@fling/web..." build`), then:
+
+```sh
+APP_ORIGIN=http://flingnode.lvh.me:8080 SITES_DOMAIN=flingnode.lvh.me:8080 SITE_SCHEME=http \
+  DEV_LOGIN=1 pnpm --filter @fling/platform-node start
+```
+
+It takes the instance configuration every platform takes (`platforms/aws/DEPLOY.md`, Instance
+configuration), and these of its own:
+
+| Name | Default | What |
+|---|---|---|
+| `PORT` | `8080` | Where it listens |
+| `FS_ROOT` | `.fling-node` | Site files, site servers' working copies and, without `DATABASE_URL`, PGlite's database |
+| `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms |
+| `DATABASE_SCHEMA` | `public` | The Postgres schema the Table is in, so instances can share a database |
+| `TICK_SECRET` (secret, 32 characters or more) | none: the tick endpoints answer 404 | The bearer token for `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate` |
+
+It migrates the schema and the data on start and runs the ticks on timers in process; every tick
+is safe to repeat, so the endpoints can run beside them. The e2e runs it as the `node` local
+runtime (`pnpm --filter @fling/e2e e2e node`).

@@ -45,7 +45,7 @@ import { migrateSchema } from './table/schema.ts'
 import { pgClient, pgliteClient } from './table/sql.ts'
 import { drain, maintain } from './ticks.ts'
 
-/** The drivers this process implements; the env may not name others. */
+/** The drivers this process implements, whatever the environment names. */
 export const NODE_DRIVERS = {
   STORE_DRIVER: 'postgres',
   STORAGE_DRIVER: 'fs',

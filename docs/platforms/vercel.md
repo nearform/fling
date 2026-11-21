@@ -30,7 +30,7 @@ provider. The route table also has write limits that a busy instance reaches.
 | Route table | Global Config (formerly Edge Config), or Marketplace Redis (Upstash) | `platforms/vercel/src/route-table/global-config.ts` or `…/redis.ts` | Global Config is read at the edge with almost no latency, but it allows 1 MB per store and, on Pro, 100 writes an hour. Every publish, share link and revocation is a write, so Redis is the safer default |
 | Sites host | Routing Middleware | `platforms/vercel/src/middleware.ts` | See §3 |
 | Live hub | None (Functions do not hold WebSockets) | a hub over a third-party WebSocket service (Ably, Pusher), or off | `publish` becomes the provider's REST publish to a per-site channel, and the ticket check moves to the provider's token auth |
-| Mailer | None on Vercel | the shared HTTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | |
+| Mailer | None on Vercel | the shared SMTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)), or a provider's HTTP API beside it | |
 | Site servers | Vercel Sandbox (Firecracker microVMs) | `platforms/vercel/src/servers/` | The closest isolation primitive. Whether its start time and cost suit a server per site is open (§8) |
 | Server logs | Written by the runner to Blob | `platforms/vercel/src/servers/server-logs.ts` | |
 | Ticks | Vercel Cron Jobs calling a Function | `platforms/vercel/src/ticks.ts` | Calls carry `CRON_SECRET`. Whether a per-minute schedule is allowed depends on the plan (§8) |
@@ -85,7 +85,7 @@ The module would be `platforms/vercel/infra`, versioned like the AWS one.
 
 - `live` is off unless a third-party WebSocket hub is configured.
 - `servers` is off until the Sandbox runner exists.
-- `email` needs an HTTP mailer provider.
+- `email` needs an SMTP provider.
 - Every other capability can be on.
 
 ## 8. Gaps and open questions

@@ -17,6 +17,9 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 **Why Fling?** Click through the deck, flung with Fling itself:
 <https://why-fling.fling.labs.nearform.com/>
 
+**See it working.** Five short walkthroughs, each starting with a problem and recorded on a real
+Fling: <https://fling-tour.fling.labs.nearform.com/>
+
 - **From anywhere.** The CLI, Claude Code (plugin), Claude Desktop (extension), Claude on the web
   and mobile (connector `https://<your Fling>/mcp`), and any script, CI job or background agent
   with an API key.
@@ -25,11 +28,12 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it. Ship a form with the site to collect labels or scores,
-  and export the answers as CSV.
+  and export the answers as CSV. Watch the walkthroughs on [reviews](https://fling-tour.fling.labs.nearform.com/get-started/) and
+  [forms](https://fling-tour.fling.labs.nearform.com/eval-labelling/).
 - **A small server when a page isn't enough.** Put a `server.ts` beside `index.html` and Fling runs
   it for `/api/*`, behind the site's sign-in, with its keys kept as site secrets: call an API, post
   to Slack, keep a price list off the page. Off unless the instance turns it on. See
-  [docs/site-servers.md](docs/site-servers.md).
+  [docs/site-servers.md](docs/site-servers.md), or [watch the walkthrough](https://fling-tour.fling.labs.nearform.com/site-server/).
 - **Hear about it.** With email set up, people are told when a site is shared with them, they join a
   group, or someone comments on their site, and choose what they hear about from any client.
 - **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.
@@ -41,8 +45,9 @@ fling deploy ./dist --name demo      # → https://demo.<your Fling>/
   `fling use` switches between them. See [apps/cli](apps/cli/README.md).
 - **Claude (Desktop, web, mobile)**: add the connector `https://<your Fling>/mcp` under
   Settings → Connectors, or install the Claude Desktop extension from the Get started page.
+  [Watch the walkthrough](https://fling-tour.fling.labs.nearform.com/claude-app/).
 - **Claude Code**: `fling setup`, or `/plugin marketplace add nearform/fling`, then
-  `/plugin install fling@fling`.
+  `/plugin install fling@fling`. [Watch the walkthrough](https://fling-tour.fling.labs.nearform.com/get-started/).
 
 ## How it works
 
@@ -63,7 +68,7 @@ several. [More](docs/how-it-works.md#instances)
 
 **Publishing**
 - **[Paths](docs/how-it-works.md#paths-one-site-a-folder-per-ticket):** one site, a folder per ticket, each with
-  its own versions, rollback and owners.
+  its own versions, rollback and owners. [Walkthrough](https://fling-tour.fling.labs.nearform.com/team-site/).
 - **[Pull](docs/how-it-works.md#pull):** download a live site, change it, and publish only what changed, without
   overwriting someone else's publish.
 - **[Markdown](docs/how-it-works.md#markdown)** files are served as pages.
@@ -71,9 +76,10 @@ several. [More](docs/how-it-works.md#instances)
 
 **Reviewing**
 - **[Review](docs/how-it-works.md#review):** comments pinned to a spot or a passage, beside the live site.
+  [Walkthrough](https://fling-tour.fling.labs.nearform.com/get-started/).
 - **[Live review](docs/how-it-works.md#live-review):** comments and pointers appear for everyone as they happen.
 - **[Forms](docs/how-it-works.md#structured-feedback-forms):** collect labels, ratings or any structured answer
-  per page, blind if you like, and export them as CSV or JSON.
+  per page, blind if you like, and export them as CSV or JSON. [Walkthrough](https://fling-tour.fling.labs.nearform.com/eval-labelling/).
 - **[Notifications](docs/how-it-works.md#notifications):** email when a site is shared with you or someone
   comments, each person choosing what they hear about.
 - **[Previews and thumbnails](docs/how-it-works.md#previews-and-thumbnails)** of each site in the web UI.

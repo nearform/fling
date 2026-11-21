@@ -1,0 +1,132 @@
+# Fling on Kubernetes. Every key is documented here; platforms/node/DEPLOY.md walks through a
+# whole install, and platforms/node/README.md lists the Node host's environment.
+
+image:
+  # The Node host image (platforms/node/Dockerfile), pushed to a registry the cluster can pull.
+  repository: ghcr.io/example/fling-node
+  # The Fling release to run (required), e.g. 0.14.0.
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Several replicas share one Postgres: its LISTEN/NOTIFY fan-out spreads the live rooms, the Table's
+# conditional writes keep them consistent, and every tick is safe to run on each of them.
+replicaCount: 2
+
+instance:
+  # The web app and API: https://<appHost>.
+  appHost: fling.example.com
+  # Sites are https://<name>.<sitesDomain>. It may be appHost itself; it must share its
+  # registrable domain.
+  sitesDomain: fling.example.com
+  # Default: sitesDomain.
+  siteCookieDomain: ""
+  # Live rooms over WebSockets at wss://<appHost>/api/live. Off: the live capability is off.
+  live: true
+
+# The instance's own configuration, as the Node host's environment (every key is in
+# platforms/aws/DEPLOY.md, Instance configuration). Secrets go in `secrets.extra` instead.
+env:
+  INSTANCE_NAME: Fling
+  ALLOWED_EMAIL_DOMAINS: example.com
+  # ADMIN_EMAILS: admin@example.com
+  # OIDC_ISSUER: https://accounts.google.com
+  # OIDC_CLIENT_ID: change-me.apps.googleusercontent.com
+  # MAIL_DRIVER: smtp
+  # MAIL_FROM: fling@mail.example.com
+  # SMTP_HOST: smtp.example.com
+
+# The Postgres the Table is in: a direct or session-mode connection (never a transaction-mode
+# pooler). The URL itself is the secret DATABASE_URL.
+database:
+  schema: public
+  # PEM of the server's CA, when it is not one Node trusts (managed Postgres with its own CA).
+  caCert: ""
+
+# Any S3-compatible store (MinIO, Spaces, AWS S3, …); the keys are secrets below.
+storage:
+  bucket: fling-sites
+  # The store's API from inside the cluster. Empty: AWS S3.
+  endpoint: ""
+  # The store as clients reach it, the address presigned URLs name. Default: endpoint.
+  publicEndpoint: ""
+  region: us-east-1
+  forcePathStyle: false
+  # md5 (Content-MD5, every S3-compatible store) or sha256 (AWS S3, MinIO). Default: md5 with an
+  # endpoint, sha256 without.
+  uploadDigest: ""
+
+# The secrets. Either name a Secret you manage (`existingSecret`, with the keys listed below), or
+# give the values here and the chart makes one. Never commit real values to a values file.
+secrets:
+  existingSecret: ""
+  # SESSION_SECRET, SITE_HMAC_KEY: at least 32 characters each.
+  sessionSecret: ""
+  siteHmacKey: ""
+  # TICK_SECRET (32+ characters): the bearer token for POST /ticks/*, which the migrate hook calls.
+  # Empty: the hook is skipped (the host still migrates on start).
+  tickSecret: ""
+  # DATABASE_URL: postgres://user:password@host:5432/db
+  databaseUrl: ""
+  # S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY. Empty: the AWS SDK's default chain (IRSA, …).
+  s3AccessKeyId: ""
+  s3SecretAccessKey: ""
+  # More secret environment (OIDC_CLIENT_SECRET, SMTP_PASSWORD, GOOGLE_CLIENT_SECRET, …).
+  extra: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: ""
+  # With cert-manager, a ClusterIssuer that solves DNS-01 (a wildcard certificate needs it):
+  #   cert-manager.io/cluster-issuer: letsencrypt-dns01
+  # ingress-nginx: the largest upload through the host, and long-lived WebSockets:
+  #   nginx.ingress.kubernetes.io/proxy-body-size: 32m
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  annotations: {}
+  tls:
+    enabled: true
+    # The Secret holding a certificate for appHost and *.sitesDomain (cert-manager fills it).
+    secretName: fling-tls
+
+# Runs after every install and upgrade, once the new pods are up: POST /ticks/migrate until it
+# reports done (the data migrations; each is safe to repeat). Needs secrets.tickSecret.
+migrate:
+  enabled: true
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+
+# The largest request body the host takes (MAX_REQUEST_BYTES); the ingress must allow as much.
+maxRequestBytes: 33554432
+
+# FS_ROOT: scratch space (site servers' working copies; site files with STORAGE_DRIVER=fs). The
+# chart always uses the S3 store, so an emptyDir is enough.
+scratch:
+  sizeLimit: 1Gi
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+nodeSelector: {}
+tolerations: []
+affinity: {}

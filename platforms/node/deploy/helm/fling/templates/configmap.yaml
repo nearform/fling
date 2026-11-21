@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fling.fullname" . }}
+  labels:
+    {{- include "fling.labels" . | nindent 4 }}
+data:
+  APP_ENV: production
+  APP_ORIGIN: {{ printf "https://%s" (.Values.instance.appHost | required "instance.appHost is required") | quote }}
+  SITES_DOMAIN: {{ include "fling.sitesHost" . | quote }}
+  SITE_COOKIE_DOMAIN: {{ .Values.instance.siteCookieDomain | default .Values.instance.sitesDomain | quote }}
+  {{- if .Values.instance.live }}
+  LIVE_URL: {{ printf "wss://%s/api/live" .Values.instance.appHost | quote }}
+  {{- else }}
+  LIVE: "off"
+  {{- end }}
+  DATABASE_SCHEMA: {{ .Values.database.schema | quote }}
+  {{- with .Values.database.caCert }}
+  DATABASE_CA_CERT: {{ . | quote }}
+  {{- end }}
+  STORAGE_DRIVER: s3
+  SITES_BUCKET: {{ .Values.storage.bucket | required "storage.bucket is required" | quote }}
+  {{- with .Values.storage.endpoint }}
+  S3_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.publicEndpoint }}
+  S3_PUBLIC_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  S3_REGION: {{ .Values.storage.region | quote }}
+  S3_FORCE_PATH_STYLE: {{ .Values.storage.forcePathStyle | toString | quote }}
+  {{- with .Values.storage.uploadDigest }}
+  S3_UPLOAD_DIGEST: {{ . | quote }}
+  {{- end }}
+  MAX_REQUEST_BYTES: {{ .Values.maxRequestBytes | int64 | toString | quote }}
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | toString | quote }}
+  {{- end }}

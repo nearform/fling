@@ -1,0 +1,25 @@
+# Values `helm lint` and `helm template` check the chart with (scripts/check-helm.mjs).
+# Placeholders only.
+image:
+  repository: registry.example.test/fling-node
+  tag: 0.0.0
+instance:
+  appHost: fling.example.test
+  sitesDomain: sites.example.test
+storage:
+  bucket: fling-sites
+  endpoint: http://minio.example.test:9000
+  publicEndpoint: https://storage.example.test
+  forcePathStyle: true
+secrets:
+  sessionSecret: placeholder-session-secret-placeholder-0000
+  siteHmacKey: placeholder-site-hmac-key-placeholder-00000
+  tickSecret: placeholder-tick-secret-placeholder-0000000
+  databaseUrl: postgres://fling:placeholder@postgres.example.test:5432/fling
+  s3AccessKeyId: placeholder
+  s3SecretAccessKey: placeholder
+  extra:
+    OIDC_CLIENT_SECRET: placeholder
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-dns01

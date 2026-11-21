@@ -4,8 +4,8 @@ name: CI
 # scenario on each platform's local runtime: apps/api's dev server, `wrangler dev` and the Node
 # host), the same
 # command a person runs before committing. The workflow adds no check of its own, so what passes
-# here is exactly what passes on a laptop. It also installs terraform, which the gate's Terraform
-# check only skips when it is missing outside CI.
+# here is exactly what passes on a laptop. It also installs terraform and helm, which the gate's
+# Terraform and Helm checks only skip when they are missing outside CI.
 #
 # The one addition is local stand-ins for the cloud services: DynamoDB Local, MinIO and Postgres as
 # service containers, and the env vars that point the adapter conformance suites in platforms/aws,
@@ -82,4 +82,8 @@ jobs:
         with:
           terraform_version: 1.16.6
           terraform_wrapper: false
+      # For the Helm part of the gate (scripts/check-helm.mjs): lint and template the charts.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
       - run: pnpm gate

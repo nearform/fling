@@ -12,10 +12,11 @@
  * Downloads: `presignGet` is a read-only SAS for one blob, good for `expiresIn` seconds. With a
  * token credential (the host's managed identity) it is a user delegation SAS, signed with a key
  * the service hands the identity (Storage Blob Data Contributor allows it) and kept for an hour;
- * with an account key (Azurite) it is a service SAS.
+ * with an account key (Azurite) it is a service SAS. On an https endpoint the SAS takes https only.
  *
  * `copy` is a server-side Copy Blob within the account, which keeps Content-Type and
- * Cache-Control; `deletePrefix` lists the prefix a page at a time and deletes what it lists.
+ * Cache-Control. Its source is named by a short read SAS (as `presignGet` signs one), since Copy
+ * Blob reads the source with no credential of the caller's; `deletePrefix` lists the prefix a page at a time and deletes what it lists.
  */
 
 import {
@@ -23,6 +24,7 @@ import {
   type BlobServiceClient,
   type ContainerClient,
   generateBlobSASQueryParameters,
+  SASProtocol,
   StorageSharedKeyCredential,
   type UserDelegationKey,
 } from '@azure/storage-blob'
@@ -34,6 +36,9 @@ const isNotFound = (err: unknown) => (err as { statusCode?: number } | null)?.st
 const DELEGATION_KEY_MS = 60 * 60 * 1000
 /** A delegation key is renewed once it has less than this left (the longest presigned GET). */
 const DELEGATION_KEY_MARGIN_MS = 15 * 60 * 1000
+
+/** How long a copy's source SAS lasts, in seconds. */
+const COPY_SOURCE_SECONDS = 300
 
 /** How many deletes of a listing page run at once. */
 const DELETE_CONCURRENCY = 32
@@ -72,6 +77,7 @@ export class AzureBlobs implements Blobs {
       blobName: key,
       permissions: BlobSASPermissions.parse('r'),
       expiresOn: new Date(this.now() + (opts.expiresIn ?? 900) * 1000),
+      ...(blob.url.startsWith('https:') ? { protocol: SASProtocol.Https } : {}),
     }
     const credential = this.service.credential
     const sas =
@@ -141,9 +147,10 @@ export class AzureBlobs implements Blobs {
     return body ? (JSON.parse(new TextDecoder().decode(body)) as T) : null
   }
 
-  /** Copy Blob within the account: authorised by this client's credential, metadata kept. */
+  /** Copy Blob within the account, from a read SAS for the source; its properties kept. */
   async copy(from: string, to: string) {
-    const poller = await this.blob(to).beginCopyFromURL(this.blob(from).url)
+    const source = await this.presignGet(from, { expiresIn: COPY_SOURCE_SECONDS })
+    const poller = await this.blob(to).beginCopyFromURL(source)
     const result = await poller.pollUntilDone()
     if (result.copyStatus && result.copyStatus !== 'success') {
       throw new Error(`Copy of ${from} ended ${result.copyStatus}`)

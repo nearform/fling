@@ -3,23 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Fling on Node: the Postgres Table and the SMTP mailer, for the platforms that run on Node. Consumed as TypeScript source.",
+  "description": "Fling on Node: the Node host (one HTTP server that routes by host, as the Cloudflare Worker does), the Postgres Table, the Postgres live fan-out and the SMTP mailer. A platform of its own (src/main.ts) and a library the cloud platforms that run on Node import. Consumed as TypeScript source.",
   "type": "module",
   "exports": {
     "./table/postgres": "./src/table/postgres.ts",
     "./table/schema": "./src/table/schema.ts",
     "./table/sql": "./src/table/sql.ts",
-    "./mail/smtp": "./src/mail/smtp.ts"
+    "./mail/smtp": "./src/mail/smtp.ts",
+    "./host": "./src/host.ts",
+    "./ticks": "./src/ticks.ts",
+    "./route-table/cached": "./src/route-table/cached.ts",
+    "./live/postgres-fanout": "./src/live/postgres-fanout.ts"
   },
   "scripts": {
     "build": "echo 'platform-node: consumed as source'",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "tsx src/main.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.17",
     "@fling/api": "workspace:*",
     "@fling/shared": "workspace:*",
+    "@hono/node-server": "^2.1.6",
     "nodemailer": "^10.6.1",
     "pg": "^8.23.1"
   },
@@ -30,10 +36,12 @@
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "@types/smtp-server": "^3.5.13",
+    "@types/ws": "^8.18.2",
     "mailparser": "^3.9.47",
     "smtp-server": "^3.21.7",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.12"
+    "vitest": "^4.1.12",
+    "ws": "^8.21.0"
   }
 }

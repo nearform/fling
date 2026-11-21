@@ -10,8 +10,12 @@
  *               through the real CloudflareMailer over wrangler's simulated `send_email` binding,
  *               kept for `/dev/mail` (KeptMailer); outside invitations on (`--invites`); site
  *               servers on for members (`--servers members`) in the local Worker Loader
+ *   node        platforms/node's host (src/main.ts): one server for the app and the sites, the
+ *               Postgres Table on PGlite, fs blobs, the core's sites host; mail through
+ *               MemoryMailer; outside invitations on; site servers on for members as Node child
+ *               processes
  *
- *   tsx src/local.ts [aws] [cloudflare]      (default: both, one after the other)
+ *   tsx src/local.ts [aws] [cloudflare] [node]      (default: all, one after the other)
  *
  * Each runtime gets free ports and a fresh temporary state, and is stopped afterwards (pass or
  * fail). Needs the web build (pnpm build) for the Worker's assets.
@@ -171,9 +175,44 @@ async function run(runtime: Runtime): Promise<boolean> {
   }
 }
 
+async function nodeRuntime(): Promise<Runtime> {
+  const port = await freePort()
+  const host = `flingnode.lvh.me:${port}`
+  return {
+    name: 'node (the Node host: PGlite, fs blobs)',
+    appOrigin: `http://${host}`,
+    start: state =>
+      spawn(tsx, [join(REPO, 'platforms', 'node', 'src', 'main.ts')], {
+        cwd: REPO,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          APP_ENV: 'development',
+          DEV_LOGIN: '1',
+          PORT: String(port),
+          APP_ORIGIN: `http://${host}`,
+          SITES_DOMAIN: host,
+          SITE_SCHEME: 'http',
+          SITE_COOKIE_DOMAIN: 'flingnode.lvh.me',
+          LIVE_URL: `ws://${host}/api/live`,
+          FS_ROOT: state,
+          SESSION_SECRET: secret(),
+          SITE_HMAC_KEY: secret(),
+          SITE_SECRETS_KEY: randomBytes(32).toString('hex'),
+          MAIL_DRIVER: 'memory',
+          MAIL_FROM: 'fling@mail.flingnode.lvh.me',
+          INVITES: 'on',
+          SERVERS: 'members',
+        },
+      }),
+  }
+}
+
 const RUNTIMES: Record<string, () => Promise<Runtime>> = {
   aws: awsRuntime,
   cloudflare: cloudflareRuntime,
+  node: nodeRuntime,
 }
 
 const wanted = process.argv.slice(2).filter(a => !a.startsWith('-'))

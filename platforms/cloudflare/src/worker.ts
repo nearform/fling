@@ -26,6 +26,7 @@
 import { exports } from 'cloudflare:workers'
 import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-types'
 import { createApp } from '@fling/api/app'
+import { isApiPath, MCPB_PATH, uiHeaders } from '@fling/api/app-host'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { maintain } from '@fling/api/maintenance'
 import { drain, errorName, logNotify } from '@fling/api/notifications'
@@ -44,61 +45,25 @@ import { D1Table } from './table/d1.ts'
 export { LiveRoom } from './live.ts'
 export { ServerTail, SiteFiles } from './servers/entrypoints.ts'
 
-/**
- * The app paths the API answers (the rest is the web UI): the AWS module's `api_paths`, plus
- * `/dev/`, which the API mounts only with the dev login on (`wrangler dev`).
- */
-export function isApiPath(path: string): boolean {
-  return (
-    path === '/healthz' ||
-    path === '/mcp' ||
-    ['/api/', '/auth/', '/mcp/', '/oauth/', '/.well-known/', '/notifications/', '/dev/'].some(p =>
-      path.startsWith(p)
-    )
-  )
-}
-
 /** The every-minute cron: the notifications outbox's tick. Any other cron purges expired items. */
 const NOTIFY_CRON = '* * * * *'
 /** How long the hourly maintenance runs (maintenance.ts); the next hour carries on. */
 const MAINTAIN_BUDGET_MS = 20_000
 
-/** The headers CloudFront's managed SecurityHeadersPolicy adds to the UI on AWS. */
-const UI_SECURITY_HEADERS: Record<string, string> = {
-  'strict-transport-security': 'max-age=31536000',
-  'x-content-type-options': 'nosniff',
-  'x-frame-options': 'SAMEORIGIN',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-  'x-xss-protection': '1; mode=block',
-}
-
-/** The web UI from Static Assets, with the cache headers deploy.yml gives it on AWS. */
+/** The web UI from Static Assets, with the headers the AWS app distribution gives it. */
 async function serveUi(request: Request, env: Env, https: boolean): Promise<Response> {
   const res = await env.ASSETS.fetch(request as never)
   const path = new URL(request.url).pathname
   // A Worker deployed without the extension would answer with index.html (the SPA's fallback).
-  if (
-    path === '/downloads/fling.mcpb' &&
-    (res.headers.get('content-type') ?? '').startsWith('text/html')
-  ) {
+  if (path === MCPB_PATH && (res.headers.get('content-type') ?? '').startsWith('text/html')) {
     return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-cache' } })
   }
   const out = new Response(res.body as never, res as never)
-  if (res.ok) {
-    if ((out.headers.get('content-type') ?? '').startsWith('text/html')) {
-      out.headers.set('cache-control', 'no-cache') // index.html (every client-side route)
-    } else if (path.startsWith('/assets/')) {
-      out.headers.set('cache-control', 'public, max-age=31536000, immutable') // content-hashed
-    } else {
-      out.headers.set('cache-control', 'public, max-age=300')
+  const headers = uiHeaders(path, out.headers.get('content-type') ?? '', https)
+  for (const [name, value] of headers) {
+    if (res.ok || !['cache-control', 'content-type', 'content-disposition'].includes(name)) {
+      out.headers.set(name, value)
     }
-    if (path === '/downloads/fling.mcpb') {
-      out.headers.set('content-type', 'application/octet-stream')
-      out.headers.set('content-disposition', 'attachment; filename="fling.mcpb"')
-    }
-  }
-  for (const [name, value] of Object.entries(UI_SECURITY_HEADERS)) {
-    if (https || name !== 'strict-transport-security') out.headers.set(name, value)
   }
   return out
 }

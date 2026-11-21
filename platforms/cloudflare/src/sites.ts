@@ -1,36 +1,27 @@
 /**
- * The sites host (`<name>.<sitesDomain>`, `s--<token>.<sitesDomain>`): the shared routing decision
- * (@fling/shared/site-routing, the one the CloudFront Function runs) over the route table, then the
- * object from R2. This file only adapts: it reads the request, provides the lookups and turns the
- * decision into a response. Unknown hosts, archived sites and missing files get the sites' 404
- * page (`_fling/404.html` from the Worker's assets, its `__APP_ORIGIN__` filled in), never cached.
- * The review shell (`_fling/review.html`) comes from the assets the same way, revalidated on every
- * use and with no header that would stop the app from framing it. `/robots.txt` on every sites
- * host is Fling's `Disallow: /` (`_fling/robots.txt` from the assets), whatever the site has. Every
- * response carries the decision's headers: `X-Robots-Tag: noindex`, on a share host
- * `Referrer-Policy: no-referrer`, so its address never leaks as a Referer, and on a site's files
- * `X-Fling-Version`, the version served.
+ * The Worker's sites host (`<name>.<sitesDomain>`, `s--<token>.<sitesDomain>`): the core's sites
+ * host (@fling/api/sites-host: the shared routing decision over the route table, carried out the
+ * same way on every platform where one host routes) with what Cloudflare supplies. Site files come
+ * from R2 with their stored Content-Type and Cache-Control, ETag revalidation and ranges. Fling's
+ * own pages (`_fling/404.html`, `_fling/review.html`, `_fling/robots.txt`) come from the Worker's
+ * assets, their `__APP_ORIGIN__` filled in.
  *
  * A site server's request (the decision's `invoke`, `/api/*` of a site whose version has one) goes
  * through the core's shell (`runInvoke`: the server's request headers, its Cache-Control, the
  * request line) to the version's isolate (servers/runtime.ts), in the run the route value names
  * (`t`). With no SiteServers (SERVERS off) it answers as a missing page.
  */
-import { createHmac } from 'node:crypto'
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
 import type { RouteTable } from '@fling/api/route-table'
-import { runInvoke } from '@fling/api/servers/shell'
 import type { ServerLogs, SiteServers } from '@fling/api/servers/types'
-import type { Clock } from '@fling/api/types'
 import {
-  MISSING_KEY,
-  NOT_FOUND_PAGE,
-  REVIEW_SHELL,
-  ROBOTS_TXT,
-  SITE_PASS_COOKIE_NAME,
-} from '@fling/shared/route-keys'
-import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
-import { normalizeQuery, routeSiteRequest, type SiteInvoke } from '@fling/shared/site-routing'
+  handleSiteRequest as handleSitesHostRequest,
+  invokeSiteServer,
+  type SitesPage,
+} from '@fling/api/sites-host'
+import type { Clock } from '@fling/api/types'
+import { NOT_FOUND_PAGE, REVIEW_SHELL, ROBOTS_TXT } from '@fling/shared/route-keys'
+import type { SiteInvoke } from '@fling/shared/site-routing'
 import type { Bindings } from './env.ts'
 import type { CloudflareSiteServers } from './servers/runtime.ts'
 
@@ -54,19 +45,15 @@ export interface SitesOptions {
   passTtlSeconds?: number
 }
 
-const hmac = (key: string, data: string) =>
-  createHmac('sha256', key).update(data).digest('base64url')
-
-function cookieValue(header: string | null, name: string): string | null {
-  if (!header) return null
-  for (const part of header.split(';')) {
-    const i = part.indexOf('=')
-    if (i >= 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim()
-  }
-  return null
-}
-
 const pages = new Map<string, { origin: string; html: string | null }>()
+
+/** Where each of Fling's pages is in the Worker's assets. */
+const ASSET_OF: Record<SitesPage, string> = {
+  // No extension: Static Assets serves 404.html for it without a redirect.
+  [NOT_FOUND_PAGE]: '/_fling/404',
+  [REVIEW_SHELL]: '/_fling/review',
+  [ROBOTS_TXT]: ROBOTS_TXT,
+}
 
 /** A file from the Worker's assets with this instance's app origin filled in (cached per isolate). */
 async function assetPage(opts: SitesOptions, asset: string): Promise<string | null> {
@@ -83,39 +70,6 @@ async function assetPage(opts: SitesOptions, asset: string): Promise<string | nu
   return page.html
 }
 
-/** The sites' 404 page, filled for this instance. */
-async function notFound(opts: SitesOptions, status: number, method: string): Promise<Response> {
-  // `/_fling/404` (no extension): Static Assets serves 404.html for it without a redirect.
-  const html = (await assetPage(opts, '/_fling/404')) ?? 'Not found'
-  return new Response(method === 'HEAD' ? null : html, {
-    status,
-    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
-  })
-}
-
-/** The review shell, filled for this instance. */
-async function reviewShell(opts: SitesOptions, method: string): Promise<Response> {
-  const html = await assetPage(opts, '/_fling/review')
-  if (html === null) return notFound(opts, 404, method)
-  return new Response(method === 'HEAD' ? null : html, {
-    status: 200,
-    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' },
-  })
-}
-
-/** Fling's robots.txt for every sites host. */
-async function robotsTxt(opts: SitesOptions, method: string): Promise<Response> {
-  const text = await assetPage(opts, ROBOTS_TXT)
-  if (text === null) return notFound(opts, 404, method)
-  return new Response(method === 'HEAD' ? null : text, {
-    status: 200,
-    headers: {
-      'content-type': 'text/plain; charset=utf-8',
-      'cache-control': 'public, max-age=300',
-    },
-  })
-}
-
 const hasBody = (o: R2Object | R2ObjectBody): o is R2ObjectBody => 'body' in o
 
 /** A site file: R2 with its stored Content-Type/Cache-Control, ETag revalidation and ranges. */
@@ -127,7 +81,7 @@ async function serveObject(request: Request, opts: SitesOptions, key: string) {
         onlyIf: request.headers as never,
         range: request.headers as never,
       })
-  if (!object) return notFound(opts, 404, request.method)
+  if (!object) return null
   const headers = new Headers()
   object.writeHttpMetadata(headers as never)
   headers.set('etag', object.httpEtag)
@@ -152,47 +106,21 @@ async function serveObject(request: Request, opts: SitesOptions, key: string) {
   return new Response(body.body as never, { status: 200, headers })
 }
 
-export async function handleSiteRequest(request: Request, opts: SitesOptions): Promise<Response> {
-  const url = new URL(request.url)
-  const decision = await routeSiteRequest(
-    {
-      method: request.method,
-      host: url.host,
-      uri: url.pathname,
-      query: normalizeQuery(url.search),
-      cookie: cookieValue(request.headers.get('cookie'), SITE_COOKIE_NAME),
-      pass: cookieValue(request.headers.get('cookie'), SITE_PASS_COOKIE_NAME),
-      fetchSite: request.headers.get('sec-fetch-site'),
-      origin: request.headers.get('origin'),
-    },
-    {
-      appOrigin: opts.appOrigin,
-      siteScheme: opts.siteScheme,
-      nowSeconds: Math.floor((opts.now ?? Date.now)() / 1000),
-      getRoute: async key => (await opts.routeTable.get(key)) ?? null,
-      getCookieKey: async () => opts.cookieKey,
-      getRevocation: async key => (await opts.revocations.get(key)) ?? null,
-      hmac,
-      passTtlSeconds: opts.passTtlSeconds,
-    }
-  )
-  if (decision.action === 'respond') {
-    const headers = new Headers(decision.headers)
-    for (const [name, cookie] of Object.entries(decision.cookies ?? {})) {
-      headers.append('set-cookie', `${name}=${cookie.value}; ${cookie.attributes}`)
-    }
-    return new Response(decision.body ?? null, { status: decision.status, headers })
-  }
-  if (decision.action === 'invoke') {
-    if (!opts.servers) return notFound(opts, 404, request.method)
-    const res = await invoke(request, opts.servers, decision)
-    for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)
-    return res
-  }
-  // The host's headers on whatever is served: file, 404 page, review shell or robots.txt.
-  const res = await serveRewrite(request, opts, decision.uri)
-  for (const [name, value] of Object.entries(decision.headers)) res.headers.set(name, value)
-  return res
+export function handleSiteRequest(request: Request, opts: SitesOptions): Promise<Response> {
+  return handleSitesHostRequest(request, {
+    appOrigin: opts.appOrigin,
+    siteScheme: opts.siteScheme,
+    cookieKey: opts.cookieKey,
+    routes: opts.routeTable,
+    revocations: opts.revocations,
+    page: page => assetPage(opts, ASSET_OF[page]),
+    object: (req, key) => serveObject(req, opts, key),
+    ...(opts.servers
+      ? { invoke: (req, decision) => invoke(req, opts.servers as never, decision) }
+      : {}),
+    now: opts.now,
+    passTtlSeconds: opts.passTtlSeconds,
+  })
 }
 
 /** The request through the shell to the version's server, in the run the route names. */
@@ -211,26 +139,9 @@ async function invoke(
     retire: (...a) => runtime.retire(...a),
     invoke: (site, version, req) => runtime.serve(site, version, req, decision.target),
   }
-  const label = new URL(request.url).hostname.split('.')[0] ?? ''
-  return runInvoke({ servers: atRun, serverLogs: servers.logs, clock: servers.clock }, request, {
-    site: { id: decision.siteId, name: label },
-    v: decision.v,
-    private: decision.private,
-    viewer: decision.viewer,
-  })
-}
-
-function serveRewrite(request: Request, opts: SitesOptions, uri: string): Promise<Response> {
-  if (uri === NOT_FOUND_PAGE) return notFound(opts, 200, request.method)
-  if (uri === REVIEW_SHELL) return reviewShell(opts, request.method)
-  if (uri === ROBOTS_TXT) return robotsTxt(opts, request.method)
-  if (uri === MISSING_KEY) return notFound(opts, 404, request.method)
-  let key: string
-  try {
-    // The object key is the decoded path, as S3 reads a CloudFront origin request's.
-    key = decodeURIComponent(uri.slice(1))
-  } catch {
-    return notFound(opts, 404, request.method)
-  }
-  return serveObject(request, opts, key)
+  return invokeSiteServer(
+    { servers: atRun, serverLogs: servers.logs, clock: servers.clock },
+    request,
+    decision
+  )
 }

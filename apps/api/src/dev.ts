@@ -21,6 +21,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import type { Server } from 'node:http'
 import { resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSiteRouter, isInvoke, isResponse, toCloudFrontEvent } from '@fling/edge'
@@ -36,24 +37,23 @@ import {
 } from '@fling/shared'
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
-import { WebSocketServer } from 'ws'
 import { createApp } from './app.ts'
 import { FsBlobs } from './blobs/fs.ts'
 import { type Config, loadBaseConfig, secretsFromEnv } from './config.ts'
 import { buildDeps } from './deps.ts'
 import { contentTypeFor } from './lib/mime.ts'
-import { admitTicket } from './live.ts'
 import { MemoryLiveHub } from './live-memory.ts'
+import { acceptLiveSockets } from './live-ws.ts'
 import { MIGRATIONS, runMigrations } from './migrations/index.ts'
 import { drain } from './notifications/drain.ts'
 import { TableRouteTable } from './route-table/table.ts'
-import { optionsFor } from './servers/index.ts'
 import { MemoryServerLogs } from './servers/memory-logs.ts'
+import { restartOptions } from './servers/node/restart.ts'
 import { NodeSiteServers } from './servers/node/runtime.ts'
 import { runInvoke } from './servers/shell.ts'
-import type { ServerOptions, ServerSite, ServerVersion } from './servers/types.ts'
 import { Records } from './store/records.ts'
 import { FileTable } from './table/file.ts'
+import type { Deps } from './types.ts'
 
 const API_PORT = Number(process.env.PORT ?? 47101)
 const SITES_PORT = Number(process.env.SITES_PORT ?? 47102)
@@ -114,16 +114,15 @@ const store = new Records(table)
 const blobs = new FsBlobs(fsRoot, `http://localhost:${API_PORT}`, config.secrets.sessionSecret)
 const serverLogs = new MemoryServerLogs()
 // A server started again after a restart runs with its version's options as the core makes them.
-let restartOptions: (site: ServerSite, version: ServerVersion) => Promise<ServerOptions | null> =
-  async () => null
+let deps: Deps | undefined
 const servers = new NodeSiteServers({
   blobs,
   workDir: resolve(fsRoot, 'servers'),
   filesDir: version => resolve(fsRoot, version.files),
   logs: serverLogs,
-  optionsFor: (site, version) => restartOptions(site, version),
+  optionsFor: restartOptions(() => deps as Deps),
 })
-const deps = buildDeps(config, {
+deps = buildDeps(config, {
   live,
   fsRoot,
   apiBaseUrl: `http://localhost:${API_PORT}`,
@@ -133,12 +132,6 @@ const deps = buildDeps(config, {
   serverLogs,
   ...(config.servers.publish.kind === 'off' ? {} : { servers }),
 })
-restartOptions = async (site, version) => {
-  const record = await store.findSite(site.name)
-  const v = record?.id === site.id ? await store.getVersion(record, version.id) : null
-  if (!record || !v?.server) return null
-  return (await optionsFor(deps, record, v.server)).options
-}
 process.on('exit', () => void servers.close())
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
@@ -160,28 +153,11 @@ const apiServer = serve({ fetch: createApp(deps).fetch, port: API_PORT }, info =
 )
 
 // Live rooms: a ticket admits the socket, then MemoryLiveHub keeps it in its room.
-const sockets = new WebSocketServer({ noServer: true })
-apiServer.on('upgrade', (req, socket, head) => {
-  const url = new URL(req.url ?? '/', 'http://localhost')
-  const admission =
-    url.pathname === '/api/live' && config.live
-      ? admitTicket(config.secrets.sessionSecret, url.searchParams.get('ticket'), deps.clock.now())
-      : null
-  if (!admission) {
-    socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
-    return
-  }
-  sockets.handleUpgrade(req, socket, head, ws => {
-    // Listen at once: the client says hello as soon as it is open.
-    const conn = live.connect(admission, ws)
-    ws.on('message', (data, binary) => {
-      const raw = binary ? new Uint8Array(data as Buffer) : (data as Buffer).toString('utf8')
-      conn.then(c => c.message(raw)).catch(() => {})
-    })
-    ws.on('close', () => {
-      conn.then(c => c.close()).catch(() => {})
-    })
-  })
+acceptLiveSockets(apiServer as Server, {
+  hub: live,
+  secret: config.secrets.sessionSecret,
+  live: config.live,
+  now: () => deps.clock.now(),
 })
 
 const router = createSiteRouter({

@@ -113,9 +113,20 @@ const envSchema = z.object({
   SITES_BUCKET: optionalString,
   KVS_ARN: optionalString,
   SSM_PREFIX: optionalString,
-  STORE_DRIVER: z.preprocess(blank, z.enum(['dynamo', 'd1', 'memory']).optional()),
+  STORE_DRIVER: z.preprocess(blank, z.enum(['dynamo', 'd1', 'postgres', 'memory']).optional()),
   STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'fs']).optional()),
-  KVS_DRIVER: z.preprocess(blank, z.enum(['cloudfront', 'workers-kv', 'memory']).optional()),
+  KVS_DRIVER: z.preprocess(
+    blank,
+    z.enum(['cloudfront', 'workers-kv', 'table', 'memory']).optional()
+  ),
+  /** The Postgres schema the Node host's Table is in (platforms/node; default `public`). */
+  DATABASE_SCHEMA: z.preprocess(
+    blank,
+    z
+      .string()
+      .regex(/^[a-z_][a-z0-9_]{0,62}$/, 'lower-case letters, digits and _')
+      .optional()
+  ),
   FS_ROOT: optionalString,
   DEV_LOGIN: flag,
   OAUTH_REDIRECT_ALLOWLIST: z.preprocess(blank, z.string().optional()),
@@ -252,6 +263,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   KVS_ARN: 'platform',
   SSM_PREFIX: 'platform',
   STORE_DRIVER: 'platform',
+  DATABASE_SCHEMA: 'platform',
   STORAGE_DRIVER: 'platform',
   KVS_DRIVER: 'platform',
   FS_ROOT: 'platform',
@@ -320,6 +332,16 @@ export interface Secrets {
   originVerifySecret?: string
   /** The SMTP server's password for SMTP_USER (`SMTP_PASSWORD`; the `smtp` mail driver). */
   smtpPassword?: string
+  /**
+   * The Node host's Postgres (`DATABASE_URL`, `postgres://…`, which can carry a password; the
+   * `postgres` store driver). Unset there: Postgres in process (PGlite), for local runs.
+   */
+  databaseUrl?: string
+  /**
+   * What a caller of the Node host's tick and migrate endpoints presents (`TICK_SECRET`, at least
+   * 32 characters, as `Authorization: Bearer <secret>`). Unset: the endpoints answer 404.
+   */
+  tickSecret?: string
 }
 
 /**
@@ -335,6 +357,8 @@ export const SECRET_SETTINGS: Record<keyof Secrets, { name: string; group: Setti
   siteSecretsKey: { name: 'SITE_SECRETS_KEY', group: 'features' },
   originVerifySecret: { name: 'ORIGIN_VERIFY_SECRET', group: 'platform' },
   smtpPassword: { name: 'SMTP_PASSWORD', group: 'mail' },
+  databaseUrl: { name: 'DATABASE_URL', group: 'platform' },
+  tickSecret: { name: 'TICK_SECRET', group: 'platform' },
 }
 
 /** The secrets by name, set or not: no value leaves here. */
@@ -475,11 +499,14 @@ export interface Config {
   /**
    * Which adapter each port uses. The core has the dev/test ones (memory, fs); a platform entry
    * supplies the others (platforms/aws: dynamo, s3, cloudfront; platforms/cloudflare: d1, r2,
-   * workers-kv). Production defaults to the AWS ones, as before there was a second platform.
+   * workers-kv; platforms/node: postgres, and `table`, the routes in the Table itself).
+   * Production defaults to the AWS ones.
    */
-  storeDriver: 'dynamo' | 'd1' | 'memory'
+  storeDriver: 'dynamo' | 'd1' | 'postgres' | 'memory'
   storageDriver: 's3' | 'r2' | 'fs'
-  kvsDriver: 'cloudfront' | 'workers-kv' | 'memory'
+  kvsDriver: 'cloudfront' | 'workers-kv' | 'table' | 'memory'
+  /** The Postgres schema of the `postgres` store driver (`DATABASE_SCHEMA`, default `public`). */
+  databaseSchema?: string
   fsRoot?: string
   /**
    * Comments and review mode (`COMMENTS`, default on; `false` turns them off). Advertised as the
@@ -595,6 +622,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     installCommand: e.INSTALL_COMMAND,
     siteDefaultAccess: e.SITE_DEFAULT_ACCESS,
     tableName: e.TABLE_NAME,
+    databaseSchema: e.DATABASE_SCHEMA,
     sitesBucket: e.SITES_BUCKET,
     kvsArn: e.KVS_ARN,
     ssmPrefix: e.SSM_PREFIX,
@@ -749,6 +777,13 @@ function definedOnly<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T
 }
 
+function tickSecretOf(value: string | undefined): string | undefined {
+  const secret = value?.trim()
+  if (!secret) return undefined
+  if (secret.length < 32) throw new Error('TICK_SECRET must be at least 32 characters')
+  return secret
+}
+
 /** Secrets from env (dev/tests). A missing client secret is allowed (dev-login still works). */
 export function secretsFromEnv(env: Record<string, string | undefined> = process.env): Secrets {
   const sessionSecret = env.SESSION_SECRET?.trim()
@@ -768,6 +803,8 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     siteSecretsKey: env.SITE_SECRETS_KEY?.trim() || undefined,
     originVerifySecret: env.ORIGIN_VERIFY_SECRET?.trim() || undefined,
     smtpPassword: env.SMTP_PASSWORD?.trim() || undefined,
+    databaseUrl: env.DATABASE_URL?.trim() || undefined,
+    tickSecret: tickSecretOf(env.TICK_SECRET),
   }
 }
 

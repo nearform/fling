@@ -293,10 +293,10 @@ Differences between platforms are capability flags, never `if (platform === …)
 
 ## 5. Shared building blocks for new platforms
 
-Azure ([its doc](../platforms/azure.md)) and the proposed platforms ([GCP](../platforms/gcp.md),
-[Fly.io](../platforms/fly.md), [Vercel](../platforms/vercel.md),
-[DigitalOcean and self-host](../platforms/digitalocean-self-host.md)) mostly have the *one host
-that routes* shape, on a Node runtime. The parts they share are written once, in `platforms/node`
+Google Cloud ([its doc](../platforms/gcp.md)), Azure ([its doc](../platforms/azure.md)),
+DigitalOcean and self-host ([their doc](../platforms/digitalocean-self-host.md)) and the proposed
+platforms ([Fly.io](../platforms/fly.md), [Vercel](../platforms/vercel.md)) mostly have the *one
+host that routes* shape, on a Node runtime. The parts they share are written once, in `platforms/node`
 (`@fling/platform-node`), which also runs as a platform of its own (`src/main.ts`) and is the e2e's
 `node` local runtime:
 

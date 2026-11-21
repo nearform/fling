@@ -174,3 +174,23 @@ run "module_owned_keys_refused" {
 
   expect_failures = [var.instance]
 }
+
+run "secrets_cannot_carry_module_owned_keys" {
+  command = plan
+
+  variables {
+    instance_secrets = { APP_ENV = "development", DEV_LOGIN = "1" }
+  }
+
+  expect_failures = [var.instance_secrets]
+}
+
+run "secrets_cannot_turn_site_servers_on" {
+  command = plan
+
+  variables {
+    instance_secrets = { SERVERS = "members" }
+  }
+
+  expect_failures = [var.instance_secrets]
+}

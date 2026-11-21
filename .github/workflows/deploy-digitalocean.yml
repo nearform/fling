@@ -6,7 +6,8 @@ name: Deploy (DigitalOcean)
 #
 # Terraform owns the shape (the app, Postgres, Spaces, the registry, the domains, the environment);
 # this workflow owns the code: it builds the image of the tag, pushes it to the registry and points
-# the app's service at it. Terraform ignores the image tag, so an apply never rolls a deploy back.
+# the app's service at its digest. Terraform ignores the image's tag and digest, so an apply never
+# rolls a deploy back.
 #
 # Everything instance-specific is one repository variable, DO_DEPLOY_CONFIG (the JSON of the
 # module's `deploy` output: APP_ID, APP_ORIGIN, REGISTRY, REPOSITORY, SERVICE), and secrets of the
@@ -22,9 +23,9 @@ name: Deploy (DigitalOcean)
 # Order:
 #   1. the image, built from the tag with the instance's app origin baked into the Claude Desktop
 #      extension, pushed as <registry>/<repository>:<release>;
-#   2. the app's spec with only the service's image tag changed, and wait for the deployment
-#      (App Platform starts the new containers, checks /healthz, then moves traffic; each new
-#      container migrates the schema and the data on start);
+#   2. the app's spec with only the service's image changed, pinned to the pushed digest, and wait
+#      for the deployment (App Platform starts the new containers, checks /healthz, then moves
+#      traffic; each new container migrates the schema and the data on start);
 #   3. /.well-known/fling answers for this instance and this release;
 #   4. the data migrations through POST /ticks/migrate until it reports done (normally already
 #      done by the start-up run; this is the deploy's own check, as on AWS and Cloudflare);
@@ -92,6 +93,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build and push the image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,24 +106,30 @@ jobs:
           cache-to: type=gha,mode=max
 
       # The spec App Platform holds (secrets come back encrypted and are kept as they are) with only
-      # the service's image tag changed; `--wait` returns when the deployment is live or failed.
+      # the service's image changed: pinned to the digest just pushed, never the mutable tag, so
+      # what runs is exactly what this run built. `--wait` returns when the deployment is live or
+      # failed.
       - name: Deploy the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+            { echo "::error::the build gave no image digest ($DIGEST)"; exit 1; }
           spec="$RUNNER_TEMP/spec.json"
           doctl apps spec get "$APP_ID" --format json |
-            jq --arg service "$SERVICE" --arg tag "$RELEASE" \
-              '.services |= map(if .name == $service then .image.tag = $tag else . end)' > "$spec"
-          jq -e --arg service "$SERVICE" --arg tag "$RELEASE" \
-            'any(.services[]; .name == $service and .image.tag == $tag)' "$spec" >/dev/null ||
+            jq --arg service "$SERVICE" --arg digest "$DIGEST" \
+              '.services |= map(if .name == $service then .image |= (del(.tag) | .digest = $digest) else . end)' > "$spec"
+          jq -e --arg service "$SERVICE" --arg digest "$DIGEST" \
+            'any(.services[]; .name == $service and .image.digest == $digest)' "$spec" >/dev/null ||
             { echo "::error::the app has no service $SERVICE"; exit 1; }
           doctl apps update "$APP_ID" --spec "$spec" --wait >/dev/null
           # A failed deployment leaves the previous one active: check what is live, not the spec.
           live="$(doctl apps get "$APP_ID" --output json |
             jq -r --arg service "$SERVICE" \
-              '.[0].active_deployment | "\(.phase) \(.spec.services[] | select(.name == $service) | .image.tag)"')"
-          [ "$live" = "ACTIVE $RELEASE" ] ||
-            { echo "::error::$RELEASE is not live (active deployment: $live); see the app's deployment logs"; exit 1; }
+              '.[0].active_deployment | "\(.phase) \(.spec.services[] | select(.name == $service) | .image.digest)"')"
+          [ "$live" = "ACTIVE $DIGEST" ] ||
+            { echo "::error::$RELEASE ($DIGEST) is not live (active deployment: $live); see the app's deployment logs"; exit 1; }
 
       - name: Check the release answers
         run: |
@@ -150,7 +158,7 @@ jobs:
           fi
           out="$RUNNER_TEMP/migrate.json"
           for attempt in $(seq 1 40); do
-            curl -fsS -X POST -H "Authorization: Bearer $TICK_SECRET" --max-time 90 \
+            curl -fsS --retry 3 -X POST -H "Authorization: Bearer $TICK_SECRET" --max-time 90 \
               "$APP_ORIGIN/ticks/migrate" -o "$out"
             jq -r '.migrations[] | "\(.id) \(.title): \(.status)"' "$out"
             if jq -e '.done' "$out" >/dev/null; then

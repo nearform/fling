@@ -319,9 +319,11 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
 
    Every adapter is passed in, so a cloud platform supplies only adapters, infrastructure and a
    deploy.
-2. **The Postgres `Table`** (`src/table/postgres.ts`, `PostgresTable`), over `pg` or PGlite:
+2. **The Postgres `Table`** (`src/table/postgres.ts`, `PostgresTable`), through Drizzle ORM over
+   `pg` or PGlite (`src/table/database.ts`):
    - `items(pk COLLATE "C", sk COLLATE "C", data jsonb, expires_at)` in a schema of the instance's
-     own, for byte order, with its own schema migrations (`src/table/schema.ts`);
+     own, for byte order, defined as a Drizzle table (`src/table/items.ts`), with migrations
+     drizzle-kit generates (`drizzle/`) applied into that schema on start;
    - each write takes transaction-scoped advisory locks on its keys (in a fixed order), reads them,
      checks the conditions and writes, so exactly one of racing writers wins; deadlocks and
      serialisation failures are retried;
@@ -331,9 +333,10 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
      again on each row, so an item put again over a dead one meanwhile stays;
    - a string jsonb can't hold (NUL, a lone surrogate) is stored escaped and read back as it was,
      so the Table keeps what the other backends keep;
-   - its SQL is injection-safe by construction: values are always parameters, identifiers go
-     only through `ident` (validated and quoted, so a reserved word is a schema name too), and
-     `tests/sql-guard.test.ts` fails on any other interpolation.
+   - its SQL is Drizzle's: the query builder wherever it can express a statement, the `sql`
+     template (values as parameters, names quoted) for the advisory locks, `starts_with`, the
+     `::jsonb` cast and the purge's `(pk, sk) IN (…)`; `tests/sql-guard.test.ts` fails on SQL
+     written as a plain string or `sql.raw` of anything but a literal.
 
    It passes the table, store, migrations and route table suites on PGlite in every gate and on a
    Postgres service in CI. It is the Table for Fly.io, Vercel (Neon), DigitalOcean and self-host,

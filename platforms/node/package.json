@@ -7,8 +7,8 @@
   "type": "module",
   "exports": {
     "./table/postgres": "./src/table/postgres.ts",
-    "./table/schema": "./src/table/schema.ts",
-    "./table/sql": "./src/table/sql.ts",
+    "./table/database": "./src/table/database.ts",
+    "./table/items": "./src/table/items.ts",
     "./mail/smtp": "./src/mail/smtp.ts",
     "./host": "./src/host.ts",
     "./ticks": "./src/ticks.ts",
@@ -19,13 +19,15 @@
     "build": "echo 'platform-node: consumed as source'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.17",
     "@fling/api": "workspace:*",
     "@fling/shared": "workspace:*",
     "@hono/node-server": "^2.1.6",
+    "drizzle-orm": "^0.45.4",
     "nodemailer": "^10.6.1",
     "pg": "^8.23.1"
   },
@@ -37,6 +39,7 @@
     "@types/pg": "^8.23.1",
     "@types/smtp-server": "^3.5.13",
     "@types/ws": "^8.18.2",
+    "drizzle-kit": "^0.31.11",
     "mailparser": "^3.9.47",
     "smtp-server": "^3.21.7",
     "tsx": "^4.23.13",

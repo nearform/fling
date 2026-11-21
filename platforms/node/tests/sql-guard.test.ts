@@ -1,22 +1,19 @@
 /**
- * A guard on the SQL in platforms/node/src: values reach Postgres only as `$n` parameters.
+ * A guard on the SQL in platforms/node/src: Drizzle writes it, so values reach Postgres only as
+ * parameters. Drizzle's query builder and its `sql` tagged template both send what they
+ * interpolate as a parameter (or, for `sql.identifier`, quoted); what could still splice text in
+ * is SQL Fling writes as a plain string. So, in every .ts file under src (comments skipped), this
+ * catches:
+ * - `sql.raw(` given anything but a single string literal;
+ * - a plain (untagged) string or template literal that reads as SQL: its text opens a statement
+ *   in any case (`select x`, `insert into`, `delete from`, `update t set`, `create`/`drop`/`alter`
+ *   `table`/`schema`/`index`, `set x to`, `begin`, `with x as (`), or holds an upper-case keyword
+ *   (`SELECT`, `FROM`, `WHERE`, `VALUES`, `ORDER BY`, `LIMIT`, `RETURNING`, `ON CONFLICT`,
+ *   `LISTEN`, `UNLISTEN`, `NOTIFY`), which covers SQL put together by `+` or by interpolation.
  *
- * What it catches, in every .ts file under src (comments skipped):
- * - a **SQL template** (a template literal whose text has a SQL keyword, matched case-insensitively)
- *   interpolating anything but: a call of `ident(`, `qualified(`, `int(` or `limitSql(` (ident.ts,
- *   and LIMIT through `int`); `this.items` (assigned once, from `qualified`); `where.join(' AND ')`
- *   (fragments held to the next rule); a ternary between two upper-case literals (`ASC`/`DESC`);
- *   or a placeholder's number (`$${n}`, `$${params.length}`);
- * - a **fragment** (a template literal with a `$${…}` placeholder, such as those pushed onto
- *   `where`) interpolating anything but placeholder numbers;
- * - **concatenation**: a string or template literal holding a SQL keyword joined with `+` to an
- *   operand that isn't a literal.
- *
- * What it doesn't catch: SQL text that holds no keyword and no placeholder until it is put
- * together elsewhere (a fragment in a plain string, joined with `.concat()` or an array `join`
- * other than `where`'s), SQL built outside platforms/node/src, or a value passed through a helper
- * on the allowlist that doesn't do what its name says. ident.ts and its tests cover the helpers;
- * review covers the rest.
+ * It doesn't catch SQL text with no such shape in any one literal (assembled from fragments that
+ * each read as plain words, or lower-case `listen x`), or a `sql` template that interpolates `sql.raw(…)` of a variable held
+ * elsewhere under another name. Review covers those.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -25,77 +22,55 @@ import { describe, expect, it } from 'vitest'
 
 const SRC = fileURLToPath(new URL('../src', import.meta.url))
 
-const KEYWORD =
-  /\b(select|insert|update|delete|create|drop|alter|listen|unlisten|notify|set|where|limit|order by|returning|values)\b/i
+/** A statement's opening, in any case (shaped as SQL, so log messages and errors don't match). */
+const STATEMENT =
+  /^\s*(select\s+[\w$*"(]|insert\s+into\b|delete\s+from\b|update\s+\S+\s+set\b|(create|drop|alter)\s+(table|schema|index|extension|role)\b|set\s+(local\s+|session\s+)?[\w.]+\s+(to|=)|begin(\s+isolation\b|\s+transaction\b|\s*;|\s*$)|with\s+\w+\s+as\s*\()/i
+/** Upper-case keywords: a clause, or a statement English rarely writes in capitals. */
+const CLAUSE =
+  /\b(FROM|WHERE|VALUES|ORDER BY|LIMIT|RETURNING|ON CONFLICT|LISTEN|UNLISTEN|NOTIFY|SELECT)\b/
 
-/** What a SQL template may interpolate. */
-const ALLOWED_IN_SQL: RegExp[] = [
-  /^(ident|qualified|int|limitSql)\(/,
-  /^this\.items$/,
-  /^where\.join\(' AND '\)$/,
-  /^[\w.]+ \? '[A-Z]+' : '[A-Z]+'$/,
-]
-/** A placeholder's number: what follows `$` in `$${…}`. */
-const PLACEHOLDER = /^(n|params\.length)$/
-
-interface Literal {
-  kind: 'string' | 'template'
-  start: number
-  end: number
-  text: string
-  /** `${…}` expressions, with whether each is a placeholder's number (`$${…}`) */
-  expressions: { code: string; placeholder: boolean }[]
-}
-
-/** The string and template literals in `source`, nested templates included. */
-function literals(source: string): Literal[] {
-  const out: Literal[] = []
+/** What the guard finds wrong in `source`, one line each. */
+function unsafe(source: string): string[] {
+  const found: string[] = []
   let i = 0
-  const readString = (quote: string) => {
-    const start = i
-    i++
+  const tagBefore = (at: number) => /\bsql\s*$/.test(source.slice(Math.max(0, at - 8), at))
+  const check = (text: string, tagged: boolean) => {
+    if (!tagged && (STATEMENT.test(text) || CLAUSE.test(text))) found.push(text)
+  }
+  const readQuoted = (quote: string) => {
+    const start = i++
     while (i < source.length && source[i] !== quote) i += source[i] === '\\' ? 2 : 1
     i++
-    out.push({
-      kind: 'string',
-      start,
-      end: i,
-      text: source.slice(start + 1, i - 1),
-      expressions: [],
-    })
+    return source.slice(start + 1, i - 1)
   }
-  const readTemplate = (): void => {
-    const lit: Literal = { kind: 'template', start: i, end: i, text: '', expressions: [] }
-    out.push(lit)
+  /** A template literal from its backtick; its text with each `${…}` as `${}`. */
+  const readTemplate = (): string => {
+    let text = ''
     i++
     while (i < source.length && source[i] !== '`') {
       if (source[i] === '\\') {
-        lit.text += source.slice(i, i + 2)
+        text += source.slice(i, i + 2)
         i += 2
       } else if (source[i] === '$' && source[i + 1] === '{') {
-        const placeholder = source[i - 1] === '$'
-        lit.text += '${}'
+        text += '${}'
         i += 2
-        const from = i
         let depth = 1
         while (i < source.length && depth > 0) {
           const c = source[i] as string
-          if (c === '`') readTemplate()
-          else if (c === "'" || c === '"') readString(c)
+          if (c === '`') {
+            const tagged = tagBefore(i)
+            check(readTemplate(), tagged)
+          } else if (c === "'" || c === '"') check(readQuoted(c), false)
           else {
             if (c === '{') depth++
             if (c === '}') depth--
             i++
           }
         }
-        lit.expressions.push({ code: source.slice(from, i - 1).trim(), placeholder })
-      } else {
-        lit.text += source[i]
-        i++
-      }
+      } else text += source[i++]
     }
     i++
-    lit.end = i
+    return text
   }
   while (i < source.length) {
     const c = source[i] as string
@@ -103,32 +78,15 @@ function literals(source: string): Literal[] {
       while (i < source.length && source[i] !== '\n') i++
     } else if (c === '/' && source[i + 1] === '*') {
       i = source.indexOf('*/', i + 2) + 2
-    } else if (c === "'" || c === '"') readString(c)
-    else if (c === '`') readTemplate()
-    else i++
-  }
-  return out
-}
-
-/** What the guard finds wrong in `source`, one line each. */
-function unsafe(source: string): string[] {
-  const found: string[] = []
-  for (const lit of literals(source)) {
-    const sql = KEYWORD.test(lit.text)
-    for (const e of lit.expressions) {
-      if (
-        e.placeholder ? PLACEHOLDER.test(e.code) : sql && ALLOWED_IN_SQL.some(a => a.test(e.code))
-      ) {
-        continue
-      }
-      if (sql || lit.expressions.some(x => x.placeholder)) found.push(`\${${e.code}}`)
-    }
-    if (!sql) continue
-    // Concatenation with something that isn't a literal, on either side.
-    const after = source.slice(lit.end).match(/^\s*\+\s*(\S)/)
-    const before = source.slice(0, lit.start).match(/(\S)\s*\+\s*$/)
-    if (after && !['"', "'", '`'].includes(after[1] as string)) found.push(`${lit.text} + …`)
-    if (before && !['"', "'", '`'].includes(before[1] as string)) found.push(`… + ${lit.text}`)
+    } else if (source.startsWith('sql.raw(', i)) {
+      i += 'sql.raw('.length
+      const literal = source.slice(i).match(/^\s*('[^'\\]*'|"[^"\\]*")\s*\)/)
+      if (!literal) found.push(`sql.raw(${source.slice(i, source.indexOf(')', i))})`)
+    } else if (c === "'" || c === '"') check(readQuoted(c), false)
+    else if (c === '`') {
+      const tagged = tagBefore(i)
+      check(readTemplate(), tagged)
+    } else i++
   }
   return found
 }
@@ -140,39 +98,37 @@ function files(dir: string): string[] {
 }
 
 describe('SQL in platforms/node/src', () => {
-  it('takes values only as parameters', () => {
-    let sql = 0
+  it('is written by Drizzle, with values only as parameters', () => {
     const found: string[] = []
+    let tagged = 0
     for (const file of files(SRC)) {
       const source = readFileSync(file, 'utf8')
-      sql += literals(source).filter(l => KEYWORD.test(l.text)).length
+      tagged += source.match(/\bsql`/g)?.length ?? 0
       for (const f of unsafe(source)) found.push(`${relative(SRC, file)}: ${f}`)
     }
     expect(found).toEqual([])
     // The scan sees the Table's and the fan-out's SQL (it would pass vacuously otherwise).
-    expect(sql).toBeGreaterThan(10)
+    expect(tagged).toBeGreaterThan(5)
   })
 
-  it('catches a value spliced into SQL, however it is written', () => {
+  it('catches SQL written as a plain string, however it is put together', () => {
     const bad = [
       'db.query(`SELECT * FROM items WHERE pk = ${pk}`)',
-      'db.query(`select * from items where pk = ${pk}`)',
-      "db.query(`DELETE FROM ${this.items} WHERE sk = '${item.sk}'`)",
-      'where.push(`sk > $${params.length} OR pk = ${pk}`)',
-      'where.push(`sk ${op} $${n}`)',
-      'db.query(`LISTEN ${channelFromRequest}`)',
-      'db.query(`SELECT 1${limit ? ` LIMIT ${limit}` : ""}`)',
-      "db.query('SELECT * FROM items WHERE pk = ' + pk)",
+      'db.query(`select * from items where pk = $1`, [pk])',
+      "db.query('DELETE FROM items WHERE sk = ' + sk)",
       "db.query(prefix + ' WHERE sk = $1', [sk])",
-      'db.query(`ORDER BY sk ${direction}`)',
+      'c.query(`LISTEN ${channel}`)',
+      'db.execute(sql.raw(`SET search_path TO ${schema}`))',
+      'db.execute(sql.raw(name))',
     ]
     for (const source of bad) expect(unsafe(source), source).not.toEqual([])
     const good = [
-      'db.query(`SELECT 1 FROM ${this.items} WHERE pk = $1`, [pk])',
-      "db.query(`SELECT 1 FROM ${qualified(s, 'items')} ` + 'WHERE pk = $1', [pk])",
-      'where.push(`sk >= $${params.length}`)',
-      "q(`ORDER BY sk ${opts.reverse ? 'DESC' : 'ASC'}${limitSql(limit)}`)",
-      'throw new Error(`not a number: ${k}`)',
+      'db.execute(sql`SELECT pg_notify(${channel}, ${payload})`)',
+      'db.execute(sql`LISTEN ${sql.identifier(channel)}`)',
+      "db.execute(sql.raw('RESET search_path'))",
+      'db.select().from(items).where(eq(items.pk, pk))',
+      'throw new Error(`database schema must be lower-case letters: ${schema}`)',
+      "console.warn('live fan-out: listen failed')",
     ]
     for (const source of good) expect(unsafe(source), source).toEqual([])
   })

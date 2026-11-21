@@ -138,7 +138,7 @@ Everyone with a site's review page open is in that site's room. New comments,
 replies and resolutions appear without a refresh, each reviewer's pointer moves on the others'
 screens with their name, and a row of avatars (profile picture or initials) shows who is there,
 dimmed when they are on another page. The room is one WebSocket protocol on every platform: a
-Durable Object on Cloudflare, an API Gateway WebSocket API on AWS. An instance without it
+Durable Object on Cloudflare, an API Gateway WebSocket API on AWS, Web PubSub on Azure. An instance without it
 (`LIVE=false`, or no `LIVE_URL`) lacks the `live` capability, and review works as before,
 refreshing comments every 30 seconds.
 
@@ -150,7 +150,7 @@ replies in their thread; never about their own actions. Comments that arrive clo
 into one email. Each person chooses what they hear about from every client (Settings →
 Notifications, `fling notifications`, `fling_notifications_set`), and every email has a one-click
 unsubscribe. Email goes out through each cloud's own service (SES on AWS, Email Service on
-Cloudflare) from a sender the operator already has; admins check the setup at `/admin/mail` with a
+Cloudflare, Communication Services Email on Azure) from a sender the operator already has; admins check the setup at `/admin/mail` with a
 test email, and see the whole configuration (secrets by name only) at `/admin/settings`. An
 instance without a mail sender lacks the `email` and `notifications` capabilities, and every client
 hides the settings. See each platform's deploy guide, Email.

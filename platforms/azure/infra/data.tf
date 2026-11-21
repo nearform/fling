@@ -7,7 +7,7 @@
 #   the Table's conditions exist for). One region keeps that cheap.
 # - default_ttl -1: TTL is on, and only items that carry a `ttl` (from expiresAt) expire.
 # - The items' fields are JSON text in `j`, never queried, so they are left out of the index; the
-#   composite index serves query's `pk =` with `ORDER BY skx`.
+#   composite indexes (pk ascending, skx either way) serve query's `ORDER BY c.pk, c.skx`.
 # - Only Entra ID (the app's managed identity, iam.tf) reaches the data: keys are off.
 
 resource "azurerm_cosmosdb_account" "this" {

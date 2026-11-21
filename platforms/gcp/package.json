@@ -1,0 +1,29 @@
+{
+  "name": "@fling/platform-gcp",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Fling on Google Cloud: the Node host (platforms/node) on Cloud Run with the Firestore Table, the Cloud Storage Blobs and Cloud Scheduler's OIDC tick check. `build` bundles it with the web build into dist/, which the Dockerfile ships.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fling/api": "workspace:*",
+    "@fling/platform-node": "workspace:*",
+    "@fling/shared": "workspace:*",
+    "@google-cloud/firestore": "^9.4.1",
+    "@google-cloud/storage": "^9.0.0",
+    "google-auth-library": "^11.3.4"
+  },
+  "devDependencies": {
+    "@fling/conformance": "workspace:*",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.12",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

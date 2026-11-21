@@ -6,7 +6,7 @@ summary: Check how the instance sends email, send a test, and see how sending we
 audience: admin
 requires: [email]
 sources: [apps/web/src/pages/AdminMail.tsx, apps/api/src/notifications/mail-admin.ts, apps/api/src/notifications/drain.ts, apps/api/src/policy.ts, apps/api/src/config.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 {{instance:name}} sends email: notifications when someone shares a site or comments, and sign-in
@@ -27,11 +27,14 @@ and name, the **Reply-To** address, and on Amazon SES the configuration set. **O
 invitations** says whether people from outside can be invited, and links to its value on
 [Settings](/guide/admin/settings).
 
-Whoever runs {{instance:name}} sets all of this when they deploy it. To change it, see the Email
-section of the deploy guide for
+Whoever runs {{instance:name}} sets all of this when they deploy it. To change it, see the email
+settings in the deploy guide for
 [AWS]({{fact:repo-url}}/blob/main/platforms/aws/DEPLOY.md#email),
-[Cloudflare]({{fact:repo-url}}/blob/main/platforms/cloudflare/DEPLOY.md#email) or
-[Azure]({{fact:repo-url}}/blob/main/platforms/azure/DEPLOY.md#email).
+[Cloudflare]({{fact:repo-url}}/blob/main/platforms/cloudflare/DEPLOY.md#email),
+[Google Cloud]({{fact:repo-url}}/blob/main/platforms/gcp/DEPLOY.md#email),
+[Azure]({{fact:repo-url}}/blob/main/platforms/azure/DEPLOY.md#email),
+[DigitalOcean]({{fact:repo-url}}/blob/main/platforms/digitalocean/DEPLOY.md#instance-configuration)
+or [your own servers]({{fact:repo-url}}/blob/main/platforms/node/DEPLOY.md#configuration).
 
 ### Send a test email
 

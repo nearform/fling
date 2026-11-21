@@ -23,7 +23,7 @@ paths:
   new access pattern needs a list, add an index item; don't scan or add a secondary index.
 - Keep the port small, because every cloud must implement it with the same semantics. A new
   operation or condition needs the conformance suite extended (`packages/conformance/src/table.ts`)
-  and every adapter updated: memory, DynamoDB, D1, Postgres.
+  and every adapter updated: memory, DynamoDB, D1, Postgres, Firestore, Cosmos DB.
 - D1 stores the generic `items` table (`platforms/cloudflare/migrations/0001_init.sql`). New record
   kinds need no SQL migration. A schema change does: a new numbered `.sql` file, additive only.
 - Postgres stores the same `items` table, defined with Drizzle (`platforms/node/src/table/items.ts`).
@@ -36,6 +36,11 @@ paths:
   its `sql` template (values as parameters, names through `sql.identifier`) only where it can't.
   Never `sql.raw` anything but a string literal, and never write SQL as a plain string.
   `platforms/node/tests/sql-guard.test.ts` fails on either.
+- Firestore (`platforms/gcp/src/table/firestore.ts`) and Cosmos DB
+  (`platforms/azure/src/table/cosmos.ts`) store one document per item, so new record kinds need no
+  migration there either. Firestore keeps the sort key as bytes for byte order; Cosmos DB keeps a
+  hex copy (`skx`) and puts every item in one logical partition, so its `transact` is one batch.
+  Both cap a key's size: keep record keys built from a site path within `MAX_PATH_BYTES`.
 
 ## Records (`apps/api/src/store/`)
 

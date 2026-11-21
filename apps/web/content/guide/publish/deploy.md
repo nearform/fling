@@ -4,7 +4,7 @@ part: publish
 order: 10
 summary: Fling a folder, a page or a zip and get its address back.
 sources: [apps/web/src/lib/arrival.ts, apps/cli/src/commands/deploy.ts, apps/cli/src/deploy.ts, apps/cli/src/inputs.ts, apps/cli/src/cli.ts, apps/api/src/publication.ts, packages/shared/src/mcp-tools.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 Publishing (flinging) puts your files online at `https://<name>.{{instance:sites}}`. Fling the same
@@ -92,6 +92,8 @@ published before and that version is put back at once, without uploading anythin
   see [Site names](/guide/publish/names).
 - **"Refusing to publish" or "found secrets".** Fling never publishes keys, credentials or files
   containing them. See [What gets published](/guide/publish/what-gets-published).
+- **"is being finalized already".** An earlier attempt at the same publish is still making it
+  live. Wait a few minutes and fling again.
 - **Too large.** One publish holds up to {{fact:max-deploy}} and {{fact:max-files}} files, none
   over {{fact:max-file}}.
 <!-- requires: servers -->

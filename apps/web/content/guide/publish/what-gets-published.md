@@ -4,7 +4,7 @@ part: publish
 order: 30
 summary: The files Fling leaves out, the secrets it refuses, the home page it can make, and the limits.
 sources: [apps/cli/src/manifest.ts, apps/cli/src/gitignore.ts, apps/cli/src/inputs.ts, packages/shared/src/secrets.ts, packages/shared/src/limits.ts, apps/api/src/publication.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 Fling publishes the files a browser needs and nothing else. It leaves out what is private to your
@@ -78,6 +78,9 @@ A Markdown file can be the home page too: see [Markdown pages](/guide/publish/ma
 
 - One publish holds up to {{fact:max-deploy}} and {{fact:max-files}} files, none over
   {{fact:max-file}}.
+- A file's path, from the top of the folder, is at most {{fact:max-path}} long, counted in UTF-8:
+  a letter outside plain English, or an emoji, takes two to four. A longer one stops the publish
+  ("Path too long" from the command line); shorten the folder or file names.
 - Anyone who can open a site can fetch every file it publishes, so keep anything private out of
   the files.<!-- requires: servers --> Data only a [site server](/guide/servers/what-is-a-site-server)
   should see goes in its `server/` folder, and keys in [site secrets](/guide/servers/secrets).<!-- /requires -->

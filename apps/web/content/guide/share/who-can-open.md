@@ -5,7 +5,7 @@ order: 10
 summary: Each site has one access level, from only you to anyone with the address.
 requires: [accessLevels]
 sources: [packages/shared/src/access.ts, packages/shared/src/audience.ts, apps/api/src/policy.ts, apps/api/src/invitations.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteAccess.tsx, packages/shared/src/mcp-tools.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 Every site has an access level: who can open it. A site is private unless you make it public, and

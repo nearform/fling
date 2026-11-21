@@ -77,7 +77,7 @@ Each choice lists the reason for it and the file that owns it.
 | Shape | How the sites host runs | Platforms |
 |---|---|---|
 | **Edge function** | A CDN runs the routing decision at the edge against an edge key-value store, then serves from object storage. The API runs separately. | AWS (CloudFront Function + KeyValueStore) |
-| **One host that routes** | One process routes by host. It answers the app's API and UI, and runs the routing decision for the sites host itself. A CDN in front only terminates TLS and caches. | Cloudflare (one Worker); proposed for GCP, Azure, Fly.io, DigitalOcean and self-host |
+| **One host that routes** | One process routes by host. It answers the app's API and UI, and runs the routing decision for the sites host itself. A CDN in front only terminates TLS and caches. | Cloudflare (one Worker), Google Cloud (the Node host on Cloud Run); proposed for Azure, Fly.io, DigitalOcean and self-host |
 
 The second shape needs a runtime that runs JS for every site request. In exchange, the sites host
 can add the decision's headers to every response; a viewer-request function cannot.

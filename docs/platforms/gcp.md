@@ -2,96 +2,84 @@
 
 # Platform: Google Cloud
 
-How Fling would meet the [logical platform](../design/platform.md) on Google Cloud. There is no
-deploy guide yet.
+How Fling meets the [logical platform](../design/platform.md) on Google Cloud. Deploying an
+instance: [platforms/gcp/DEPLOY.md](../../platforms/gcp/DEPLOY.md).
 
 ## 1. Status and shape
 
-**Status:** proposed. No code exists. This document is the design to build from.
+**Status:** supported. The adapters pass the conformance suites against the Firestore emulator and
+fake-gcs-server in CI, the Terraform module passes its tests against mocked providers, and the
+`Deploy (Google Cloud)` workflow deploys an instance by hand from a release tag. Site servers are
+not built yet (§7).
 
 **Shape:** one host that routes. The [shared Node host](../design/platform.md#5-shared-building-blocks-for-new-platforms)
-runs as one Cloud Run service that answers the app host and the sites host. Behind it are:
-- a global external Application Load Balancer, for TLS and the wildcard certificate;
-- Cloud CDN, for public, immutable objects.
+runs as one Cloud Run service that answers the app host and the sites host. In front of it is a
+global external Application Load Balancer, for TLS and the wildcard certificate, with Cloud CDN on
+the sites' backend when it is switched on.
 
 Google Cloud has no JS edge (§3), so the routing decision runs in Cloud Run, as it does in the
 Cloudflare Worker.
 
 **Cost floor (idle):** roughly $20–25 a month.
-- The load balancer's forwarding rule costs about $18 a month, whatever the traffic.
+- The load balancer's forwarding rules cost about $18 a month, whatever the traffic.
 - Cloud Run scales to zero.
-- Firestore, GCS, Secret Manager and Cloud Scheduler sit within or near their free tiers at idle.
-- `live` with Memorystore adds about $35 a month or more.
-
-**Effort:** large.
-- Two new adapters: Firestore and GCS.
-- The shared Node host and the shared SMTP mailer.
-- A Terraform module.
-- A deploy workflow.
-- Site servers on Cloud Run, which are the biggest single piece.
+- Firestore, Cloud Storage, Secret Manager and Cloud Scheduler sit within or near their free tiers
+  at idle.
 
 ## 2. Mapping
 
 | Element | Google Cloud service | Adapter | Notes |
 |---|---|---|---|
-| Table | Firestore in Native mode, one database, one collection `items` | `platforms/gcp/src/table/firestore.ts` | See "Table on Firestore" below |
-| Blobs | Cloud Storage (`sites` bucket), V4 signed URLs | `platforms/gcp/src/blobs/gcs.ts` | GCS checks MD5 or CRC32C on upload, never SHA-256, so uploads bind the manifest's MD5 (`Content-MD5`, [§3.2](../design/platform.md#32-blobs)); a manifest without one goes through the host's upload routes (`HostUploads`) |
-| Route table | Firestore, behind an in-process cache | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over the core's `TableRouteTable` | A new key is visible at once, a changed one after the cache TTL |
-| Sites host | Cloud Run (the Node host) behind the load balancer and Cloud CDN | `platforms/node` (shared) | See §3 |
-| Live hub | WebSockets on Cloud Run, with a fan-out between instances | `platforms/gcp/src/live.ts` | Fan-out over Memorystore for Redis pub/sub, or Pub/Sub. Otherwise one instance only, or `live` off at first |
+| Table | Firestore in Native mode, one database, collection `items` | `platforms/gcp/src/table/firestore.ts` | See "Table on Firestore" below |
+| Blobs | Cloud Storage (`sites` bucket), V4 signed URLs | `platforms/gcp/src/blobs/gcs.ts` | Cloud Storage checks an upload's MD5 or CRC32C, never its SHA-256, so a signed PUT binds the manifest's MD5 (`Content-MD5`, with Content-Type and Cache-Control; `uploadDigest = 'md5'`, [§3.2](../design/platform.md#32-blobs)); a manifest without one goes through the host's upload routes (`HostUploads`). The service signs as its own service account through the IAM Credentials API, with no key |
+| Route table | Firestore, behind an in-process cache | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over the core's `TableRouteTable` | A new key is visible at once, a changed one within the cache's 5 s |
+| Sites host | Cloud Run (the Node host) behind the load balancer | `platforms/node/src/host.ts` (shared), wired in `platforms/gcp/src/host.ts` | See §3 |
+| Live hub | WebSockets on Cloud Run, the Node host's in-process hub | `platforms/gcp/src/host.ts` (`MemoryLiveHub`) | Every socket of a room must reach one process, so `LIVE_URL` is set only with `max_instances = 1` |
 | Mailer | none native: the shared SMTP mailer (a transactional provider's SMTP) | `platforms/node/src/mail/smtp.ts` (shared) | Google Cloud has no email-sending service. Outbound port 25 is blocked; 465 and 587 are not |
-| Site servers | Cloud Run, one service per site, a revision per version | `platforms/gcp/src/servers/` | See "Site servers" below |
-| Server logs | Cloud Logging (`entries.list`) | `platforms/gcp/src/servers/server-logs.ts` | Read-only; Cloud Run writes the server's stdout |
-| Ticks | Cloud Scheduler calling the service over HTTP, with an OIDC token | `platforms/gcp/src/entry.ts` | `notify` every minute (with mail), `maintain` hourly. The host checks the token's service account |
-| Migrations | a Cloud Run job, run by the deploy | `platforms/gcp/src/migrate.ts` | It runs the same image and loops until done |
-| Secrets | Secret Manager | `platforms/gcp/src/secrets.ts` | Read at start-up. Generated secrets are added as versions outside Terraform, so they stay out of state |
+| Site servers | not yet | — | `SERVERS` must be off; the service refuses to start otherwise |
+| Ticks | Cloud Scheduler calling the service over HTTPS, with an OIDC token | `platforms/gcp/src/ticks.ts` | `notify` every minute (with mail), `maintain` hourly, through the load balancer to the app host. The service verifies the Google-signed ID token (google-auth-library: signature, issuer, expiry, the app origin as audience) and its service account |
+| Migrations | the host's `POST /ticks/migrate`, called by the deploy | `platforms/node/src/host.ts` (shared) | With an ID token of the deploy service account; looped until done |
+| Secrets | Secret Manager, in the service's environment | `platforms/gcp/src/env.ts` | Cloud Run fills the environment from each secret's latest version when an instance starts. Generated secrets are written by Terraform with write-only attributes, so they stay out of state; secrets to fill by hand start as `unset`, which reads as not set |
 | Sign-in | (core OIDC) | — | The client secrets are in Secret Manager |
 
 ### Table on Firestore
 
-- **Layout:** each item is a document in one collection. It holds the fields `pk`, `sk`, `data`
-  and `expiresAt`, plus `ttl` as a Timestamp. The document ID is a hash of `pk` and `sk`, because
-  IDs may not contain `/` and are capped at 1,500 bytes. A composite index on `(pk ASC, sk ASC)`
-  serves `query`, and `reverse` is the same index read descending.
-- **Order:** Firestore orders strings by their UTF-8 encoded bytes, which is the `compareSk`
-  order. A prefix query is the range `[prefix, prefix + U+FFFF)`, checked against the
-  conformance suite's prefix cases.
-- **Consistency and transactions:** reads are strongly consistent. Server-side transactions span
-  documents and collections, well above `TRANSACT_MAX` (25).
-- **Conditions:** each condition becomes a read inside the transaction (`ifAbsent`, `ifExists`,
-  `fieldEquals`) before its write, and `ConditionFailed` carries the op index. `add` is
-  `FieldValue.increment`.
-- **Expiry:** a TTL policy on `ttl` deletes expired documents, usually within 24 hours. As on
-  DynamoDB, every read and condition also treats an item past its `expiresAt` as absent.
-- **Paging:** the cursor is the core's `encodeCursor(sk)` keyset cursor, read with `startAfter`.
-
-### Site servers
-
-- **What runs:** one Cloud Run service per site, named by the core's naming. Each runs a generic
-  runner image. The image holds the core's shell (strips the environment, enforces wall time and
-  body limits). The version's `_fling/server.mjs` comes from a Cloud Storage volume mount, so
-  there is no build step per deploy.
-- **Versions:** each version and configuration is a revision with a tag. `goLive` moves the
-  traffic to the new revision, and `probe` calls the revision's tag URL.
-- **Isolation:**
-  - Ingress is internal plus the load balancer.
-  - Invoker IAM lets only the sites host's service account call the service.
-  - Each service runs as its own service account, which has no rights.
-- **Egress `none`:** Direct VPC egress with all traffic sent into a VPC that has no Cloud NAT
-  and a deny-all egress firewall rule.
-- **Limits:** the wall-time cap is the request timeout, up to 60 minutes. Concurrency and
-  max-instances bound each site.
+- **Layout:** each item is a document in one collection. Its ID is a SHA-256 of `pk` and `sk`,
+  because IDs may not contain `/` and are capped at 1,500 bytes. It holds `pk`, `s` (the sort
+  key's UTF-8 bytes, a Bytes value), `data` (the item's other fields as JSON, exempt from
+  indexing) and, when the item expires, `ttl` as a Timestamp.
+- **Order:** Firestore orders Bytes values byte by byte, which is the `compareSk` order, so the
+  order never rests on how strings compare. A prefix query is the range `[prefix, prefix + 0xFF)`:
+  no UTF-8 sequence holds the byte 0xFF, so every key that starts with the prefix is inside it,
+  characters above the Basic Multilingual Plane included. Composite indexes on `(pk, s)` ascending
+  and descending serve `query` and `reverse`.
+- **Values:** JSON keeps every value the port takes: NUL and lone surrogates are escaped, nested
+  arrays (which Firestore refuses as values) are text, and no field name is reserved.
+- **Consistency and transactions:** reads are strongly consistent. The database runs with
+  pessimistic concurrency, so a transaction's reads take locks; the client retries a transaction
+  that lost a conflict (up to 50 times). Transactions span documents, well above `TRANSACT_MAX`
+  (25).
+- **Conditions:** each condition is a read inside the transaction (`ifAbsent`, `ifExists`,
+  `fieldEquals`) before its write, and `ConditionFailed` carries the op index. `update` (with
+  `add`) is a read and a write in one transaction, so concurrent adds all count.
+- **Expiry:** a TTL policy on `ttl` deletes expired documents, usually within 24 hours and
+  sometimes later. As on DynamoDB, every read and condition also treats an item past its
+  `expiresAt` as absent.
+- **Paging:** the cursor is the core's `encodeCursor(sk)` keyset cursor, read with `startAfter`
+  on `s`. `scan` pages in document ID order.
 
 ## 3. Edge and sites host
 
 The Node host runs `routeSiteRequest` for every request to `*.<sites domain>`:
-- A rewrite streams the object from GCS, adds the decision's headers, and sets `Cache-Control`
-  public only for public sites.
+- A rewrite streams the object from Cloud Storage, adds the decision's headers, and sets
+  `Cache-Control` public only for public sites.
 - A response is returned directly.
-- An invoke calls the site's Cloud Run service with the viewer and site headers and an ID token.
 
-Cloud CDN in front caches what is marked public, keyed by host and path. Private sites are never
-cached at the edge.
+The load balancer has two backend services on one serverless NEG: `app` for the hostname, never
+cached, and `sites` for `*.hostname`. With the module's `cdn` on, Cloud CDN caches the sites'
+backend under the service's own `Cache-Control` (`USE_ORIGIN_HEADERS`), keyed by host, path and
+query. Private sites are never cached at the edge. It is off by default, so a change of access or
+a rollback is seen at once.
 
 Google Cloud has no edge that runs this decision. Service Extensions plugins run WebAssembly
 (Rust, Go or C++) over the Proxy-Wasm ABI, not JS. They are generally available on Cloud Load
@@ -103,81 +91,86 @@ logical platform rules out.
 - One Google-managed certificate from Certificate Manager covers the hostname and `*.hostname`.
   It is validated by a DNS authorisation and attached to the load balancer through a certificate
   map.
-- Cloud DNS holds the zone, the authorisation's CNAME record, and A and AAAA records for both
-  names, pointing at the load balancer's global IP.
+- Cloud DNS holds the authorisation's CNAME record and A and AAAA records for both names, pointing
+  at the load balancer's global addresses, when the module is given the zone; otherwise its
+  `dns_records` output lists them for wherever the domain's DNS is.
 - The Cloud Run service accepts traffic only from the load balancer (ingress
-  `internal-and-cloud-load-balancing`), so no origin secret is needed.
+  `internal-and-cloud-load-balancing`) and needs no invoker IAM, so no origin secret is needed.
+  HTTP is redirected to HTTPS.
 
 ## 5. Infrastructure as code
 
-Proposed as a Terraform module at `platforms/gcp/infra` on the `google` and `google-beta`
-providers, versioned by `infra-gcp-v<x.y.z>` tags. Ownership is split as on AWS: Terraform owns
-the shape, the deploy owns the image, and the app owns documents and objects.
+The Terraform module is [`platforms/gcp/infra`](../../platforms/gcp/infra), on the `google` and
+`google-beta` providers. It is versioned by `infra-gcp-v<x.y.z>` tags, separate from release tags.
+Terraform owns the shape, `deploy-gcp.yml` owns the image, and the app owns documents and objects.
 
 | File | Resources |
 |---|---|
 | `main.tf` | `google_project_service` for each API used; `google_artifact_registry_repository` for images |
-| `api.tf` | `google_cloud_run_v2_service` (the Node host, placeholder image, `ignore_changes` on it); `google_cloud_run_v2_job` (migrate) |
-| `edge.tf` | `google_compute_global_address`; `google_compute_region_network_endpoint_group` (serverless NEG); `google_compute_backend_service` with Cloud CDN on; `google_compute_url_map`; `google_compute_target_https_proxy`; `google_compute_global_forwarding_rule`; HTTP-to-HTTPS redirect |
-| `certs.tf` | `google_certificate_manager_dns_authorization`; `google_certificate_manager_certificate` (hostname and wildcard); `google_certificate_manager_certificate_map` and its entries |
-| `dns.tf` | `google_dns_record_set` for A, AAAA and the authorisation CNAME (the zone is looked up) |
-| `data.tf` | `google_firestore_database` (Native mode, PITR, delete protection); `google_firestore_index` `(pk, sk)`; `google_firestore_field` TTL on `ttl` |
-| `storage.tf` | `google_storage_bucket` for `ui` and `sites` (uniform access, lifecycle on `uploads/`); bucket IAM |
-| `secrets.tf` | `google_secret_manager_secret` for each secret (versions added outside Terraform) |
-| `schedule.tf` | `google_cloud_scheduler_job` for `notify` (with mail) and `maintain`, with an OIDC token for the scheduler's service account |
-| `iam.tf` | `google_service_account` for the host, scheduler and deploy; `google_iam_workload_identity_pool` and `google_iam_workload_identity_pool_provider` for GitHub OIDC, limited to the repository and environment; role bindings |
-| `servers.tf` (with servers) | A runner service account; a zips bucket; `google_compute_network` and subnet with no NAT, plus a deny-all egress `google_compute_firewall` (egress `none`); the host's right to create services under the site prefix only |
-| `live.tf` (with Memorystore) | `google_redis_instance` and its VPC access |
+| `api.tf` | `google_cloud_run_v2_service` (the Node host, placeholder image, `ignore_changes` on it), its environment and secrets |
+| `edge.tf` | Global IPv4 and IPv6 addresses; the serverless NEG; `app` and `sites` backend services (Cloud CDN on `sites` with `cdn`); URL maps; HTTPS and HTTP proxies; forwarding rules; the HTTP-to-HTTPS redirect |
+| `certs.tf` | `google_certificate_manager_dns_authorization`; `google_certificate_manager_certificate` (hostname and wildcard); the certificate map and its entries |
+| `dns.tf` | `google_dns_record_set` for A, AAAA and the authorisation CNAME (with `dns_zone`) |
+| `data.tf` | `google_firestore_database` (Native mode, pessimistic concurrency, PITR, delete protection); `google_firestore_index` `(pk, s)` both ways; `google_firestore_field` TTL on `ttl`, no indexes on `data` |
+| `storage.tf` | The `sites` bucket (uniform access, public access prevented, lifecycle on `uploads/`); bucket IAM |
+| `secrets.tf` | `google_secret_manager_secret` for each secret; write-only versions (generated, or the `unset` placeholder) |
+| `schedule.tf` | `google_cloud_scheduler_job` for `maintain` and, with mail, `notify`, with an OIDC token for the scheduler's service account |
+| `iam.tf` | Service accounts for the service, the scheduler and the deploy; `google_iam_workload_identity_pool` and its provider for GitHub OIDC, limited to the repository and owner ids and the environment; role bindings |
 
-Tests run as `terraform test` with mocked providers, which `scripts/check-terraform.mjs` would
-learn to run for each module.
+`infra/tests/*.tftest.hcl` run against mocked providers in the gate (`scripts/check-terraform.mjs`).
 
 ## 6. Deploy and local runtime
 
-- **Deploy:** a `deploy-gcp.yml` workflow authenticates through Workload Identity Federation. In
-  order, it:
-  1. builds the image and pushes it to Artifact Registry;
-  2. deploys a new revision;
-  3. runs the migrate job until done;
+- **Deploy:** `.github/workflows/deploy-gcp.yml`, by hand from a release tag, authenticates
+  through Workload Identity Federation. In order, it:
+  1. builds the service (`platforms/gcp/scripts/build.mjs`, with `instance.json`), the UI and the
+     `.mcpb`, and the image (`platforms/gcp/Dockerfile`), and pushes it to Artifact Registry;
+  2. deploys a new revision on it;
+  3. loops `POST /ticks/migrate` until done;
   4. polls `/.well-known/fling`;
-  5. syncs the UI and the sites' own pages to GCS;
-  6. runs the e2e smoke test.
-- **Local runtime:** the Node host over the Firestore emulator and fake-gcs-server, added to
-  `packages/e2e/src/local.ts`.
-- **Emulators in CI:** the Firestore emulator and fake-gcs-server as service containers next to
-  DynamoDB Local and MinIO.
+  5. runs the e2e smoke test.
+
+  The web UI and Fling's pages for the sites are in the image, so there is nothing to sync. The
+  `deploy` Terraform output becomes the `GCP_DEPLOY_CONFIG` GitHub variable.
+- **Local runtime:** the `node` runtime of `pnpm e2e` runs the Node host every Google Cloud
+  instance runs; the GCP adapters are held to the same behaviour by the conformance suites.
+- **Emulators in CI:** the Firestore emulator and fake-gcs-server, started by `ci.yml` beside
+  DynamoDB Local, MinIO and Postgres (`platforms/gcp/tests/services.ts`). fake-gcs-server checks
+  neither a signed URL's signature nor its Content-MD5, so the Blobs suite sends the signed URLs
+  through a stand-in for Cloud Storage's documented V4 checks first (`tests/signed-urls.ts`).
 
 ## 7. Capabilities
 
-- At first, everything except `live`, `servers` and `serversEgress`, plus `email` once the HTTP
-  mailer is configured.
-- `live` turns on with a fan-out (Memorystore or Pub/Sub).
-- `servers` turns on with the Cloud Run site servers. `serversEgress` follows the egress setting.
+- Everything except `servers` and `serversEgress`.
+- `live` needs `max_instances = 1` (the module's default); with more, the module leaves `LIVE_URL`
+  unset and review pages poll.
+- `email`, `invites` and the email channel of notifications need the module's `mail`.
 
 ## 8. Gaps and open questions
 
-- **MD5 upload binding on GCS:** a V4 signed URL that signs `Content-MD5` should make GCS refuse
-  other bytes; the adapter's conformance run against fake-gcs-server and a real bucket confirms
-  it. Uploads from clients that send no MD5 pass through the host's upload routes.
-- **The 32 MiB request cap:** Cloud Run limits HTTP/1 requests to 32 MiB (no cap on HTTP/2), and
-  this binds uploads through the host. The options are end-to-end HTTP/2 or keeping uploads under
-  the cap.
-- **WebSocket lifetime:** Cloud Run's request timeout is at most 60 minutes. Whether that also
-  bounds a WebSocket connection is unconfirmed, and clients must reconnect if it does.
-- **Firestore prefix ranges:** the `U+FFFF` upper bound has to be checked against keys that
-  contain characters above the Basic Multilingual Plane.
-- **Cold starts:** a scale-to-zero sites host adds start-up latency to the first site request.
-  A minimum of one instance costs about $10–15 a month more.
-- **Firestore TTL deletion lag:** deletion can take more than 24 hours, so reads must filter
-  expired items, as the DynamoDB adapter does.
-- **Site servers per site:** check Cloud Run's per-project service quotas (default 1,000
-  services per region) against the expected number of sites with servers.
+- **Site servers:** a Cloud Run service per site, a revision per version, egress `none` through
+  Direct VPC egress into a VPC with no route out. Not built; check Cloud Run's per-project service
+  quota (1,000 per region by default) against the sites expected to have servers.
+- **Live rooms across instances:** they need a fan-out between instances (Memorystore for Redis
+  pub/sub, or Pub/Sub) before the service can scale out with `live` on.
+- **The 32 MiB request cap:** Cloud Run limits HTTP/1 requests to 32 MiB, which bounds uploads
+  through the host (`MAX_REQUEST_BYTES` defaults to it). Uploads with an MD5 go straight to Cloud
+  Storage.
+- **Unconfirmed without a real project:** that Cloud Storage refuses a signed PUT whose body does
+  not match its signed `Content-MD5` (documented, and what the test stand-in does); that the load
+  balancer passes the original Host header to Cloud Run (the Node host routes by it); that a
+  WebSocket through the load balancer lasts the service's request timeout; and the Firestore IAM
+  condition that holds the service to its own database.
+- **Cold starts:** a scale-to-zero service adds start-up latency to the first request.
+  `min_instances = 1` costs about $10–15 a month more.
 
 ## 9. Sources
 
 - [Cloud Run quotas and limits](https://docs.cloud.google.com/run/quotas)
 - [Cloud Storage data validation (MD5, CRC32C)](https://docs.cloud.google.com/storage/docs/data-validation)
 - [Cloud Storage canonical requests](https://docs.cloud.google.com/storage/docs/authentication/canonical-requests)
+- [Firestore value type ordering](https://firebase.google.com/docs/firestore/manage-data/data-types#value_type_ordering)
+- [Firestore concurrency modes](https://cloud.google.com/firestore/docs/transaction-data-contention)
+- [Cloud Scheduler with OIDC tokens](https://cloud.google.com/scheduler/docs/http-target-auth)
 - [Service Extensions release notes](https://docs.cloud.google.com/service-extensions/docs/release-notes)
 - [Media CDN extensions overview](https://docs.cloud.google.com/service-extensions/docs/media-cdn-extensions-overview)
-- [Service Extensions plugins with Cloud CDN](https://cloud.google.com/blog/products/networking/run-service-extensions-plugins-with-cloud-cdn/)

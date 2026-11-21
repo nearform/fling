@@ -29,6 +29,12 @@ FLING_TEST_S3_ENDPOINT=http://localhost:9000 pnpm --filter @fling/platform-s3 te
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=fling-test postgres:17
 FLING_TEST_POSTGRES_URL=postgres://postgres:fling-test@localhost:5432/postgres \
   pnpm --filter @fling/platform-node test
+
+docker run -d -p 8086:8080 gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+  gcloud emulators firestore start --host-port=0.0.0.0:8080
+docker run -d -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
+FLING_TEST_FIRESTORE_EMULATOR_HOST=localhost:8086 \
+  FLING_TEST_GCS_ENDPOINT=http://localhost:4443 pnpm --filter @fling/platform-gcp test
 ```
 
 The Postgres Table's suites also run on PGlite (Postgres in process) in every `pnpm gate`, so only
@@ -295,7 +301,9 @@ platforms are capability flags, never `if (platform === …)`.
 - The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow with the
   release tag as `ref`, or locally with `pnpm --filter @fling/platform-cloudflare run deploy` from
   a checkout of the tag. It ends with the e2e smoke test.
-- To roll back, run either deploy workflow with an older release tag. Data is never rolled back,
+- A Google Cloud instance is deployed by hand through the **Deploy (Google Cloud)** workflow
+  (`deploy-gcp.yml`) with the release tag as `ref`. It ends with the e2e smoke test.
+- To roll back, run any deploy workflow with an older release tag. Data is never rolled back,
   which is why migrations use expand/contract.
 
 ## Releasing

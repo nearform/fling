@@ -685,11 +685,12 @@ makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shel
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one
-Worker, D1, R2, Workers KV with D1 behind it; `platforms/digitalocean`: the **Node host image** on
-App Platform, Managed PostgreSQL, Spaces). `platforms/node` holds what platforms on Node share
-and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer; with its image,
-Compose file and Helm chart it is the self-host platform. `platforms/s3` holds `S3Blobs`, the
-Blobs adapter for every store that speaks the S3 API (S3, Spaces, MinIO).
+Worker, D1, R2, Workers KV with D1 behind it; `platforms/gcp`: the **Node host** on Cloud Run,
+Firestore, Cloud Storage, Secret Manager, Cloud Scheduler; `platforms/digitalocean`: the **Node
+host image** on App Platform, Managed PostgreSQL, Spaces). `platforms/node` holds what platforms on
+Node share and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer; with
+its image, Compose file and Helm chart it is the self-host platform. `platforms/s3` holds
+`S3Blobs`, the Blobs adapter for every store that speaks the S3 API (S3, Spaces, MinIO).
 
 **Node host** — all of an instance in one Node HTTP server (`createNodeHost`,
 `platforms/node/src/host.ts`), routing by host as the Cloudflare Worker does: the API, the UI, host
@@ -705,7 +706,9 @@ platform's entry point into the same image.
 
 **Tick endpoints** — the Node host's `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate`
 on the app host, for a scheduler or a deploy, behind a caller check the platform supplies
-(`TickAuthorizer`; by default `Authorization: Bearer <TICK_SECRET>`). Without one they answer 404.
+(`TickAuthorizer`; by default `Authorization: Bearer <TICK_SECRET>`; on Google Cloud a Google-signed
+ID token of the scheduler's or the deploy's service account, `platforms/gcp/src/ticks.ts`). Without
+one they answer 404.
 
 **Postgres Table** — the Table on Postgres (`PostgresTable`, `platforms/node/src/table/postgres.ts`),
 through Drizzle ORM over `pg` or PGlite: one `items(pk, sk COLLATE "C", data jsonb, expires_at)`
@@ -715,6 +718,12 @@ racing writers wins, and migrations drizzle-kit generates (`platforms/node/drizz
 at once and purged hourly. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
+
+**Firestore Table** — the Table on Firestore in Native mode (`FirestoreTable`,
+`platforms/gcp/src/table/firestore.ts`): one document per item in the `items` collection, its ID a
+hash of the key, the sort key stored as bytes so queries come back in UTF-8 byte order, the other
+fields as JSON, and every condition, update and `transact` in a Firestore transaction. A `ttl`
+Timestamp feeds the TTL policy; reads hide expired items at once.
 
 **Logical platform** — the contract every **Platform** meets whatever cloud it is on: the ports,
 their semantics, the sites host, ticks, secrets, domains, deploy and local runtime, and the design

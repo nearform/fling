@@ -27,6 +27,8 @@ const ALLOWED = {
   // The deploy guides open with a prompt that tells an agent which repository to clone.
   'platforms/aws/DEPLOY.md': [REPO],
   'platforms/cloudflare/DEPLOY.md': [REPO],
+  'platforms/node/DEPLOY.md': [REPO],
+  'platforms/digitalocean/DEPLOY.md': [REPO],
   '.github/workflows/release-cli.yml': [PACKAGE, REPO],
   // The "Why Fling?" page, a static site published with Fling itself.
   'why/index.html': [PACKAGE, REPO],

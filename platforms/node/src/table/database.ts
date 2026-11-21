@@ -161,6 +161,21 @@ async function lock(db: FlingDatabase, pid: number): Promise<boolean> {
 }
 
 /** A `pg` Pool as a Database. */
+/**
+ * The `pg` Pool's settings for `DATABASE_URL`, with `DATABASE_CA_CERT` (PEM) when the server's
+ * certificate is signed by a CA Node does not trust (a managed Postgres's own, such as
+ * DigitalOcean's): TLS then verifies against that CA. node-postgres lets the URL's `sslmode`
+ * replace the TLS settings it is given, so a URL with both is refused rather than verified less.
+ */
+export function pgPoolConfig(url: string, caCert?: string): pg.PoolConfig {
+  const ca = caCert?.trim()
+  if (!ca) return { connectionString: url }
+  if (/[?&]ssl(mode)?=/i.test(url)) {
+    throw new Error('DATABASE_CA_CERT is set: leave sslmode (and ssl) out of DATABASE_URL')
+  }
+  return { connectionString: url, ssl: { ca, rejectUnauthorized: true } }
+}
+
 export function pgDatabase(pool: pg.Pool): Database {
   return {
     db: nodePg(pool) as unknown as FlingDatabase,

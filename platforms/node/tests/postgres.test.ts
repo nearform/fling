@@ -16,7 +16,7 @@ import { sql } from 'drizzle-orm'
 import pg from 'pg'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { PostgresFanout, pgliteNotifier, pgNotifier } from '../src/live/postgres-fanout.ts'
-import { type Database, pgDatabase } from '../src/table/database.ts'
+import { type Database, pgDatabase, pgPoolConfig } from '../src/table/database.ts'
 import { PostgresTable } from '../src/table/postgres.ts'
 import { databases, freshSchema, POSTGRES_URL } from './services.ts'
 
@@ -262,5 +262,20 @@ describe('the pg driver', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('the pg pool settings', () => {
+  const url = 'postgres://fling:pw@db.example.test:25060/fling'
+  const ca = '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----'
+
+  it('verifies TLS against DATABASE_CA_CERT when it is set, and is the URL alone otherwise', () => {
+    expect(pgPoolConfig(url)).toEqual({ connectionString: url })
+    expect(pgPoolConfig(url, '  ')).toEqual({ connectionString: url })
+    expect(pgPoolConfig(url, ca).ssl).toEqual({ ca, rejectUnauthorized: true })
+  })
+
+  it('refuses a URL whose sslmode would replace the CA', () => {
+    expect(() => pgPoolConfig(`${url}?sslmode=require`, ca)).toThrow(/sslmode/)
   })
 })

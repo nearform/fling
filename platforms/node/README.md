@@ -48,12 +48,14 @@ configuration), and these of its own:
 | `S3_UPLOAD_DIGEST` | `md5` with an endpoint, `sha256` without | What a presigned PUT binds. `md5` (`Content-MD5`) works on every S3-compatible store; `sha256` only where the store rejects a body whose signed `x-amz-checksum-sha256` differs (AWS S3, MinIO). With `md5`, a file the client sent no MD5 for is uploaded through the host |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (secrets) | the AWS SDK's default chain | The store's keys |
 | `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms. A direct or session-mode connection: a pooler in transaction mode (PgBouncer's, or a provider's "transaction" endpoint) breaks the migrations' lock and search_path and the live rooms' LISTEN, and start-up fails saying so |
+| `DATABASE_CA_CERT` | none: the CAs Node trusts | The PEM of the CA that signed the Postgres server's certificate (a managed Postgres's own); TLS is then verified against it. Leave `sslmode` out of `DATABASE_URL` with it |
 | `DATABASE_SCHEMA` | `public` | The Postgres schema the Table is in, so instances can share a database |
 | `TICK_SECRET` (secret, 32 characters or more) | none: the tick endpoints answer 404 | The bearer token for `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate` |
 
 It migrates the schema and the data on start and runs the ticks on timers in process; every tick
 is safe to repeat, so the endpoints can run beside them. `GET /healthz` answers on any host that is
-neither the app's nor a site's, for a load balancer's or an orchestrator's probe.
+neither the app's nor a site's, for a load balancer's or an orchestrator's probe. The e2e runs it
+as the `node` local runtime (`pnpm --filter @fling/e2e e2e node`).
 
 ## The image
 

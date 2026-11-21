@@ -121,11 +121,17 @@ The Node host runs `routeSiteRequest` for every request to `*.<sites domain>`:
 Front Door caches what is marked public. Its rules engine can rewrite URLs and set headers, but it
 cannot read a key-value store or check an HMAC, so it cannot run the decision.
 
-Front Door sends the Container App's own name as the Host, since Container Apps routes by it, and
-the name the visitor asked for as `X-Forwarded-Host`. A rule adds `X-Origin-Verify` with the
-origin-verify secret on the way to the origin (the role `ORIGIN_VERIFY_SECRET` plays on AWS). The
-Container App answers 403 to a request without it, and otherwise routes by `X-Forwarded-Host`
+Front Door sends the Container App's own name as the Host, since Container Apps routes by it. A
+rule writes the name the visitor asked for as `X-Fling-Host` and adds `X-Origin-Verify` with the
+origin-verify secret (the role `ORIGIN_VERIFY_SECRET` plays on AWS), each overwriting whatever the
+visitor sent. The Container App answers 403 to a request without the secret, and otherwise routes
+by `X-Fling-Host`, never `X-Forwarded-Host`, which Front Door appends to a visitor's
 (`platforms/azure/src/front-door.ts`).
+
+Front Door's cache sits in front of the app, and its cache key has no cookie, so a stored response
+reaches the next visitor without the app deciding again. Every file of a non-public site needs a
+site cookie, so the app makes a `public` Cache-Control `private` on any response to a request
+carrying one, and Front Door stores none of them.
 
 ## 4. Domains and TLS
 

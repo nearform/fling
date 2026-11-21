@@ -123,7 +123,15 @@ Variables worth knowing: `container` (`cpu`, `memory`, `min_replicas`, `max_repl
 
 The app refuses any request without the `X-Origin-Verify` header Front Door adds, so its own
 Container Apps hostname answers nothing useful. Front Door sends the app's hostname as `Host`, and
-the visitor's as `X-Forwarded-Host`, which the app routes by.
+its rule set writes the visitor's as `X-Fling-Host`, overwriting any the visitor sent, which the
+app routes by. The app never reads `X-Forwarded-Host`, since Front Door appends to a visitor's. The
+deploy checks this (Check spoofed host headers); by hand, the app's own origin must still come
+back:
+
+```bash
+curl -s -H "X-Forwarded-Host: x.$SITES_DOMAIN" -H "X-Fling-Host: x.$SITES_DOMAIN" \
+  https://$APP_DOMAIN/.well-known/fling | jq .appOrigin
+```
 
 ## The deploy config (AZURE_DEPLOY_CONFIG)
 
@@ -136,7 +144,7 @@ module's `deploy` output. Nothing in it is secret.
 | `resourceGroup` | Where the app and its jobs are |
 | `registry`, `repository` | Where the image is pushed (`<registry>/<repository>:<commit>`) |
 | `containerApp`, `jobs` | The app and the jobs updated to the new image; `jobs.migrate` is started for the data migrations |
-| `frontDoor` | The profile and endpoint whose cache is purged after a deploy |
+| `frontDoor` | The profile, endpoint and custom domains whose cache is purged after a deploy |
 | `appOrigin`, `sitesDomain` | The smoke test's target and the Claude Desktop extension's default server |
 | `INSTANCE` | The [instance configuration](../aws/DEPLOY.md#instance-configuration), built into the image as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
 
@@ -287,3 +295,12 @@ FLING_E2E_API_KEY="$(cat key.txt)" pnpm --filter @fling/e2e smoke https://$APP_D
 The app never calls Key Vault: each secret is a Container Apps secret referencing it, read with the
 app's identity. No Azure key is kept anywhere: Cosmos DB and Web PubSub have local keys off, the
 storage account has account keys off, and the deploy signs in over OIDC.
+
+Two of these are also readable outside Key Vault, by anyone who can read the resource that sends
+them: the origin-verify secret is in the Front Door profile's rule set (Reader or CDN Profile
+Contributor on the profile or its resource group shows it), and the live-events secret is the
+`code` in the Web PubSub hub's event handler URL (Reader on the Web PubSub resource shows it). The
+first lets a request reach the app without Front Door, past its cache; the second lets one post
+events to the live rooms' handler, which still admits a connection only with a valid ticket. Keep
+read access to the resource group to the people who run the instance, and bump `secrets_version`
+after removing someone. The deploy identity has neither: its Front Door role only purges.

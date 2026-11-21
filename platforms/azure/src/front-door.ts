@@ -1,17 +1,26 @@
 /**
  * What the Container App does with a request before the Node host sees it. Every request reaches
  * it through Front Door (infra/edge.tf), which sends the Container App's own name as the Host
- * (Container Apps routes by it) and the name the visitor asked for as X-Forwarded-Host, and adds
- * `X-Origin-Verify: <ORIGIN_VERIFY_SECRET>` on its way to the origin.
+ * (Container Apps routes by it). Its rule set writes the name the visitor asked for (its
+ * `{hostname}`) as `X-Fling-Host` and `X-Origin-Verify: <ORIGIN_VERIFY_SECRET>`, each overwriting
+ * whatever the visitor sent under that name.
  *
  * - A request without the secret went around Front Door, to the app's own address: 403. Without a
  *   secret configured (local runs) every request passes, and in development a missing header is
  *   allowed (a wrong one never is), as the core's own check (`originVerify`) does.
- * - The Host is put back: X-Forwarded-Host, which only Front Door can have set on a request that
- *   carries the secret, so the Node host routes the app host and the sites hosts as named.
+ * - The Host is put back from X-Fling-Host, so the Node host routes the app host and the sites
+ *   hosts as named. X-Forwarded-Host is never read: Front Door appends to one a visitor sends, so
+ *   its value can be the visitor's. Both headers are dropped before the Node host sees the request.
+ * - Front Door's cache sits in front of the app, so a response it stores is served to the next
+ *   visitor without the app deciding again; its cache key has no cookie. A response to a request
+ *   carrying a site cookie (the site session or a site pass, which every file of a non-public
+ *   site needs) is the viewer's own, so a `public` Cache-Control on it becomes `private`, which
+ *   Front Door never stores. Public sites' files fetched without one stay cacheable.
  * - The hub's event handler (`LIVE_EVENTS_PATH` on the app host) goes to the live rooms.
  */
 import { timingSafeEqual } from 'node:crypto'
+import { SITE_PASS_COOKIE_NAME } from '@fling/shared'
+import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
 
 export interface FrontDoorOptions {
   /** ORIGIN_VERIFY_SECRET */
@@ -35,14 +44,20 @@ function verified(request: Request, opts: FrontDoorOptions): boolean {
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-/** The request as the visitor sent it: Host from X-Forwarded-Host, when Front Door set one. */
+/** The header Front Door's rule set writes the visitor's host name into (infra/edge.tf). */
+export const HOST_HEADER = 'x-fling-host'
+
+/** The request as the visitor sent it: Host from X-Fling-Host, when Front Door set one. */
 export function visitorRequest(request: Request): Request {
-  const forwarded = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
-  if (!forwarded) return request
+  const named = request.headers.get(HOST_HEADER)?.trim()
+  if (!named && !request.headers.has('x-forwarded-host')) return request
   const url = new URL(request.url)
-  url.host = forwarded
   const headers = new Headers(request.headers)
-  headers.set('host', forwarded)
+  if (named) {
+    url.host = named
+    headers.set('host', named)
+  }
+  headers.delete(HOST_HEADER)
   headers.delete('x-forwarded-host')
   return new Request(url, {
     method: request.method,
@@ -52,13 +67,40 @@ export function visitorRequest(request: Request): Request {
   } as RequestInit)
 }
 
-/** `fetch` behind Front Door's check, with the visitor's Host. */
+/** Whether a request carries a site session or a site pass. */
+function hasSiteCookie(request: Request): boolean {
+  const header = request.headers.get('cookie')
+  if (!header) return false
+  return header.split(';').some(part => {
+    const name = part.slice(0, part.indexOf('=')).trim()
+    return name === SITE_COOKIE_NAME || name === SITE_PASS_COOKIE_NAME
+  })
+}
+
+/** `response` with a `public` Cache-Control made `private`, so no shared cache stores it. */
+export function unshared(response: Response): Response {
+  const cacheControl = response.headers.get('cache-control')
+  if (!cacheControl || !/(^|,)\s*public\s*(,|$)/i.test(cacheControl)) return response
+  const value = cacheControl.replace(/(^|,)(\s*)public(\s*)(?=,|$)/i, '$1$2private$3')
+  try {
+    response.headers.set('cache-control', value)
+    return response
+  } catch {
+    const copy = new Response(response.body, response)
+    copy.headers.set('cache-control', value)
+    return copy
+  }
+}
+
+/** `fetch` behind Front Door's check, with the visitor's Host, kept out of Front Door's cache
+ * when it answered a viewer's site cookie. */
 export function behindFrontDoor(
   fetch: (request: Request) => Promise<Response>,
   opts: FrontDoorOptions
 ): (request: Request) => Promise<Response> {
   return async request => {
     if (!verified(request, opts)) return forbidden()
-    return fetch(visitorRequest(request))
+    const response = await fetch(visitorRequest(request))
+    return hasSiteCookie(request) ? unshared(response) : response
   }
 }

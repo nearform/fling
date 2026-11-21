@@ -6,7 +6,7 @@
  */
 import { siteObjectKey } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { manifestKey } from '../src/blobs/types.ts'
+import { manifestKey, stagedObjectKey, UPLOAD_URL_TTL_SECONDS } from '../src/blobs/types.ts'
 import { GRACE_MS, maintain, PENDING_TTL_MS } from '../src/maintenance.ts'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 
@@ -137,6 +137,32 @@ describe('retention', () => {
     env.advance(GRACE_MS)
     await maintain(env.deps)
     expect(await env.store.getVersion(site, staged.versionId)).toBeNull()
+  })
+
+  it('on a store bound by MD5, deletes what a staging URL took after finalize, once it expires', async () => {
+    const env = setup({ versionRetention: 0 })
+    Object.defineProperty(env.blobs, 'uploadDigest', { value: 'md5' })
+    const alice = await createUser(env, ALICE)
+    const live = await deploy(env, alice.key, 'docs', [file('index.html', '<h1>v1</h1>')])
+    const pending = await json(
+      await api(env, alice.key, 'POST', '/api/sites/docs/deploys', {
+        manifest: { files: [file('index.html', 'later').meta] },
+      })
+    )
+    const site = (await env.store.findSite('docs')) as NonNullable<
+      Awaited<ReturnType<typeof env.store.findSite>>
+    >
+    const late = stagedObjectKey(site.id, live.body.versionId, 'index.html')
+    const waiting = stagedObjectKey(site.id, pending.versionId, 'index.html')
+    await env.blobs.put(late, Buffer.from('late'))
+    await env.blobs.put(waiting, Buffer.from('later'))
+    await maintain(env.deps)
+    expect(await env.blobs.head(late)).not.toBeNull()
+    env.advance(UPLOAD_URL_TTL_SECONDS * 1000)
+    await maintain(env.deps)
+    expect(await env.blobs.head(late)).toBeNull()
+    // A pending version's staged files are its uploads, kept for its finalize.
+    expect(await env.blobs.head(waiting)).not.toBeNull()
   })
 
   it('deletes a replaced rendered home page after the grace', async () => {

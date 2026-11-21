@@ -17,6 +17,12 @@
  * meanwhile (a rollback, or a deploy of the same files) is unmarked, never swept. Publication
  * revives a `pruning` version it repoints to, and answers 409 `retry_later` for one `sweeping`.
  *
+ * Staged uploads (a store bound by MD5, `Blobs.uploadDigest`): finalize deletes a version's
+ * staging copies, but its upload URLs stay good for UPLOAD_URL_TTL_SECONDS, so a PUT after
+ * finalize recreates one that nothing serves. Each complete version's staging prefix is deleted
+ * once, in the window from that TTL to STAGED_WINDOW_MS after the version was made; a pending
+ * one's staged files are its uploads, kept until it is finalized or swept.
+ *
  * Rendered home pages (paths.ts `refreshHome`): each one a site replaced (`homeOld`) is deleted
  * GRACE_MS after it was replaced (`sweepHomes`).
  *
@@ -25,7 +31,7 @@
  * instance has this tick, mail or not.
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
-import { formsKey, manifestKey, stagedPrefix } from './blobs/types.ts'
+import { formsKey, manifestKey, stagedPrefix, UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
 import { pathRef } from './paths.ts'
 import { sweepRevocations } from './revocations.ts'
 import { serverSite, serverVersion } from './servers/index.ts'
@@ -39,6 +45,11 @@ export const GRACE_MS = 60 * 60 * 1000
 export const PENDING_TTL_MS = 24 * 60 * 60 * 1000
 /** Replaced home pages older than this are taken to be deleted already (`sweepHomes`). */
 const HOME_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
+/**
+ * After its upload URLs expire, how long a complete version's staging prefix is swept for: two
+ * hourly runs and a margin, so one run is always inside it and older versions cost nothing.
+ */
+const STAGED_WINDOW_MS = 3 * 60 * 60 * 1000
 /** The most sites one run reads from the directory. */
 const MAX_SITES = 100_000
 
@@ -138,6 +149,19 @@ export async function maintainTarget(
       await deps.blobs.delete(formsKey(storage, v.id))
       await deps.store.deleteVersion(ref, v.id)
       result.swept++
+    }
+  }
+  if (deps.blobs.uploadDigest === 'md5') {
+    for (const v of versions) {
+      const age = now - Date.parse(v.createdAt)
+      const expired = age >= UPLOAD_URL_TTL_SECONDS * 1000
+      if (
+        v.status === 'complete' &&
+        expired &&
+        age < UPLOAD_URL_TTL_SECONDS * 1000 + STAGED_WINDOW_MS
+      ) {
+        await deps.blobs.deletePrefix(stagedPrefix(storage, v.id))
+      }
     }
   }
   const stamp = new Date(now).toISOString()

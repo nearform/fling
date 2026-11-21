@@ -139,7 +139,12 @@ import {
 import { pathsTemplate } from '@fling/shared/paths-templates'
 import { computeVersionId } from '@fling/shared/version-id'
 import { guestRefusal } from './auth/middleware.ts'
-import { manifestKey, stagedObjectKey, stagedPrefix } from './blobs/types.ts'
+import {
+  manifestKey,
+  stagedObjectKey,
+  stagedPrefix,
+  UPLOAD_URL_TTL_SECONDS,
+} from './blobs/types.ts'
 import { formsForDeploy, writeForms } from './forms.ts'
 import { inviterOf } from './invitations.ts'
 import { mapLimit } from './lib/concurrency.ts'
@@ -191,8 +196,7 @@ import type { PathRecord, ServerMark, SiteRecord, User, VersionRecord } from './
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
 
-/** Upload URLs from stage() live this long; the CLI uploads straight away. */
-export const UPLOAD_URL_TTL_SECONDS = 15 * 60
+export { UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
 
 const MAX_LISTED = 20
 const MAX_MISSING_LISTED = 50
@@ -1113,10 +1117,12 @@ async function finalizePath(
  * version stays pending with no manifest; deploying again starts over) and 422.
  *
  * On a store whose uploads are bound only to an MD5 (`Blobs.uploadDigest`), the uploads are at
- * their staging keys: each one's SHA-256 is checked and it is scanned there, then it is copied into
- * the version and the staging copy deleted, so what is served is what was checked, whatever is
- * PUT to its URL afterwards. One that isn't the manifest's is deleted like a secret, with 409
- * `upload_mismatch`. A file already copied in (a finalize that stopped part way) was checked.
+ * their staging keys, whose URLs stay good after finalize. Each one is first copied into the
+ * version, which no URL can write, and the copy is what is checked (its size and SHA-256) and
+ * scanned, so what is served is what was checked, whatever is PUT to a staging URL meanwhile.
+ * One that isn't the manifest's is deleted like a secret, with 409 `upload_mismatch`. The staging
+ * copies are deleted either way. A file already copied in (a finalize that stopped part way) and
+ * no longer staged is checked where it is.
  */
 async function checkUploads(
   deps: Deps,
@@ -1128,14 +1134,22 @@ async function checkUploads(
   const staging = blobs.uploadDigest === 'md5'
   const finalKey = (f: ManifestFile) => siteObjectKey(storage, versionId, f.path)
   const stagedKey = (f: ManifestFile) => stagedObjectKey(storage, versionId, f.path)
-  const sized = async (key: string, f: ManifestFile) => (await blobs.head(key))?.size === f.size
+  if (staging) {
+    await mapLimit(sent, HEAD_CONCURRENCY, async f => {
+      if (await blobs.head(stagedKey(f))) await blobs.copy(stagedKey(f), finalKey(f))
+    })
+  }
+  const discard = async () => {
+    await blobs.deletePrefix(siteVersionPrefix(storage, versionId))
+    if (staging) await blobs.deletePrefix(stagedPrefix(storage, versionId))
+  }
   const checks = await mapLimit(sent, HEAD_CONCURRENCY, async file => {
-    if (!staging) return { file, state: (await sized(finalKey(file), file)) ? 'here' : 'missing' }
-    if (await sized(stagedKey(file), file)) return { file, state: 'staged' }
-    return { file, state: (await sized(finalKey(file), file)) ? 'here' : 'missing' }
+    const head = await blobs.head(finalKey(file))
+    return head && head.size === file.size ? null : file.path
   })
-  const missing = checks.filter(c => c.state === 'missing').map(c => c.file.path)
+  const missing = checks.filter((p): p is string => p !== null)
   if (missing.length > 0) {
+    // Nothing is discarded: the publisher may upload what is missing and finalize again.
     const listed = missing.slice(0, MAX_MISSING_LISTED)
     const more = missing.length > listed.length ? ` (+${missing.length - listed.length} more)` : ''
     throw conflict(
@@ -1144,16 +1158,9 @@ async function checkUploads(
       { missing }
     )
   }
-  const toCheck = staging ? checks.filter(c => c.state === 'staged').map(c => c.file) : sent
-  const { findings, mismatched } = await scanStoredVersion(
-    deps,
-    staging ? stagedKey : finalKey,
-    toCheck,
-    staging
-  )
+  const { findings, mismatched } = await scanStoredVersion(deps, finalKey, sent, staging)
   if (findings.length > 0 || mismatched.length > 0) {
-    await blobs.deletePrefix(siteVersionPrefix(storage, versionId))
-    if (staging) await blobs.deletePrefix(stagedPrefix(storage, versionId))
+    await discard()
     await blobs.delete(manifestKey(storage, versionId))
     if (findings.length > 0) throw secretDetected(findings)
     const listed = mismatched.slice(0, MAX_MISSING_LISTED)
@@ -1166,10 +1173,7 @@ async function checkUploads(
       { mismatched }
     )
   }
-  if (staging) {
-    await mapLimit(toCheck, HEAD_CONCURRENCY, f => blobs.copy(stagedKey(f), finalKey(f)))
-    await blobs.deletePrefix(stagedPrefix(storage, versionId))
-  }
+  if (staging) await blobs.deletePrefix(stagedPrefix(storage, versionId))
 }
 
 /**

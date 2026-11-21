@@ -4,8 +4,9 @@
 into `https://<name>.<your Fling>`: private to your team, live in seconds.
 
 > **Fling runs in your own cloud.** It isn't a hosted service you sign up to: first someone deploys
-> a Fling for your organisation, at an address like `fling.yourcompany.com`, on AWS or Cloudflare.
-> Then everyone installs the CLI or adds the connector and points it at that address.
+> a Fling for your organisation, at an address like `fling.yourcompany.com`, on AWS, Cloudflare,
+> DigitalOcean or machines you run. Then everyone installs the CLI or adds the connector and
+> points it at that address.
 > **[Deploy your Fling →](#deploy)** Already have one? Start below.
 
 ```sh
@@ -36,7 +37,8 @@ Fling: <https://fling-tour.fling.labs.nearform.com/>
   [docs/site-servers.md](docs/site-servers.md), or [watch the walkthrough](https://fling-tour.fling.labs.nearform.com/site-server/).
 - **Hear about it.** With email set up, people are told when a site is shared with them, they join a
   group, or someone comments on their site, and choose what they hear about from any client.
-- **Yours.** Run it on AWS or Cloudflare, under your domain, sign-in and brand.
+- **Yours.** Run it on AWS, Cloudflare, DigitalOcean or your own machines, under your domain,
+  sign-in and brand.
 
 ## Use it
 

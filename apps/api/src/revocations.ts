@@ -8,7 +8,9 @@
  *
  * A revocation stays on the list for REVOCATION_KEEP_SECONDS, well past the last cookie it could
  * stop. Each one is kept as a record due then (`REVOKED`, store/records.ts), and the sweep, run
- * by each platform's one-minute tick, takes due ones off the list. The record is written before the
+ * by maintenance (maintenance.ts, every platform's hourly tick, which every instance has with or
+ * without mail), takes due ones off the list. An entry kept up to an hour past its due time stops
+ * nothing more: the last cookie it could stop expired 23 days before. The record is written before the
  * list key, so no key outlives its record. A later revocation of the same address replaces the
  * list's value; the earlier record, when due, sees a value that isn't its own and leaves it.
  */
@@ -19,8 +21,8 @@ import type { Deps } from './types.ts'
 /** How long a revocation stays on the list: well past the last cookie it could stop (7 days). */
 export const REVOCATION_KEEP_SECONDS = 30 * 24 * 60 * 60
 
-/** Revocations taken off the list per sweep: more wait for the next tick. */
-const SWEEP_LIMIT = 100
+/** Revocations read per page of the sweep. */
+const SWEEP_PAGE = 100
 
 /** Put `email` on the revocation list as of `at`: their member cookies stop opening sites. */
 export async function revokeSiteCookies(deps: Deps, email: string, at: Date): Promise<void> {
@@ -31,15 +33,26 @@ export async function revokeSiteCookies(deps: Deps, email: string, at: Date): Pr
   await deps.routeTable.put(revokedKvsKey(mac), String(before))
 }
 
-/** Take the revocations that are due off the list; returns how many were. */
-export async function sweepRevocations(deps: Deps): Promise<number> {
-  const due = await deps.store.dueRevocations(deps.clock.now().toISOString(), SWEEP_LIMIT)
-  for (const r of due) {
-    const listKey = revokedKvsKey(r.mac)
-    if ((await deps.routeTable.get(listKey)) === String(r.before)) {
-      await deps.routeTable.delete(listKey)
+/**
+ * Take the revocations that are due off the list, a page at a time until none are due or the
+ * deadline passes (the rest wait for the next run); returns how many were.
+ */
+export async function sweepRevocations(
+  deps: Deps,
+  opts: { deadline?: number } = {}
+): Promise<number> {
+  let swept = 0
+  for (;;) {
+    const due = await deps.store.dueRevocations(deps.clock.now().toISOString(), SWEEP_PAGE)
+    for (const r of due) {
+      const listKey = revokedKvsKey(r.mac)
+      if ((await deps.routeTable.get(listKey)) === String(r.before)) {
+        await deps.routeTable.delete(listKey)
+      }
+      await deps.store.deleteRevocation(r)
     }
-    await deps.store.deleteRevocation(r)
+    swept += due.length
+    if (due.length < SWEEP_PAGE) return swept
+    if (opts.deadline !== undefined && Date.now() > opts.deadline) return swept
   }
-  return due.length
 }

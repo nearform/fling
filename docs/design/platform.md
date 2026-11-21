@@ -189,10 +189,10 @@ Each element uses the same headings:
 
 ### 3.7 Ticks and migrations
 
-- **Port:** entry-point handlers that call the core's `drain`, `sweepRevocations`, `maintain` and
-  `runMigrations`.
+- **Port:** entry-point handlers that call the core's `drain`, `maintain` and `runMigrations`.
 - **Semantics:**
-  - `notify` runs every minute (with mail); `maintain` runs hourly.
+  - `notify` runs every minute (with mail) and drains the outbox. `maintain` runs hourly on every
+    instance: version retention, replaced home pages, and the revocation sweep.
   - `migrate` runs from the deploy, after the new code is live, until it reports done.
   - Every tick is safe to repeat, because leases are conditional updates in the Table.
 - **Conformance:** `migrationsConformance`. The ticks are covered by the e2e.
@@ -305,7 +305,5 @@ that routes* shape, on a Node runtime. Writing the parts they share once keeps "
   (`platforms/aws/tests/live.test.ts`, `platforms/cloudflare/tests/live.test.ts`). The AWS route
   table (`CloudFrontRouteTable`) has no emulator and is stub-tested. A `liveHubConformance` suite
   should come before a third hub.
-- **The revocation sweep runs on the minute tick,** which exists only when mail is configured.
-  An instance without mail never sweeps its revocation list.
 - **CI knows two platforms.** `scripts/check-terraform.mjs` checks one Terraform module, and
   `ci.yml` starts only DynamoDB Local and MinIO. Each new platform adds its module and emulators.

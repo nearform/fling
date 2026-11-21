@@ -597,7 +597,7 @@ invitation:
 - **Admins invite members** from **Admin → Invitations** (`/admin/invitations`): a full user, like
   anyone the policy admits. Revoking an invitation there cuts that person off on their next request,
   and puts them on the edge's revocation list, so their `fling_site` cookie stops opening
-  members-level sites within seconds too. The scheduler's one-minute tick takes entries off the
+  members-level sites within seconds too. The hourly maintenance tick takes entries off the
   list after 30 days.
 - **Guests sign in with an emailed link**, single use, never at the OIDC issuer (which usually
   admits only your organisation): the share's notification email carries their first one, and the

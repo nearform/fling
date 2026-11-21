@@ -11,6 +11,7 @@ import { revocationMac, SITE_COOKIE_TTL_SECONDS, signSiteCookie } from '@fling/s
 import { routeSiteRequest } from '@fling/shared/site-routing'
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 import type { MailConfig } from '../src/config.ts'
+import { maintain } from '../src/maintenance.ts'
 import { drain } from '../src/notifications/drain.ts'
 import { sweepRevocations } from '../src/revocations.ts'
 import {
@@ -453,7 +454,8 @@ describe('the revocation list', () => {
     expect(await env.routeTable.get(listKey(env, SAM))).toBeUndefined()
     expect(await env.routeTable.get(listKey(env, PAT))).toBe(again)
     env.advance(30 * DAY)
-    expect(await sweepRevocations(env.deps)).toBe(1)
+    // Maintenance, the hourly tick every instance has, runs the sweep.
+    expect((await maintain(env.deps)).revocations).toBe(1)
     expect(await env.routeTable.get(listKey(env, PAT))).toBeUndefined()
     expect(await sweepRevocations(env.deps)).toBe(0)
   })

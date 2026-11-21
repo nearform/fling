@@ -9,11 +9,11 @@
  * - The sites host (`*.<SITES_DOMAIN>`): the shared routing decision over the route table and R2
  *   (sites.ts), and site servers' `/api/*` through the Worker Loader (src/servers/), whose isolates
  *   are handed the `SiteFiles` and `ServerTail` entrypoints exported from here.
- * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`) drains the
- *   notifications outbox (@fling/api/notifications) and takes due revocations off the edge's
- *   revocation list (@fling/api/revocations); hourly, deletes expired items from D1. Reads
+ * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`, with mail) drains the
+ *   notifications outbox (@fling/api/notifications); hourly, deletes expired items from D1. Reads
  *   already ignore them; that reclaims the space; and runs maintenance (@fling/api/maintenance:
- *   version retention, replaced rendered pages), and, with site servers, folds the past hours' log
+ *   version retention, replaced rendered pages, due revocations off the edge's revocation list),
+ *   and, with site servers, folds the past hours' log
  *   pieces into hourly chunks (src/servers/logs.ts).
  *
  * Data migrations are not run here: scripts/migrate.ts runs them from the deploy, through a
@@ -29,7 +29,6 @@ import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { maintain } from '@fling/api/maintenance'
 import { drain, errorName, logNotify } from '@fling/api/notifications'
-import { sweepRevocations } from '@fling/api/revocations'
 import type { Deps } from '@fling/api/types'
 import { DOWNLOAD_ROUTE, R2Blobs, UPLOAD_ROUTE } from './blobs/r2.ts'
 import { buildCloudflareDeps, CLOUDFLARE_DRIVERS } from './deps.ts'
@@ -186,18 +185,6 @@ export default {
             console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
           })
           .catch(err => logNotify('error', 'notify drain failed', { err: errorName(err) }))
-      )
-      ctx.waitUntil(
-        sweepRevocations(deps)
-          .then(n => {
-            if (n)
-              console.log(JSON.stringify({ level: 'info', msg: 'revocations swept', count: n }))
-          })
-          .catch(err => {
-            console.warn(
-              JSON.stringify({ level: 'warn', msg: 'revocation sweep failed', err: String(err) })
-            )
-          })
       )
       return
     }

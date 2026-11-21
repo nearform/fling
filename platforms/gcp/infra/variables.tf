@@ -174,10 +174,11 @@ variable "live" {
 
 variable "cdn" {
   description = <<-EOT
-    Cloud CDN on the sites' backend (*.<hostname>), caching what the service marks public
-    (cache mode USE_ORIGIN_HEADERS): public sites' files, never a private site's or the app's.
-    Off by default, so every request reaches the service and a change of access or a rollback is
-    seen at once; on, a public file may be served from the edge for its max-age after it changed.
+    Cloud CDN on the sites' backend (*.<hostname>), caching what the service marks public: public
+    sites' files, never what the service sends `private` (a site that isn't public, a share link)
+    or anything of the app's. Off by default, so every request reaches the service and a change of
+    access or a rollback is seen at once; on, a public file may be served from the edge for up to a
+    minute after it changed.
   EOT
   type        = bool
   default     = false

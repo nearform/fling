@@ -77,9 +77,10 @@ The Node host runs `routeSiteRequest` for every request to `*.<sites domain>`:
 
 The load balancer has two backend services on one serverless NEG: `app` for the hostname, never
 cached, and `sites` for `*.hostname`. With the module's `cdn` on, Cloud CDN caches the sites'
-backend under the service's own `Cache-Control` (`USE_ORIGIN_HEADERS`), keyed by host, path and
-query. Private sites are never cached at the edge. It is off by default, so a change of access or
-a rollback is seen at once.
+backend under the service's own `Cache-Control`, keyed by host, path and query, for at most a
+minute (`max_ttl`, since a URL stays the same across versions). The sites host sends `private` for
+everything of a site that isn't public and everything on a share link, so the edge never keeps
+those. It is off by default, so a change of access or a rollback is seen at once.
 
 Google Cloud has no edge that runs this decision. Service Extensions plugins run WebAssembly
 (Rust, Go or C++) over the Proxy-Wasm ABI, not JS. They are generally available on Cloud Load

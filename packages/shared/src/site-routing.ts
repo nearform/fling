@@ -158,6 +158,8 @@ export interface SiteResponse {
   cookies?: Record<string, SiteCookie>
   /** the body to send (JSON: `{"error":{"code","message"}}`); absent: none */
   body?: string
+  /** it answers for a site that isn't public, or on a share host (see SiteRewrite.private) */
+  private?: boolean
 }
 
 /** Serve this object key (`/sites/<id>/<v>/<path>`, MISSING_KEY, NOT_FOUND_PAGE or REVIEW_SHELL). */
@@ -166,6 +168,13 @@ export interface SiteRewrite {
   uri: string
   /** to add to the response served for it (siteResponseHeaders) */
   headers: Record<string, string>
+  /**
+   * The file is of a site that isn't public, or served on a share host. CloudFront caches by the
+   * rewritten key, behind the checks, so it needs nothing; a host that may sit behind a cache
+   * keyed by the viewer's URL (the Node host behind Cloud CDN) makes its Cache-Control `private`
+   * (serverCacheControl), so no shared cache keeps what only the checks may hand out.
+   */
+  private?: boolean
 }
 
 /** Who the access checks found calling a site's server: what VIEWER_HEADER carries. */
@@ -626,6 +635,25 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     }
   }
 
+  // What follows serves the site to someone the checks let in. On a site that isn't public, or a
+  // share host, nothing it answers may be kept by a cache keyed by the viewer's URL.
+  const known = site as RouteValue & { id: string; v: string }
+  const decision = await serveSite(req, ctx, known, uri, invoke, checked)
+  if (decision.action !== 'invoke' && (site.vis !== 'public' || target.share)) {
+    decision.private = true
+  }
+  return decision
+}
+
+/** The decision for a request the access checks let through. */
+async function serveSite(
+  req: SiteRequest,
+  ctx: SiteRoutingContext,
+  site: RouteValue & { id: string; v: string },
+  uri: string,
+  invoke: boolean,
+  checked: boolean
+): Promise<SiteDecision> {
   if (invoke) {
     if (site.x) {
       return refuse(503, 'Service Unavailable', 'server_stopped', 'Server stopped')

@@ -11,7 +11,9 @@
  * - `object`: a site file from the platform's store, null when there is none;
  * - `invoke`: a site server's request (absent: SERVERS off, answered as a missing page).
  *
- * Unknown hosts, archived sites and missing files get the 404 page, never cached. The review shell
+ * Unknown hosts, archived sites and missing files get the 404 page, never cached. What a site that
+ * isn't public, or a share host, serves goes out `private` (serverCacheControl), so a cache keyed
+ * by the viewer's URL in front of the host (Cloud CDN) never keeps it. The review shell
  * is revalidated on every use and carries no header that would stop the app framing it.
  * `/robots.txt` is Fling's `Disallow: /` on every sites host, whatever the site has. Every response
  * carries the decision's headers: `X-Robots-Tag: noindex`, on a share host
@@ -27,6 +29,7 @@ import {
 } from '@fling/shared/route-keys'
 import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
 import { normalizeQuery, routeSiteRequest, type SiteInvoke } from '@fling/shared/site-routing'
+import { serverCacheControl } from '@fling/shared/site-server'
 import type { RouteTable } from './route-table/types.ts'
 import { runInvoke } from './servers/shell.ts'
 import type { ServerLogs, SiteServers } from './servers/types.ts'
@@ -141,6 +144,9 @@ export async function handleSiteRequest(
     for (const [name, cookie] of Object.entries(decision.cookies ?? {})) {
       headers.append('set-cookie', `${name}=${cookie.value}; ${cookie.attributes}`)
     }
+    if (decision.private) {
+      headers.set('cache-control', serverCacheControl(headers.get('cache-control'), true))
+    }
     return new Response(decision.body ?? null, { status: decision.status, headers })
   }
   if (decision.action === 'invoke') {
@@ -149,7 +155,14 @@ export async function handleSiteRequest(
     return withHeaders(await opts.invoke(request, decision), decision.headers)
   }
   // The host's headers on whatever is served: file, 404 page, review shell or robots.txt.
-  return withHeaders(await serveRewrite(request, opts, decision.uri), decision.headers)
+  const res = await serveRewrite(request, opts, decision.uri)
+  const headers = { ...decision.headers }
+  // A file only the access checks may hand out is never kept by a shared cache in front of this
+  // host: the stored `public, …, s-maxage` becomes `private`, as a site server's answer does.
+  if (decision.private) {
+    headers['cache-control'] = serverCacheControl(res.headers.get('cache-control'), true)
+  }
+  return withHeaders(res, headers)
 }
 
 async function serveRewrite(

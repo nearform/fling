@@ -52,9 +52,15 @@ resource "google_compute_backend_service" "app" {
   }
 }
 
-# The sites. With var.cdn, Cloud CDN caches what the service marks public (USE_ORIGIN_HEADERS):
-# a public site's files. A private site's answers are never public, and a response that sets a
-# cookie is never cached.
+# The sites. With var.cdn, Cloud CDN caches what the service marks public: a public site's files.
+# The service sends `private` for whatever only the access checks may hand out (a site that isn't
+# public, a share link) and `no-store` for its 404s and sign-in hops, and a response that sets a
+# cookie is never cached. The cache is keyed by the viewer's URL, which stays the same across
+# versions, so max_ttl caps how long the edge keeps a file (the stored `s-maxage` is a year, for
+# CloudFront's versioned keys): a publish, a rollback or a change of access reaches every viewer
+# within local.cdn_ttl. CACHE_ALL_STATIC is the cache mode that takes a max_ttl; every file the
+# service sends says how to cache it, so the mode's defaults for unmarked files never apply.
+# client_ttl leaves the browser the max-age the service sends.
 resource "google_compute_backend_service" "sites" {
   project               = var.project_id
   name                  = "${local.name}-sites"
@@ -69,7 +75,10 @@ resource "google_compute_backend_service" "sites" {
   dynamic "cdn_policy" {
     for_each = var.cdn ? [1] : []
     content {
-      cache_mode       = "USE_ORIGIN_HEADERS"
+      cache_mode       = "CACHE_ALL_STATIC"
+      default_ttl      = local.cdn_ttl
+      max_ttl          = local.cdn_ttl
+      client_ttl       = 31536000
       negative_caching = false
       cache_key_policy {
         include_host         = true

@@ -13,6 +13,7 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Email over SMTP.** `MAIL_DRIVER=smtp` sends Fling's emails through any provider or relay that takes SMTP, with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY` (`tls`, `starttls` by default, or `none` outside production) and `SMTP_USER`, and the password as the `SMTP_PASSWORD` secret. A provider's refusal is never lost: rate limits and quotas wait and retry, a suppressed or refused recipient is recorded as such, and the admins' Mail page shows the reply's code. It is for the platforms that run on Node; AWS and Cloudflare keep SES and Email Service.
 - **Revoked invitations come off the edge's list on every instance, mail or not.** The sweep that takes a revocation off the sites' revocation list after 30 days ran on the one-minute notifications tick, which an instance has only with mail, so an instance without mail kept every entry for good. It now runs in the hourly maintenance every instance has, on AWS and Cloudflare alike, and works through every entry that is due rather than 100 a run.
 
 ## 0.13.3 (2026-11-16)

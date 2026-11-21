@@ -566,7 +566,9 @@ needs; clients build their settings from it.
 (`apps/api/src/mail/types.ts`): `MemoryMailer` (tests, the e2e's Node runtime) and `FileMailer`
 (`pnpm dev`, into `.fling-dev/mail/`) in the core, `SesMailer` (`platforms/aws/src/mail/ses.ts`)
 and `CloudflareMailer` (`platforms/cloudflare/src/mail/email.ts`, over the `send_email` binding)
-on the platforms, each built in its platform's `deps.ts`; all pass `mailerConformance`.
+on the platforms, each built in its platform's `deps.ts`, and `SmtpMailer`
+(`platforms/node/src/mail/smtp.ts`, `MAIL_DRIVER=smtp`, for any provider or relay that takes SMTP)
+for the platforms on Node; all pass `mailerConformance`.
 `MAIL_DRIVER` turns it on (the `email` capability), and with any channel on, the `notifications`
 capability.
 

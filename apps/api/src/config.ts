@@ -140,11 +140,18 @@ const envSchema = z.object({
       .refine(v => /^wss?:\/\//.test(v), 'must be a ws:// or wss:// URL')
       .optional()
   ),
-  MAIL_DRIVER: z.preprocess(blank, z.enum(['ses', 'cloudflare', 'file', 'memory']).optional()),
+  MAIL_DRIVER: z.preprocess(
+    blank,
+    z.enum(['ses', 'cloudflare', 'smtp', 'file', 'memory']).optional()
+  ),
   MAIL_FROM: emailAddress,
   MAIL_FROM_NAME: headerText,
   MAIL_REPLY_TO: emailAddress,
   SES_CONFIGURATION_SET: optionalString,
+  SMTP_HOST: optionalString,
+  SMTP_PORT: z.preprocess(blank, z.coerce.number().int().min(1).max(65535).optional()),
+  SMTP_SECURITY: z.preprocess(blank, z.enum(['tls', 'starttls', 'none']).optional()),
+  SMTP_USER: optionalString,
   /** Outside invitations: off unless `on` (or true/yes/1); on needs mail. */
   INVITES: flag,
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
@@ -235,6 +242,10 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   MAIL_FROM_NAME: 'mail',
   MAIL_REPLY_TO: 'mail',
   SES_CONFIGURATION_SET: 'mail',
+  SMTP_HOST: 'mail',
+  SMTP_PORT: 'mail',
+  SMTP_SECURITY: 'mail',
+  SMTP_USER: 'mail',
   APP_ENV: 'platform',
   TABLE_NAME: 'platform',
   SITES_BUCKET: 'platform',
@@ -307,6 +318,8 @@ export interface Secrets {
   siteSecretsKey?: string
   /** CloudFront adds `x-origin-verify: <secret>`; unset → no check. */
   originVerifySecret?: string
+  /** The SMTP server's password for SMTP_USER (`SMTP_PASSWORD`; the `smtp` mail driver). */
+  smtpPassword?: string
 }
 
 /**
@@ -321,6 +334,7 @@ export const SECRET_SETTINGS: Record<keyof Secrets, { name: string; group: Setti
   siteHmacKey: { name: 'SITE_HMAC_KEY', group: 'platform' },
   siteSecretsKey: { name: 'SITE_SECRETS_KEY', group: 'features' },
   originVerifySecret: { name: 'ORIGIN_VERIFY_SECRET', group: 'platform' },
+  smtpPassword: { name: 'SMTP_PASSWORD', group: 'mail' },
 }
 
 /** The secrets by name, set or not: no value leaves here. */
@@ -354,9 +368,10 @@ export interface OidcConfig {
 export interface MailConfig {
   /**
    * Which Mailer sends: the core has `memory` (tests, the e2e's Node runtime) and `file` (local dev,
-   * `.fling-dev/mail/`); a platform supplies `ses` or `cloudflare`. Production takes only those two.
+   * `.fling-dev/mail/`); a platform supplies `ses`, `cloudflare` or `smtp` (platforms/node, for any
+   * provider or relay that takes SMTP). Production takes only those three.
    */
-  driver: 'ses' | 'cloudflare' | 'file' | 'memory'
+  driver: 'ses' | 'cloudflare' | 'smtp' | 'file' | 'memory'
   /** The sender address (`MAIL_FROM`), on a domain that is not the sites domain. */
   from: string
   /** The sender's display name (`MAIL_FROM_NAME`, default INSTANCE_NAME). */
@@ -365,6 +380,20 @@ export interface MailConfig {
   replyTo?: string
   /** AWS: the SES configuration set to name on each send; unset, the identity's default applies. */
   sesConfigurationSet?: string
+  /** The `smtp` driver's server (`SMTP_*`; its password is the `SMTP_PASSWORD` secret). */
+  smtp?: SmtpConfig
+}
+
+/**
+ * An SMTP server (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, `SMTP_USER`). `security` is `tls`
+ * (TLS from the start, port 465), `starttls` (the default: the server must upgrade the
+ * connection, port 587) or `none` (a local relay; refused in production).
+ */
+export interface SmtpConfig {
+  host: string
+  port: number
+  security: 'tls' | 'starttls' | 'none'
+  user?: string
 }
 
 /** Who may publish a site server (`SERVERS`): nobody, admins, every member, or members of groups. */
@@ -664,8 +693,10 @@ function settingsOf(
 function mailConfig(e: z.infer<typeof envSchema>, cfg: BaseConfig): MailConfig | undefined {
   const production = cfg.appEnv === 'production'
   if (!e.MAIL_DRIVER) return undefined
-  if (production && e.MAIL_DRIVER !== 'ses' && e.MAIL_DRIVER !== 'cloudflare') {
-    throw new Error(`MAIL_DRIVER must be ses or cloudflare in production (got ${e.MAIL_DRIVER})`)
+  if (production && (e.MAIL_DRIVER === 'file' || e.MAIL_DRIVER === 'memory')) {
+    throw new Error(
+      `MAIL_DRIVER must be ses, cloudflare or smtp in production (got ${e.MAIL_DRIVER})`
+    )
   }
   if (!e.MAIL_FROM) throw new Error('MAIL_FROM is required with MAIL_DRIVER')
   if (production) {
@@ -694,6 +725,22 @@ function mailConfig(e: z.infer<typeof envSchema>, cfg: BaseConfig): MailConfig |
     fromName: e.MAIL_FROM_NAME ?? e.INSTANCE_NAME,
     replyTo: e.MAIL_REPLY_TO,
     sesConfigurationSet: e.SES_CONFIGURATION_SET,
+    smtp: e.MAIL_DRIVER === 'smtp' ? smtpConfig(e, production) : undefined,
+  })
+}
+
+/** The `smtp` driver's server, checked: a host, and TLS in production. */
+function smtpConfig(e: z.infer<typeof envSchema>, production: boolean): SmtpConfig {
+  if (!e.SMTP_HOST) throw new Error('SMTP_HOST is required with MAIL_DRIVER=smtp')
+  const security = e.SMTP_SECURITY ?? (e.SMTP_PORT === 465 ? 'tls' : 'starttls')
+  if (production && security === 'none') {
+    throw new Error('SMTP_SECURITY=none is refused in production: use tls or starttls')
+  }
+  return definedOnly({
+    host: e.SMTP_HOST,
+    port: e.SMTP_PORT ?? (security === 'tls' ? 465 : 587),
+    security,
+    user: e.SMTP_USER,
   })
 }
 
@@ -720,6 +767,7 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     siteHmacKey,
     siteSecretsKey: env.SITE_SECRETS_KEY?.trim() || undefined,
     originVerifySecret: env.ORIGIN_VERIFY_SECRET?.trim() || undefined,
+    smtpPassword: env.SMTP_PASSWORD?.trim() || undefined,
   }
 }
 

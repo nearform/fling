@@ -289,13 +289,40 @@ describe('mail configuration', () => {
     })
   })
 
-  it('takes only the cloud drivers in production; file and memory in development', () => {
+  it('takes only the providers in production; file and memory in development', () => {
     expect(mail({ ...MAIL, MAIL_DRIVER: 'cloudflare' })?.driver).toBe('cloudflare')
+    expect(mail({ ...MAIL, MAIL_DRIVER: 'smtp', SMTP_HOST: 'smtp.example.test' })?.driver).toBe(
+      'smtp'
+    )
     for (const driver of ['file', 'memory']) {
-      expect(() => mail({ ...MAIL, MAIL_DRIVER: driver })).toThrow(/ses or cloudflare/)
+      expect(() => mail({ ...MAIL, MAIL_DRIVER: driver })).toThrow(/ses, cloudflare or smtp/)
       expect(mail({ MAIL_DRIVER: driver, MAIL_FROM: 'fling@example.test' })?.driver).toBe(driver)
     }
     expect(() => mail({ ...MAIL, MAIL_DRIVER: 'pigeon' })).toThrow()
+  })
+
+  it('names an SMTP server, over TLS in production', () => {
+    const SMTP = { ...MAIL, MAIL_DRIVER: 'smtp', SMTP_HOST: 'smtp.example.test' }
+    expect(() => mail({ ...SMTP, SMTP_HOST: '' })).toThrow(/SMTP_HOST/)
+    expect(mail(SMTP)?.smtp).toEqual({ host: 'smtp.example.test', port: 587, security: 'starttls' })
+    expect(mail({ ...SMTP, SMTP_PORT: '465', SMTP_USER: 'apikey' })?.smtp).toEqual({
+      host: 'smtp.example.test',
+      port: 465,
+      security: 'tls',
+      user: 'apikey',
+    })
+    expect(mail({ ...SMTP, SMTP_SECURITY: 'tls', SMTP_PORT: '2465' })?.smtp?.port).toBe(2465)
+    expect(() => mail({ ...SMTP, SMTP_SECURITY: 'none' })).toThrow(/refused in production/)
+    expect(
+      mail({
+        MAIL_DRIVER: 'smtp',
+        MAIL_FROM: 'f@example.test',
+        SMTP_HOST: 'localhost',
+        SMTP_SECURITY: 'none',
+      })?.smtp?.security
+    ).toBe('none')
+    expect(() => mail({ ...SMTP, SMTP_SECURITY: 'ssl' })).toThrow()
+    expect(mail(MAIL)?.smtp).toBeUndefined()
   })
 
   it('refuses invalid addresses and a multi-line sender name', () => {

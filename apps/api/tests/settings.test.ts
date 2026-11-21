@@ -112,6 +112,7 @@ describe('GET /api/admin/settings', () => {
       siteHmacKey: 'hmac-key-value-0123456789abcdefghijk',
       siteSecretsKey: 'b2'.repeat(32),
       originVerifySecret: 'origin-verify-value-0123456789',
+      smtpPassword: 'smtp-password-value-0123456789',
     }
     const env = setup({ adminEmails: [BOSS], secrets })
     const boss = await createUser(env, BOSS)

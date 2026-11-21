@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Fling on Node: the Postgres Table, for the platforms that run on Node. Consumed as TypeScript source.",
+  "description": "Fling on Node: the Postgres Table and the SMTP mailer, for the platforms that run on Node. Consumed as TypeScript source.",
   "type": "module",
   "exports": {
     "./table/postgres": "./src/table/postgres.ts",
     "./table/schema": "./src/table/schema.ts",
-    "./table/sql": "./src/table/sql.ts"
+    "./table/sql": "./src/table/sql.ts",
+    "./mail/smtp": "./src/mail/smtp.ts"
   },
   "scripts": {
     "build": "echo 'platform-node: consumed as source'",
@@ -19,12 +20,18 @@
     "@electric-sql/pglite": "^0.5.17",
     "@fling/api": "workspace:*",
     "@fling/shared": "workspace:*",
+    "nodemailer": "^10.6.1",
     "pg": "^8.23.1"
   },
   "devDependencies": {
     "@fling/conformance": "workspace:*",
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^24.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "@types/smtp-server": "^3.5.13",
+    "mailparser": "^3.9.47",
+    "smtp-server": "^3.21.7",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12"

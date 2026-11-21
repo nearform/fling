@@ -200,7 +200,11 @@ with a release tag as `ref`. In order:
 1. builds the image from the tag, with the instance's address baked into the Claude Desktop
    extension, and pushes `<registry>/fling-node:<release>`;
 2. updates the app's spec with only the service's image changed, pinned to the digest just
-   pushed (never the tag, which a later push could move), and waits for the deployment. App Platform starts the new containers, waits for `/healthz`, then moves traffic.
+   pushed (never the tag, which a later push could move), and waits for the deployment. The image
+   is pushed as one manifest without attestations, so that digest is the image itself.
+   Deploying a release again pushes its tag again: the previous image is left untagged, and the
+   registry's garbage collection may remove it, so roll back by running the workflow again
+   rather than by pointing the app at an old digest. App Platform starts the new containers, waits for `/healthz`, then moves traffic.
    Each container applies the schema and data migrations on start, under a lock;
 3. waits until `https://$APP_HOST/.well-known/fling` answers for this instance with this release;
 4. calls `POST /ticks/migrate` with `FLING_TICK_SECRET` until it reports `done`;

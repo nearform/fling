@@ -102,6 +102,10 @@ jobs:
           tags: registry.digitalocean.com/${{ env.REGISTRY }}/${{ env.REPOSITORY }}:${{ env.RELEASE }}
           build-args: |
             FLING_MCPB_SERVER_URL=${{ env.APP_ORIGIN }}
+          # One image manifest, no attestations: its digest is what App Platform pulls by (an
+          # index of the image and its provenance or SBOM may not be accepted).
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

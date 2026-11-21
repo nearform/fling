@@ -2,8 +2,9 @@
 
 # Design: the logical platform
 
-Status: describes the contract AWS and Cloudflare meet today. The building blocks for new
-platforms ([§5](#5-shared-building-blocks-for-new-platforms)) are proposals.
+Status: describes the contract AWS and Cloudflare meet today, and the building blocks for new
+platforms ([§5](#5-shared-building-blocks-for-new-platforms)), built in `platforms/node` and run
+as the e2e's third local runtime. No instance runs on them yet.
 
 Fling is one core and several **platforms**. The core holds every rule. A platform is
 `platforms/<cloud>/`: an entry point plus adapters that put the core on one cloud's primitives.
@@ -152,7 +153,10 @@ Each element uses the same headings:
     - a synthetic response (redirects, 403/405/503, `Set-Cookie` for site passes);
     - an invoke of the site server with the viewer and site headers.
 
-    It adds the decision's `headers` wherever its runtime allows.
+    It adds the decision's `headers` wherever its runtime allows. A host that serves the sites
+    itself does this through the core's sites host (`handleSiteRequest`,
+    `apps/api/src/sites-host.ts`), supplying only how to read an object, one of Fling's pages, and
+    invoke a site server (`invokeSiteServer`).
 - **Conformance:** `routeTableConformance` covers the storage side. The edge shell has
   per-platform tests only (§6).
 - **Gates:** nothing.
@@ -165,6 +169,9 @@ Each element uses the same headings:
     tickets. A hub only keeps a site's WebSocket connections and sends to them.
   - A hub whose connections outlive one process keeps them as live connection records through the
     Store, as AWS does.
+  - A hub of several processes that each hold their own sockets shares the rooms through a
+    `LiveFanout` (`apps/api/src/live-memory.ts`): every room event goes to the other processes,
+    which keep their peers as remote presence.
   - The transport is WebSockets at `LIVE_URL`.
 - **Conformance:** `liveHubConformance`: welcome, join and leave, pointers to the room's others
   only, `publish` to the site's room and no other, and a closed or gone connection forgotten.
@@ -271,33 +278,52 @@ Differences between platforms are capability flags, never `if (platform === …)
 The proposed platforms ([GCP](../platforms/gcp.md), [Azure](../platforms/azure.md),
 [Fly.io](../platforms/fly.md), [Vercel](../platforms/vercel.md),
 [DigitalOcean and self-host](../platforms/digitalocean-self-host.md)) mostly have the *one host
-that routes* shape, on a Node runtime. Writing the parts they share once keeps "write once" true:
+that routes* shape, on a Node runtime. The parts they share are written once, in `platforms/node`
+(`@fling/platform-node`), which also runs as a platform of its own (`src/main.ts`) and is the e2e's
+`node` local runtime:
 
-1. **A Node host** (proposed as `platforms/node`). It is one HTTP server that does on Node what
-   the Cloudflare Worker does:
+1. **The Node host** (`src/host.ts`, `createNodeHost`). One HTTP server (Hono on
+   `@hono/node-server`, `ws` for the upgrades) that does on Node what the Cloudflare Worker does:
    - routes by host;
-   - serves the API and the UI on the app host;
-   - runs `routeSiteRequest` on the sites host and streams the objects it names;
-   - serves the core's signed blob routes;
-   - accepts WebSocket upgrades for the live rooms, with a pluggable fan-out across instances;
-   - exposes the tick and migrate endpoints behind a platform-supplied caller check.
+   - on the app host, serves the API (`createApp`), the UI from its build with the app
+     distribution's headers (`@fling/api/app-host`), the core's signed blob routes and, for a
+     store that can't bind uploads, the host upload routes (`HostUploads`, §3.2);
+   - on the sites host, carries out `routeSiteRequest` through the core's sites host (§3.3) over a
+     cached route table (`CachedRouteTable`), with objects from `Blobs` and site servers through
+     the core's shell;
+   - accepts `/api/live` WebSocket upgrades into a `MemoryLiveHub` (`@fling/api/live-ws`, which
+     `apps/api/src/dev.ts` uses too), with a pluggable fan-out across processes (§3.4): in process
+     by default, Postgres `LISTEN`/`NOTIFY` (`src/live/postgres-fanout.ts`) for processes that
+     share a Postgres;
+   - exposes `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate` behind a caller check
+     the platform supplies (`TickAuthorizer`; by default a `TICK_SECRET` bearer,
+     `sharedSecretTicks`). Without one they answer 404, and `src/main.ts` also runs the ticks on
+     timers in process.
 
-   `apps/api/src/dev.ts` already does most of this for the local runtime. A cloud platform then
-   supplies only adapters, infrastructure and a deploy.
-2. **A Postgres `Table` adapter**, a sibling of the D1 one
-   (`platforms/cloudflare/src/table/d1.ts`):
-   - `items(pk, sk COLLATE "C", data jsonb, expires_at)` for byte order;
-   - conditions checked inside one transaction (`SELECT … FOR UPDATE` and guard statements);
-   - conformance run against a Postgres service in CI.
+   Every adapter is passed in, so a cloud platform supplies only adapters, infrastructure and a
+   deploy.
+2. **The Postgres `Table`** (`src/table/postgres.ts`, `PostgresTable`), over `pg` or PGlite:
+   - `items(pk COLLATE "C", sk COLLATE "C", data jsonb, expires_at)` in a schema of the instance's
+     own, for byte order, with its own schema migrations (`src/table/schema.ts`);
+   - each write takes transaction-scoped advisory locks on its keys (in a fixed order), reads them,
+     checks the conditions and writes, so exactly one of racing writers wins; deadlocks and
+     serialisation failures are retried;
+   - expired items are hidden at once and purged by the hourly tick.
 
-   It is the Table for Fly.io, Vercel (Neon), DigitalOcean and self-host, and the fallback on
-   Azure and GCP.
-3. **An HTTP mailer** for clouds without a mail service (GCP, Fly.io, DigitalOcean, self-host).
-   It is one adapter for a transactional provider's API, or for SMTP, passing `mailerConformance`.
+   It passes the table, store, migrations and route table suites on PGlite in every gate and on a
+   Postgres service in CI. It is the Table for Fly.io, Vercel (Neon), DigitalOcean and self-host,
+   and the fallback on Azure and GCP.
+3. **A mailer for clouds without a mail service**: SMTP (`src/mail/smtp.ts`, `SmtpMailer`,
+   `MAIL_DRIVER=smtp`), which every transactional provider also offers, passing
+   `mailerConformance` against a fake SMTP server. A provider's own HTTP API, where SMTP is
+   blocked, is a further adapter beside it.
 
 ## 6. Known gaps in the contract
 
 - **No shared conformance for edge shells.** Each sites host tests its own. The AWS route table
   (`CloudFrontRouteTable`) has no emulator and is stub-tested.
-- **CI knows two platforms.** `scripts/check-terraform.mjs` checks one Terraform module, and
-  `ci.yml` starts only DynamoDB Local and MinIO. Each new platform adds its module and emulators.
+- **The Node host's objects are whole reads.** `Blobs` has no streaming read and keeps no
+  metadata, so the Node host reads a site file whole and makes its type and Cache-Control again
+  from its name. A ranged or streaming `get` on the port would let it stream large files.
+- **Each new platform adds its emulators to CI.** `scripts/check-terraform.mjs` checks every
+  `platforms/*/infra` module; `ci.yml` starts DynamoDB Local, MinIO and Postgres.

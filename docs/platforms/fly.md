@@ -31,14 +31,14 @@ beyond them, so most of the work is setup and deploy scripts.
 |---|---|---|---|
 | Table | Fly Managed Postgres | the shared Postgres adapter ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | Postgres gives cross-partition transactions and byte order (`COLLATE "C"`). SQLite on a volume with LiteFS would also meet the contract, but it ties writes to one primary Machine and adds replication to operate, so Postgres is the recommendation |
 | Blobs | Tigris (S3-compatible, globally replicated) | `S3Blobs` (`platforms/aws/src/blobs/s3.ts`) pointed at Tigris, if it passes `blobsConformance` | `fly storage create` makes the bucket and sets its credentials as app secrets. Whether Tigris enforces a signed `x-amz-checksum-sha256` on a presigned PUT is unconfirmed (§8). Without it, see [the upload binding](../design/platform.md#6-known-gaps-in-the-contract) |
-| Route table | Postgres, with an in-process cache | the core's `TableRouteTable` behind a cache, as `CachedRouteTable` (`platforms/cloudflare/src/route-table/cached.ts`) does | A new key is visible at once. Changed keys are stale for up to the cache's lifetime on other Machines, unless invalidated over the fan-out below |
+| Route table | Postgres, with an in-process cache | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over the core's `TableRouteTable` | A new key is visible at once. Changed keys are stale for up to the cache's lifetime (5 s) on other Machines |
 | Sites host | The Node host | `platforms/node` | See §3 |
-| Live hub | WebSockets on the Node host | `platforms/node` hub, with a Postgres `LISTEN`/`NOTIFY` fan-out (proposed `platforms/fly/src/live-fanout.ts`) | WebSockets work natively through Fly's proxy. With more than one Machine, `publish` has to reach the Machine that holds each socket. `NOTIFY` on a per-site channel does this without another service |
-| Mailer | None on Fly | the shared HTTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | A transactional provider's API |
+| Live hub | WebSockets on the Node host | the Node host's hub with the shared Postgres fan-out (`platforms/node/src/live/postgres-fanout.ts`) | WebSockets work natively through Fly's proxy. With more than one Machine, every room event reaches the other Machines through `NOTIFY` on the instance's channel, without another service |
+| Mailer | None on Fly | the shared SMTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | A transactional provider's SMTP |
 | Site servers | Fly Machines, one per site, created through the Machines API | `platforms/fly/src/servers/` | A generic runner image loads the version's `_fling/server.mjs` from Tigris. Machines stop when idle and start on request through the proxy. Each version is a Machine update, so `goLive` is the route's `t` changing |
 | Server logs | Fly log shipping, or a log written by the runner | `platforms/fly/src/servers/server-logs.ts` | The simplest is the runner writing its lines to Tigris, as the Cloudflare isolate writes to R2 |
-| Ticks | No managed per-minute scheduler | an in-process timer in the Node host that takes a Table lease | Every Machine runs the timer, and the lease (a conditional update) lets one of them run each tick. Scheduled Machines run hourly at most, so they could serve `maintain` but not `notify` |
-| Migrations | A release command (`[deploy] release_command` in `fly.toml`) | `platforms/node` migrate entry | Runs before the new Machines take traffic. The deploy loops it until done |
+| Ticks | No managed per-minute scheduler | the Node host's in-process timers (`platforms/node/src/main.ts`) | Every Machine runs them; each tick is safe to repeat, as the outbox and the migration leases are conditional writes. Scheduled Machines run hourly at most, so they could serve `maintain` but not `notify` |
+| Migrations | A release command (`[deploy] release_command` in `fly.toml`) | `POST /ticks/migrate` on the Node host, or its start (`src/main.ts` migrates on start) | Runs before the new Machines take traffic. The deploy loops it until done |
 | Secrets | Fly secrets (`fly secrets set`) | environment, through `secretsFromEnv` | Encrypted at rest and injected as environment variables |
 | Sign-in | (core OIDC) | — | The client secrets are Fly secrets |
 
@@ -94,7 +94,7 @@ Terraform is used only for DNS, wherever the operator's DNS provider has one.
 - `live` needs the fan-out once there is more than one Machine.
 - `servers` needs the Machines runner.
 - `serversEgress` stays on until an egress fence exists (§8).
-- `email` needs an HTTP mailer provider.
+- `email` needs an SMTP provider.
 
 ## 8. Gaps and open questions
 

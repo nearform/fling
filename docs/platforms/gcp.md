@@ -25,7 +25,7 @@ Cloudflare Worker.
 
 **Effort:** large.
 - Two new adapters: Firestore and GCS.
-- The shared Node host and the shared HTTP mailer.
+- The shared Node host and the shared SMTP mailer.
 - A Terraform module.
 - A deploy workflow.
 - Site servers on Cloud Run, which are the biggest single piece.
@@ -35,11 +35,11 @@ Cloudflare Worker.
 | Element | Google Cloud service | Adapter | Notes |
 |---|---|---|---|
 | Table | Firestore in Native mode, one database, one collection `items` | `platforms/gcp/src/table/firestore.ts` | See "Table on Firestore" below |
-| Blobs | Cloud Storage (`sites` bucket), V4 signed URLs | `platforms/gcp/src/blobs/gcs.ts` | GCS checks MD5 or CRC32C on upload, never SHA-256 ([known gap](../design/platform.md#6-known-gaps-in-the-contract)). Until the contract changes, uploads go through the host's signed routes |
-| Route table | Firestore, behind an in-process cache | `platforms/gcp/src/route-table/cached.ts` over the core's `TableRouteTable` | The Cloudflare `CachedRouteTable` pattern: a new key is visible at once, a changed one after the cache TTL |
+| Blobs | Cloud Storage (`sites` bucket), V4 signed URLs | `platforms/gcp/src/blobs/gcs.ts` | GCS checks MD5 or CRC32C on upload, never SHA-256, so uploads bind the manifest's MD5 (`Content-MD5`, [§3.2](../design/platform.md#32-blobs)); a manifest without one goes through the host's upload routes (`HostUploads`) |
+| Route table | Firestore, behind an in-process cache | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over the core's `TableRouteTable` | A new key is visible at once, a changed one after the cache TTL |
 | Sites host | Cloud Run (the Node host) behind the load balancer and Cloud CDN | `platforms/node` (shared) | See §3 |
 | Live hub | WebSockets on Cloud Run, with a fan-out between instances | `platforms/gcp/src/live.ts` | Fan-out over Memorystore for Redis pub/sub, or Pub/Sub. Otherwise one instance only, or `live` off at first |
-| Mailer | none native: the shared HTTP mailer (a transactional provider's API) | `platforms/node/src/mail/http.ts` (shared) | Google Cloud has no email-sending service |
+| Mailer | none native: the shared SMTP mailer (a transactional provider's SMTP) | `platforms/node/src/mail/smtp.ts` (shared) | Google Cloud has no email-sending service. Outbound port 25 is blocked; 465 and 587 are not |
 | Site servers | Cloud Run, one service per site, a revision per version | `platforms/gcp/src/servers/` | See "Site servers" below |
 | Server logs | Cloud Logging (`entries.list`) | `platforms/gcp/src/servers/server-logs.ts` | Read-only; Cloud Run writes the server's stdout |
 | Ticks | Cloud Scheduler calling the service over HTTP, with an OIDC token | `platforms/gcp/src/entry.ts` | `notify` every minute (with mail), `maintain` hourly. The host checks the token's service account |
@@ -156,9 +156,9 @@ learn to run for each module.
 
 ## 8. Gaps and open questions
 
-- **SHA-256 upload binding:** GCS validates only MD5 and CRC32C (`x-goog-hash`), so the
-  [contract change](../design/platform.md#6-known-gaps-in-the-contract) decides whether uploads
-  can go direct. Until then they pass through the host's signed routes.
+- **MD5 upload binding on GCS:** a V4 signed URL that signs `Content-MD5` should make GCS refuse
+  other bytes; the adapter's conformance run against fake-gcs-server and a real bucket confirms
+  it. Uploads from clients that send no MD5 pass through the host's upload routes.
 - **The 32 MiB request cap:** Cloud Run limits HTTP/1 requests to 32 MiB (no cap on HTTP/2), and
   this binds uploads through the host. The options are end-to-end HTTP/2 or keeping uploads under
   the cap.

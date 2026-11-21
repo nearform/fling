@@ -35,14 +35,14 @@ Fling's CI does not already run: Postgres and MinIO.
 |---|---|---|---|---|
 | Table | Managed PostgreSQL | PostgreSQL | the shared Postgres adapter ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | |
 | Blobs | Spaces (S3-compatible) | MinIO, or any S3-compatible store | `S3Blobs` (`platforms/aws/src/blobs/s3.ts`) with an endpoint | MinIO already passes `blobsConformance` in CI. Whether Spaces enforces `x-amz-checksum-sha256` is unconfirmed (§8); see [the upload binding](../design/platform.md#6-known-gaps-in-the-contract) |
-| Route table | Postgres, with an in-process cache | the same | `TableRouteTable` behind a cache, as `CachedRouteTable` does | |
+| Route table | Postgres, with an in-process cache | the same | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over `TableRouteTable` | |
 | Sites host | The Node host | the same | `platforms/node` | See §3 |
-| Live hub | WebSockets on the Node host | the same | `platforms/node` hub, with a Postgres `LISTEN`/`NOTIFY` fan-out | One container needs no fan-out |
-| Mailer | None on DigitalOcean | the operator's SMTP relay | the shared HTTP or SMTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | |
+| Live hub | WebSockets on the Node host | the same the Node host's hub, with the shared Postgres `LISTEN`/`NOTIFY` fan-out (`platforms/node/src/live/postgres-fanout.ts`) | One container needs no fan-out |
+| Mailer | None on DigitalOcean | the operator's SMTP relay | the shared SMTP mailer ([platform §5](../design/platform.md#5-shared-building-blocks-for-new-platforms)) | |
 | Site servers | App Platform components or DOKS pods per site | containers under gVisor or Firecracker, or off | `platforms/node/src/servers/container.ts` (proposed) | Plain containers do not isolate untrusted code well enough. A sandboxed runtime is required, or `SERVERS` stays off |
 | Server logs | Written by the runner to the object store | the same | as on Fly | |
-| Ticks | No per-minute scheduler confirmed | cron, or a Kubernetes `CronJob` | an in-process timer in the Node host with a Table lease | The lease lets every replica run the timer while one acts |
-| Migrations | An App Platform pre-deploy job | an init container, or a one-off `docker compose run` | `platforms/node` migrate entry | Looped until done |
+| Ticks | No per-minute scheduler confirmed | cron, or a Kubernetes `CronJob` | the Node host's in-process timers, or the tick endpoints (`POST /ticks/*`, a `TICK_SECRET` bearer) from cron | Every tick is safe to repeat, so every replica runs the timers |
+| Migrations | An App Platform pre-deploy job | an init container, or a one-off `docker compose run` | `POST /ticks/migrate`, or the Node host's start (it migrates on start) | Looped until done |
 | Secrets | App Platform encrypted environment variables | Docker or Kubernetes secrets | environment, through `secretsFromEnv` | |
 | Sign-in | (core OIDC) | (core OIDC) | — | |
 
@@ -89,7 +89,9 @@ in front of the host and not in place of it.
 ## 8. Gaps and open questions
 
 - **Spaces and SHA-256.** Does a presigned PUT with a signed `x-amz-checksum-sha256` reject
-  different bytes? ([Spaces](https://docs.digitalocean.com/products/spaces/))
+  different bytes? If not, `S3Blobs` binds `Content-MD5` instead (`digest: 'md5'`, with the host's
+  upload routes for manifests without an MD5); the blobs conformance run against Spaces decides
+  ([Spaces](https://docs.digitalocean.com/products/spaces/)).
 - **Ticks on App Platform.** App Platform jobs are not confirmed to run on a schedule, so the
   in-process timer is the plan
   ([App Platform jobs](https://docs.digitalocean.com/products/app-platform/)).

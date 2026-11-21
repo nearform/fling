@@ -8,7 +8,7 @@
  *   own sockets, less the peer it came from;
  * - each process learns the room's peers elsewhere from the joins and leaves it hears, so
  *   `welcome` lists everyone. A process that stops without a word leaves its peers listed until
- *   LIVE_CONNECTION_TTL_SECONDS pass (they no longer move; a reload clears them).
+ *   LIVE_CONNECTION_TTL_SECONDS pass (they stand still; a reload clears them).
  *
  * What a message asks of the room is the core's (`relay`, live.ts); this keeps the sockets.
  * live-ws.ts accepts the WebSocket upgrades (`GET /api/live?ticket=`) and hands each socket here.

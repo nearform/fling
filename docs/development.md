@@ -34,21 +34,28 @@ FLING_TEST_POSTGRES_URL=postgres://postgres:fling-test@localhost:5432/postgres \
 The Postgres Table's suites also run on PGlite (Postgres in process) in every `pnpm gate`, so only
 the races on concurrent connections need the server.
 
-Without terraform installed, the terraform check is skipped outside CI.
+The terraform check covers every platform's module (`platforms/*/infra`): `terraform fmt`, then
+`validate` through its examples (`infra/examples/*`, or the module itself without any), then
+`terraform test` when it has `infra/tests`. Without terraform installed it is skipped outside CI.
 
 ## Running locally
 
-There are two local runtimes, and each serves the whole product:
+There are three local runtimes, and each serves the whole product:
 
 | Runtime | Start | App | Sites |
 |---|---|---|---|
 | Core on Node (AWS flavoured: a table in a JSON file, fs blobs, the real CloudFront Function) | `pnpm dev`, plus `pnpm --filter @fling/web dev` for the UI | <http://fling.lvh.me:47100> (API :47101) | `http://<name>.fling.lvh.me:47102` |
 | Cloudflare Worker under `wrangler dev` (local D1, R2, KV) | `pnpm --filter "@fling/web..." build`, then `pnpm --filter @fling/platform-cloudflare dev` | <http://flingcf.lvh.me:47103> | `http://<name>.flingcf.lvh.me:47103` |
+| The Node host (`platforms/node`: one server, the Postgres Table on PGlite, fs blobs) | `pnpm --filter "@fling/web..." build`, then `APP_ORIGIN=http://flingnode.lvh.me:8080 SITES_DOMAIN=flingnode.lvh.me:8080 SITE_SCHEME=http DEV_LOGIN=1 pnpm --filter @fling/platform-node start` | <http://flingnode.lvh.me:8080> | `http://<name>.flingnode.lvh.me:8080` |
 
-`lvh.me` resolves to 127.0.0.1. Both runtimes run pending data migrations on start, as a deploy
-does. Both keep their state across restarts: Node in `.fling-dev/` (the table in `table.json`, the
-blobs beside it, and the session secrets in `dev-secrets.json`, so you stay signed in) and wrangler
-in `platforms/cloudflare/.wrangler/`. Delete either folder to start over.
+`lvh.me` resolves to 127.0.0.1. Every runtime runs pending data migrations on start, as a deploy
+does. Each keeps its state across restarts: the core on Node in `.fling-dev/` (the table in
+`table.json`, the blobs beside it, and the session secrets in `dev-secrets.json`, so you stay
+signed in), wrangler in `platforms/cloudflare/.wrangler/` and the Node host in `FS_ROOT` (default
+`.fling-node/`, PGlite's database in `pglite/`; it reads `SESSION_SECRET` and `SITE_HMAC_KEY`
+from the environment, so set them to stay signed in). Delete the folder to start over. With
+`DATABASE_URL` set the Node host uses that Postgres instead, and live rooms fan out through it
+across processes.
 
 **Pages on site hosts.** The sites' 404 page and the review shell (`/_fling/review.html`, the page
 review mode frames) are single-file builds of `apps/web` (`vite.404.config.ts`,
@@ -168,13 +175,14 @@ setup (CLI, config, each Fling, Claude Code, Claude Desktop) and changes nothing
 than a Fling it talks to says a newer release is out; `FLING_NO_UPDATE_CHECK=1` quietens it.
 
 **The e2e scenario.** Run `pnpm build && pnpm e2e` (or `pnpm --filter @fling/e2e e2e aws` for one
-runtime). It starts each runtime on free ports with fresh state, runs
-`packages/e2e/src/scenario.ts` through the real CLI and over HTTP, then stops it. Both runtimes run
-with mail on (MemoryMailer on Node, the CloudflareMailer over the simulated binding under
-`wrangler dev`), and the scenario drains with `POST /dev/notify/drain` and reads what each person
-was sent from `GET /api/me/notifications/sent`. Both also run with site servers on for members:
-Node by `apps/api/src/dev.ts`'s default (`SERVERS=members` unless set), each server a Node child
-process, and the Worker with `--servers members`, each server a local Worker Loader isolate. The
+runtime: `aws`, `cloudflare` or `node`). It starts each runtime on free ports with fresh state,
+runs `packages/e2e/src/scenario.ts` through the real CLI and over HTTP, then stops it. Every
+runtime runs with mail on (MemoryMailer on Node and in the Node host, the CloudflareMailer over the
+simulated binding under `wrangler dev`), and the scenario drains with `POST /dev/notify/drain` and reads what each person
+was sent from `GET /api/me/notifications/sent`. Each also runs with site servers on for members:
+Node by `apps/api/src/dev.ts`'s default (`SERVERS=members` unless set) and the Node host with
+`SERVERS=members`, each server a Node child process, and the Worker with `--servers members`, each
+server a local Worker Loader isolate. The
 scenario publishes the workshop-quote example, which waits for its site secret and goes live once
 `fling secrets set --from` sets it, calls its `/api/*`, reads its logs and rolls back.
 
@@ -262,7 +270,9 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 ## Adding a platform
 
 The contract every platform meets and the steps to add one are in
-[docs/design/platform.md](design/platform.md) (§4). Each platform also gets a platform doc in
+[docs/design/platform.md](design/platform.md) (§4). A platform on a Node runtime starts from
+`platforms/node` (§5): the Node host, the Postgres Table, the Postgres live fan-out and the SMTP
+mailer, and supplies only the adapters its cloud needs, its infrastructure and a deploy. Each platform also gets a platform doc in
 [docs/platforms/](platforms/README.md), written to the shared template. Differences between
 platforms are capability flags, never `if (platform === …)`.
 

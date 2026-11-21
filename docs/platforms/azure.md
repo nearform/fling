@@ -33,8 +33,8 @@ the routing decision runs in the Container App, as it does in the Cloudflare Wor
 | Element | Azure service | Adapter | Notes |
 |---|---|---|---|
 | Table | Cosmos DB for NoSQL, serverless, one container, **one constant partition key** | `platforms/azure/src/table/cosmos.ts` | See "Table on Cosmos DB" below. Fallback: Postgres Flexible Server with the shared Postgres adapter |
-| Blobs | Blob Storage (`sites` container), SAS URLs | `platforms/azure/src/blobs/blob.ts` | Put Blob checks Content-MD5 or CRC64, never SHA-256 ([known gap](../design/platform.md#6-known-gaps-in-the-contract)). Until the contract changes, uploads go through the host's signed routes. `copy` is server-side (Copy Blob) |
-| Route table | Cosmos DB, behind an in-process cache | `platforms/azure/src/route-table/cached.ts` over the core's `TableRouteTable` | The Cloudflare `CachedRouteTable` pattern |
+| Blobs | Blob Storage (`sites` container), SAS URLs | `platforms/azure/src/blobs/blob.ts` | Put Blob checks Content-MD5 or CRC64, never SHA-256, so uploads bind the manifest's MD5 ([§3.2](../design/platform.md#32-blobs)); a manifest without one goes through the host's upload routes (`HostUploads`). `copy` is server-side (Copy Blob) |
+| Route table | Cosmos DB, behind an in-process cache | the shared `CachedRouteTable` (`platforms/node/src/route-table/cached.ts`) over the core's `TableRouteTable` | |
 | Sites host | Container Apps (the Node host) behind Front Door Standard | `platforms/node` (shared) | See §3 |
 | Live hub | Azure Web PubSub, one group per site | `platforms/azure/src/live.ts` | The closest match to the API Gateway WebSocket API. The service keeps the connections, and connect, message and disconnect events reach the host as upstream webhooks. `publish` is a REST send to the site's group, and connections are live connection records, as on AWS |
 | Mailer | Azure Communication Services Email | `platforms/azure/src/mail/acs.ts` | A verified domain for `mail.<sites domain>`. Throttling and suppression map to the core's reasons |
@@ -162,9 +162,8 @@ Tests run as `terraform test` with mocked providers.
 
 ## 8. Gaps and open questions
 
-- **SHA-256 upload binding:** Put Blob validates only Content-MD5 or CRC64 (CRC64-NVME), so the
-  [contract change](../design/platform.md#6-known-gaps-in-the-contract) decides whether uploads
-  can go direct.
+- **MD5 upload binding on Blob Storage:** a SAS PUT carrying `Content-MD5` should be refused for
+  other bytes; the adapter's conformance run against Azurite and a real account confirms it.
 - **Cosmos DB string order:** the ORDER BY documentation does not state the collation for
   strings, so the adapter orders on the hex `skx`. Test the native `sk` order against the
   conformance suite and drop `skx` if it matches.

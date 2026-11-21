@@ -47,6 +47,16 @@ const EXCEPTIONS = {
   'README.md': [/^<https:\/\/why-fling\.fling\.labs\.[a-z]+\.com\/>$/],
 }
 
+/** Links allowed anywhere in a file's lines, removed before the line is checked. */
+const LINKS = {
+  'README.md': [
+    // The walkthroughs, published with Fling itself.
+    /https:\/\/fling-tour\.fling\.labs\.[a-z]+\.com\/[a-z-]*\/?/g,
+    // The publisher's open-source banner at the end.
+    /\[!\[banner\]\(https:\/\/raw\.githubusercontent\.com\/[a-z]+\/\.github\/[^)\s]+\)\]\(https:\/\/www\.[a-z]+\.com\/contact\/[^)\s]*\)/g,
+  ],
+}
+
 let out = ''
 try {
   const args = ['grep', '--untracked', '-n', '-I', '-i', OWNER, '--', '.', ':!pnpm-lock.yaml']
@@ -63,6 +73,7 @@ for (const line of out.split('\n').filter(Boolean)) {
   const allowed = ALLOWED[file] ?? []
   // The package name contains the repo slug, so strip it first.
   let left = text
+  for (const re of LINKS[file] ?? []) left = left.replace(re, '')
   for (const name of [PACKAGE, REPO]) {
     if (left.includes(name) && !allowed.includes(name)) {
       problems.push(

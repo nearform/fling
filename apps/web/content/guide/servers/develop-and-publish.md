@@ -5,7 +5,7 @@ order: 20
 summary: Run a site and its server on your computer with fling dev, then publish both together.
 requires: [servers]
 sources: [apps/cli/src/commands/dev.ts, apps/cli/src/dev-server.ts, apps/cli/src/dotenv.ts, apps/cli/src/server-build.ts, apps/cli/src/commands/deploy.ts, apps/cli/src/site-server.ts, apps/cli/src/mcp.ts, apps/api/src/servers/index.ts, apps/api/src/mcp/publish.ts, packages/shared/src/mcp-tools.ts, packages/shared/src/server-template.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 `fling dev` runs a folder on your computer the way its site will be served, with its server beside

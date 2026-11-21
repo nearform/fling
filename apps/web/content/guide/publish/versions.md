@@ -5,7 +5,7 @@ order: 60
 summary: Every publish is kept as a version; put an earlier one back in an instant.
 requires: [rollback]
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteVersions.tsx, apps/web/src/components/site/PathVersions.tsx, apps/web/src/lib/site-tabs.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 Each time you publish new files, Fling keeps them as a version and serves the newest. The earlier
@@ -49,7 +49,8 @@ fling rollback payments-plans <versionId> --path PAY-412
 Open the site from **Sites** and choose its **Versions** tab. It shows the files being served, then the
 **History**: each version with when it was flung, who published it, its files and size. Click
 **Files** to see a version's files, and **Restore** to serve it. The one being served is marked
-**Current**.
+**Current**.<!-- requires: servers --> A version that carries a [site server](/guide/servers/what-is-a-site-server)
+is marked **Server**.<!-- /requires -->
 
 A Path's own page has the same **Versions** section for that Path.
 

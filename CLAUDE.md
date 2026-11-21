@@ -1,15 +1,20 @@
 # Fling
 
 Throw a folder of static files at a Fling server and get `https://<name>.<sites domain>` back.
-One codebase, many instances: each instance runs on one cloud (AWS or Cloudflare) with its own
-name, domains, sign-in and brand, published at `/.well-known/fling`.
+One codebase, many instances: each instance runs on one platform (AWS, Cloudflare, Google Cloud,
+Azure, DigitalOcean or self-hosted) with its own name, domains, sign-in and brand, published at
+`/.well-known/fling`.
 
 - Domain terms: [CONTEXT.md](CONTEXT.md). Use its words (site, version, publication, policy,
   capability, platform…) in code, comments and docs.
 - How to develop (setup, local runtimes, adding a feature, a migration, a config value, a platform,
   releasing): [docs/development.md](docs/development.md).
 - Deploying an instance: [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md),
-  [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md).
+  [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md),
+  [platforms/gcp/DEPLOY.md](platforms/gcp/DEPLOY.md),
+  [platforms/azure/DEPLOY.md](platforms/azure/DEPLOY.md),
+  [platforms/digitalocean/DEPLOY.md](platforms/digitalocean/DEPLOY.md), and self-host
+  [platforms/node/DEPLOY.md](platforms/node/DEPLOY.md).
 - The contract every platform meets: [docs/design/platform.md](docs/design/platform.md). One doc
   per platform, supported and proposed, in [docs/platforms/](docs/platforms/README.md).
 - Area rules: [.claude/rules/](.claude/rules/), each loaded when you touch the paths it names
@@ -21,9 +26,13 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
 | Path | What |
 |---|---|
 | `apps/api` | The core: Hono API, policy, Records, migrations, MCP and OAuth. No cloud SDKs |
-| `platforms/aws` | Lambda entry point, DynamoDB/S3/CloudFront KVS/SSM adapters, Terraform module (`infra/`) |
+| `platforms/aws` | Lambda entry point, DynamoDB/CloudFront KVS/SSM adapters (S3 from `platforms/s3`), Terraform module (`infra/`) |
 | `platforms/cloudflare` | One Worker (API, UI, sites), D1/R2/KV adapters, wrangler config, setup and deploy scripts |
-| `platforms/node` | The Node host (one server for the app and the sites), the Postgres `Table`, the SMTP mailer: shared by the Node-based platforms and runnable on its own |
+| `platforms/gcp` | Cloud Run entry point, Firestore `Table`, Cloud Storage `Blobs`, Cloud Scheduler's OIDC tick check, Terraform module (`infra/`) |
+| `platforms/azure` | Container Apps entry point and jobs, the Front Door wrapper, Cosmos DB `Table`, Blob Storage, Web PubSub, the ACS mailer, Terraform module (`infra/`) |
+| `platforms/digitalocean` | Terraform module (`infra/`) running the Node host image on App Platform with Managed PostgreSQL and Spaces |
+| `platforms/node` | The Node host (one server for the app and the sites), the Postgres `Table`, the SMTP mailer: shared by the Node-based platforms and runnable on its own. Its image (`Dockerfile`), Compose file and Helm chart (`deploy/`) are the self-host platform |
+| `platforms/s3` | `S3Blobs`, the `Blobs` adapter for any S3-compatible store (S3, Spaces, MinIO), shared by AWS and the Node host |
 | `packages/shared` | Contracts used by every app, including the sites' routing decision (`site-routing.ts`) |
 | `packages/conformance` | Suites every adapter must pass (Table, Blobs, RouteTable, Store, migrations) |
 | `packages/e2e` | The one scenario every platform passes, locally (`pnpm e2e`) and as the post-deploy smoke test |

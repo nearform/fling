@@ -5,7 +5,7 @@ order: 30
 summary: See how the instance is configured; changing it is a deploy.
 audience: admin
 sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its
@@ -24,7 +24,7 @@ Open **Admin → Settings**. The values are in groups:
 | **Branding** | The instance's name, the install command it shows, its logo, favicon and colours |
 | **Features** | Comments, live review, outside invitations and their daily limit, how many versions of each site are kept, and site servers: who may publish one, what they may reach and their limits |
 | **Mail** | How email is sent, and from which address |
-| **Platform** | Where its data and files are kept, on its cloud |
+| **Platform** | Where its data and files are kept |
 
 Each row shows a setting's name, the value the instance runs with, and **set** if the deployment
 gave it or **default** if it falls back to Fling's own. Secrets show only whether they are set,

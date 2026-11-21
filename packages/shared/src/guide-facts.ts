@@ -13,6 +13,7 @@ import {
   MAX_DEPLOY_BYTES,
   MAX_FILE_BYTES,
   MAX_FILES,
+  MAX_PATH_BYTES,
   MAX_PATH_FOLDER_LENGTH,
   MAX_PATHS_PER_SITE,
 } from './limits.ts'
@@ -62,6 +63,7 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'max-deploy': mb(MAX_DEPLOY_BYTES),
   'max-file': mb(MAX_FILE_BYTES),
   'max-files': count(MAX_FILES),
+  'max-path': `${count(MAX_PATH_BYTES)} bytes`,
   'max-inline': mb(MCP_PUBLISH_MAX_BYTES),
   'max-paths': count(MAX_PATHS_PER_SITE),
   'max-folder': count(MAX_PATH_FOLDER_LENGTH),

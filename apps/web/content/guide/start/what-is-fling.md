@@ -4,7 +4,7 @@ part: start
 order: 10
 summary: Publish a folder of static files and get a link back, from your assistant, the command line or the web.
 sources: [README.md, packages/shared/src/distribution.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 {{instance:name}} puts a folder of static files online and gives you a link back:

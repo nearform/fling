@@ -5,7 +5,7 @@ order: 30
 summary: What you hear about, such as a site shared with you or a new comment, and how to change it.
 requires: [notifications]
 sources: [packages/shared/src/notifications.ts, apps/api/src/notifications/**, apps/web/src/pages/Notifications.tsx, apps/web/src/lib/notifications.ts, apps/cli/src/commands/notifications.ts, packages/shared/src/mcp-tools.ts]
-verified: 32545014b
+verified: 79489687d
 ---
 
 {{instance:name}} tells you when something happens that involves you, so you don't have to keep

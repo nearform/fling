@@ -1,6 +1,7 @@
 /**
  * AcsMailer against a stubbed EmailClient: what ACS was asked to send, and each failure ACS can
- * answer (a RestError status and code, or an operation that ends Failed).
+ * answer (a RestError status and code, or an operation the poller reports failed, thrown as
+ * `@azure/core-lro` throws it).
  */
 import type { EmailMessage, EmailSendResponse } from '@azure/communication-email'
 import {
@@ -12,6 +13,10 @@ import {
 import { describe, expect, it } from 'vitest'
 import { type AcsClient, AcsMailer } from '../src/mail/acs.ts'
 
+/** What `@azure/core-lro`'s poller throws for an operation that ended Failed. */
+const operationFailed = (code: string) =>
+  new Error(`The long-running operation has failed. ${code}. Refused for someone@example.test`)
+
 const restError = (statusCode: number, code: string) =>
   Object.assign(new Error('refused for someone@example.test'), {
     name: 'RestError',
@@ -21,7 +26,11 @@ const restError = (statusCode: number, code: string) =>
 
 /** A stub EmailClient: keeps what it was asked to send, or answers with `fail`. */
 function stub(
-  fail?: { throws: unknown } | { ends: Partial<EmailSendResponse> } | { pending: true }
+  fail?:
+    | { throws: unknown }
+    | { fails: string }
+    | { ends: Partial<EmailSendResponse> }
+    | { pending: true }
 ) {
   const sent: { message: EmailMessage; operationId?: string }[] = []
   const client: AcsClient = {
@@ -30,15 +39,19 @@ function stub(
       sent.push({ message, ...(options?.operationId ? { operationId: options.operationId } : {}) })
       return {
         pollUntilDone: () =>
-          fail && 'pending' in fail
-            ? new Promise((_, reject) =>
-                options?.abortSignal?.addEventListener('abort', () => reject(new Error('aborted')))
-              )
-            : Promise.resolve({
-                id: options?.operationId ?? 'op',
-                status: 'Succeeded',
-                ...(fail && 'ends' in fail ? fail.ends : {}),
-              } as EmailSendResponse),
+          fail && 'fails' in fail
+            ? Promise.reject(operationFailed(fail.fails))
+            : fail && 'pending' in fail
+              ? new Promise((_, reject) =>
+                  options?.abortSignal?.addEventListener('abort', () =>
+                    reject(new Error('aborted'))
+                  )
+                )
+              : Promise.resolve({
+                  id: options?.operationId ?? 'op',
+                  status: 'Succeeded',
+                  ...(fail && 'ends' in fail ? fail.ends : {}),
+                } as EmailSendResponse),
       }
     },
   }
@@ -48,9 +61,7 @@ function stub(
 const FAILURES: Record<Exclude<ProviderFailure, 'quota'>, Parameters<typeof stub>[0]> = {
   throttle: { throws: restError(429, 'TooManyRequests') },
   rejected: { throws: restError(400, 'InvalidSenderUserName') },
-  suppressed: {
-    ends: { status: 'Failed', error: { code: 'EmailDroppedAllRecipientsSuppressed' } },
-  },
+  suppressed: { fails: 'EmailDroppedAllRecipientsSuppressed' },
   transient: { throws: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) },
 }
 
@@ -86,6 +97,33 @@ describe('AcsMailer', () => {
     expect(first?.message.replyTo).toEqual([{ address: 'help@example.test' }])
     expect(first?.message.disableUserEngagementTracking).toBe(true)
     expect(result).toEqual({ ok: true, providerId: first?.operationId })
+  })
+
+  it('names the same operation for a retried send, and another for another recipient', async () => {
+    const { client, sent } = stub()
+    const mailer = new AcsMailer(client)
+    await mailer.send(message())
+    await mailer.send(message())
+    await mailer.send(message({ to: 'other@example.test' }))
+    const [a, b, c] = sent.map(s => s.operationId)
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(b).toBe(a)
+    expect(c).not.toBe(a)
+  })
+
+  it('reads the code from an operation the poller reports failed', async () => {
+    const suppressed = await new AcsMailer(
+      stub({ fails: 'EmailDroppedAllRecipientsSuppressed' }).client
+    ).send(message())
+    expect(suppressed).toMatchObject({ ok: false, retry: false, reason: 'suppressed' })
+    const other = await new AcsMailer(stub({ fails: 'InternalError' }).client).send(message())
+    expect(other).toMatchObject({
+      ok: false,
+      retry: true,
+      reason: 'transient',
+      detail: 'InternalError',
+    })
+    expect(JSON.stringify(other)).not.toContain('someone@example.test')
   })
 
   it('counts a send ACS accepted and is still running when the wait runs out', async () => {

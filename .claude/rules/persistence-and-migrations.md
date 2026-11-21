@@ -26,13 +26,16 @@ paths:
   and every adapter updated: memory, DynamoDB, D1, Postgres.
 - D1 stores the generic `items` table (`platforms/cloudflare/migrations/0001_init.sql`). New record
   kinds need no SQL migration. A schema change does: a new numbered `.sql` file, additive only.
-- Postgres stores the same `items` table (`platforms/node/src/table/`), its schema migrations in
-  `SCHEMA_MIGRATIONS` (`schema.ts`), applied on start and recorded in `<schema>.fling_schema`. The
-  same rule holds: new record kinds need none; a schema change is a new entry, additive only.
-- Postgres SQL is injection-safe by construction: values are always `$n` parameters; identifiers
-  (schema, table, LISTEN channel) only through `ident`/`qualified` (`table/ident.ts`), integers
-  through `int`; nothing else is interpolated but fixed fragments. `tests/sql-guard.test.ts`
-  fails on any other `${…}` in SQL text; extend its allowlist only with another such fragment.
+- Postgres stores the same `items` table, defined with Drizzle (`platforms/node/src/table/items.ts`).
+  Its migrations come from drizzle-kit: change `items.ts`, run
+  `pnpm --filter @fling/platform-node db:generate`, and commit the new file in
+  `platforms/node/drizzle/`. They name no schema; `table/database.ts` applies them on start into
+  the instance's schema, recorded in `<schema>.fling_migrations`. The same rule holds: new record
+  kinds need none; a schema change is a new migration, additive only; never edit one that has run.
+- Postgres SQL goes through Drizzle: its query builder wherever it can express the statement, and
+  its `sql` template (values as parameters, names through `sql.identifier`) only where it can't.
+  Never `sql.raw` anything but a string literal, and never write SQL as a plain string.
+  `platforms/node/tests/sql-guard.test.ts` fails on either.
 
 ## Records (`apps/api/src/store/`)
 

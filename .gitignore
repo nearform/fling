@@ -16,3 +16,6 @@ platforms/cloudflare/deploy-config.json
 
 # Agent worktrees
 .claude/worktrees/
+
+# The self-host compose file's instance configuration (platforms/node/deploy/compose)
+platforms/node/deploy/compose/fling.env

@@ -1,0 +1,129 @@
+# Fling on one machine: the Node host, Postgres, MinIO and Caddy (TLS, with a wildcard certificate
+# over ACME DNS-01). Every value comes from .env (copy .env.example; platforms/node/DEPLOY.md).
+#
+#   docker compose up -d --build
+#
+# Caddy is the only service with published ports. The Node host, Postgres and MinIO talk on the
+# compose network; MinIO's API is also reached through Caddy at FLING_STORAGE_HOST, the address the
+# presigned upload and download URLs name. Ticks run in the Node host's process, and it migrates
+# the schema and the data on start.
+name: fling
+
+x-s3: &s3
+  STORAGE_DRIVER: s3
+  SITES_BUCKET: ${FLING_BUCKET:-fling-sites}
+  S3_ENDPOINT: http://minio:9000
+  S3_PUBLIC_ENDPOINT: ${FLING_STORAGE_ORIGIN:-https://${FLING_STORAGE_HOST}}
+  S3_FORCE_PATH_STYLE: 'true'
+  S3_ACCESS_KEY_ID: fling
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY in .env}
+
+services:
+  fling:
+    image: ${FLING_IMAGE:-fling-node:local}
+    build:
+      context: ../../../..
+      dockerfile: platforms/node/Dockerfile
+      args:
+        FLING_MCPB_SERVER_URL: ${FLING_APP_ORIGIN:-https://${FLING_APP_HOST}}
+    restart: unless-stopped
+    env_file:
+      - path: fling.env
+        required: false
+    environment:
+      <<: *s3
+      APP_ENV: ${APP_ENV:-production}
+      APP_ORIGIN: ${FLING_APP_ORIGIN:-https://${FLING_APP_HOST}}
+      SITES_DOMAIN: ${FLING_SITES_DOMAIN:?set FLING_SITES_DOMAIN in .env}
+      SITE_COOKIE_DOMAIN: ${FLING_SITE_COOKIE_DOMAIN:-${FLING_SITES_DOMAIN}}
+      LIVE_URL: ${FLING_LIVE_URL:-wss://${FLING_APP_HOST}/api/live}
+      DATABASE_URL: postgres://fling:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/fling
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      SITE_HMAC_KEY: ${SITE_HMAC_KEY:?set SITE_HMAC_KEY in .env}
+      TICK_SECRET: ${TICK_SECRET:-}
+    volumes:
+      - fling-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fling
+      POSTGRES_DB: fling
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fling -d fling']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # The MinIO image Fling's CI runs the Blobs conformance suite against. Any S3-compatible store
+  # will do: point S3_* at it and drop this service and minio-init.
+  minio:
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fling-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fs', 'http://localhost:9000/minio/health/live']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Once per start, idempotently: the private bucket, its lifecycle and the host's own key.
+  minio-init:
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r2
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-fling-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      FLING_BUCKET: ${FLING_BUCKET:-fling-sites}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+    volumes:
+      - ./minio-init.sh:/minio-init.sh:ro
+    entrypoint: ['/bin/bash', '/minio-init.sh']
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  caddy:
+    build:
+      context: caddy
+      args:
+        CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/cloudflare}
+    image: fling-caddy:local
+    restart: unless-stopped
+    environment:
+      FLING_APP_HOST: ${FLING_APP_HOST:?set FLING_APP_HOST in .env}
+      FLING_SITES_HOST: ${FLING_SITES_DOMAIN}
+      FLING_STORAGE_HOST: ${FLING_STORAGE_HOST:?set FLING_STORAGE_HOST in .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      ACME_DNS_PROVIDER: ${ACME_DNS_PROVIDER:-cloudflare}
+      ACME_DNS_API_TOKEN: ${ACME_DNS_API_TOKEN:-}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - fling
+      - minio
+
+volumes:
+  fling-data:
+  postgres-data:
+  minio-data:
+  caddy-data:
+  caddy-config:

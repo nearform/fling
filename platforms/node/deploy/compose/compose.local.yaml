@@ -1,0 +1,27 @@
+# The compose file on a laptop, over plain HTTP on lvh.me (every name under it is 127.0.0.1), with
+# dev login, the memory mailer and outside invitations on: what smoke.sh runs the e2e scenario
+# against. Never for a real instance.
+#
+#   docker compose -f compose.yaml -f compose.local.yaml --env-file <file> up -d --build --wait
+services:
+  fling:
+    environment:
+      APP_ENV: development
+      DEV_LOGIN: '1'
+      SITE_SCHEME: http
+      APP_ORIGIN: http://${FLING_APP_HOST}:${FLING_LOCAL_PORT:-47380}
+      SITES_DOMAIN: ${FLING_SITES_DOMAIN}:${FLING_LOCAL_PORT:-47380}
+      SITE_COOKIE_DOMAIN: ${FLING_SITES_DOMAIN}
+      LIVE_URL: ws://${FLING_APP_HOST}:${FLING_LOCAL_PORT:-47380}/api/live
+      S3_PUBLIC_ENDPOINT: http://${FLING_STORAGE_HOST}:${FLING_LOCAL_PORT:-47380}
+      MAIL_DRIVER: memory
+      MAIL_FROM: fling@mail.${FLING_SITES_DOMAIN}
+      INVITES: 'on'
+
+  caddy:
+    build: !reset null
+    image: caddy:2.10
+    ports: !override
+      - '${FLING_LOCAL_PORT:-47380}:80'
+    volumes: !override
+      - ./caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro

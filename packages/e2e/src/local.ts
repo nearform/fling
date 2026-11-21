@@ -15,7 +15,11 @@
  *               MemoryMailer; outside invitations on; site servers on for members as Node child
  *               processes
  *
- *   tsx src/local.ts [aws] [cloudflare] [node]      (default: all, one after the other)
+ *   attached    an instance already running with dev login on, at FLING_E2E_ORIGIN (the self-host
+ *               compose file under its local override: platforms/node/deploy/compose/smoke.sh);
+ *               nothing is started or stopped, and it is never among the defaults
+ *
+ *   tsx src/local.ts [aws] [cloudflare] [node] [attached]   (default: all but attached, in turn)
  *
  * Each runtime gets free ports and a fresh temporary state, and is stopped afterwards (pass or
  * fail). Needs the web build (pnpm build) for the Worker's assets.
@@ -33,7 +37,8 @@ import { devLogin } from './sign-in.ts'
 interface Runtime {
   name: string
   appOrigin: string
-  start(state: string): ChildProcess
+  /** absent: the runtime is already running (attached) */
+  start?(state: string): ChildProcess
 }
 
 async function freePort(): Promise<number> {
@@ -111,10 +116,20 @@ async function cloudflareRuntime(): Promise<Runtime> {
   }
 }
 
-async function waitForHealth(origin: string, child: ChildProcess, output: () => string) {
+async function attachedRuntime(): Promise<Runtime> {
+  const appOrigin = process.env.FLING_E2E_ORIGIN?.replace(/\/$/, '')
+  if (!appOrigin) throw new Error('attached: set FLING_E2E_ORIGIN to the running instance')
+  return { name: 'attached (an instance already running, with dev login)', appOrigin }
+}
+
+async function waitForHealth(
+  origin: string,
+  child: ChildProcess | undefined,
+  output: () => string
+) {
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
-    if (child.exitCode !== null)
+    if (child && child.exitCode !== null)
       throw new Error(`the runtime exited (${child.exitCode}):\n${output()}`)
     try {
       const res = await fetch(`${origin}/healthz`)
@@ -128,8 +143,8 @@ async function waitForHealth(origin: string, child: ChildProcess, output: () => 
 }
 
 /** Stop the runtime and everything it started (wrangler runs workerd as a child). */
-function stop(child: ChildProcess) {
-  if (child.pid === undefined || child.exitCode !== null) return
+function stop(child: ChildProcess | undefined) {
+  if (!child || child.pid === undefined || child.exitCode !== null) return
   try {
     process.kill(-child.pid, 'SIGTERM')
   } catch {
@@ -140,12 +155,12 @@ function stop(child: ChildProcess) {
 async function run(runtime: Runtime): Promise<boolean> {
   console.log(`\n${runtime.name}: ${runtime.appOrigin}`)
   const state = mkdtempSync(join(tmpdir(), 'fling-e2e-state-'))
-  const child = runtime.start(state)
+  const child = runtime.start?.(state)
   let output = ''
-  child.stdout?.on('data', d => {
+  child?.stdout?.on('data', d => {
     output += d
   })
-  child.stderr?.on('data', d => {
+  child?.stderr?.on('data', d => {
     output += d
   })
   const started = Date.now()
@@ -214,12 +229,14 @@ const RUNTIMES: Record<string, () => Promise<Runtime>> = {
   cloudflare: cloudflareRuntime,
   node: nodeRuntime,
 }
+const ATTACHED: Record<string, () => Promise<Runtime>> = { attached: attachedRuntime }
+const ALL = { ...RUNTIMES, ...ATTACHED }
 
 const wanted = process.argv.slice(2).filter(a => !a.startsWith('-'))
 const names = wanted.length ? wanted : Object.keys(RUNTIMES)
 for (const name of names) {
-  if (!RUNTIMES[name]) {
-    console.error(`unknown runtime ${name} (${Object.keys(RUNTIMES).join(', ')})`)
+  if (!ALL[name]) {
+    console.error(`unknown runtime ${name} (${Object.keys(ALL).join(', ')})`)
     process.exit(2)
   }
 }
@@ -227,7 +244,7 @@ for (const name of names) {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => process.exit(130))
 let failed = 0
 for (const name of names) {
-  const make = RUNTIMES[name] as () => Promise<Runtime>
+  const make = ALL[name] as () => Promise<Runtime>
   if (!(await run(await make()))) failed++
 }
 process.exit(failed ? 1 : 0)

@@ -96,4 +96,9 @@ describe.runIf(GCS_ENDPOINT)('fake-gcs-server', () => {
       metadata,
     }
   })
+
+  it('signs a download as an attachment, so the store never renders a site file', async () => {
+    const url = new URL(await new GcsBlobs(gcs.bucket, gcs.storage).presignGet('sites/a.html'))
+    expect(url.searchParams.get('response-content-disposition')).toBe('attachment')
+  })
 })

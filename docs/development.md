@@ -40,6 +40,11 @@ FLING_TEST_FIRESTORE_EMULATOR_HOST=localhost:8086 \
 The Postgres Table's suites also run on PGlite (Postgres in process) in every `pnpm gate`, so only
 the races on concurrent connections need the server.
 
+The Google Cloud image installs the Google clients from `platforms/gcp/server/package-lock.json`
+with `npm ci`. After bumping them in `platforms/gcp/package.json`, set the same versions in
+`platforms/gcp/server/package.json` and run `npm install --package-lock-only` there; the build fails
+until they match.
+
 The terraform check covers every platform's module (`platforms/*/infra`): `terraform fmt`, then
 `validate` through its examples (`infra/examples/*`, or the module itself without any), then
 `terraform test` when it has `infra/tests`. Without terraform installed it is skipped outside CI.

@@ -53,6 +53,11 @@ Firestore $NAME (items), bucket <prefix>$NAME-sites, Secret Manager $NAME-*, Art
 | The deploy workflow | The image (the service, the web UI and the Claude Desktop extension), each revision, the data migrations |
 | The service at runtime | Firestore documents and the bucket's objects |
 
+The service takes requests only from the load balancer (ingress `internal-and-cloud-load-balancing`
+in the console, `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` in Terraform): its `run.app` URL refuses
+the internet. That ingress also admits callers inside the project's VPC networks (and a Shared VPC
+it is attached to), so the ticks and migrations check their own caller rather than trust the path.
+
 ## Requirements
 
 - **A Google Cloud project with billing**, and an account that may administer it (Owner, or the

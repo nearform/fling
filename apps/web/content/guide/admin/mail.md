@@ -29,8 +29,9 @@ invitations** says whether people from outside can be invited, and links to its 
 
 Whoever runs {{instance:name}} sets all of this when they deploy it. To change it, see the Email
 section of the deploy guide for
-[AWS]({{fact:repo-url}}/blob/main/platforms/aws/DEPLOY.md#email) or
-[Cloudflare]({{fact:repo-url}}/blob/main/platforms/cloudflare/DEPLOY.md#email).
+[AWS]({{fact:repo-url}}/blob/main/platforms/aws/DEPLOY.md#email),
+[Cloudflare]({{fact:repo-url}}/blob/main/platforms/cloudflare/DEPLOY.md#email) or
+[Azure]({{fact:repo-url}}/blob/main/platforms/azure/DEPLOY.md#email).
 
 ### Send a test email
 

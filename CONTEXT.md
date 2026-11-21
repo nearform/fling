@@ -574,7 +574,9 @@ needs; clients build their settings from it.
 (`apps/api/src/mail/types.ts`): `MemoryMailer` (tests, the e2e's Node runtime) and `FileMailer`
 (`pnpm dev`, into `.fling-dev/mail/`) in the core, `SesMailer` (`platforms/aws/src/mail/ses.ts`)
 and `CloudflareMailer` (`platforms/cloudflare/src/mail/email.ts`, over the `send_email` binding)
-on the platforms, each built in its platform's `deps.ts`, and `SmtpMailer`
+on the platforms, each built in its platform's `deps.ts`, `AcsMailer`
+(`platforms/azure/src/mail/acs.ts`, `MAIL_DRIVER=acs`, Azure Communication Services Email), and
+`SmtpMailer`
 (`platforms/node/src/mail/smtp.ts`, `MAIL_DRIVER=smtp`, for any provider or relay that takes SMTP)
 for the platforms on Node; all pass `mailerConformance`.
 `MAIL_DRIVER` turns it on (the `email` capability), and with any channel on, the `notifications`
@@ -686,11 +688,14 @@ makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shel
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one
 Worker, D1, R2, Workers KV with D1 behind it; `platforms/gcp`: the **Node host** on Cloud Run,
-Firestore, Cloud Storage, Secret Manager, Cloud Scheduler; `platforms/digitalocean`: the **Node
-host image** on App Platform, Managed PostgreSQL, Spaces). `platforms/node` holds what platforms on
-Node share and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer; with
-its image, Compose file and Helm chart it is the self-host platform. `platforms/s3` holds
-`S3Blobs`, the Blobs adapter for every store that speaks the S3 API (S3, Spaces, MinIO).
+Firestore, Cloud Storage, Secret Manager, Cloud Scheduler; `platforms/azure`: the **Node host** on
+Container Apps behind Front Door, the **Cosmos DB Table**, Blob Storage, Web PubSub, Communication
+Services Email, Key Vault references, and Container Apps jobs for the ticks and migrations;
+`platforms/digitalocean`: the **Node host image** on App Platform, Managed PostgreSQL, Spaces).
+`platforms/node` holds what platforms on Node share and runs on its own: the **Node host**, the
+**Postgres Table** and the SMTP mailer; with its image, Compose file and Helm chart it is the
+self-host platform. `platforms/s3` holds `S3Blobs`, the Blobs adapter for every store that speaks
+the S3 API (S3, Spaces, MinIO).
 
 **Node host** — all of an instance in one Node HTTP server (`createNodeHost`,
 `platforms/node/src/host.ts`), routing by host as the Cloudflare Worker does: the API, the UI, host
@@ -718,6 +723,12 @@ racing writers wins, and migrations drizzle-kit generates (`platforms/node/drizz
 at once and purged hourly. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
+
+**Cosmos DB Table** — the Table on one Cosmos DB for NoSQL container (`CosmosTable`,
+`platforms/azure/src/table/cosmos.ts`): every item in one logical partition, so every write is one
+transactional batch bound to the ETags of what it read, and a write that loses a race starts again
+from its reads; sk ordered by its hex copy (`skx`), so the order is byte order under any
+collation. One logical partition holds at most 20 GB, the ceiling of an instance on it.
 
 **Firestore Table** — the Table on Firestore in Native mode (`FirestoreTable`,
 `platforms/gcp/src/table/firestore.ts`): one document per item in the `items` collection, its ID a

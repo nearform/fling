@@ -30,6 +30,7 @@ const DRIVERS: Record<string, string> = {
   ses: 'Amazon SES',
   cloudflare: 'Cloudflare Email Service',
   smtp: 'SMTP',
+  acs: 'Azure Communication Services',
   file: 'Files (local development)',
   memory: 'Memory (tests)',
 }

@@ -12,6 +12,7 @@ import { createApp } from '@fling/api/app'
 import { FsBlobs } from '@fling/api/blobs/fs'
 import { loadBaseConfig } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
+import { MemoryLiveHub } from '@fling/api/live-memory'
 import type { MailResult } from '@fling/api/mail'
 import { FileMailer } from '@fling/api/mail/file'
 import { MemoryMailer } from '@fling/api/mail/memory'
@@ -23,6 +24,8 @@ import { MemoryTable } from '@fling/api/table/memory'
 import {
   blobsConformance,
   EXPECTED_FAILURE,
+  type LiveHubClient,
+  liveHubConformance,
   mailerConformance,
   migrationsConformance,
   routeTableConformance,
@@ -124,5 +127,32 @@ mailerConformance('FileMailer', () => {
         from,
         headers,
       })),
+  }
+})
+
+/** MemoryLiveHub as dev.ts drives it: the socket's messages and close go to its connection. */
+liveHubConformance('MemoryLiveHub', () => {
+  const hub = new MemoryLiveHub()
+  const gone = new WeakSet<LiveHubClient>()
+  return {
+    publish: (siteId, message) => hub.publish(siteId, message),
+    async connect(admission) {
+      const got: LiveHubClient['got'][number][] = []
+      const client: LiveHubClient = {
+        got,
+        send: async m => conn.message(JSON.stringify(m)),
+        close: async () => conn.close(),
+      }
+      const conn = await hub.connect(admission, {
+        send(data) {
+          if (gone.has(client)) throw new Error('gone')
+          got.push(JSON.parse(data))
+        },
+      })
+      return client
+    },
+    async drop(client) {
+      gone.add(client)
+    },
   }
 })

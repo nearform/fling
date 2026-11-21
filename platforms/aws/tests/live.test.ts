@@ -7,6 +7,7 @@ import { loadBaseConfig } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
 import { signTicket } from '@fling/api/live'
 import type { Deps } from '@fling/api/types'
+import { type LiveHubClient, liveHubConformance } from '@fling/conformance'
 import type { LiveServerMessage } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import { ApiGatewayLiveHub, handleLiveEvent, isLiveEvent, type LiveEvent } from '../src/live.ts'
@@ -65,44 +66,6 @@ describe('API Gateway live rooms', () => {
     expect(await w.deps.store.getLiveConnection('c1')).toBeNull()
   })
 
-  it('joins, welcomes on hello, relays pointers to others, leaves on $disconnect', async () => {
-    const w = world()
-    expect(await w.connect('a', w.ticket('S1', 'Alice'))).toEqual({ statusCode: 200 })
-    await w.connect('b', w.ticket('S1', 'Bob'))
-    await w.connect('x', w.ticket('S2', 'Elsewhere'))
-    const alice = (await w.deps.store.getLiveConnection('a'))?.peer
-    const bob = (await w.deps.store.getLiveConnection('b'))?.peer
-    expect(w.got('a')).toEqual([{ type: 'join', peer: bob }])
-
-    await w.say('b', { type: 'hello' })
-    expect(w.got('b')).toEqual([{ type: 'welcome', you: bob, peers: [alice] }])
-
-    const cursor = { type: 'cursor', path: '/', hash: '', anchor: null }
-    await w.say('a', cursor)
-    expect(w.got('b').at(-1)).toEqual({ ...cursor, peerId: alice?.id })
-    expect(w.got('a').some(m => m.type === 'cursor')).toBe(false)
-
-    await w.hub.publish('S1', { type: 'comments' })
-    expect(w.got('a').at(-1)).toEqual({ type: 'comments' })
-    expect(w.got('x')).toEqual([])
-
-    await w.run(w.event('DISCONNECT', 'a'))
-    expect(w.got('b').at(-1)).toEqual({ type: 'leave', peerId: alice?.id })
-    expect(await w.deps.store.getLiveConnection('a')).toBeNull()
-    expect(await w.run(w.event('MESSAGE', 'a', { body: '{"type":"ping"}' }))).toEqual({
-      statusCode: 410,
-    })
-  })
-
-  it('forgets a connection API Gateway reports gone', async () => {
-    const w = world()
-    await w.connect('a', w.ticket('S1', 'Alice'))
-    await w.connect('b', w.ticket('S1', 'Bob'))
-    w.gone.add('a')
-    await w.hub.publish('S1', { type: 'comments' })
-    expect((await w.deps.store.listLiveConnections('S1')).map(c => c.connectionId)).toEqual(['b'])
-  })
-
   it('reads base64 bodies', async () => {
     const w = world()
     await w.connect('a', w.ticket('S1', 'Alice'))
@@ -110,4 +73,30 @@ describe('API Gateway live rooms', () => {
     await w.run(w.event('MESSAGE', 'a', { body, isBase64Encoded: true }))
     expect(w.got('a')).toEqual([{ type: 'pong' }])
   })
+})
+
+liveHubConformance('ApiGatewayLiveHub', () => {
+  const w = world()
+  let n = 0
+  const idOf = new WeakMap<LiveHubClient, string>()
+  return {
+    publish: (siteId, message) => w.hub.publish(siteId, message),
+    async connect(admission) {
+      const id = `c${++n}`
+      const t = signTicket(SECRET, admission, new Date(Date.now() + 60_000))
+      expect(await w.connect(id, t)).toEqual({ statusCode: 200 })
+      const client: LiveHubClient = {
+        get got() {
+          return w.got(id)
+        },
+        send: async m => void (await w.say(id, m)),
+        close: async () => void (await w.run(w.event('DISCONNECT', id))),
+      }
+      idOf.set(client, id)
+      return client
+    },
+    async drop(client) {
+      w.gone.add(idOf.get(client) ?? '')
+    },
+  }
 })

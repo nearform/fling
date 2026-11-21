@@ -39,10 +39,17 @@ export class MemoryLiveHub implements LiveHub {
         try {
           socket.send(JSON.stringify(message))
         } catch {
-          // closing: its close() removes it
+          // gone: forgotten now, as a hub that stores connections forgets one reported gone
+          this.forget(siteId, socket)
         }
       },
     }
+  }
+
+  private forget(siteId: string, socket: LiveSocket) {
+    const members = this.rooms.get(siteId)
+    for (const [id, m] of members ?? []) if (m.socket === socket) members?.delete(id)
+    if (members?.size === 0) this.rooms.delete(siteId)
   }
 
   /** An admitted socket joins its room. */

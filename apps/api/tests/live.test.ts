@@ -14,7 +14,6 @@ import {
   relay,
   signTicket,
 } from '../src/live.ts'
-import { MemoryLiveHub } from '../src/live-memory.ts'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 
 const SECRET = 's'.repeat(40)
@@ -91,42 +90,6 @@ describe('relay', () => {
     ]) {
       expect(relay(peer, raw)).toBeNull()
     }
-  })
-})
-
-/** A socket that records what it was sent. */
-const socket = () => {
-  const got: LiveServerMessage[] = []
-  return { got, send: (data: string) => void got.push(JSON.parse(data)) }
-}
-
-describe('MemoryLiveHub', () => {
-  it('welcomes, announces joins and leaves, never echoes a pointer, publishes to the room', async () => {
-    const hub = new MemoryLiveHub()
-    const [a, b, elsewhere] = [socket(), socket(), socket()]
-    const ca = await hub.connect(admission, a)
-    const cb = await hub.connect({ ...admission, name: 'Bob' }, b)
-    await hub.connect({ ...admission, siteId: 'S2' }, elsewhere)
-    expect(a.got).toEqual([{ type: 'join', peer: cb.peer }])
-    expect(b.got).toEqual([])
-
-    await cb.message('{"type":"hello"}')
-    expect(b.got).toEqual([{ type: 'welcome', you: cb.peer, peers: [ca.peer] }])
-
-    const cursor = { type: 'cursor', path: '/', hash: '', anchor: { x: 5, y: 6 } }
-    await ca.message(JSON.stringify(cursor))
-    expect(b.got.at(-1)).toEqual({ ...cursor, peerId: ca.peer.id })
-    expect(a.got).toHaveLength(1)
-
-    await hub.publish('S1', { type: 'comments' })
-    expect(a.got.at(-1)).toEqual({ type: 'comments' })
-    expect(b.got.at(-1)).toEqual({ type: 'comments' })
-    expect(elsewhere.got).toEqual([])
-
-    await ca.close()
-    expect(b.got.at(-1)).toEqual({ type: 'leave', peerId: ca.peer.id })
-    await ca.close() // twice is once
-    expect(b.got.filter(m => m.type === 'leave')).toHaveLength(1)
   })
 })
 

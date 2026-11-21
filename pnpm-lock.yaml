@@ -228,6 +228,9 @@ importers:
       '@fling/api':
         specifier: workspace:*
         version: link:../../apps/api
+      '@fling/shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: ^24.0.0

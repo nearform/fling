@@ -16,8 +16,8 @@ pnpm gate     # lint (Biome, de-branding check), terraform validate, typecheck, 
 ```
 
 CI runs `pnpm gate` and nothing else, so if it passes locally it passes in CI. The one exception is
-the suites backed by DynamoDB Local and MinIO, which run only when their endpoints are set. To run
-them locally:
+the suites backed by DynamoDB Local, MinIO and a Postgres server, which run only when their
+endpoints are set. To run them locally:
 
 ```sh
 docker run -d -p 8000:8000 amazon/dynamodb-local
@@ -25,7 +25,14 @@ docker run -d -p 9000:9000 -e MINIO_ROOT_USER=fling-test \
   -e MINIO_ROOT_PASSWORD=fling-test-secret bitnamilegacy/minio
 FLING_TEST_DYNAMODB_ENDPOINT=http://localhost:8000 \
   FLING_TEST_S3_ENDPOINT=http://localhost:9000 pnpm --filter @fling/platform-aws test
+
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=fling-test postgres:17
+FLING_TEST_POSTGRES_URL=postgres://postgres:fling-test@localhost:5432/postgres \
+  pnpm --filter @fling/platform-node test
 ```
+
+The Postgres Table's suites also run on PGlite (Postgres in process) in every `pnpm gate`, so only
+the races on concurrent connections need the server.
 
 Without terraform installed, the terraform check is skipped outside CI.
 

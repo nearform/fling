@@ -1,0 +1,17 @@
+# The build context of platforms/node/Dockerfile (the repository root): sources and lockfile only.
+**/node_modules
+**/dist
+**/dist-404
+**/dist-review
+**/.env
+**/.env.*
+!**/.env.example
+**/.fling-dev
+**/.fling-node
+**/.wrangler
+**/.terraform
+**/*.tfstate*
+.git
+.claude
+coverage
+platforms/cloudflare/deploy-config.json

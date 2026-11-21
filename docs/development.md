@@ -23,8 +23,8 @@ endpoints are set. To run them locally:
 docker run -d -p 8000:8000 amazon/dynamodb-local
 docker run -d -p 9000:9000 -e MINIO_ROOT_USER=fling-test \
   -e MINIO_ROOT_PASSWORD=fling-test-secret bitnamilegacy/minio
-FLING_TEST_DYNAMODB_ENDPOINT=http://localhost:8000 \
-  FLING_TEST_S3_ENDPOINT=http://localhost:9000 pnpm --filter @fling/platform-aws test
+FLING_TEST_DYNAMODB_ENDPOINT=http://localhost:8000 pnpm --filter @fling/platform-aws test
+FLING_TEST_S3_ENDPOINT=http://localhost:9000 pnpm --filter @fling/platform-s3 test
 
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=fling-test postgres:17
 FLING_TEST_POSTGRES_URL=postgres://postgres:fling-test@localhost:5432/postgres \

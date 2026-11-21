@@ -13,8 +13,13 @@ What every Fling platform on a Node runtime shares, and a platform of its own. T
 | `src/live/postgres-fanout.ts` | Live rooms shared by the processes on one Postgres (`LISTEN`/`NOTIFY`) |
 | `src/route-table/cached.ts` | The route table behind a short per-process cache |
 | `src/mail/smtp.ts` | The SMTP mailer (`MAIL_DRIVER=smtp`) |
+| `src/blobs.ts` | The object store: the filesystem, or any S3-compatible store through `S3Blobs` ([`platforms/s3`](../s3/src/env.ts)) |
 | `src/ticks.ts` | The notifications and maintenance ticks |
 | `src/main.ts` | All of the above as one process, configured from the environment |
+| `scripts/build.mjs` | Bundles an entry point (default `src/main.ts`) into `dist/server/` for an image |
+| `Dockerfile` | The Node host image: the bundle, the web build and the Claude Desktop extension |
+| `deploy/compose/` | Self-host on one machine: the image, Postgres, MinIO and Caddy ([DEPLOY.md](DEPLOY.md)) |
+| `deploy/helm/fling/` | Self-host on Kubernetes: a Helm chart for the image ([DEPLOY.md](DEPLOY.md)) |
 
 ## Running it
 
@@ -32,11 +37,39 @@ configuration), and these of its own:
 |---|---|---|
 | `PORT` | `8080` | Where it listens |
 | `MAX_REQUEST_BYTES` | `33554432` (32 MiB) | The largest request body it takes; more is a 413 |
-| `FS_ROOT` | `.fling-node` | Site files, site servers' working copies and, without `DATABASE_URL`, PGlite's database |
+| `FS_ROOT` | `.fling-node` (the image: `/data`) | Site files (with `STORAGE_DRIVER=fs`), site servers' working copies and, without `DATABASE_URL`, PGlite's database |
+| `WEB_DIR` | this checkout's `apps/web` (the image: `/app/web`) | The web build: `dist`, `dist-404`, `dist-review`, `sites-robots.txt` |
+| `STORAGE_DRIVER` | `fs` | `fs`: site files under `FS_ROOT`, for one machine or a shared volume. `s3`: any S3-compatible store, from the variables below |
+| `SITES_BUCKET` | (required with `s3`) | The bucket. Private: every read is the host's or a presigned URL's |
+| `S3_ENDPOINT` | AWS S3 | The store's API as the host reaches it (`https://nyc3.digitaloceanspaces.com`, `http://minio:9000`) |
+| `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | The store as clients reach it: presigned upload and download URLs name it |
+| `S3_REGION` | `AWS_REGION`, else `us-east-1` | The region requests are signed for (Spaces: the datacentre, such as `nyc3`) |
+| `S3_FORCE_PATH_STYLE` | `false` | `true` for `<endpoint>/<bucket>/<key>` URLs (MinIO) |
+| `S3_UPLOAD_DIGEST` | `md5` with an endpoint, `sha256` without | What a presigned PUT binds. `md5` (`Content-MD5`) works on every S3-compatible store; `sha256` only where the store rejects a body whose signed `x-amz-checksum-sha256` differs (AWS S3, MinIO). With `md5`, a file the client sent no MD5 for is uploaded through the host |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (secrets) | the AWS SDK's default chain | The store's keys |
 | `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms. A direct or session-mode connection: a pooler in transaction mode (PgBouncer's, or a provider's "transaction" endpoint) breaks the migrations' lock and search_path and the live rooms' LISTEN, and start-up fails saying so |
 | `DATABASE_SCHEMA` | `public` | The Postgres schema the Table is in, so instances can share a database |
 | `TICK_SECRET` (secret, 32 characters or more) | none: the tick endpoints answer 404 | The bearer token for `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate` |
 
 It migrates the schema and the data on start and runs the ticks on timers in process; every tick
-is safe to repeat, so the endpoints can run beside them. The e2e runs it as the `node` local
+is safe to repeat, so the endpoints can run beside them. `GET /healthz` answers on any host that is
+neither the app's nor a site's, for a load balancer's or an orchestrator's probe.
+
+## The image
+
+`Dockerfile` builds one image for every instance, from the repository root:
+
+```sh
+docker build -f platforms/node/Dockerfile -t fling-node .
+docker run -p 8080:8080 --env-file fling.env fling-node
+```
+
+It is `node:24-bookworm-slim` with the bundle (`scripts/build.mjs`: the entry point and every
+dependency in one file, PGlite installed beside it), the schema migrations, the web build and the
+Claude Desktop extension. It runs as the `node` user with `APP_ENV=production`, `PORT=8080`,
+`WEB_DIR=/app/web` and `FS_ROOT=/data` (a volume), and checks `/healthz` itself. Two build
+arguments make it reusable: `FLING_ENTRY` bundles another platform's entry point (GCP or Azure,
+importing this package's host and adapters) in its place, and `FLING_MCPB_SERVER_URL` bakes an app
+origin into the extension. Site servers run as Node child processes, which isolate nothing, so
+keep `SERVERS` off in the image. Deploying it: [DEPLOY.md](DEPLOY.md). The e2e runs it as the `node` local
 runtime (`pnpm --filter @fling/e2e e2e node`).

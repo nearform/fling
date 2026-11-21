@@ -1,0 +1,28 @@
+{
+  "name": "@fling/platform-s3",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "S3-compatible object storage for every platform whose store speaks the S3 API (AWS S3, DigitalOcean Spaces, MinIO, any other): the S3Blobs adapter, binding uploads by SHA-256 or Content-MD5, and its client from the environment. Consumed as TypeScript source.",
+  "type": "module",
+  "exports": {
+    "./blobs": "./src/blobs.ts",
+    "./env": "./src/env.ts"
+  },
+  "scripts": {
+    "build": "echo 'platform-s3: consumed as source'",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1150.0",
+    "@aws-sdk/s3-request-presigner": "3.1150.0",
+    "@fling/api": "workspace:*"
+  },
+  "devDependencies": {
+    "@fling/conformance": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

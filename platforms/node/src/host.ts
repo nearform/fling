@@ -29,7 +29,8 @@
  * that failed was a site server's (an ApiError anywhere in the error's causes).
  *
  * Hosts are matched by name, the port aside (one server listens on one port, and a client may
- * name the default one).
+ * name the default one). A request for another host gets a 404, except `GET /healthz`, which a
+ * load balancer's or an orchestrator's probe sends to whatever address it reaches the host on.
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -330,6 +331,8 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
         now: () => deps.clock.now().getTime(),
       })
     }
+    // A probe names no host of the instance's (a load balancer's, Docker's, Kubernetes').
+    if (url.pathname === '/healthz' && request.method === 'GET') return app.fetch(request)
     return notFound()
   }
 

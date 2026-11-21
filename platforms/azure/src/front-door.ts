@@ -12,10 +12,11 @@
  *   hosts as named. X-Forwarded-Host is never read: Front Door appends to one a visitor sends, so
  *   its value can be the visitor's. Both headers are dropped before the Node host sees the request.
  * - Front Door's cache sits in front of the app: a response it stores is served to the next
- *   visitor by URL (its cache key has no cookie) without the app deciding again, for as long as
- *   the response's `s-maxage`, else its `max-age`, says, and for one to three days when it has no
- *   Cache-Control. It never stores `private`, `no-cache` or `no-store`, whatever its rules say
- *   (Azure's "Caching with Azure Front Door", Cache expiration). So on the sites hosts
+ *   visitor by URL (its cache key has no cookie) without the app deciding again. Azure documents
+ *   how long it keeps one ("Caching with Azure Front Door", Cache expiration): for its `s-maxage`
+ *   first, else its `max-age`, else its `Expires`, and for one to three days when it has no
+ *   Cache-Control; and it never stores `private`, `no-cache` or `no-store`, whatever its rules
+ *   say. DEPLOY.md (Checking the edge cache) shows how to see the cap live. So on the sites hosts
  *   (`edgeCacheControl`):
  *   - a response to a request carrying a site cookie (the site session or a site pass) is the
  *     viewer's own, and is made `private`;
@@ -25,8 +26,10 @@
  *     minute, as on Google Cloud's CDN;
  *   - a response without Cache-Control is `no-cache`.
  *   A non-public site's file never reaches a request without a site cookie (the decision answers a
- *   302 with `no-store`), and the core marks every response for a non-public site or a share host
- *   `private`, so neither is stored at all; the cap is what bounds a public site's staleness.
+ *   302 with `no-store`), so Front Door never stores one. A share host's files need no cookie and
+ *   are served with the file's own Cache-Control (`cacheControlFor`), so Front Door may store them:
+ *   the 60 s cap is what bounds them after the link is revoked, as it bounds a public site's
+ *   files after a publish or an access change.
  * - The hub's event handler (`LIVE_EVENTS_PATH` on the app host) goes to the live rooms.
  */
 import { timingSafeEqual } from 'node:crypto'

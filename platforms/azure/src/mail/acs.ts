@@ -13,9 +13,9 @@
  * and the duplicate this accepts is the one every provider here has: a send ACS accepted whose
  * answer never arrived (the network failing after the 202) is retried and can arrive twice. A send
  * still running when the wait ends is not retried. The mailer waits for the outcome for up to
- * `waitMs`; one still running then counts as sent, since ACS has taken it. The SDK's poller reports a failed operation by throwing an Error whose
- * message carries ACS's error code (`The long-running operation has failed. <code>. <message>`);
- * the mailer reads the code from there.
+ * `waitMs`; one still running then counts as sent, since ACS has taken it. The SDK's poller
+ * reports a failed operation by throwing an Error whose message carries ACS's error code (`The
+ * long-running operation has failed. <code>. <message>`); the mailer reads the code from there.
  *
  * ACS's answers map onto `MailResult`, never a throw: 429 (its per-minute and per-hour sending
  * limits) to `throttled`; an operation that failed because every recipient is on the domain's

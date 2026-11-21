@@ -540,6 +540,10 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
 @media (prefers-reduced-motion: no-preference) {
   .platform { transition: translate 120ms var(--ease-out), box-shadow 120ms var(--ease-out); }
 }
+.platforms-next { grid-column: 1 / -1; margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.5rem; color: var(--muted); font-size: 0.85rem; }
+.platforms-next b { font-weight: 800; }
+.platforms-next a { color: inherit; font-weight: 700; padding: 0.1rem 0.55rem; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-2); text-decoration: none; }
+.platforms-next a:hover { color: var(--ink); border-color: var(--outline); }
 .foot { color: var(--muted); font-size: 0.85rem; }
 .big-f { inline-size: clamp(64px, 10vw, 104px); }
 @media (prefers-reduced-motion: no-preference) {
@@ -911,6 +915,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
         <a class="btn" href="https://github.com/nearform/fling#deploy">How do I deploy it? <span aria-hidden="true">→</span></a>
         <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/aws/DEPLOY.md">On AWS</a>
         <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/platforms/cloudflare/DEPLOY.md">On Cloudflare</a>
+        <a class="btn ghost" href="https://github.com/nearform/fling/blob/main/docs/platforms/README.md">Other clouds</a>
       </div>
     </div>
   </section>
@@ -936,6 +941,7 @@ h3 { font-size: var(--step-1); letter-spacing: -0.01em; }
               <span>Cloudflare</span>
             </a>
           </span>
+            <p class="platforms-next"><b>Planned:</b><a href="https://github.com/nearform/fling/blob/main/docs/platforms/gcp.md">Google Cloud</a><a href="https://github.com/nearform/fling/blob/main/docs/platforms/azure.md">Azure</a><a href="https://github.com/nearform/fling/blob/main/docs/platforms/digitalocean-self-host.md">DigitalOcean and self-host</a><a href="https://github.com/nearform/fling/blob/main/docs/platforms/fly.md">Fly.io</a><a href="https://github.com/nearform/fling/blob/main/docs/platforms/vercel.md">Vercel</a></p>
           </div>
         </section>
         <h3 class="setup-connect">2. Connect to it</h3>

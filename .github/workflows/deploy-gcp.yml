@@ -1,0 +1,207 @@
+name: Deploy (Google Cloud)
+
+# Deploys Fling to Google Cloud: the Cloud Run service of an instance provisioned with
+# platforms/gcp/infra. By hand only (workflow_dispatch), with a release tag as `ref`; an earlier
+# release tag rolls back. Merging to main deploys nothing.
+#
+# Everything instance-specific is one repository variable, GCP_DEPLOY_CONFIG: the JSON of the
+# Terraform module's `deploy` output (project, region, workload identity provider, deploy service
+# account, service, image repository, app origin) plus an INSTANCE object of the instance's own
+# values, built into the image as instance.json. One secret is optional: FLING_E2E_API_KEY, an API
+# key of a test user, for the smoke test (without it the smoke test is skipped with a warning).
+# The job becomes the deploy service account through Workload Identity Federation, which trusts only
+# this repository's `gcp` environment, so there is no Google Cloud key in GitHub. See
+# platforms/gcp/DEPLOY.md.
+#
+# Order, so nothing is ever served that points at something missing:
+#   1. the image: the service bundled (platforms/gcp), the web build, the Claude Desktop extension;
+#      pushed to Artifact Registry, tagged with the commit;
+#   2. a new revision of the service on that image, which takes all traffic once it is ready;
+#   3. the data migrations, through POST /ticks/migrate with an ID token of the deploy service
+#      account, until they report done. The code just deployed serves correctly before they run
+#      (apps/api/src/migrations), so this comes after the code;
+#   4. /.well-known/fling answers for this instance and release, then the e2e scenario as a smoke
+#      test.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The release tag to deploy, e.g. v0.7.0. An older tag rolls back. Empty = the tip of the selected branch.'
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-gcp
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to Google Cloud
+    runs-on: ubuntu-24.04
+    environment: gcp
+    timeout-minutes: 30
+    env:
+      CONFIG: ${{ vars.GCP_DEPLOY_CONFIG }}
+      SHA: ${{ inputs.ref || github.sha }}
+    steps:
+      - name: Read the deploy config
+        id: config
+        run: |
+          set -euo pipefail
+          [ -n "$CONFIG" ] || { echo "::error::GCP_DEPLOY_CONFIG is not set (see platforms/gcp/DEPLOY.md)"; exit 1; }
+          get() { jq -er ".$1" <<<"$CONFIG"; }
+          {
+            for key in GCP_PROJECT GCP_REGION GCP_WORKLOAD_IDENTITY_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT \
+              SERVICE IMAGE_REPOSITORY APP_ORIGIN; do
+              echo "$key=$(get "$key")"
+            done
+            # Who may sign in (domains, individual addresses, or both) has no default.
+            jq -e '[.INSTANCE.ALLOWED_EMAIL_DOMAINS, .INSTANCE.ALLOWED_EMAILS] | map(strings | select(test("\\S"))) | length > 0' \
+              <<<"$CONFIG" >/dev/null || {
+              echo "::error::GCP_DEPLOY_CONFIG.INSTANCE needs ALLOWED_EMAIL_DOMAINS or ALLOWED_EMAILS (see platforms/gcp/DEPLOY.md)"; exit 1; }
+            echo "INSTANCE=$(jq -c '.INSTANCE' <<<"$CONFIG")"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      # Only ever ship code that is on main (a pull request's commits can be fetched by SHA).
+      - name: Check the commit is on main
+        run: |
+          set -euo pipefail
+          echo "COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main ||
+            { echo "::error::$(git rev-parse HEAD) is not on main; only commits on main can be deployed"; exit 1; }
+          echo "RELEASE=$(jq -r .version package.json)" >> "$GITHUB_ENV"
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the service, the web UI and the Claude Desktop extension
+        env:
+          # The image carries the instance's values as instance.json (platforms/gcp/scripts/build.mjs).
+          FLING_INSTANCE_CONFIG: ${{ steps.config.outputs.INSTANCE }}
+          # The extension this instance serves adds this instance to the Flings it knows.
+          FLING_MCPB_SERVER_URL: ${{ steps.config.outputs.APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          pnpm --filter "@fling/platform-gcp..." build
+          pnpm --filter "@fling/web..." build
+          pnpm --filter ./apps/cli build:mcpb
+          # The Node host serves it from the UI's build: https://<app>/downloads/fling.mcpb.
+          mkdir -p apps/web/dist/downloads
+          cp apps/cli/dist/fling.mcpb apps/web/dist/downloads/fling.mcpb
+          for f in platforms/gcp/dist/server/index.mjs platforms/gcp/dist/server/package.json \
+            apps/web/dist/index.html apps/web/dist-404/404.html apps/web/dist-review/review-shell.html \
+            apps/web/dist/downloads/fling.mcpb; do
+            [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
+          done
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ steps.config.outputs.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build and push the image
+        env:
+          REPOSITORY: ${{ steps.config.outputs.IMAGE_REPOSITORY }}
+          REGION: ${{ steps.config.outputs.GCP_REGION }}
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          image="$REPOSITORY/fling:$COMMIT"
+          docker build -f platforms/gcp/Dockerfile -t "$image" .
+          docker push "$image"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+      # Only the image changes: Terraform owns the rest of the service's configuration.
+      - name: Deploy the service
+        env:
+          PROJECT: ${{ steps.config.outputs.GCP_PROJECT }}
+          REGION: ${{ steps.config.outputs.GCP_REGION }}
+          SERVICE: ${{ steps.config.outputs.SERVICE }}
+        run: |
+          set -euo pipefail
+          gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" \
+            --image "$IMAGE" --quiet
+
+      - name: Mint an ID token for the migrate endpoint
+        id: token
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ steps.config.outputs.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ steps.config.outputs.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.config.outputs.APP_ORIGIN }}
+          id_token_include_email: true
+
+      # Each call runs migration pages for up to 50 seconds and returns the runner's report; call
+      # again until `done`. `busy` means another run holds a migration's lock (a crashed one's lease
+      # runs out within 2 minutes).
+      - name: Run data migrations
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/migrate.json"
+          for attempt in $(seq 1 40); do
+            status="$(curl -sS -o "$out" -w '%{http_code}' -X POST \
+              -H "Authorization: Bearer $ID_TOKEN" "$APP_ORIGIN/ticks/migrate")"
+            if [ "$status" != 200 ]; then
+              echo "::error::POST /ticks/migrate answered $status (a 404 is a refused caller: see platforms/gcp/DEPLOY.md, Data migrations)"
+              cat "$out"; exit 1
+            fi
+            jq -r '.migrations[] | "\(.id) \(.title): \(.status), \(.scanned) items, \(.counts)"' "$out"
+            if jq -e '.done' "$out" >/dev/null; then
+              jq -r '.migrations[] | "- \(.id) \(.title): \(.status)"' "$out" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if jq -e 'any(.migrations[]; .status == "busy")' "$out" >/dev/null; then sleep 20; fi
+          done
+          echo "::error::Data migrations still not done after 40 calls"; exit 1
+
+      - name: Check the instance answers
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            if meta="$(curl -fsS -H 'Cache-Control: no-cache' "$APP_ORIGIN/.well-known/fling?deploy=$COMMIT")" &&
+              jq -e --arg origin "$APP_ORIGIN" --arg release "$RELEASE" \
+                '.version >= 1 and .appOrigin == $origin and .release == $release' <<<"$meta" >/dev/null; then
+              jq -c '{name, appOrigin, sitesDomain, release, auth: .auth.kind}' <<<"$meta"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance and release $RELEASE (check the service's logs)"; exit 1
+
+      - name: Smoke test
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FLING_E2E_API_KEY" ]; then
+            echo "::warning::Smoke test skipped: FLING_E2E_API_KEY is not set (platforms/gcp/DEPLOY.md)"
+            exit 0
+          fi
+          pnpm --filter @fling/e2e smoke "$APP_ORIGIN"
+
+      - name: Summary
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
+        run: echo "### Deployed \`$COMMIT\` ($RELEASE) to $APP_ORIGIN" >> "$GITHUB_STEP_SUMMARY"

@@ -144,7 +144,7 @@ module's `deploy` output. Nothing in it is secret.
 | `resourceGroup` | Where the app and its jobs are |
 | `registry`, `repository` | Where the image is pushed (`<registry>/<repository>:<commit>`) |
 | `containerApp`, `jobs` | The app and the jobs updated to the new image; `jobs.migrate` is started for the data migrations |
-| `frontDoor` | The profile, endpoint and custom domains whose cache is purged after a deploy |
+| `frontDoor` | The profile, endpoint and app domain whose cache is purged after a deploy |
 | `appOrigin`, `sitesDomain` | The smoke test's target and the Claude Desktop extension's default server |
 | `INSTANCE` | The [instance configuration](../aws/DEPLOY.md#instance-configuration), built into the image as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
 
@@ -209,7 +209,10 @@ Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 3. starts the migrate job, which runs the pending data migrations until they report done, and
    waits for it to succeed. The code just deployed serves correctly before they run;
 4. waits for `https://$APP_DOMAIN/.well-known/fling` to answer for this instance and release;
-5. purges Front Door's cache;
+5. purges Front Door's cache of the app's domain. The sites hosts need no purge: the app gives
+   their responses at most a minute in Front Door (`s-maxage=60`) and makes a response to a site
+   cookie `private`, which Front Door never stores, so a publish, a rollback or an access change
+   reaches every visitor within a minute (docs/platforms/azure.md, Edge and sites host);
 6. runs the e2e scenario against the instance (Smoke test, below), when `FLING_E2E_API_KEY` is set.
 
 To roll back, run it with an earlier release tag. Data migrations are written to survive a rollback

@@ -115,11 +115,12 @@ connection records in the Store.
 ## 3. Edge and sites host
 
 The Node host runs `routeSiteRequest` for every request to `*.<sites domain>`:
-- A rewrite reads the blob, adds the decision's headers, and marks only public sites cacheable.
+- A rewrite reads the blob and serves it with the decision's headers and the file's own
+  Cache-Control.
 - A response is returned directly.
 
-Front Door caches what is marked public. Its rules engine can rewrite URLs and set headers, but it
-cannot read a key-value store or check an HMAC, so it cannot run the decision.
+Front Door's rules engine can rewrite URLs and set headers, but it cannot read a key-value store
+or check an HMAC, so it cannot run the decision.
 
 Front Door sends the Container App's own name as the Host, since Container Apps routes by it. A
 rule writes the name the visitor asked for as `X-Fling-Host` and adds `X-Origin-Verify` with the
@@ -128,10 +129,24 @@ visitor sent. The Container App answers 403 to a request without the secret, and
 by `X-Fling-Host`, never `X-Forwarded-Host`, which Front Door appends to a visitor's
 (`platforms/azure/src/front-door.ts`).
 
-Front Door's cache sits in front of the app, and its cache key has no cookie, so a stored response
-reaches the next visitor without the app deciding again. Every file of a non-public site needs a
-site cookie, so the app makes a `public` Cache-Control `private` on any response to a request
-carrying one, and Front Door stores none of them.
+Front Door's cache sits in front of the app: a response it stores goes to the next visitor by URL
+(its cache key has no cookie) without the app deciding again. It keeps a response for its
+`s-maxage`, else its `max-age`, and for one to three days when it has no Cache-Control; it never
+stores `private`, `no-cache` or `no-store`. So on the sites hosts the Container App rewrites the
+Cache-Control on the way out (`edgeCacheControl` in `platforms/azure/src/front-door.ts`):
+- a response to a request carrying a site cookie (the site session or a site pass) is the
+  viewer's own and becomes `private`;
+- any other response Front Door could store gets an `s-maxage` of at most 60 s, while browsers
+  keep its `max-age` (a year for a hashed file). A publish, a rollback, a site made private,
+  archived or deleted, and a revoked share link reach every visitor within a minute, as on Google
+  Cloud's CDN;
+- a response without Cache-Control becomes `no-cache`.
+
+A non-public site's file never reaches a request without a site cookie (the decision answers a
+302 with `no-store`), and the core marks every response for a non-public site or a share host
+`private`, so Front Door stores neither. The route honours the origin's headers (no rule
+overrides caching), and the deploy purges only the app's domain: nothing on the sites hosts is
+held for longer than a minute.
 
 ## 4. Domains and TLS
 

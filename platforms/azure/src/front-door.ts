@@ -11,11 +11,22 @@
  * - The Host is put back from X-Fling-Host, so the Node host routes the app host and the sites
  *   hosts as named. X-Forwarded-Host is never read: Front Door appends to one a visitor sends, so
  *   its value can be the visitor's. Both headers are dropped before the Node host sees the request.
- * - Front Door's cache sits in front of the app, so a response it stores is served to the next
- *   visitor without the app deciding again; its cache key has no cookie. A response to a request
- *   carrying a site cookie (the site session or a site pass, which every file of a non-public
- *   site needs) is the viewer's own, so a `public` Cache-Control on it becomes `private`, which
- *   Front Door never stores. Public sites' files fetched without one stay cacheable.
+ * - Front Door's cache sits in front of the app: a response it stores is served to the next
+ *   visitor by URL (its cache key has no cookie) without the app deciding again, for as long as
+ *   the response's `s-maxage`, else its `max-age`, says, and for one to three days when it has no
+ *   Cache-Control. It never stores `private`, `no-cache` or `no-store`, whatever its rules say
+ *   (Azure's "Caching with Azure Front Door", Cache expiration). So on the sites hosts
+ *   (`edgeCacheControl`):
+ *   - a response to a request carrying a site cookie (the site session or a site pass) is the
+ *     viewer's own, and is made `private`;
+ *   - any other response Front Door could store is held for at most `EDGE_MAX_AGE` (60 s): its
+ *     `s-maxage` is capped, or set, while browsers keep its `max-age`. A publish, a rollback, a
+ *     site made private, archived or deleted and a revoked share link reach every visitor within a
+ *     minute, as on Google Cloud's CDN;
+ *   - a response without Cache-Control is `no-cache`.
+ *   A non-public site's file never reaches a request without a site cookie (the decision answers a
+ *   302 with `no-store`), and the core marks every response for a non-public site or a share host
+ *   `private`, so neither is stored at all; the cap is what bounds a public site's staleness.
  * - The hub's event handler (`LIVE_EVENTS_PATH` on the app host) goes to the live rooms.
  */
 import { timingSafeEqual } from 'node:crypto'
@@ -27,6 +38,8 @@ export interface FrontDoorOptions {
   secret?: string
   /** a missing header passes (development) */
   allowMissing?: boolean
+  /** SITES_DOMAIN: its hosts' responses get Front Door's caching rules (`edgeCacheControl`) */
+  sitesDomain?: string
 }
 
 const forbidden = () =>
@@ -67,21 +80,44 @@ export function visitorRequest(request: Request): Request {
   } as RequestInit)
 }
 
-/** Whether a request carries a site session or a site pass. */
-function hasSiteCookie(request: Request): boolean {
-  const header = request.headers.get('cookie')
-  if (!header) return false
-  return header.split(';').some(part => {
-    const name = part.slice(0, part.indexOf('=')).trim()
-    return name === SITE_COOKIE_NAME || name === SITE_PASS_COOKIE_NAME
-  })
+/** The longest Front Door holds a sites-host response, in seconds. */
+export const EDGE_MAX_AGE = 60
+
+/** The directives Front Door never stores a response with. */
+const UNCACHEABLE = new Set(['private', 'no-cache', 'no-store'])
+
+/**
+ * The Cache-Control a sites-host response leaves for Front Door with: `private` when the request
+ * carried a site cookie, a shared lifetime of at most EDGE_MAX_AGE otherwise, `no-cache` for none.
+ */
+export function edgeCacheControl(value: string | null, siteCookie: boolean): string {
+  if (!value?.trim()) return 'no-cache'
+  const directives = value
+    .split(',')
+    .map(d => d.trim())
+    .filter(Boolean)
+  const nameOf = (d: string) => d.split('=')[0]?.trim().toLowerCase() ?? ''
+  const secondsOf = (name: string) => {
+    const found = directives.find(d => nameOf(d) === name)
+    const n = found ? Number.parseInt(found.split('=')[1] ?? '', 10) : Number.NaN
+    return Number.isNaN(n) ? undefined : n
+  }
+  if (directives.some(d => UNCACHEABLE.has(nameOf(d)))) return value
+  if (siteCookie) {
+    const kept = directives.filter(d => !['public', 's-maxage'].includes(nameOf(d)))
+    return ['private', ...kept].join(', ')
+  }
+  const shared = Math.min(
+    secondsOf('s-maxage') ?? secondsOf('max-age') ?? EDGE_MAX_AGE,
+    EDGE_MAX_AGE
+  )
+  const kept = directives.filter(d => nameOf(d) !== 's-maxage')
+  return [...kept, `s-maxage=${Math.max(0, shared)}`].join(', ')
 }
 
-/** `response` with a `public` Cache-Control made `private`, so no shared cache stores it. */
-export function unshared(response: Response): Response {
-  const cacheControl = response.headers.get('cache-control')
-  if (!cacheControl || !/(^|,)\s*public\s*(,|$)/i.test(cacheControl)) return response
-  const value = cacheControl.replace(/(^|,)(\s*)public(\s*)(?=,|$)/i, '$1$2private$3')
+/** `response` with its Cache-Control set to `value`, copied first when its headers are immutable. */
+function withCacheControl(response: Response, value: string): Response {
+  if (response.headers.get('cache-control') === value) return response
   try {
     response.headers.set('cache-control', value)
     return response
@@ -92,15 +128,30 @@ export function unshared(response: Response): Response {
   }
 }
 
-/** `fetch` behind Front Door's check, with the visitor's Host, kept out of Front Door's cache
- * when it answered a viewer's site cookie. */
+/** Whether a request carries a site session or a site pass. */
+function hasSiteCookie(request: Request): boolean {
+  const header = request.headers.get('cookie')
+  if (!header) return false
+  return header.split(';').some(part => {
+    const name = part.slice(0, part.indexOf('=')).trim()
+    return name === SITE_COOKIE_NAME || name === SITE_PASS_COOKIE_NAME
+  })
+}
+
+/** `fetch` behind Front Door's check, with the visitor's Host, and sites-host responses' caching
+ * fitted to Front Door's cache. */
 export function behindFrontDoor(
   fetch: (request: Request) => Promise<Response>,
   opts: FrontDoorOptions
 ): (request: Request) => Promise<Response> {
+  const sitesSuffix = opts.sitesDomain ? `.${opts.sitesDomain.toLowerCase()}` : undefined
   return async request => {
     if (!verified(request, opts)) return forbidden()
-    const response = await fetch(visitorRequest(request))
-    return hasSiteCookie(request) ? unshared(response) : response
+    const visitor = visitorRequest(request)
+    const response = await fetch(visitor)
+    const host = new URL(visitor.url).hostname.toLowerCase()
+    if (!sitesSuffix || !host.endsWith(sitesSuffix)) return response
+    const value = edgeCacheControl(response.headers.get('cache-control'), hasSiteCookie(request))
+    return withCacheControl(response, value)
   }
 }

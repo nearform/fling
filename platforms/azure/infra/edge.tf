@@ -5,9 +5,10 @@
 #   certificate (a wildcard one included), validated by the `_dnsauth` TXT records (dns.tf).
 #   When the hostname is the sites domain, both validate at the same name.
 # - One route, `/*` on both domains, HTTPS only, to the app's ingress. Front Door caches what the
-#   app marks cacheable (public sites' files and the UI's hashed assets), keyed on the query
-#   string; everything private is `no-store` or `private` at the origin, and so is any response to
-#   a request carrying a site cookie (src/front-door.ts).
+#   app marks cacheable, keyed on the query string, for the response's s-maxage, else its max-age;
+#   no rule overrides that, and Front Door never stores `private`, `no-cache` or `no-store` even
+#   when one does. The app keeps sites-host responses to at most 60 s here and makes a response
+#   to a site cookie `private` (src/front-door.ts, edgeCacheControl).
 # - A rule set writes two headers on every request it forwards, overwriting any the visitor sent:
 #   X-Origin-Verify (the origin-verify secret), which the app refuses requests without, and
 #   X-Fling-Host (the host name the visitor asked for), which the app routes by, since Front Door

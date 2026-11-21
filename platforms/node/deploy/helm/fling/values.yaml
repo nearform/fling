@@ -58,7 +58,9 @@ storage:
   uploadDigest: ""
 
 # The secrets. Either name a Secret you manage (`existingSecret`, with the keys listed below), or
-# give the values here and the chart makes one. Never commit real values to a values file.
+# give the values here and the chart makes one. Never commit real values to a values file. The
+# chart can't read an existing Secret, so it can't refuse a SERVERS key there: keep SERVERS out
+# of it (the host would run site servers as child processes, which isolate nothing).
 secrets:
   existingSecret: ""
   # SESSION_SECRET, SITE_HMAC_KEY: at least 32 characters each.
@@ -95,7 +97,8 @@ ingress:
 
 # Runs after every install and upgrade, once the new pods are up: POST /ticks/migrate until it
 # reports done (the data migrations; each is safe to repeat). Without a TICK_SECRET in the Secret
-# it says so and succeeds: the host migrates on start anyway.
+# it says so and succeeds: the host migrates on start anyway. With one, a 404 (the secret or the
+# app host refused) fails it.
 migrate:
   enabled: true
   backoffLimit: 6

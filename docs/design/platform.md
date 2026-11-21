@@ -108,6 +108,10 @@ Each element uses the same headings:
   - **`expiresAt`** (an exact ISO string) hides an item from every read and condition from that
     instant, whenever the backend purges it.
   - `update` never creates an item.
+  - **Keys** are well-formed strings without NUL (`storableKey`). A key that isn't, which only a
+    caller's input can make, reads as absent on every backend, and `put` and `transact` refuse it.
+    Values may hold any string, NUL and lone surrogates included; field names may hold NUL but no
+    lone surrogate (DynamoDB refuses one), and `fieldEquals` compares a value with none.
 - **Conformance:** `tableConformance`, `storeConformance` with `store-notifications`, and
   `migrationsConformance` (`packages/conformance/src/`).
 - **Gates:** nothing. Every platform needs it.
@@ -125,6 +129,11 @@ Each element uses the same headings:
     The binding also covers content type and cache-control and is tied to its key. The client
     sends exactly the headers `presignPut` returns. Clients upload directly; the API never sees
     the bytes.
+  - An MD5 is the client's word, not the manifest's SHA-256, which the version id and kept-file
+    reuse trust. So a store bound by MD5 says so (`Blobs.uploadDigest = 'md5'`), and publication
+    reads every uploaded file back and checks its SHA-256 before the version goes live (409
+    `upload_mismatch`, nothing kept). The secret scan already reads the text files back; this adds
+    the rest, so on such a store a deploy reads each uploaded byte once more.
   - A presigned GET expires and is tied to its key.
   - `deletePrefix` pages past one listing.
   - The port has no multipart upload. Large uploads through MCP are chunked in the Table and
@@ -300,6 +309,11 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
      `sharedSecretTicks`). Without one they answer 404, and `src/main.ts` also runs the ticks on
      timers in process.
 
+   It takes request bodies of at most 32 MiB by default (`maxBodyBytes`, `MAX_REQUEST_BYTES`):
+   a file at its limit through the upload routes, with room to spare. A declared Content-Length
+   over it is a 413 at once; a body without one is cut off as it passes it. Hosts are matched by
+   name, the port aside.
+
    Every adapter is passed in, so a cloud platform supplies only adapters, infrastructure and a
    deploy.
 2. **The Postgres `Table`** (`src/table/postgres.ts`, `PostgresTable`), over `pg` or PGlite:
@@ -308,7 +322,15 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
    - each write takes transaction-scoped advisory locks on its keys (in a fixed order), reads them,
      checks the conditions and writes, so exactly one of racing writers wins; deadlocks and
      serialisation failures are retried;
-   - expired items are hidden at once and purged by the hourly tick.
+   - each transaction runs at READ COMMITTED, whatever the server's default, and retries after a
+     jittered backoff;
+   - expired items are hidden at once and purged by the hourly tick, whose DELETE checks expiry
+     again on each row, so an item put again over a dead one meanwhile stays;
+   - a string jsonb can't hold (NUL, a lone surrogate) is stored escaped and read back as it was,
+     so the Table keeps what the other backends keep;
+   - its SQL is injection-safe by construction: values are always parameters, identifiers go
+     only through `ident` (validated and quoted, so a reserved word is a schema name too), and
+     `tests/sql-guard.test.ts` fails on any other interpolation.
 
    It passes the table, store, migrations and route table suites on PGlite in every gate and on a
    Postgres service in CI. It is the Table for Fly.io, Vercel (Neon), DigitalOcean and self-host,

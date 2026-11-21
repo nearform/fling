@@ -636,7 +636,9 @@ SHA-256 (`x-amz-checksum-sha256`) where the store checks one, the MD5 (`Content-
 manifest's optional `md5`) where it checks only that. A store that checks neither, or an upload
 whose manifest has no MD5, goes through **host uploads** (`HostUploads`,
 `apps/api/src/blobs/host-uploads.ts`): signed `/blob-upload` and `/blob-download` routes on the
-app host that check the SHA-256 themselves before writing to the store.
+app host that check the SHA-256 themselves before writing to the store. On a store bound by MD5
+(`Blobs.uploadDigest`), publication also reads every uploaded file back and checks its SHA-256
+before the version goes live, since the version id and kept files trust it.
 
 **Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of

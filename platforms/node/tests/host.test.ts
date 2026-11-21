@@ -4,7 +4,7 @@
  * the live rooms over real WebSockets, alone and spread over two hosts through the Postgres
  * fan-out (on PGlite here, on a Postgres server where FLING_TEST_POSTGRES_URL is set).
  */
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -52,7 +52,7 @@ function webBuild() {
   return dir
 }
 
-async function world(opts: { live?: MemoryLiveHub; db?: PGlite } = {}) {
+async function world(opts: { live?: MemoryLiveHub; db?: PGlite; maxBodyBytes?: number } = {}) {
   const db = pgliteClient(opts.db ?? (await PGlite.create()))
   if (!opts.db) closing.push(() => db.close())
   const schema = `h_${randomBytes(4).toString('hex')}`
@@ -85,6 +85,7 @@ async function world(opts: { live?: MemoryLiveHub; db?: PGlite } = {}) {
     },
     live,
     ticks: { authorize: sharedSecretTicks(TICKS) },
+    ...(opts.maxBodyBytes ? { maxBodyBytes: opts.maxBodyBytes } : {}),
   })
   return { host, deps, routes, blobs, live, table }
 }
@@ -93,6 +94,51 @@ const get = (host: NodeHost, url: string, init: RequestInit = {}) =>
   host.fetch(new Request(url, init))
 
 describe('the Node host', () => {
+  it('matches hosts by name, whatever port the client names', async () => {
+    const { host, routes, blobs } = await world()
+    await routes.put(
+      siteKvsKey('pub'),
+      JSON.stringify({ id: 'S1', v: 'V1', vis: 'public', spa: false })
+    )
+    await blobs.put('sites/S1/V1/index.html', new TextEncoder().encode('<h1>hi</h1>'))
+    const site = await get(host, 'http://pub.sites.example.test/', {
+      headers: { host: 'pub.sites.example.test:80' },
+    })
+    expect(await site.text()).toBe('<h1>hi</h1>')
+    const app = await get(host, `${APP}/healthz`, { headers: { host: 'app.example.test:80' } })
+    expect(app.status).toBe(200)
+  })
+
+  it('refuses a body over its limit, declared or not', async () => {
+    const { host, blobs } = await world({ maxBodyBytes: 1024 })
+    const bytes = new Uint8Array(4096)
+    const put = await blobs.presignPut('sites/S/V/big.bin', {
+      contentType: 'application/octet-stream',
+      cacheControl: 'no-cache',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    })
+    const declared = await host.fetch(
+      new Request(put.url, { method: 'PUT', headers: put.headers, body: bytes })
+    )
+    expect(declared.status).toBe(413)
+    const streamed = await host.fetch(
+      new Request(put.url, {
+        method: 'PUT',
+        headers: put.headers,
+        body: new ReadableStream({
+          start(controller) {
+            for (let i = 0; i < 4; i++) controller.enqueue(bytes.slice(i * 1024, (i + 1) * 1024))
+            controller.close()
+          },
+        }),
+        duplex: 'half',
+      } as RequestInit)
+    )
+    expect(streamed.status).toBe(413)
+    expect(await streamed.json()).toMatchObject({ error: { code: 'too_large' } })
+    expect(await blobs.head('sites/S/V/big.bin')).toBeNull()
+  })
+
   it('answers the API and the UI on the app host, and nothing on other hosts', async () => {
     const { host } = await world()
     const health = await get(host, `${APP}/healthz`)

@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Self-host Fling, or run it on DigitalOcean.** One container image of the Node host (`platforms/node/Dockerfile`) runs a whole Fling from its environment, with the web app, the sites' pages and the Claude Desktop extension built in, as an unprivileged user with a health check. Self-hosters run it with Docker Compose (the image, Postgres, MinIO and Caddy, which gets a wildcard certificate over ACME DNS-01) or a Helm chart (several replicas behind an Ingress, a migrate hook after every upgrade); DigitalOcean runs it on App Platform with Managed PostgreSQL and Spaces, from a Terraform module and a deploy workflow. The Node host stores site files in any S3-compatible store (`STORAGE_DRIVER=s3`, `SITES_BUCKET`, `S3_*`), binding each upload by its MD5 or SHA-256, verifies a managed Postgres's TLS against `DATABASE_CA_CERT`, and answers `/healthz` to probes on any address. Site servers stay off there. Nothing changes on AWS or Cloudflare.
+
 ## 0.14.0 (2026-11-21)
 
 - **One finalize of a deploy at a time.** A second finalize of the same deploy while one is checking its files answers 409 `finalize_in_progress` and changes nothing; finalize again a moment later and it answers for what the first made live. A finalize that stopped part way holds the deploy for at most 5 minutes.

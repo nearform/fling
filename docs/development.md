@@ -272,7 +272,15 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 The contract every platform meets and the steps to add one are in
 [docs/design/platform.md](design/platform.md) (§4). A platform on a Node runtime starts from
 `platforms/node` (§5): the Node host, the Postgres Table, the Postgres live fan-out and the SMTP
-mailer, and supplies only the adapters its cloud needs, its infrastructure and a deploy. Each platform also gets a platform doc in
+mailer, and supplies only the adapters its cloud needs, its infrastructure and a deploy. A store
+that speaks the S3 API takes `S3Blobs` from `platforms/s3` (`STORAGE_DRIVER=s3` on the Node host).
+The Node host image (`platforms/node/Dockerfile`, bundled by `platforms/node/scripts/build.mjs`)
+takes another entry point as the `FLING_ENTRY` build argument, so a platform on Node can ship its
+own entry in the same image. Self-host (Compose and Helm, `platforms/node/deploy/`) and
+DigitalOcean run the image as it is; `platforms/node/deploy/compose/smoke.sh` runs the e2e
+scenario against the Compose file on a laptop with Docker (`pnpm e2e attached`). Charts under
+`platforms/*/deploy/helm/` are linted by `pnpm infra` (`scripts/check-helm.mjs`) where helm is
+installed, and always in CI. Each platform also gets a platform doc in
 [docs/platforms/](platforms/README.md), written to the shared template. Differences between
 platforms are capability flags, never `if (platform === …)`.
 

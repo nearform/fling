@@ -73,5 +73,4 @@ Claude Desktop extension. It runs as the `node` user with `APP_ENV=production`, 
 arguments make it reusable: `FLING_ENTRY` bundles another platform's entry point (GCP or Azure,
 importing this package's host and adapters) in its place, and `FLING_MCPB_SERVER_URL` bakes an app
 origin into the extension. Site servers run as Node child processes, which isolate nothing, so
-keep `SERVERS` off in the image. Deploying it: [DEPLOY.md](DEPLOY.md). The e2e runs it as the `node` local
-runtime (`pnpm --filter @fling/e2e e2e node`).
+keep `SERVERS` off in the image. Deploying it: [DEPLOY.md](DEPLOY.md).

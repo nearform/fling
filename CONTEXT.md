@@ -685,14 +685,23 @@ makes itself on AWS. Fling's pages on sites hosts (the 404 page, the review shel
 
 **Platform** — `platforms/<cloud>`: one cloud's entry point and adapters for the ports
 (`platforms/aws`: Lambda, DynamoDB, S3, CloudFront KeyValueStore, SSM; `platforms/cloudflare`: one
-Worker, D1, R2, Workers KV with D1 behind it). `platforms/node` holds what platforms on Node share
-and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer.
+Worker, D1, R2, Workers KV with D1 behind it; `platforms/digitalocean`: the **Node host image** on
+App Platform, Managed PostgreSQL, Spaces). `platforms/node` holds what platforms on Node share
+and runs on its own: the **Node host**, the **Postgres Table** and the SMTP mailer; with its image,
+Compose file and Helm chart it is the self-host platform. `platforms/s3` holds `S3Blobs`, the
+Blobs adapter for every store that speaks the S3 API (S3, Spaces, MinIO).
 
 **Node host** — all of an instance in one Node HTTP server (`createNodeHost`,
 `platforms/node/src/host.ts`), routing by host as the Cloudflare Worker does: the API, the UI, host
 uploads and the **tick endpoints** on the app host; the sites host on `*.<sites domain>`; live
 rooms over WebSockets (`apps/api/src/live-ws.ts`) with a **Live fan-out**. Every adapter is passed
 in. `platforms/node/src/main.ts` runs it from the environment; the e2e's `node` runtime runs that.
+
+**Node host image** — the container image of the Node host (`platforms/node/Dockerfile`): the
+entry point bundled with its dependencies (`platforms/node/scripts/build.mjs`), the web build and
+the Claude Desktop extension, configured entirely from the environment, so one image serves every
+instance. Self-host (Compose, Helm) and DigitalOcean run it; `FLING_ENTRY` bundles another
+platform's entry point into the same image.
 
 **Tick endpoints** — the Node host's `POST /ticks/notify`, `/ticks/maintain` and `/ticks/migrate`
 on the app host, for a scheduler or a deploy, behind a caller check the platform supplies

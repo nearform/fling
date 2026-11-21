@@ -276,6 +276,22 @@ Key Vault, Log Analytics, the registry (Basic, about $5) and storage. The app sc
 Cosmos DB serverless, Blob Storage and Web PubSub's free tier are paid per use. The jobs run a few
 seconds each (the hourly maintain, and the minute's notify with mail).
 
+## Checking the edge cache
+
+Front Door holds a sites-host response for at most a minute (`s-maxage=60`, set by the app) and
+never stores a response to a signed-in viewer. To see it on a public site, fetch one of its files
+twice, a few seconds apart, without cookies:
+
+```bash
+curl -sI https://$SITE.$SITES_DOMAIN/index.html | grep -iE '^(cache-control|x-cache|age):'
+curl -sI https://$SITE.$SITES_DOMAIN/index.html | grep -iE '^(cache-control|x-cache|age):'
+```
+
+The first is usually `x-cache: TCP_MISS`, the second `TCP_HIT` with an `Age` under 60, and the
+Cache-Control ends in `s-maxage=60`. Once the `Age` would pass 60, the next request is a miss (or a
+`REVALIDATED_HIT`) and the `Age` starts again. With a `fling_site` cookie the Cache-Control is
+`private` and `x-cache` says `PRIVATE_NOSTORE`.
+
 ## Smoke test
 
 The deploy ends with the e2e scenario (`packages/e2e`) against the live instance, signed in with

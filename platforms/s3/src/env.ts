@@ -7,7 +7,7 @@
  * | `S3_ENDPOINT` | AWS S3 | the store's API as the host reaches it (`https://nyc3.digitaloceanspaces.com`, `http://minio:9000`) |
  * | `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | the store as clients reach it: the address presigned URLs name |
  * | `S3_REGION` | `AWS_REGION`, else `us-east-1` | the region the requests are signed for (Spaces: the datacentre, `nyc3`) |
- * | `S3_FORCE_PATH_STYLE` | off | `<endpoint>/<bucket>/<key>` URLs instead of `<bucket>.<endpoint>/<key>` (MinIO needs it) |
+ * | `S3_FORCE_PATH_STYLE` | off | `<endpoint>/<bucket>/<key>` URLs instead of `<bucket>.<endpoint>/<key>` (MinIO needs it, and so does a public endpoint that is one host in front of the store) |
  * | `S3_UPLOAD_DIGEST` | `md5` with an endpoint, `sha256` without | what a presigned PUT binds (S3Blobs' `digest`) |
  * | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (secrets) | the SDK's default chain | the store's keys |
  *

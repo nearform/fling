@@ -32,7 +32,7 @@ The examples use these placeholders; substitute your own:
 | --- | --- | --- |
 | `$APP_HOST` | `fling.example.com` | The app (UI and API) |
 | `$SITES_DOMAIN` | `fling.example.com` | Sites hang off it: `<name>.$SITES_DOMAIN` (may equal `$APP_HOST`; must share its registrable domain) |
-| `$STORAGE_HOST` | `fling-storage.example.com` | Compose only: MinIO's API, which the presigned upload and download URLs name. Outside `*.$SITES_DOMAIN`, or it hides the site of that name |
+| `$STORAGE_HOST` | `fling-storage.example.com` | Compose only: the sites bucket in MinIO, path-style (`/<bucket>/<key>`), which the presigned upload and download URLs name; Caddy passes nothing else of MinIO's API. Outside `*.$SITES_DOMAIN`, or it hides the site of that name |
 
 ```
 $APP_HOST        Caddy or the Ingress → the Node host ─┬─ /api/*, /auth/*, /mcp, /oauth/*,
@@ -47,7 +47,7 @@ $APP_HOST        Caddy or the Ingress → the Node host ─┬─ /api/*, /auth/
 *.$SITES_DOMAIN  Caddy or the Ingress → the Node host ─── the shared site routing decision
                                                           (route table: Postgres, cached) →
                                                           the object store
-$STORAGE_HOST    Caddy → MinIO ────────────────────────── presigned PUTs and GETs (CLI, pull)
+$STORAGE_HOST    Caddy → MinIO ──── /<bucket>/* only ───── presigned PUTs and GETs (CLI, pull)
 in process       every minute: the notifications' outbox → SMTP (with MAIL_DRIVER=smtp);
                  hourly: maintenance (retention, expired items, staged uploads)
 ```
@@ -115,7 +115,9 @@ docker compose up -d --build      # or set FLING_IMAGE to a published image and 
   uploads (`uploads/`, swept after a day) and the host's own key (`fling`, read and write on that
   bucket only). Staged uploads (`sites/<id>/_staged/`) are swept by the host's hourly maintenance.
   Uploads are bound by `Content-MD5` (`S3_UPLOAD_DIGEST=md5`); a file whose MD5 an older CLI did
-  not send goes through the host. Any other S3-compatible store works in MinIO's place: set
+  not send goes through the host. Caddy passes only the bucket's path-style URLs
+  (`/<bucket>/*`, so `S3_FORCE_PATH_STYLE=true`) to MinIO and answers 404 for the rest of its
+  API, its admin routes included. Any other S3-compatible store works in MinIO's place: set
   `S3_*` in `fling.env` and drop the `minio` and `minio-init` services.
 - **Ticks and migrations.** The host migrates the schema and the data on start and runs the ticks
   on timers in its process. `TICK_SECRET` opens `POST /ticks/notify`, `/ticks/maintain` and
@@ -185,7 +187,9 @@ ingress:
   tick is safe to repeat and a minute's schedule would add nothing but pods.
 - **Migrations.** Each replica migrates on start, under a lock in Postgres. A Helm hook Job runs
   after every install and upgrade and calls `POST /ticks/migrate` on the Service until it reports
-  done (it needs `TICK_SECRET`; without one it is skipped).
+  done (with `TICK_SECRET` in the Secret; without one it says so and succeeds).
+- **Site servers** are refused: the chart fails to render with `SERVERS` set to anything but
+  `off`. Pods mount no service account token.
 - **Storage.** The chart always uses the S3 store; `/data` is an `emptyDir` for scratch, and the
   root filesystem is read-only. The pods run as the image's unprivileged user.
 

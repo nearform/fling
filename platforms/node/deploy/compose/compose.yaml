@@ -4,8 +4,8 @@
 #   docker compose up -d --build
 #
 # Caddy is the only service with published ports. The Node host, Postgres and MinIO talk on the
-# compose network; MinIO's API is also reached through Caddy at FLING_STORAGE_HOST, the address the
-# presigned upload and download URLs name. Ticks run in the Node host's process, and it migrates
+# compose network; the sites bucket alone is also reached through Caddy at FLING_STORAGE_HOST, the
+# address the presigned upload and download URLs name (path-style, so one host serves it). Ticks run in the Node host's process, and it migrates
 # the schema and the data on start.
 name: fling
 
@@ -106,6 +106,7 @@ services:
       FLING_APP_HOST: ${FLING_APP_HOST:?set FLING_APP_HOST in .env}
       FLING_SITES_HOST: ${FLING_SITES_DOMAIN}
       FLING_STORAGE_HOST: ${FLING_STORAGE_HOST:?set FLING_STORAGE_HOST in .env}
+      FLING_BUCKET: ${FLING_BUCKET:-fling-sites}
       ACME_EMAIL: ${ACME_EMAIL:-}
       ACME_DNS_PROVIDER: ${ACME_DNS_PROVIDER:-cloudflare}
       ACME_DNS_API_TOKEN: ${ACME_DNS_API_TOKEN:-}

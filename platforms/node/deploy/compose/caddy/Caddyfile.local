@@ -1,0 +1,16 @@
+# compose.local.yaml's front: the same routes as Caddyfile, over plain HTTP.
+{
+	auto_https off
+}
+
+http://{$FLING_STORAGE_HOST} {
+	@bucket path /{$FLING_BUCKET}/*
+	handle @bucket {
+		reverse_proxy minio:9000
+	}
+	respond 404
+}
+
+http://{$FLING_APP_HOST}, http://*.{$FLING_SITES_HOST} {
+	reverse_proxy fling:8080
+}

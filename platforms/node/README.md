@@ -42,9 +42,9 @@ configuration), and these of its own:
 | `STORAGE_DRIVER` | `fs` | `fs`: site files under `FS_ROOT`, for one machine or a shared volume. `s3`: any S3-compatible store, from the variables below |
 | `SITES_BUCKET` | (required with `s3`) | The bucket. Private: every read is the host's or a presigned URL's |
 | `S3_ENDPOINT` | AWS S3 | The store's API as the host reaches it (`https://nyc3.digitaloceanspaces.com`, `http://minio:9000`) |
-| `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | The store as clients reach it: presigned upload and download URLs name it |
+| `S3_PUBLIC_ENDPOINT` | `S3_ENDPOINT` | The store as clients reach it: presigned upload and download URLs name it. Behind a single-host proxy, set `S3_FORCE_PATH_STYLE=true` and let the proxy pass only `/<bucket>/*` |
 | `S3_REGION` | `AWS_REGION`, else `us-east-1` | The region requests are signed for (Spaces: the datacentre, such as `nyc3`) |
-| `S3_FORCE_PATH_STYLE` | `false` | `true` for `<endpoint>/<bucket>/<key>` URLs (MinIO) |
+| `S3_FORCE_PATH_STYLE` | `false` | `true` for `<endpoint>/<bucket>/<key>` URLs: MinIO, and any `S3_PUBLIC_ENDPOINT` that is one host in front of the store (a proxy such as the Compose file's Caddy), which serves no `<bucket>.<host>` names |
 | `S3_UPLOAD_DIGEST` | `md5` with an endpoint, `sha256` without | What a presigned PUT binds. `md5` (`Content-MD5`) works on every S3-compatible store; `sha256` only where the store rejects a body whose signed `x-amz-checksum-sha256` differs (AWS S3, MinIO). With `md5`, a file the client sent no MD5 for is uploaded through the host |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` (secrets) | the AWS SDK's default chain | The store's keys |
 | `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms. A direct or session-mode connection: a pooler in transaction mode (PgBouncer's, or a provider's "transaction" endpoint) breaks the migrations' lock and search_path and the live rooms' LISTEN, and start-up fails saying so |

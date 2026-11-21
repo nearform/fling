@@ -1,5 +1,5 @@
 # TLS in front of Fling: the app host, every site (*.<sites domain>, one wildcard certificate) and
-# MinIO's API (the storage host the presigned URLs name). The certificates come from Let's Encrypt
+# the sites bucket in MinIO (the storage host the presigned URLs name). The certificates come from Let's Encrypt
 # over ACME DNS-01 with the DNS provider module the image was built with; a provider whose module
 # takes one API token is configured from .env alone (cloudflare, digitalocean, hetzner, …), others
 # need their own lines here (see https://github.com/caddy-dns).
@@ -15,8 +15,14 @@
 
 {$FLING_STORAGE_HOST} {
 	import dns01
-	# Caddy passes the Host on, so MinIO checks the signature the URL was made for.
-	reverse_proxy minio:9000
+	# The sites bucket's objects, path-style, and nothing else of MinIO's API (its admin and
+	# health routes, other buckets). Caddy passes the Host on, so MinIO checks the signature the
+	# URL was made for.
+	@bucket path /{$FLING_BUCKET}/*
+	handle @bucket {
+		reverse_proxy minio:9000
+	}
+	respond 404
 }
 
 {$FLING_APP_HOST}, *.{$FLING_SITES_HOST} {

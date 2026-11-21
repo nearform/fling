@@ -16,8 +16,11 @@
  *   surrogate, which items may; as text, every string is stored as it was. Nothing is queried
  *   by field, so the fields need no indexing (the container's indexing policy leaves `/j` out).
  * - `x` is expiresAt in epoch ms, which reads and conditions compare, and `ttl` the seconds until
- *   then, so the container's TTL (on, `default_ttl = -1`) purges dead items. The deletion lags,
- *   so a dead item is also invisible to every read and condition here.
+ *   an hour after then, so the container's TTL (on, `default_ttl = -1`) purges dead items. Cosmos
+ *   DB counts `ttl` from its own clock, so the hour keeps a skewed host clock from having an item
+ *   purged while it is live, and a write that read the dead item from racing its purge. An expiry
+ *   beyond the longest `ttl` Cosmos DB takes gets none: the item stays until it is written again.
+ *   Purges lag, so a dead item is also invisible to every read and condition here.
  *
  * Writes: every write (put, update, delete, transact) reads the items it touches, checks its
  * conditions on them in JS, and commits one transactional batch whose operations are bound to
@@ -30,8 +33,9 @@
  * is an Upsert, which needs no read.
  *
  * Consistency: the account is set to Strong (one region; infra/data.tf), so a read made by any
- * replica of the host sees every committed write. The batch limits (100 operations, 2 MB) are
- * above what `transact` takes (TRANSACT_MAX, 25, and items of at most 400 KB).
+ * replica of the host sees every committed write. A batch takes at most 100 operations, above
+ * TRANSACT_MAX (25), and 2 MB of documents, which a `transact` of large items can pass: such a
+ * batch is refused before it is sent, with an error naming the limit.
  */
 import { createHash } from 'node:crypto'
 import type { Container, ItemDefinition, OperationInput, SqlParameter } from '@azure/cosmos'
@@ -82,8 +86,17 @@ export const hexOf = (s: string) => Buffer.from(s, 'utf8').toString('hex')
 export const idOf = (k: Key) =>
   createHash('sha256').update(k.pk).update('\0').update(k.sk).digest('hex')
 
-/** The longest item TTL Cosmos DB takes (a 32-bit integer, 68 years); a later expiry waits longer. */
+/** The longest item TTL Cosmos DB takes (a 32-bit integer of seconds, 68 years). */
 const TTL_MAX = 2 ** 31 - 1
+
+/** How long after its expiry Cosmos DB purges a dead item, in seconds. */
+const PURGE_MARGIN = 3600
+
+/** How long a placeholder (a delete's hold on a key's absence) stays, in seconds. */
+const PLACEHOLDER_TTL = 60
+
+/** The most document bytes one transactional batch takes. */
+const BATCH_MAX_BYTES = 2 * 1024 * 1024
 
 /** How many times a write starts again after losing a race before it gives up. */
 const ATTEMPTS = 40
@@ -170,7 +183,8 @@ export class CosmosTable implements Table {
     }
     if (typeof item.expiresAt === 'string') {
       doc.x = Date.parse(item.expiresAt)
-      doc.ttl = Math.min(TTL_MAX, Math.max(1, Math.ceil((doc.x - this.now()) / 1000)))
+      const ttl = Math.max(0, Math.ceil((doc.x - this.now()) / 1000)) + PURGE_MARGIN
+      if (ttl <= TTL_MAX) doc.ttl = ttl
     }
     return doc
   }
@@ -196,6 +210,7 @@ export class CosmosTable implements Table {
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
     const limit = limitOf(opts.limit)
+    const now = this.now()
     if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
     const lo = hexOf(opts.skPrefix ?? '')
     const parameters: SqlParameter[] = [
@@ -203,7 +218,7 @@ export class CosmosTable implements Table {
       { name: '@pk', value: pk },
       { name: '@lo', value: lo },
       { name: '@hi', value: `${lo}g` },
-      { name: '@now', value: this.now() },
+      { name: '@now', value: now },
     ]
     let after = ''
     if (opts.cursor !== undefined) {
@@ -215,11 +230,12 @@ export class CosmosTable implements Table {
       `SELECT ${limit === undefined ? '' : 'TOP @n '}* FROM c`,
       'WHERE c.p = @p AND c.pk = @pk AND c.skx >= @lo AND c.skx < @hi',
       `AND (NOT IS_DEFINED(c.x) OR c.x > @now)${after}`,
-      `ORDER BY c.skx ${opts.reverse ? 'DESC' : 'ASC'}`,
+      // pk leads the ORDER BY so the composite (pk, skx) indexes serve it (infra/data.tf).
+      `ORDER BY c.pk ASC, c.skx ${opts.reverse ? 'DESC' : 'ASC'}`,
     ].join(' ')
     const docs = await this.all(query, parameters)
-    const items = docs.flatMap(d => this.live(d) ?? [])
-    const last = items[items.length - 1]
+    const items = docs.flatMap(d => this.live(d, now) ?? [])
+    const last = docs[docs.length - 1]
     return limit !== undefined && docs.length >= limit && last
       ? { items, cursor: encodeCursor(last.sk) }
       : { items }
@@ -228,9 +244,10 @@ export class CosmosTable implements Table {
   /** Migrations only (see the Table port): every live item, in id order; the cursor is an id. */
   async scan(opts: ScanOptions = {}): Promise<Page> {
     const limit = limitOf(opts.limit)
+    const now = this.now()
     const parameters: SqlParameter[] = [
       { name: '@p', value: PARTITION },
-      { name: '@now', value: this.now() },
+      { name: '@now', value: now },
       { name: '@after', value: opts.cursor === undefined ? '' : decodeCursor(opts.cursor) },
     ]
     if (limit !== undefined) parameters.push({ name: '@n', value: limit })
@@ -240,7 +257,7 @@ export class CosmosTable implements Table {
       'ORDER BY c.id ASC',
     ].join(' ')
     const docs = await this.all(query, parameters)
-    const items = docs.flatMap(d => this.live(d) ?? [])
+    const items = docs.flatMap(d => this.live(d, now) ?? [])
     const last = docs[docs.length - 1]
     return limit !== undefined && docs.length >= limit && last
       ? { items, cursor: encodeCursor(last.id) }
@@ -280,6 +297,9 @@ export class CosmosTable implements Table {
 
   async transact(ops: TransactOp[]) {
     if (ops.length > TRANSACT_MAX) throw new Error(`transact takes at most ${TRANSACT_MAX} ops`)
+    const keys = ops.map(op => ('put' in op ? op.put : op.delete)).map(k => `${k.pk}\0${k.sk}`)
+    if (new Set(keys).size !== keys.length)
+      throw new Error('transact ops must be on distinct items')
     for (const op of ops) checkKey('put' in op ? op.put : op.delete)
     await this.write(
       ops.map(op =>
@@ -355,11 +375,19 @@ export class CosmosTable implements Table {
       skx: hexOf(k.sk),
       j: '{}',
       x: 0,
-      ttl: 1,
+      ttl: PLACEHOLDER_TTL,
     }
   }
 
   private async commit(batch: OperationInput[]) {
+    const bytes = batch.reduce(
+      (n, op) =>
+        n + ('resourceBody' in op ? Buffer.byteLength(JSON.stringify(op.resourceBody)) : 0),
+      0
+    )
+    if (bytes > BATCH_MAX_BYTES) {
+      throw new Error(`a Cosmos DB batch takes at most 2 MB of items; this one is ${bytes} bytes`)
+    }
     let res: Awaited<ReturnType<Container['items']['batch']>>
     try {
       res = await this.container.items.batch(batch, PARTITION)

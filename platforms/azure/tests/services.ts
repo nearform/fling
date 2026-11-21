@@ -40,6 +40,17 @@ export const CONTAINER_SETTINGS = {
     indexingMode: 'consistent' as const,
     includedPaths: [{ path: '/*' }],
     excludedPaths: [{ path: '/j/?' }, { path: '/"_etag"/?' }],
+    // As infra/data.tf: what query's ORDER BY c.pk, c.skx needs.
+    compositeIndexes: [
+      [
+        { path: '/pk', order: 'ascending' as const },
+        { path: '/skx', order: 'ascending' as const },
+      ],
+      [
+        { path: '/pk', order: 'ascending' as const },
+        { path: '/skx', order: 'descending' as const },
+      ],
+    ],
   },
 }
 

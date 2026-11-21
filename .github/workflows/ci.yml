@@ -8,12 +8,14 @@ name: CI
 # Terraform and Helm checks only skip when they are missing outside CI.
 #
 # The one addition is local stand-ins for the cloud services: DynamoDB Local, MinIO and Postgres as
-# service containers, and the env vars that point the adapter conformance suites in platforms/aws,
-# platforms/s3 and platforms/node at them. Without those env vars (a laptop without Docker) the suites skip, so
+# service containers, the Firestore emulator and fake-gcs-server started in a step, and the env vars
+# that point the adapter conformance suites in platforms/aws, platforms/s3, platforms/node and
+# platforms/gcp at them. Without those env vars (a laptop without Docker) the suites skip, so
 # `pnpm gate` still passes (the Postgres Table's suites still run on PGlite, in process); with
 # them, the adapters must behave like the core's memory/fs ones. The tests create their own table,
 # bucket and schemas. To run them locally, see platforms/aws/tests/services.ts,
-# platforms/s3/tests/services.ts and platforms/node/tests/services.ts.
+# platforms/s3/tests/services.ts, platforms/node/tests/services.ts and
+# platforms/gcp/tests/services.ts.
 #
 # The Release workflow (release-cli.yml) calls it (workflow_call) on the tagged commit before
 # publishing; a successful release then deploys. Every dependency is public, so no npm token is
@@ -66,6 +68,8 @@ jobs:
       FLING_TEST_S3_ACCESS_KEY: fling-test
       FLING_TEST_S3_SECRET_KEY: fling-test-secret
       FLING_TEST_POSTGRES_URL: postgres://postgres:fling-test@localhost:5432/postgres
+      FLING_TEST_FIRESTORE_EMULATOR_HOST: localhost:8086
+      FLING_TEST_GCS_ENDPOINT: http://localhost:4443
     steps:
       - uses: actions/checkout@v7
       # pnpm version comes from `packageManager` in the root package.json. Must precede setup-node
@@ -76,6 +80,21 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The Firestore emulator and fake-gcs-server for platforms/gcp (tests/services.ts). Started
+      # here rather than as service containers, which take no command, and both images need one.
+      - name: Start the Google Cloud emulators
+        run: |
+          set -euo pipefail
+          docker run -d --name firestore -p 8086:8080 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:594.0.0-emulators \
+            gcloud emulators firestore start --host-port=0.0.0.0:8080
+          docker run -d --name gcs -p 4443:4443 fsouza/fake-gcs-server:1.56.1 -scheme http -port 4443
+          for i in $(seq 1 60); do
+            curl -fs http://localhost:8086 >/dev/null && curl -fs http://localhost:4443/storage/v1/b >/dev/null && exit 0
+            sleep 2
+          done
+          docker logs firestore; docker logs gcs
+          echo "::error::the Google Cloud emulators did not start"; exit 1
       # For the Terraform part of the gate (scripts/check-terraform.mjs): ubuntu-24.04 runners don't
       # ship terraform. No wrapper: the script reads terraform's own output and exit code.
       - uses: hashicorp/setup-terraform@v4

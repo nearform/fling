@@ -113,8 +113,11 @@ const envSchema = z.object({
   SITES_BUCKET: optionalString,
   KVS_ARN: optionalString,
   SSM_PREFIX: optionalString,
-  STORE_DRIVER: z.preprocess(blank, z.enum(['dynamo', 'd1', 'postgres', 'memory']).optional()),
-  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'fs']).optional()),
+  STORE_DRIVER: z.preprocess(
+    blank,
+    z.enum(['dynamo', 'd1', 'postgres', 'firestore', 'memory']).optional()
+  ),
+  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'gcs', 'fs']).optional()),
   KVS_DRIVER: z.preprocess(
     blank,
     z.enum(['cloudfront', 'workers-kv', 'table', 'memory']).optional()
@@ -499,11 +502,12 @@ export interface Config {
   /**
    * Which adapter each port uses. The core has the dev/test ones (memory, fs); a platform entry
    * supplies the others (platforms/aws: dynamo, s3, cloudfront; platforms/cloudflare: d1, r2,
-   * workers-kv; platforms/node: postgres, and `table`, the routes in the Table itself).
+   * workers-kv; platforms/node: postgres, and `table`, the routes in the Table itself;
+   * platforms/gcp: firestore, gcs and `table`).
    * Production defaults to the AWS ones.
    */
-  storeDriver: 'dynamo' | 'd1' | 'postgres' | 'memory'
-  storageDriver: 's3' | 'r2' | 'fs'
+  storeDriver: 'dynamo' | 'd1' | 'postgres' | 'firestore' | 'memory'
+  storageDriver: 's3' | 'r2' | 'gcs' | 'fs'
   kvsDriver: 'cloudfront' | 'workers-kv' | 'table' | 'memory'
   /** The Postgres schema of the `postgres` store driver (`DATABASE_SCHEMA`, default `public`). */
   databaseSchema?: string
@@ -673,7 +677,9 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     throw new Error('INVITES=on needs email: set MAIL_DRIVER and MAIL_FROM')
   }
   if (cfg.storeDriver === 'dynamo' && !cfg.tableName) throw new Error('TABLE_NAME is required')
-  if (cfg.storageDriver === 's3' && !cfg.sitesBucket) throw new Error('SITES_BUCKET is required')
+  if ((cfg.storageDriver === 's3' || cfg.storageDriver === 'gcs') && !cfg.sitesBucket) {
+    throw new Error('SITES_BUCKET is required')
+  }
   if (cfg.kvsDriver === 'cloudfront' && !cfg.kvsArn) throw new Error('KVS_ARN is required')
   cfg.settings = settingsOf(env, e, cfg)
   return cfg

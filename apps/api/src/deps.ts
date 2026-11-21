@@ -34,7 +34,7 @@ export interface Adapters {
   identities?: IdentityProvider[]
   /** the live rooms' hub; without one (or with live rooms off) publishing does nothing */
   live?: LiveHub
-  /** the platform's mailer, for the `ses`, `cloudflare` and `smtp` mail drivers */
+  /** the platform's mailer, for the `ses`, `cloudflare`, `smtp` and `acs` mail drivers */
   mailer?: Mailer
   /** runs site servers: needed when `SERVERS` is on */
   servers?: SiteServers

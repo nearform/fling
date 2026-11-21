@@ -295,7 +295,7 @@ describe('mail configuration', () => {
       'smtp'
     )
     for (const driver of ['file', 'memory']) {
-      expect(() => mail({ ...MAIL, MAIL_DRIVER: driver })).toThrow(/ses, cloudflare or smtp/)
+      expect(() => mail({ ...MAIL, MAIL_DRIVER: driver })).toThrow(/ses, cloudflare, smtp or acs/)
       expect(mail({ MAIL_DRIVER: driver, MAIL_FROM: 'fling@example.test' })?.driver).toBe(driver)
     }
     expect(() => mail({ ...MAIL, MAIL_DRIVER: 'pigeon' })).toThrow()

@@ -143,9 +143,9 @@ Cache-Control on the way out (`edgeCacheControl` in `platforms/azure/src/front-d
 - a response without Cache-Control becomes `no-cache`.
 
 A non-public site's file never reaches a request without a site cookie (the decision answers a
-302 with `no-store`), so Front Door never stores one. A share host's files need no cookie and keep
-the file's own Cache-Control, so Front Door may store them, and the 60 s cap is what bounds them
-after the link is revoked. The route honours the origin's headers (no rule
+302 with `no-store`), and the core sends everything it serves for a non-public site or a share host
+`private`, so Front Door stores neither. The 60 s cap bounds what it does store, a public site's
+files, after a publish or an access change. The route honours the origin's headers (no rule
 overrides caching), and the deploy purges only the app's domain: nothing on the sites hosts is
 held for longer than a minute.
 

@@ -26,10 +26,10 @@
  *     minute, as on Google Cloud's CDN;
  *   - a response without Cache-Control is `no-cache`.
  *   A non-public site's file never reaches a request without a site cookie (the decision answers a
- *   302 with `no-store`), so Front Door never stores one. A share host's files need no cookie and
- *   are served with the file's own Cache-Control (`cacheControlFor`), so Front Door may store them:
- *   the 60 s cap is what bounds them after the link is revoked, as it bounds a public site's
- *   files after a publish or an access change.
+ *   302 with `no-store`), and the core sends everything it serves for a non-public site or a share
+ *   host `private` (`serverCacheControl` in apps/api/src/sites-host.ts), so Front Door stores
+ *   neither. The 60 s cap bounds what it does store, a public site's files, after a publish or an
+ *   access change.
  * - The hub's event handler (`LIVE_EVENTS_PATH` on the app host) goes to the live rooms.
  */
 import { timingSafeEqual } from 'node:crypto'

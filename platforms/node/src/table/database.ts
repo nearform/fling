@@ -2,7 +2,14 @@
  * The Postgres database the Node platform keeps its Table in, as Drizzle sees it, on one of two
  * drivers: a `pg` Pool (`pgDatabase`: a Postgres server, managed or self-hosted) and PGlite
  * (`pgliteDatabase`: Postgres compiled to WebAssembly, in process, which the tests and the local
- * runtime use). PostgresTable is written once over `FlingDatabase`, what both drivers give.
+ * runtime use). PostgresTable is written once over `Database`, what both drivers give: Drizzle's
+ * Postgres database and a READ COMMITTED transaction on one connection.
+ *
+ * `DATABASE_URL` must reach Postgres directly or through a pooler in session mode. A pooler in
+ * transaction mode (PgBouncer's, or a provider's "transaction" endpoint) hands each statement
+ * outside a transaction to any server connection, which breaks what holds a connection: the
+ * migrator's lock and search_path, and LISTEN. `migrate` checks that its statements stay on one
+ * server connection with its search_path, and fails saying so when they don't.
  *
  * `migrate` applies the migrations drizzle-kit generated (drizzle/) that the instance's schema
  * lacks, recorded in `<schema>.fling_migrations`. They name no schema, so it runs them with the
@@ -29,6 +36,11 @@ export type FlingDatabase = PgDatabase<PgQueryResultHKT>
 
 export interface Database {
   db: FlingDatabase
+  /**
+   * `fn` in one READ COMMITTED transaction on one connection: committed when it resolves, rolled
+   * back when it throws, with `fn`'s error
+   */
+  transaction<T>(fn: (tx: FlingDatabase) => Promise<T>): Promise<T>
   /** apply the migrations `schema` lacks (see the header); returns how many it applied */
   migrate(schema?: string): Promise<number>
   /** release the connections (a pool's, or PGlite's database) */
@@ -76,11 +88,22 @@ async function migrating(
   if (encoding?.server_encoding !== 'UTF8') {
     throw new Error(`the database's encoding must be UTF8, not ${encoding?.server_encoding}`)
   }
-  await db.execute(sql`SELECT pg_advisory_lock(${MIGRATE_LOCK})`)
+  const [locked] = rowsOf<{ pid: number }>(
+    await db.execute(sql`SELECT pg_advisory_lock(${MIGRATE_LOCK}), pg_backend_pid() AS pid`)
+  )
   try {
     const before = await migrations(db, name)
     await db.execute(sql`CREATE SCHEMA IF NOT EXISTS ${sql.identifier(name)}`)
     await db.execute(sql`SET search_path TO ${sql.identifier(name)}`)
+    const [session] = rowsOf<{ schema: string | null; pid: number }>(
+      await db.execute(sql`SELECT current_schema() AS schema, pg_backend_pid() AS pid`)
+    )
+    if (session?.pid !== locked?.pid || session?.schema !== name) {
+      throw new Error(
+        'the database connection does not keep its session (a pooler in transaction mode?): ' +
+          'DATABASE_URL must be a direct or session-mode connection'
+      )
+    }
     await run({
       migrationsFolder: MIGRATIONS,
       migrationsSchema: name,
@@ -97,6 +120,27 @@ async function migrating(
 export function pgDatabase(pool: pg.Pool): Database {
   return {
     db: nodePg(pool) as unknown as FlingDatabase,
+    // Drizzle's own pool transaction hands a connection whose ROLLBACK failed back to the pool,
+    // and throws the ROLLBACK's error; here such a connection is discarded, and `fn`'s error (a
+    // deadlock PostgresTable retries, say) is the one thrown.
+    async transaction(fn) {
+      const conn = await pool.connect()
+      const tx = nodePg(conn) as unknown as FlingDatabase
+      let broken: Error | undefined
+      try {
+        await tx.execute(sql`BEGIN ISOLATION LEVEL READ COMMITTED`)
+        const result = await fn(tx)
+        await tx.execute(sql`COMMIT`)
+        return result
+      } catch (err) {
+        await tx.execute(sql`ROLLBACK`).catch((rollback: Error) => {
+          broken = rollback
+        })
+        throw err
+      } finally {
+        conn.release(broken)
+      }
+    },
     async migrate(schema = DEFAULT_SCHEMA) {
       const conn = await pool.connect()
       let broken: Error | undefined
@@ -117,13 +161,30 @@ export function pgDatabase(pool: pg.Pool): Database {
   }
 }
 
+/**
+ * Each PGlite's migrations so far, one after another: PGlite is one session, which its advisory
+ * lock can't keep two migrators of apart (each would set the other's search_path).
+ */
+const pgliteMigrations = new WeakMap<PGlite, Promise<unknown>>()
+
 /** A PGlite database as a Database. PGlite is one connection, so it runs one query at a time. */
 export function pgliteDatabase(lite: PGlite): Database {
   const db = pglite(lite)
   return {
     db: db as unknown as FlingDatabase,
-    migrate: (schema = DEFAULT_SCHEMA) =>
-      migrating(db as unknown as FlingDatabase, schema, config => migratePglite(db, config)),
+    transaction: fn =>
+      db.transaction(tx => fn(tx as unknown as FlingDatabase), {
+        isolationLevel: 'read committed',
+      }),
+    migrate(schema = DEFAULT_SCHEMA) {
+      const run = (pgliteMigrations.get(lite) ?? Promise.resolve())
+        .catch(() => {})
+        .then(() =>
+          migrating(db as unknown as FlingDatabase, schema, config => migratePglite(db, config))
+        )
+      pgliteMigrations.set(lite, run)
+      return run
+    },
     close: () => lite.close(),
   }
 }

@@ -238,6 +238,57 @@ describe('a store bound by MD5', () => {
     expect(await env.blobs.head(staged)).toBeNull()
   })
 
+  it('lets one finalize at a time copy and check: a second one meanwhile is a 409 and touches nothing', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>checked</h1>')]
+    const { uploads, versionId } = await stageUploads(files)
+    const id = (await env.store.findSite('hello'))?.id as string
+    const staged = stagedObjectKey(id, versionId, 'index.html')
+    await upload(env, uploads, files)
+    // As the first finalize copies, a colliding body lands in staging and a second finalize runs.
+    const copy = env.blobs.copy.bind(env.blobs)
+    let second: Promise<unknown> | undefined
+    env.blobs.copy = async (from: string, to: string) => {
+      await copy(from, to)
+      if (second || from !== staged) return
+      await env.blobs.put(staged, Buffer.from('<h1>collide</h1>'))
+      second = publish(env.deps, user, 'hello', versionId).catch(err => err)
+      await second
+    }
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+    await expect(second).resolves.toMatchObject({ status: 409, code: 'finalize_in_progress' })
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+    // Once it is done, finalizing again is the usual answer.
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+  })
+
+  it('a finalize that read the version pending, then claimed it once live, answers live', async () => {
+    const files = [file('index.html', '<h1>hi</h1>')]
+    const { uploads, versionId } = await stageUploads(files)
+    await upload(env, uploads, files)
+    const claim = env.store.claimFinalize.bind(env.store)
+    let first: Promise<unknown> | undefined
+    env.store.claimFinalize = async (...args) => {
+      // The second finalize reaches its claim only after the first has made the version live.
+      if (!first) {
+        env.store.claimFinalize = claim
+        first = publish(env.deps, user, 'hello', versionId)
+        await first
+      }
+      return claim(...args)
+    }
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+    await expect(first).resolves.toMatchObject({ status: 'live' })
+    expect(await stored(versionId, 'index.html')).toBe('<h1>hi</h1>')
+  })
+
   it('refuses a colliding body PUT before the copy, and keeps nothing', async () => {
     md5Bound()
     const files = [file('index.html', '<h1>checked</h1>')]

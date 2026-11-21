@@ -184,6 +184,9 @@
  *   REFRESH#<sha256>       REFRESH                       refresh token → { grantId, email, usedAt }
  *                                                        — 30 days; usedAt set on rotation
  *                                                        (conditional), reuse revokes the grant
+ *   FINALIZE#<storage>     VERSION#<versionId>           a finalize in progress (owner): claimed
+ *                                                        ifAbsent, released by its owner; lapses
+ *                                                        at its expiresAt
  *   UPLOAD#<id>            UPLOAD                        chunked MCP upload (owner, site name) —
  *                                                        1 h; parts are in blobs under uploads/<id>/
  *   UPLOAD#<id>            FILE#<path>                   one uploaded file: encoding, part count —
@@ -356,6 +359,10 @@ const key = {
   grant: (email: string, id: string) => ({ pk: userPk(email), sk: `GRANT#${id}` }),
   refresh: (hash: string) => ({ pk: `REFRESH#${hash}`, sk: 'REFRESH' }),
   upload: (id: string) => ({ pk: `UPLOAD#${id}`, sk: 'UPLOAD' }),
+  finalizeClaim: (storage: string, versionId: string) => ({
+    pk: `FINALIZE#${storage}`,
+    sk: `VERSION#${versionId}`,
+  }),
   uploadFile: (uploadId: string, path: string) => ({
     pk: `UPLOAD#${uploadId}`,
     sk: `FILE#${path}`,
@@ -1389,6 +1396,26 @@ export class Records implements Store {
 
   getUpload(id: string) {
     return this.read<UploadRecord>('upload', key.upload(id))
+  }
+
+  async claimFinalize(storage: string, versionId: string, owner: string, until: string) {
+    const k = key.finalizeClaim(storage, versionId)
+    try {
+      await this.table.put(encode('finalizeclaim', k, { owner, expiresAt: until }), ifAbsent)
+      return true
+    } catch (err) {
+      if (err instanceof ConditionFailed) return false
+      throw err
+    }
+  }
+
+  async releaseFinalize(storage: string, versionId: string, owner: string) {
+    const k = key.finalizeClaim(storage, versionId)
+    try {
+      await this.table.delete(k.pk, k.sk, fieldEquals('owner', owner))
+    } catch (err) {
+      if (!(err instanceof ConditionFailed)) throw err
+    }
   }
 
   async deleteUpload(id: string) {

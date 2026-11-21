@@ -641,6 +641,11 @@ app host that check the SHA-256 themselves before writing to the store. On a sto
 each one into the version and checks the copy's SHA-256 and scans it there, since the version id
 and kept files trust it; no presigned URL can write a version's own keys.
 
+**Finalize claim** — what lets one finalize of a version run at a time (`finalizing` in
+`apps/api/src/publication.ts`, `Store.claimFinalize`): a Table item taken ifAbsent before the
+uploads are copied and checked, released after, lapsing after 30 minutes. Another finalize
+meanwhile is 409 `finalize_in_progress`.
+
 **Storable text** — text every store keeps as it is: no NUL and no lone surrogate
 (`packages/shared/src/text.ts`). A user string that becomes part of a stored key (a file path, a
 Path's folder, an email address) must be storable text, refused at admission with a 400 otherwise.

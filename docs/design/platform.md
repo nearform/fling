@@ -136,8 +136,9 @@ Each element uses the same headings:
     and SHA-256 and scans it (409 `upload_mismatch` or 422, nothing kept), and deletes the staging
     copies. A URL is still good meanwhile, so a colliding body PUT to it lands at the staging key,
     never in what is checked and served; the hourly maintenance deletes such leftovers once the
-    URLs expire. On such a store a deploy reads each
-    uploaded byte once more.
+    URLs expire. On such a store a deploy reads each uploaded byte once more. One finalize of a
+    version runs at a time (a claim in the Table, `Store.claimFinalize`, on every store), so no
+    second one copies over, or discards, what the first checked and made live.
   - A presigned GET expires and is tied to its key.
   - `deletePrefix` pages past one listing.
   - The port has no multipart upload. Large uploads through MCP are chunked in the Table and

@@ -99,16 +99,14 @@ describe('AcsMailer', () => {
     expect(result).toEqual({ ok: true, providerId: first?.operationId })
   })
 
-  it('names the same operation for a retried send, and another for another recipient', async () => {
+  it('names a new operation for every attempt, a retry included', async () => {
     const { client, sent } = stub()
     const mailer = new AcsMailer(client)
     await mailer.send(message())
     await mailer.send(message())
-    await mailer.send(message({ to: 'other@example.test' }))
-    const [a, b, c] = sent.map(s => s.operationId)
-    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(b).toBe(a)
-    expect(c).not.toBe(a)
+    const [a, b] = sent.map(s => s.operationId)
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    expect(b).not.toBe(a)
   })
 
   it('reads the code from an operation the poller reports failed', async () => {

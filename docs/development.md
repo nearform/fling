@@ -254,25 +254,10 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 
 ## Adding a platform
 
-A platform is `platforms/<cloud>/` with:
-- an entry point that builds `Deps` (`buildDeps` with its own adapters);
-- adapters for `Table`, `Blobs` and `RouteTable` that pass `packages/conformance`;
-- for site servers ([docs/site-servers.md](site-servers.md), the design in
-  [docs/design/site-servers.md](design/site-servers.md)), a `SiteServers` adapter that runs a
-  version's `_fling/server.mjs` for `/api/*` and a `ServerLogs` adapter for its log
-  (`apps/api/src/servers/types.ts`), both passing the conformance suites in
-  `packages/conformance/src/site-servers.ts`, which run a fetch handler and a `node:http` server
-  through each. Without them, leave `SERVERS` off and the `servers` capability is off;
-- a `LiveHub` for the live rooms (`apps/api/src/live.ts`): something that keeps a site's sockets
-  and runs the core's room functions (`joinRoom`, `receive`, `leaveRoom`, `broadcast`) over them,
-  plus a `LIVE_URL` where clients connect. A hub whose connections outlive one process keeps them
-  as live connection records through the `Store` (as AWS does). Without one, leave `LIVE_URL` unset
-  and the `live` capability is off;
-- a sites host that calls `routeSiteRequest` and adds the decision's `headers` to what it serves;
-- infrastructure and deploy scripts, plus a `DEPLOY.md`;
-- a local runtime added to `packages/e2e/src/local.ts`.
-
-Differences between platforms are capability flags, never `if (platform === …)`.
+The contract every platform meets and the steps to add one are in
+[docs/design/platform.md](design/platform.md) (§4). Each platform also gets a platform doc in
+[docs/platforms/](platforms/README.md), written to the shared template. Differences between
+platforms are capability flags, never `if (platform === …)`.
 
 ## Shipping
 

@@ -643,7 +643,7 @@ and kept files trust it; no presigned URL can write a version's own keys.
 
 **Finalize claim** — what lets one finalize of a version run at a time (`finalizing` in
 `apps/api/src/publication.ts`, `Store.claimFinalize`): a Table item taken ifAbsent before the
-uploads are copied and checked, released after, lapsing after 30 minutes. Another finalize
+uploads are copied and checked, released after, lapsing after 5 minutes. Another finalize
 meanwhile is 409 `finalize_in_progress`.
 
 **Storable text** — text every store keeps as it is: no NUL and no lone surrogate

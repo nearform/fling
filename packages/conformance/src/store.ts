@@ -1258,6 +1258,25 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.getGrant(e, g.id)).toBeNull()
       })
 
+      it('claimFinalize: one of racing claims wins; only its owner releases; a lapsed one is free', async () => {
+        const store = await factory()
+        const until = '2099-01-01T00:00:00.000Z'
+        const won = await Promise.all(
+          ['a', 'b', 'c'].map(owner => store.claimFinalize('S1', 'V1', owner, until))
+        )
+        expect(won.filter(Boolean)).toHaveLength(1)
+        const owner = ['a', 'b', 'c'][won.indexOf(true)] as string
+        // Another version, or the same one elsewhere, is claimed apart.
+        expect(await store.claimFinalize('S1', 'V2', 'x', until)).toBe(true)
+        expect(await store.claimFinalize('S2', 'V1', 'x', until)).toBe(true)
+        await store.releaseFinalize('S1', 'V1', 'someone else')
+        expect(await store.claimFinalize('S1', 'V1', 'd', until)).toBe(false)
+        await store.releaseFinalize('S1', 'V1', owner)
+        expect(await store.claimFinalize('S1', 'V1', 'd', '2000-01-01T00:00:00.000Z')).toBe(true)
+        // That claim lapsed as it was made: the next one takes it.
+        expect(await store.claimFinalize('S1', 'V1', 'e', until)).toBe(true)
+      })
+
       it('claimRefreshToken: first claim wins, later ones are reuse, unknown is null', async () => {
         const store = await factory()
         const e = email()

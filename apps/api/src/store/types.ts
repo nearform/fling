@@ -918,6 +918,16 @@ export interface Store extends NotificationStore {
     at: string
   ): Promise<{ record: RefreshTokenRecord; reused: boolean } | null>
 
+  // --- finalizing a version ---
+  /**
+   * Claim the finalize of `versionId` (stored under `storage`: a site's or a Path's id) for
+   * `owner` until `until` (ISO): false while another finalize holds an unexpired claim. A claim
+   * lapses at `until`, so a crashed finalize holds nothing for long.
+   */
+  claimFinalize(storage: string, versionId: string, owner: string, until: string): Promise<boolean>
+  /** Let the claim go, if `owner` still holds it. */
+  releaseFinalize(storage: string, versionId: string, owner: string): Promise<void>
+
   // --- chunked MCP uploads ---
   putUpload(upload: UploadRecord): Promise<void>
   getUpload(id: string): Promise<UploadRecord | null>

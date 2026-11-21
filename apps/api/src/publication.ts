@@ -101,7 +101,7 @@
  * on a base) sets that version's config. A Path's version keeps its own, beside its manifest. The
  * config is scanned for secrets like a file sent.
  */
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   type AccessLevel,
   type AudienceInput,
@@ -1093,20 +1093,27 @@ async function finalizePath(
       })
     }
     if (version.status !== 'pending') throw retryLater(folder)
-    const manifest = await blobs.getJson<StoredManifest>(manifestKey(path.id, versionId))
-    if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
-    const layer = manifest.layer ?? null
-    if (layer && path.currentVersionId !== layer.base) {
-      throw baseChanged(`${displayPublishPath(folder)} of "${site.name}"`, layer.base)
-    }
-    const kept = new Set(layer?.kept)
-    await checkUploads(
-      deps,
-      path.id,
-      versionId,
-      manifest.files.filter(f => !kept.has(f.path))
-    )
-    return goLivePath(deps, user, actor, site, path, version, manifest.files, layer)
+    const claimed = await finalizing(deps, path.id, versionId, async () => {
+      // Read again under the claim: a finalize that held it before may have made it live.
+      const pending = await deps.store.getVersion(ref, versionId)
+      if (pending?.status !== 'pending') return null
+      const manifest = await blobs.getJson<StoredManifest>(manifestKey(path.id, versionId))
+      if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
+      const layer = manifest.layer ?? null
+      if (layer && path.currentVersionId !== layer.base) {
+        throw baseChanged(`${displayPublishPath(folder)} of "${site.name}"`, layer.base)
+      }
+      const kept = new Set(layer?.kept)
+      await checkUploads(
+        deps,
+        path.id,
+        versionId,
+        manifest.files.filter(f => !kept.has(f.path)),
+        async () => (await deps.store.getVersion(ref, versionId))?.status === 'pending'
+      )
+      return goLivePath(deps, user, actor, site, path, pending, manifest.files, layer)
+    })
+    return claimed ?? finalizePath(deps, user, actor, site, versionId)
   }
   return null
 }
@@ -1128,7 +1135,8 @@ async function checkUploads(
   deps: Deps,
   storage: string,
   versionId: string,
-  sent: readonly ManifestFile[]
+  sent: readonly ManifestFile[],
+  stillPending: () => Promise<boolean>
 ) {
   const { blobs } = deps
   const staging = blobs.uploadDigest === 'md5'
@@ -1140,6 +1148,10 @@ async function checkUploads(
     })
   }
   const discard = async () => {
+    // Never a version's files once it is live (a finalize whose claim lapsed, say).
+    if (!(await stillPending())) {
+      throw conflict(`Deploy ${versionId} was finalized meanwhile`, 'finalize_in_progress')
+    }
     await blobs.deletePrefix(siteVersionPrefix(storage, versionId))
     if (staging) await blobs.deletePrefix(stagedPrefix(storage, versionId))
   }
@@ -1355,20 +1367,58 @@ export async function publish(
     return goLive(deps, user, actor, site, version, [], acting, layer)
   }
 
-  const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
-  if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
-  const layer = manifest.layer ?? null
-  if (layer && site.currentVersionId !== layer.base) throw baseChanged(`"${name}"`, layer.base)
-  const kept = new Set(layer?.kept)
-  // Upload URLs only accept the manifest's bytes, so what was scanned is what is served.
-  await checkUploads(
-    deps,
-    site.id,
-    versionId,
-    manifest.files.filter(f => !kept.has(f.path))
-  )
-  if (layer) await copyKept(deps, site.id, versionId, layer)
-  return goLive(deps, user, actor, site, version, manifest.files, acting, layer)
+  const claimed = await finalizing(deps, site.id, versionId, async () => {
+    // Read again under the claim: a finalize that held it before may have made it live.
+    const pending = await store.getVersion(site, versionId)
+    if (pending?.status !== 'pending') return null
+    const manifest = await blobs.getJson<StoredManifest>(manifestKey(site.id, versionId))
+    if (!manifest) throw notFound(`Manifest for deploy ${versionId} is gone; deploy again`)
+    const layer = manifest.layer ?? null
+    if (layer && site.currentVersionId !== layer.base) throw baseChanged(`"${name}"`, layer.base)
+    const kept = new Set(layer?.kept)
+    await checkUploads(
+      deps,
+      site.id,
+      versionId,
+      manifest.files.filter(f => !kept.has(f.path)),
+      async () => (await store.getVersion(site, versionId))?.status === 'pending'
+    )
+    if (layer) await copyKept(deps, site.id, versionId, layer)
+    return goLive(deps, user, actor, site, pending, manifest.files, acting, layer)
+  })
+  // Made live (or deleted) by the finalize before: answered as a finalize of what it is now.
+  return claimed ?? publish(deps, user, name, versionId, acting)
+}
+
+/** How long a finalize's claim holds: well past the longest check of a version's files. */
+const FINALIZE_CLAIM_MS = 30 * 60_000
+
+/**
+ * `fn` holding the claim on finalizing `versionId` (Store.claimFinalize), so one finalize at a
+ * time copies, checks, discards or makes it live: another one meanwhile is 409
+ * `finalize_in_progress` and touches nothing. A crashed finalize's claim lapses after
+ * FINALIZE_CLAIM_MS. Every store takes it, MD5-bound or not: two finalizes racing are a hazard
+ * anywhere (one discarding what the other made live).
+ */
+async function finalizing<T>(
+  deps: Deps,
+  storage: string,
+  versionId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const owner = randomUUID()
+  const until = new Date(deps.clock.now().getTime() + FINALIZE_CLAIM_MS).toISOString()
+  if (!(await deps.store.claimFinalize(storage, versionId, owner, until))) {
+    throw conflict(
+      `Deploy ${versionId} is being finalized already: finalize again in a minute`,
+      'finalize_in_progress'
+    )
+  }
+  try {
+    return await fn()
+  } finally {
+    await deps.store.releaseFinalize(storage, versionId, owner)
+  }
 }
 
 /**

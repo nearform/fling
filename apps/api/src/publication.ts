@@ -392,22 +392,33 @@ function secretDetected(findings: readonly SecretFinding[]): ApiError {
 
 /**
  * Read back a staged version's objects and scan them: every text-like file up to
- * SECRET_SCAN_MAX_FILE_BYTES (= the per-file limit), SCAN_CONCURRENCY at a time.
+ * SECRET_SCAN_MAX_FILE_BYTES (= the per-file limit), SCAN_CONCURRENCY at a time. With `verify` (a
+ * store whose uploads are bound only to an MD5), every file is read and its SHA-256 checked too;
+ * the paths whose bytes are not the manifest's are `mismatched`.
  */
 async function scanStoredVersion(
   deps: Deps,
   siteId: string,
   versionId: string,
-  files: readonly ManifestFile[]
-): Promise<SecretFinding[]> {
-  const toScan = files.filter(
-    f => isScannablePath(f.path) && f.size > 0 && f.size <= SECRET_SCAN_MAX_FILE_BYTES
-  )
-  const results = await mapLimit(toScan, SCAN_CONCURRENCY, async f => {
+  files: readonly ManifestFile[],
+  verify = false
+): Promise<{ findings: SecretFinding[]; mismatched: string[] }> {
+  const scannable = (f: ManifestFile) =>
+    isScannablePath(f.path) && f.size > 0 && f.size <= SECRET_SCAN_MAX_FILE_BYTES
+  const toRead = verify ? files : files.filter(scannable)
+  const results = await mapLimit(toRead, SCAN_CONCURRENCY, async f => {
     const bytes = await deps.blobs.get(siteObjectKey(siteId, versionId, f.path))
-    return bytes ? scanBytesForSecrets(bytes, f.path) : []
+    if (!bytes) return { findings: [], mismatched: verify ? [f.path] : [] }
+    const wrong = verify && createHash('sha256').update(bytes).digest('hex') !== f.sha256
+    return {
+      findings: scannable(f) ? scanBytesForSecrets(bytes, f.path) : [],
+      mismatched: wrong ? [f.path] : [],
+    }
   })
-  return results.flat()
+  return {
+    findings: results.flatMap(r => r.findings),
+    mismatched: results.flatMap(r => r.mismatched),
+  }
 }
 
 // --- shared steps -------------------------------------------------------------------------------
@@ -1100,7 +1111,9 @@ async function finalizePath(
 /**
  * Every file uploaded, at its size (409 `missing_uploads` otherwise), and read back and scanned
  * for secrets: the server never saw these bytes. A secret → what was uploaded is deleted (the
- * version stays pending with no manifest; deploying again starts over) and 422.
+ * version stays pending with no manifest; deploying again starts over) and 422. On a store whose
+ * uploads are bound only to an MD5 (`Blobs.uploadDigest`), every file's SHA-256 is checked too, and
+ * one that isn't the manifest's is deleted the same way, with 409 `upload_mismatch`.
  */
 async function checkUploads(
   deps: Deps,
@@ -1123,11 +1136,26 @@ async function checkUploads(
       { missing }
     )
   }
-  const findings = await scanStoredVersion(deps, storage, versionId, sent)
-  if (findings.length > 0) {
+  const { findings, mismatched } = await scanStoredVersion(
+    deps,
+    storage,
+    versionId,
+    sent,
+    blobs.uploadDigest === 'md5'
+  )
+  if (findings.length > 0 || mismatched.length > 0) {
     await blobs.deletePrefix(siteVersionPrefix(storage, versionId))
     await blobs.delete(manifestKey(storage, versionId))
-    throw secretDetected(findings)
+    if (findings.length > 0) throw secretDetected(findings)
+    const listed = mismatched.slice(0, MAX_MISSING_LISTED)
+    const more =
+      mismatched.length > listed.length ? ` (+${mismatched.length - listed.length} more)` : ''
+    throw conflict(
+      `${mismatched.length} file(s) uploaded are not the bytes the manifest names: ` +
+        `${listed.join(', ')}${more}. Deploy again.`,
+      'upload_mismatch',
+      { mismatched }
+    )
   }
 }
 

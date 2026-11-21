@@ -1,9 +1,10 @@
 /** Builds the Hono app from injected deps — no AWS here, so tests run on memory/fs fakes. */
-import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH } from '@fling/shared'
+import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH, MAX_FILE_BYTES } from '@fling/shared'
 import { Hono } from 'hono'
 import { FS_DOWNLOAD_ROUTE, FS_UPLOAD_ROUTE, FsBlobs } from './blobs/fs.ts'
 import { keyFromPath } from './blobs/signed-url.ts'
 import { instanceMetadata, RELEASE } from './instance.ts'
+import { bodyUpTo } from './lib/body.ts'
 import {
   errorHandler,
   notFoundHandler,
@@ -56,18 +57,24 @@ export function createApp(deps: Deps) {
     const forbidden = (message: string) => ({ error: { code: 'forbidden', message } })
     app.put(`${FS_UPLOAD_ROUTE}/*`, async c => {
       const key = keyFromPath(c.req.path, FS_UPLOAD_ROUTE)
-      const ok =
-        key !== null &&
-        (await blobs.acceptUpload({
-          key,
-          exp: c.req.query('exp'),
-          sig: c.req.query('sig'),
-          contentType: c.req.header('content-type') ?? '',
-          cacheControl: c.req.header('cache-control') ?? '',
-          checksum: c.req.header('x-amz-checksum-sha256') ?? '',
-          body: new Uint8Array(await c.req.arrayBuffer()),
-        }))
-      if (!ok) return c.json(forbidden('Bad signature or checksum'), 403)
+      if (key === null) return c.json(forbidden('Bad signature or checksum'), 403)
+      const signed = {
+        key,
+        exp: c.req.query('exp'),
+        sig: c.req.query('sig'),
+        contentType: c.req.header('content-type') ?? '',
+        cacheControl: c.req.header('cache-control') ?? '',
+        checksum: c.req.header('x-amz-checksum-sha256') ?? '',
+      }
+      // The signature first, so no unsigned request has its body read; then at most a file's bytes.
+      if (!blobs.verifiesUpload(signed)) return c.json(forbidden('Bad signature or checksum'), 403)
+      const body = await bodyUpTo(c.req.raw, MAX_FILE_BYTES)
+      if (!body) {
+        return c.json({ error: { code: 'too_large', message: 'The file is too large' } }, 413)
+      }
+      if (!(await blobs.acceptUpload({ ...signed, body }))) {
+        return c.json(forbidden('Bad signature or checksum'), 403)
+      }
       return c.body(null, 200)
     })
     app.get(`${FS_DOWNLOAD_ROUTE}/*`, async c => {

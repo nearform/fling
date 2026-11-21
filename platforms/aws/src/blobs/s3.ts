@@ -48,6 +48,10 @@ export class S3Blobs implements Blobs {
     private opts: S3BlobsOptions = {}
   ) {}
 
+  get uploadDigest(): S3Digest {
+    return this.opts.digest ?? 'sha256'
+  }
+
   async presignPut(key: string, opts: PresignPutOptions): Promise<PresignedPut> {
     const md5 = this.opts.digest === 'md5'
     if (md5 && !opts.md5) {

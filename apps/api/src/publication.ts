@@ -1390,8 +1390,12 @@ export async function publish(
   return claimed ?? publish(deps, user, name, versionId, acting)
 }
 
-/** How long a finalize's claim holds: well past the longest check of a version's files. */
-const FINALIZE_CLAIM_MS = 30 * 60_000
+/**
+ * How long a finalize's claim holds: past the longest request any platform lets a finalize run
+ * (the API Lambda's timeout, a Worker's request), and short, because a finalize killed before it
+ * releases (a timeout, an evicted isolate) blocks every retry until its claim lapses.
+ */
+const FINALIZE_CLAIM_MS = 5 * 60_000
 
 /**
  * `fn` holding the claim on finalizing `versionId` (Store.claimFinalize), so one finalize at a
@@ -1410,14 +1414,21 @@ async function finalizing<T>(
   const until = new Date(deps.clock.now().getTime() + FINALIZE_CLAIM_MS).toISOString()
   if (!(await deps.store.claimFinalize(storage, versionId, owner, until))) {
     throw conflict(
-      `Deploy ${versionId} is being finalized already: finalize again in a minute`,
+      `Deploy ${versionId} is being finalized already: deploy again in a few minutes (a finalize that stopped part way frees it within ${FINALIZE_CLAIM_MS / 60_000} minutes)`,
       'finalize_in_progress'
     )
   }
   try {
     return await fn()
   } finally {
-    await deps.store.releaseFinalize(storage, versionId, owner)
+    // the claim lapses anyway: a failed release must not turn a finalize that worked into an error
+    await deps.store
+      .releaseFinalize(storage, versionId, owner)
+      .catch(err =>
+        console.warn(
+          JSON.stringify({ level: 'warn', msg: 'finalize claim release failed', err: String(err) })
+        )
+      )
   }
 }
 

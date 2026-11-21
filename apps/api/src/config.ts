@@ -115,9 +115,9 @@ const envSchema = z.object({
   SSM_PREFIX: optionalString,
   STORE_DRIVER: z.preprocess(
     blank,
-    z.enum(['dynamo', 'd1', 'postgres', 'firestore', 'memory']).optional()
+    z.enum(['dynamo', 'd1', 'postgres', 'firestore', 'cosmos', 'memory']).optional()
   ),
-  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'gcs', 'fs']).optional()),
+  STORAGE_DRIVER: z.preprocess(blank, z.enum(['s3', 'r2', 'gcs', 'azure-blob', 'fs']).optional()),
   KVS_DRIVER: z.preprocess(
     blank,
     z.enum(['cloudfront', 'workers-kv', 'table', 'memory']).optional()
@@ -156,7 +156,7 @@ const envSchema = z.object({
   ),
   MAIL_DRIVER: z.preprocess(
     blank,
-    z.enum(['ses', 'cloudflare', 'smtp', 'file', 'memory']).optional()
+    z.enum(['ses', 'cloudflare', 'smtp', 'acs', 'file', 'memory']).optional()
   ),
   MAIL_FROM: emailAddress,
   MAIL_FROM_NAME: headerText,
@@ -395,10 +395,10 @@ export interface OidcConfig {
 export interface MailConfig {
   /**
    * Which Mailer sends: the core has `memory` (tests, the e2e's Node runtime) and `file` (local dev,
-   * `.fling-dev/mail/`); a platform supplies `ses`, `cloudflare` or `smtp` (platforms/node, for any
-   * provider or relay that takes SMTP). Production takes only those three.
+   * `.fling-dev/mail/`); a platform supplies `ses`, `cloudflare`, `smtp` (platforms/node, for any
+   * provider or relay that takes SMTP) or `acs` (platforms/azure). Production takes only those.
    */
-  driver: 'ses' | 'cloudflare' | 'smtp' | 'file' | 'memory'
+  driver: 'ses' | 'cloudflare' | 'smtp' | 'acs' | 'file' | 'memory'
   /** The sender address (`MAIL_FROM`), on a domain that is not the sites domain. */
   from: string
   /** The sender's display name (`MAIL_FROM_NAME`, default INSTANCE_NAME). */
@@ -503,11 +503,11 @@ export interface Config {
    * Which adapter each port uses. The core has the dev/test ones (memory, fs); a platform entry
    * supplies the others (platforms/aws: dynamo, s3, cloudfront; platforms/cloudflare: d1, r2,
    * workers-kv; platforms/node: postgres, and `table`, the routes in the Table itself;
-   * platforms/gcp: firestore, gcs and `table`).
+   * platforms/gcp: firestore, gcs and `table`; platforms/azure: cosmos, azure-blob and `table`).
    * Production defaults to the AWS ones.
    */
-  storeDriver: 'dynamo' | 'd1' | 'postgres' | 'firestore' | 'memory'
-  storageDriver: 's3' | 'r2' | 'gcs' | 'fs'
+  storeDriver: 'dynamo' | 'd1' | 'postgres' | 'firestore' | 'cosmos' | 'memory'
+  storageDriver: 's3' | 'r2' | 'gcs' | 'azure-blob' | 'fs'
   kvsDriver: 'cloudfront' | 'workers-kv' | 'table' | 'memory'
   /** The Postgres schema of the `postgres` store driver (`DATABASE_SCHEMA`, default `public`). */
   databaseSchema?: string
@@ -729,7 +729,7 @@ function mailConfig(e: z.infer<typeof envSchema>, cfg: BaseConfig): MailConfig |
   if (!e.MAIL_DRIVER) return undefined
   if (production && (e.MAIL_DRIVER === 'file' || e.MAIL_DRIVER === 'memory')) {
     throw new Error(
-      `MAIL_DRIVER must be ses, cloudflare or smtp in production (got ${e.MAIL_DRIVER})`
+      `MAIL_DRIVER must be ses, cloudflare, smtp or acs in production (got ${e.MAIL_DRIVER})`
     )
   }
   if (!e.MAIL_FROM) throw new Error('MAIL_FROM is required with MAIL_DRIVER')

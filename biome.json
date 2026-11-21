@@ -123,6 +123,10 @@
                   {
                     "group": ["cloudflare:*", "@cloudflare/*", "miniflare"],
                     "message": "The core is cloud-agnostic: Workers runtime code belongs in platforms/cloudflare."
+                  },
+                  {
+                    "group": ["@azure/*"],
+                    "message": "The core is cloud-agnostic: Azure SDK code belongs in platforms/azure."
                   }
                 ]
               }

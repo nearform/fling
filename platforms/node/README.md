@@ -30,6 +30,7 @@ configuration), and these of its own:
 | Name | Default | What |
 |---|---|---|
 | `PORT` | `8080` | Where it listens |
+| `MAX_REQUEST_BYTES` | `33554432` (32 MiB) | The largest request body it takes; more is a 413 |
 | `FS_ROOT` | `.fling-node` | Site files, site servers' working copies and, without `DATABASE_URL`, PGlite's database |
 | `DATABASE_URL` (secret) | none: PGlite, one process | The Postgres to keep the Table in. Several processes on it share their live rooms |
 | `DATABASE_SCHEMA` | `public` | The Postgres schema the Table is in, so instances can share a database |

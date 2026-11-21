@@ -13,7 +13,7 @@ import {
 } from '@fling/conformance'
 import { simpleParser } from 'mailparser'
 import { SMTPServer } from 'smtp-server'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { SmtpMailer, smtpFailure, smtpMailerFor } from '../src/mail/smtp.ts'
 
 /** What providers answer for each failure, as (code, reply). */
@@ -136,11 +136,17 @@ describe('SmtpMailer', () => {
     await new Promise<void>(resolve => closed.listen(0, '127.0.0.1', resolve))
     const gone = (closed.server.address() as AddressInfo).port
     await new Promise<void>(resolve => closed.close(() => resolve()))
-    expect(await mailer({ port: gone }).send(mailMessage())).toMatchObject({
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unreachable = mailer({ port: gone })
+    expect(await unreachable.send(mailMessage())).toMatchObject({
       ok: false,
       retry: true,
       reason: 'transient',
     })
+    await unreachable.send(mailMessage())
+    // Logged once, so a wrong SMTP_HOST or SMTP_PORT shows without flooding the log.
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('could not reach'))).toHaveLength(1)
+    warn.mockRestore()
   })
 
   it('maps replies by code and wording', () => {
@@ -149,11 +155,29 @@ describe('SmtpMailer', () => {
     expect(reply(450, '450 4.2.1 Slow down')).toMatchObject({ reason: 'throttled' })
     expect(reply(552, '552 5.2.2 Mailbox full')).toMatchObject({ reason: 'rejected' })
     expect(reply(550, '550 5.7.1 Inactive recipient')).toMatchObject({ reason: 'suppressed' })
-    expect(reply(554, '554 Sending limit reached')).toMatchObject({
+    expect(reply(554, '554 5.7.0 Sending limit reached')).toMatchObject({
       reason: 'throttled',
       quota: true,
       retry: true,
     })
+    // A recipient's full mailbox is their quota, not ours: it never holds the batches.
+    expect(reply(452, '452 4.2.2 The email account is over quota')).toEqual({
+      ok: false,
+      retry: true,
+      reason: 'transient',
+      detail: 'SMTP 452 4.2.2',
+    })
+    expect(reply(552, '552 5.2.2 Mailbox over quota')).toMatchObject({
+      reason: 'rejected',
+      retry: false,
+    })
+    expect(reply(552, '552 5.2.2 Mailbox over quota')).not.toHaveProperty('quota')
+    // Greylisting asks for a later try: transient, not a rate limit.
+    expect(reply(451, '451 4.7.1 Greylisted, please try again later')).toMatchObject({
+      reason: 'transient',
+      retry: true,
+    })
+    expect(reply(451, '451 4.7.1 Try again later')).not.toHaveProperty('quota')
     expect(smtpFailure(new Error('boom'))).toMatchObject({ reason: 'transient', retry: true })
   })
 

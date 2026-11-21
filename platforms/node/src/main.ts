@@ -15,7 +15,8 @@
  * - **Ticks**: in process, the notifications every minute and maintenance hourly; and the
  *   endpoints (host.ts) for an outside scheduler when TICK_SECRET is set. Repeated ticks are safe.
  *
- * `PORT` (default 8080) is where it listens; the web build (apps/web: `dist`, `dist-404`,
+ * `PORT` (default 8080) is where it listens, `MAX_REQUEST_BYTES` (default 32 MiB) the largest
+ * request body it takes; the web build (apps/web: `dist`, `dist-404`,
  * `dist-review`, `sites-robots.txt`) is read from this checkout. The e2e runs it as the `node`
  * local runtime (packages/e2e/src/local.ts).
  */
@@ -118,6 +119,7 @@ const host = createNodeHost({
     robots: web('sites-robots.txt'),
   },
   live,
+  ...(process.env.MAX_REQUEST_BYTES ? { maxBodyBytes: Number(process.env.MAX_REQUEST_BYTES) } : {}),
   ...(config.secrets.tickSecret
     ? { ticks: { authorize: sharedSecretTicks(config.secrets.tickSecret) } }
     : {}),

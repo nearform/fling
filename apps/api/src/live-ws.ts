@@ -20,7 +20,7 @@ export interface LiveSocketsOptions {
   /** whether live rooms are on (`config.live`) */
   live: boolean
   now: () => Date
-  /** the request's host must be this one, when given (the app host, port included) */
+  /** the request's host must have this name, when given (the app host's; the port aside) */
   host?: string
 }
 
@@ -32,7 +32,8 @@ export function acceptLiveSockets(server: Server, opts: LiveSocketsOptions): () 
   const sockets = new WebSocketServer({ noServer: true })
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
-    const hostOk = !opts.host || req.headers.host?.toLowerCase() === opts.host
+    const name = (host: string | undefined) => host?.toLowerCase().replace(/:\d+$/, '')
+    const hostOk = !opts.host || name(req.headers.host) === name(opts.host)
     const admission =
       url.pathname === LIVE_PATH && opts.live && hostOk
         ? admitTicket(opts.secret, url.searchParams.get('ticket'), opts.now())

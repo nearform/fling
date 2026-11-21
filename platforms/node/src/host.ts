@@ -21,6 +21,14 @@
  *
  * Every adapter is passed in (`deps`), so a cloud platform on Node supplies its own Table, Blobs and
  * mailer and keeps the rest.
+ *
+ * Request bodies: at most `maxBodyBytes` (default 32 MiB: a file at its limit, MAX_FILE_BYTES,
+ * through the upload routes, with room to spare; Lambda takes 6 MB, Workers 100 MB). A declared
+ * Content-Length over it is a 413 before anything runs; a body without one is cut off as it passes
+ * the limit, and the route reading it answers 413 `too_large`.
+ *
+ * Hosts are matched by name, the port aside (one server listens on one port, and a client may
+ * name the default one).
  */
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -30,6 +38,7 @@ import { createApp } from '@fling/api/app'
 import { isApiPath, MCPB_PATH, uiHeaders } from '@fling/api/app-host'
 import type { Blobs } from '@fling/api/blobs'
 import type { HostUploads } from '@fling/api/blobs/host-uploads'
+import { ApiError } from '@fling/api/errors'
 import { contentTypeFor } from '@fling/api/lib/mime'
 import type { MemoryLiveHub } from '@fling/api/live-memory'
 import { acceptLiveSockets } from '@fling/api/live-ws'
@@ -82,6 +91,8 @@ export interface NodeHostOptions {
   live?: MemoryLiveHub
   /** the host's upload and download routes, for a store that can't bind uploads itself */
   uploads?: HostUploads
+  /** the largest request body taken, in bytes (default DEFAULT_MAX_BODY_BYTES) */
+  maxBodyBytes?: number
   ticks?: {
     authorize: TickAuthorizer
     /** how long a tick or a migrate call may run before it returns (default 50 s) */
@@ -90,6 +101,40 @@ export interface NodeHostOptions {
     maintain?: () => Promise<unknown>
   }
 }
+
+/** The largest request body the Node host takes by default: 32 MiB. */
+export const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024
+
+const tooLarge = (max: number) =>
+  new ApiError(413, 'too_large', `The request is too large (at most ${max} bytes)`)
+
+/**
+ * The request with its body held to `max` bytes, or a 413 when it says it is larger. A body
+ * without a Content-Length errors as it passes `max`, with the 413 the API's error handler answers.
+ */
+function capped(request: Request, max: number): Request | Response {
+  if (!request.body) return request
+  const declared = Number(request.headers.get('content-length') ?? Number.NaN)
+  if (declared > max) {
+    const err = tooLarge(max)
+    return json({ error: { code: err.code, message: err.message } }, 413)
+  }
+  let size = 0
+  const limit = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      size += chunk.byteLength
+      if (size > max) controller.error(tooLarge(max))
+      else controller.enqueue(chunk)
+    },
+  })
+  return new Request(request, {
+    body: request.body.pipeThrough(limit),
+    duplex: 'half',
+  } as RequestInit)
+}
+
+/** A Host header's name, without its port. */
+const hostName = (host: string) => host.toLowerCase().replace(/:\d+$/, '')
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -193,7 +238,12 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
   const { config } = deps
   const app = createApp(deps)
   const appHost = new URL(config.appOrigin).host.toLowerCase()
-  const sitesSuffix = `.${config.sitesDomain.toLowerCase()}`
+  const appName = hostName(appHost)
+  const sitesSuffix = `.${hostName(config.sitesDomain)}`
+  const maxBody = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
+  if (!Number.isInteger(maxBody) || maxBody < 1) {
+    throw new Error('maxBodyBytes (MAX_REQUEST_BYTES) must be a positive whole number of bytes')
+  }
   const https = config.appOrigin.startsWith('https:')
   const page = pageReader(opts.pages ?? {}, config.appOrigin)
   const budget = () => Date.now() + (opts.ticks?.budgetMs ?? 50_000)
@@ -220,10 +270,12 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
     )
   }
 
-  async function fetch(request: Request): Promise<Response> {
+  async function fetch(incoming: Request): Promise<Response> {
+    const request = capped(incoming, maxBody)
+    if (request instanceof Response) return request
     const url = new URL(request.url)
-    const host = (request.headers.get('host') ?? url.host).toLowerCase()
-    if (host === appHost) {
+    const host = hostName(request.headers.get('host') ?? url.host)
+    if (host === appName) {
       const path = url.pathname
       if (path.startsWith('/ticks/')) {
         return Object.values(TICK_PATHS).includes(path as never) ? tick(request, path) : notFound()

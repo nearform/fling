@@ -86,17 +86,18 @@ Its inputs:
 | `app_host`, `sites_domain` | (required) | The addresses |
 | `site_cookie_domain` | `sites_domain` | `SITE_COOKIE_DOMAIN` |
 | `dns_zone` | none | The DigitalOcean domain App Platform manages the records in |
-| `image_tag` | (required) | The tag the app starts on; afterwards the workflow sets it |
+| `image_tag` | (required) | The tag the app starts on; afterwards the workflow pins each release by digest |
 | `registry_name`, `create_registry`, `registry_tier` | —, `true`, `basic` | The registry |
 | `instance_size_slug`, `instance_count` | `apps-s-1vcpu-1gb`, `1` | The containers. More than one share the Table and their live rooms through Postgres, and every tick is safe to repeat |
 | `database_size`, `database_node_count` | `db-s-1vcpu-1gb`, `1` | The cluster |
 | `bucket_name` | `<name>-sites` | The bucket (names are unique per region) |
 | `instance` | `{}` | The instance's own configuration ([below](#instance-configuration)) |
-| `instance_secrets` | `{}` | Its secrets: `OIDC_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET`, `SMTP_PASSWORD` |
+| `instance_secrets` | `{}` | Its secrets: `OIDC_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`/`_SECRET`, `SMTP_PASSWORD`. Like `instance`, it may not set a variable the module owns, nor `SERVERS` |
 | `alert_emails` | the team's | Who is told of a failed deploy or domain |
 
 `examples/basic` is a root module to copy. Terraform owns the shape; the workflow owns the code.
-The module ignores the service's image tag after creation, so an apply never rolls a deploy back.
+The module ignores the service's image tag and digest after creation, so an apply never rolls a
+deploy back.
 
 ### The Node host's environment
 
@@ -198,8 +199,8 @@ with a release tag as `ref`. In order:
 
 1. builds the image from the tag, with the instance's address baked into the Claude Desktop
    extension, and pushes `<registry>/fling-node:<release>`;
-2. updates the app's spec with only the service's image tag changed, and waits for the
-   deployment. App Platform starts the new containers, waits for `/healthz`, then moves traffic.
+2. updates the app's spec with only the service's image changed, pinned to the digest just
+   pushed (never the tag, which a later push could move), and waits for the deployment. App Platform starts the new containers, waits for `/healthz`, then moves traffic.
    Each container applies the schema and data migrations on start, under a lock;
 3. waits until `https://$APP_HOST/.well-known/fling` answers for this instance with this release;
 4. calls `POST /ticks/migrate` with `FLING_TICK_SECRET` until it reports `done`;

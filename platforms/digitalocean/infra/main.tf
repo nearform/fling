@@ -3,7 +3,8 @@
 # docs/platforms/digitalocean-self-host.md; the guide is platforms/digitalocean/DEPLOY.md.
 #
 # Terraform owns the shape; the deploy workflow (.github/workflows/deploy-digitalocean.yml) owns
-# the code: it pushes the image and sets the service's image tag, which Terraform then ignores.
+# the code: it pushes the image and points the service at its digest, which Terraform then ignores
+# (with the tag).
 #
 # The generated secrets (session, site HMAC, tick) and the database and Spaces keys are in the app's
 # encrypted environment and also in Terraform state: App Platform's env has no write-only argument.
@@ -179,8 +180,9 @@ resource "digitalocean_app" "fling" {
   }
 
   lifecycle {
-    # The deploy workflow sets the tag of each release (see the header).
-    ignore_changes = [spec[0].service[0].image[0].tag]
+    # The deploy workflow pins each release's image by digest (see the header), in place of the
+    # tag the app was created with.
+    ignore_changes = [spec[0].service[0].image[0].tag, spec[0].service[0].image[0].digest]
   }
 
   depends_on = [digitalocean_container_registry.fling]

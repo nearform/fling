@@ -116,7 +116,7 @@ variable "instance" {
       "STORE_DRIVER", "STORAGE_DRIVER", "KVS_DRIVER", "SITES_BUCKET", "DATABASE_URL",
       "DATABASE_CA_CERT", "S3_ENDPOINT", "S3_PUBLIC_ENDPOINT", "S3_REGION", "S3_FORCE_PATH_STYLE",
       "S3_UPLOAD_DIGEST", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "SESSION_SECRET",
-      "SITE_HMAC_KEY", "TICK_SECRET",
+      "SITE_HMAC_KEY", "TICK_SECRET", "DEV_LOGIN",
     ])) == 0
     error_message = "instance sets a variable the module owns (addresses, drivers, storage, database or the generated secrets)."
   }
@@ -132,6 +132,24 @@ variable "instance_secrets" {
   type        = map(string)
   default     = {}
   sensitive   = true
+
+  # The same keys as instance's are refused here, so nothing the module owns, and no SERVERS,
+  # comes in as a secret instead. Only the names are checked; the values stay sensitive.
+  validation {
+    condition = length(setintersection(nonsensitive(keys(var.instance_secrets)), [
+      "APP_ENV", "APP_ORIGIN", "SITES_DOMAIN", "SITE_COOKIE_DOMAIN", "LIVE_URL", "PORT", "FS_ROOT",
+      "STORE_DRIVER", "STORAGE_DRIVER", "KVS_DRIVER", "SITES_BUCKET", "DATABASE_URL",
+      "DATABASE_CA_CERT", "S3_ENDPOINT", "S3_PUBLIC_ENDPOINT", "S3_REGION", "S3_FORCE_PATH_STYLE",
+      "S3_UPLOAD_DIGEST", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "SESSION_SECRET",
+      "SITE_HMAC_KEY", "TICK_SECRET", "DEV_LOGIN",
+    ])) == 0
+    error_message = "instance_secrets sets a variable the module owns (addresses, drivers, storage, database or the generated secrets)."
+  }
+
+  validation {
+    condition     = !contains(nonsensitive(keys(var.instance_secrets)), "SERVERS")
+    error_message = "SERVERS stays off on App Platform, and is not a secret: leave it out of instance_secrets."
+  }
 }
 
 variable "alert_emails" {

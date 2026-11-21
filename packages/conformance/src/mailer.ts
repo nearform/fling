@@ -63,6 +63,12 @@ export interface MailerConformanceOptions {
    * suppressed address and drops it, so it never reports `suppressed`.
    */
   failures?: readonly ProviderFailure[]
+  /**
+   * The provider sets the sender's display name itself, from its own configuration, and takes none
+   * per message (Azure Communication Services Email: the sender username's display name). The
+   * cases then check the sender's address and leave its name to the provider.
+   */
+  providerSetsFromName?: boolean
 }
 
 const LINE_BREAK = /[\r\n]/
@@ -104,7 +110,10 @@ export function mailerConformance(
       expect(mail).toMatchObject({
         to: 'reader@example.test',
         subject: 'Ana shared q3-report with you',
-        from: { address: 'fling@mail.example.test', name: 'Acme Fling' },
+        from: {
+          address: 'fling@mail.example.test',
+          ...(opts.providerSetsFromName ? {} : { name: 'Acme Fling' }),
+        },
       })
       expect(header(mail as DeliveredMail, 'List-Unsubscribe-Post')).toBe(
         'List-Unsubscribe=One-Click'
@@ -127,7 +136,7 @@ export function mailerConformance(
       )
       const [mail] = await delivered()
       expect(mail?.subject).toBe(subject)
-      expect(mail?.from.name).toBe('Café Fling')
+      if (!opts.providerSetsFromName) expect(mail?.from.name).toBe('Café Fling')
     })
 
     it('never lets CR or LF from a subject, name or header value into the headers', async () => {

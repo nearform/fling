@@ -25,7 +25,8 @@
  * Request bodies: at most `maxBodyBytes` (default 32 MiB: a file at its limit, MAX_FILE_BYTES,
  * through the upload routes, with room to spare; Lambda takes 6 MB, Workers 100 MB). A declared
  * Content-Length over it is a 413 before anything runs; a body without one is cut off as it passes
- * the limit, and the route reading it answers 413 `too_large`.
+ * the limit, and the route reading it answers 413 `too_large`; so does the host, when the read
+ * that failed was a site server's (an ApiError anywhere in the error's causes).
  *
  * Hosts are matched by name, the port aside (one server listens on one port, and a client may
  * name the default one).
@@ -131,6 +132,15 @@ function capped(request: Request, max: number): Request | Response {
     body: request.body.pipeThrough(limit),
     duplex: 'half',
   } as RequestInit)
+}
+
+/** The ApiError among `err` and its causes (undici wraps a body's error in a TypeError). */
+function apiErrorIn(err: unknown): ApiError | null {
+  for (let e = err, depth = 0; e && depth < 5; depth++) {
+    if (e instanceof ApiError) return e
+    e = (e as { cause?: unknown }).cause
+  }
+  return null
 }
 
 /** A Host header's name, without its port. */
@@ -271,6 +281,16 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
   }
 
   async function fetch(incoming: Request): Promise<Response> {
+    try {
+      return await route(incoming)
+    } catch (err) {
+      const known = apiErrorIn(err)
+      if (!known) throw err
+      return json({ error: { code: known.code, message: known.message } }, known.status)
+    }
+  }
+
+  async function route(incoming: Request): Promise<Response> {
     const request = capped(incoming, maxBody)
     if (request instanceof Response) return request
     const url = new URL(request.url)

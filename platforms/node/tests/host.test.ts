@@ -15,6 +15,7 @@ import { buildDeps } from '@fling/api/deps'
 import { type Admission, signTicket } from '@fling/api/live'
 import { type LiveFanout, MemoryLiveHub } from '@fling/api/live-memory'
 import { TableRouteTable } from '@fling/api/route-table/table'
+import type { SiteServers } from '@fling/api/servers/types'
 import { Records } from '@fling/api/store/records'
 import { type LiveHubClient, liveHubConformance, routeTableConformance } from '@fling/conformance'
 import type { LiveServerMessage } from '@fling/shared'
@@ -52,7 +53,9 @@ function webBuild() {
   return dir
 }
 
-async function world(opts: { live?: MemoryLiveHub; db?: PGlite; maxBodyBytes?: number } = {}) {
+async function world(
+  opts: { live?: MemoryLiveHub; db?: PGlite; maxBodyBytes?: number; servers?: SiteServers } = {}
+) {
   const db = pgliteClient(opts.db ?? (await PGlite.create()))
   if (!opts.db) closing.push(() => db.close())
   const schema = `h_${randomBytes(4).toString('hex')}`
@@ -72,7 +75,13 @@ async function world(opts: { live?: MemoryLiveHub; db?: PGlite; maxBodyBytes?: n
   const live = opts.live ?? new MemoryLiveHub()
   const routes = new CachedRouteTable(new TableRouteTable(table))
   const blobs = new FsBlobs(fsRoot, APP, SECRET)
-  const deps = buildDeps(config, { store: new Records(table), blobs, routeTable: routes, live })
+  const deps = buildDeps(config, {
+    store: new Records(table),
+    blobs,
+    routeTable: routes,
+    live,
+    ...(opts.servers ? { servers: opts.servers } : {}),
+  })
   const web = webBuild()
   const host = createNodeHost({
     deps,
@@ -136,6 +145,39 @@ describe('the Node host', () => {
     )
     expect(streamed.status).toBe(413)
     expect(await streamed.json()).toMatchObject({ error: { code: 'too_large' } })
+
+    // A site server reading a body that runs over: 413 as well, never a 500.
+    const servers = {
+      invoke: async (_site: unknown, _version: unknown, req: Request) => {
+        await req.arrayBuffer()
+        return new Response('read')
+      },
+    } as unknown as SiteServers
+    const site = await world({ maxBodyBytes: 1024, servers })
+    await site.routes.put(
+      siteKvsKey('srv'),
+      JSON.stringify({ id: 'S2', v: 'V2', vis: 'public', spa: false, f: 1 })
+    )
+    const chunks = () =>
+      new ReadableStream({
+        start(controller) {
+          for (let i = 0; i < 4; i++) controller.enqueue(bytes.slice(i * 1024, (i + 1) * 1024))
+          controller.close()
+        },
+      })
+    const post = (body: ReadableStream | Uint8Array) =>
+      site.host.fetch(
+        new Request('http://srv.sites.example.test/api/echo', {
+          method: 'POST',
+          headers: { origin: 'http://srv.sites.example.test' },
+          body,
+          duplex: 'half',
+        } as RequestInit)
+      )
+    const invoked = await post(chunks())
+    expect(invoked.status).toBe(413)
+    expect(await invoked.json()).toMatchObject({ error: { code: 'too_large' } })
+    expect(await (await post(bytes.slice(0, 512))).text()).toBe('read')
     expect(await blobs.head('sites/S/V/big.bin')).toBeNull()
   })
 

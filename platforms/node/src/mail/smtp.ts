@@ -13,8 +13,9 @@
  * - the recipient's mailbox is full (`452 4.2.2`, `552 5.2.2`, "over quota") → `transient` for a
  *   4xx, `rejected` for a 5xx: it is their quota, never the sender's;
  * - our daily or sending quota, a policy reply that says so (`454 4.7.0 Daily sending quota
- *   exceeded`, any 4.7.x or 5.7.x) → `throttled`, `quota`, which holds the batches until the next
- *   UTC day;
+ *   exceeded`, any 4.7.x or 5.7.x) or a 4xx without an enhanced code that does (SES's
+ *   `454 Throttling failure: Daily message quota exceeded.`) → `throttled`, `quota`, which holds
+ *   the batches until the next UTC day;
  * - a rate limit, or `421` (the server sheds load) → `throttled`;
  * - any other 4xx (greylisting's `451 4.7.1 Try again later` included), and a connection that
  *   fails or times out → `transient`. A connection or TLS failure is also logged as a warning, once
@@ -82,7 +83,10 @@ export function smtpFailure(err: unknown): Failure {
       ? { ok: false, retry: true, reason: 'transient', detail }
       : { ok: false, retry: false, reason: 'rejected', detail }
   }
-  if (parts?.[2] === '7' && QUOTA.test(reply)) {
+  // Ours: a policy reply (x.7.x), or a 4xx with no enhanced code at all (Amazon SES's
+  // `454 Throttling failure: Daily message quota exceeded.`).
+  const policy = parts ? parts[2] === '7' : status < 500
+  if (policy && QUOTA.test(reply)) {
     return { ok: false, retry: true, reason: 'throttled', quota: true, detail }
   }
   if (status === 421 || RATE.test(reply)) {

@@ -22,13 +22,14 @@
  *
  * SQL: values are always `$n` parameters, never text; identifiers (the schema, `items`) only
  * through ident.ts, and integers (a LIMIT) through `int`. The rest is fixed fragments: operators
- * of `CursorOp`, `ASC`/`DESC`. tests/sql-guard.test.ts holds every SQL string here to that.
+ * of `CURSOR_SQL`, `ASC`/`DESC`. tests/sql-guard.test.ts holds every SQL string here to that.
  *
  * Strings: jsonb holds neither NUL nor a lone surrogate, which the other backends store. A string
  * (value or field name) holding one is stored as `{"~fling~esc": "s", "u": [its UTF-16 code
  * units]}`, and an object whose field names need it, or that has a `~fling~esc` field of its own,
- * as `{"~fling~esc": "o", "e": [[name, value], …]}`; reads undo it. Only items that need it pay
- * for it. Keys are never escaped (that would change their order): one that isn't `storableKey`
+ * as `{"~fling~esc": "o", "e": [[name, value], …]}`, and the whole item is then stored as
+ * `{"~fling~esc": "item", "d": …}`, the marker reads look for; reads undo it. Only items that need
+ * it pay for it, on write and on read. Keys are never escaped (that would change their order): one that isn't `storableKey`
  * reads as absent, as on every backend, and a cursor holding a NUL is compared up to the NUL,
  * which orders the same against keys that hold none.
  */
@@ -111,6 +112,13 @@ function unescaped(value: unknown): unknown {
 /** The comparisons a cursor makes: a closed set of fixed fragments. */
 type CursorOp = '>' | '<' | '<='
 
+/** Each comparison as a fixed fragment around its `$n` placeholder. */
+const CURSOR_SQL: Record<CursorOp, (n: number) => string> = {
+  '>': n => `sk > $${n}`,
+  '<': n => `sk < $${n}`,
+  '<=': n => `sk <= $${n}`,
+}
+
 /** A cursor's sk as Postgres can compare it: up to its first NUL, if it has one. */
 function cursorBound(sk: string, reverse: boolean | undefined): { op: CursorOp; sk: string } {
   const nul = sk.indexOf('\0')
@@ -129,9 +137,8 @@ const lockId = (k: Key) =>
   BigInt.asIntN(64, createHash('sha256').update(keyOf(k)).digest().readBigUInt64BE(0))
 
 const fromRow = (row: Row): TableItem => {
-  const fields = MAY_NEED_ESCAPE.test(JSON.stringify(row.data))
-    ? (unescaped(row.data) as Row['data'])
-    : row.data
+  // Only an escaped item has ESC at its top (dataOf): every other row is read as it is.
+  const fields = row.data[ESC] === 'item' ? (unescaped(row.data.d) as Row['data']) : row.data
   return { ...fields, pk: row.pk, sk: row.sk }
 }
 
@@ -140,7 +147,7 @@ function dataOf(item: TableItem): string {
   checkExpiresAt(item.expiresAt)
   const { pk: _pk, sk: _sk, ...fields } = item
   const json = JSON.stringify(fields)
-  return MAY_NEED_ESCAPE.test(json) ? JSON.stringify(escaped(fields)) : json
+  return MAY_NEED_ESCAPE.test(json) ? JSON.stringify({ [ESC]: 'item', d: escaped(fields) }) : json
 }
 
 function holds(cond: Condition | undefined, item: TableItem | null): boolean {
@@ -272,12 +279,11 @@ export class PostgresTable implements Table {
     if (opts.cursor !== undefined) {
       const bound = cursorBound(decodeCursor(opts.cursor), opts.reverse)
       params.push(bound.sk)
-      where.push(`sk ${bound.op} $${params.length}`)
+      where.push(CURSOR_SQL[bound.op](params.length))
     }
-    const order: 'ASC' | 'DESC' = opts.reverse ? 'DESC' : 'ASC'
     const { rows } = await this.db.query<Row>(
       `SELECT pk, sk, data FROM ${this.items} WHERE ${where.join(' AND ')} ` +
-        `ORDER BY sk ${order}${limitSql(limit)}`,
+        `ORDER BY sk ${opts.reverse ? 'DESC' : 'ASC'}${limitSql(limit)}`,
       params
     )
     return page(rows, limit, row => encodeCursor(row.sk))

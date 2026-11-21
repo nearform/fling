@@ -1,0 +1,7 @@
+# The build context is the repository root; the image takes only the bundle and the web build.
+*
+!platforms/azure/dist/
+!apps/web/dist/
+!apps/web/dist-404/
+!apps/web/dist-review/
+!apps/web/sites-robots.txt

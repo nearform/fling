@@ -275,7 +275,13 @@ describe('the pg pool settings', () => {
     expect(pgPoolConfig(url, ca).ssl).toEqual({ ca, rejectUnauthorized: true })
   })
 
-  it('refuses a URL whose sslmode would replace the CA', () => {
-    expect(() => pgPoolConfig(`${url}?sslmode=require`, ca)).toThrow(/sslmode/)
+  it('refuses a URL whose ssl parameters would replace the CA', () => {
+    for (const query of ['?sslmode=require', '?ssl=true', '?application_name=f&sslrootcert=x']) {
+      expect(() => pgPoolConfig(`${url}${query}`, ca)).toThrow(/sslmode/)
+    }
+    expect(pgPoolConfig(`${url}?application_name=fling`, ca).ssl).toEqual({
+      ca,
+      rejectUnauthorized: true,
+    })
   })
 })

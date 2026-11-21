@@ -80,6 +80,7 @@ jobs:
           echo "migrateJob=$(jq -er '.jobs.migrate' <<<"$c")" >> "$GITHUB_OUTPUT"
           echo "frontDoorProfile=$(jq -er '.frontDoor.profile' <<<"$c")" >> "$GITHUB_OUTPUT"
           echo "frontDoorEndpoint=$(jq -er '.frontDoor.endpoint' <<<"$c")" >> "$GITHUB_OUTPUT"
+          echo "frontDoorDomains=$(jq -er '.frontDoor.domains | join(" ")' <<<"$c")" >> "$GITHUB_OUTPUT"
           echo "INSTANCE=$(jq -c '.INSTANCE // {}' <<<"$c")" >> "$GITHUB_OUTPUT"
           # The release this build reports in /.well-known/fling (the root package.json's version).
           echo "RELEASE=$(jq -er .version package.json)" >> "$GITHUB_OUTPUT"
@@ -181,6 +182,21 @@ jobs:
           done
           echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance and release $RELEASE (check the app's logs)"; exit 1
 
+      # A host header a visitor sends must not move the request to another host: the app routes by
+      # the X-Fling-Host Front Door's rule overwrites, never X-Forwarded-Host.
+      - name: Check spoofed host headers
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.appOrigin }}
+        run: |
+          set -euo pipefail
+          sites="$(curl -fsS "$APP_ORIGIN/.well-known/fling?deploy=$SHA" | jq -er .sitesDomain)"
+          other="spoof-check.$sites"
+          meta="$(curl -fsS -H "X-Forwarded-Host: $other" -H "X-Fling-Host: $other" \
+            "$APP_ORIGIN/.well-known/fling?spoof=$SHA")" || {
+            echo "::error::$APP_ORIGIN answered a request with spoofed host headers as another host"; exit 1; }
+          jq -e --arg origin "$APP_ORIGIN" '.appOrigin == $origin' <<<"$meta" >/dev/null || {
+            echo "::error::spoofed host headers changed what $APP_ORIGIN answered"; exit 1; }
+
       # Everything, on both domains: every client-side route is served as index.html, and the sites'
       # 404 and review pages come from the image. Hashed assets are fetched again once, by name.
       - name: Purge Front Door
@@ -188,10 +204,13 @@ jobs:
           GROUP: ${{ steps.config.outputs.resourceGroup }}
           PROFILE: ${{ steps.config.outputs.frontDoorProfile }}
           ENDPOINT: ${{ steps.config.outputs.frontDoorEndpoint }}
+          DOMAINS: ${{ steps.config.outputs.frontDoorDomains }}
         run: |
           set -euo pipefail
+          # The custom domains by name, so the purge covers what visitors are served under.
+          read -ra domains <<<"$DOMAINS"
           az afd endpoint purge --resource-group "$GROUP" --profile-name "$PROFILE" \
-            --endpoint-name "$ENDPOINT" --content-paths '/*'
+            --endpoint-name "$ENDPOINT" --domains "${domains[@]}" --content-paths '/*'
 
       - name: Smoke test
         env:

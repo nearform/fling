@@ -1,7 +1,7 @@
 /**
  * The Container App's handler: Front Door's check and the visitor's Host (front-door.ts) on their
  * own, and the whole host (host.ts) over the Cosmos DB emulator and Azurite where both are
- * configured (services.ts): the API and the sites hosts by X-Forwarded-Host, the hub's event
+ * configured (services.ts): the API and the sites hosts by X-Fling-Host, the hub's event
  * handler on the app host, and nothing for a request that went around Front Door.
  */
 import { loadBaseConfig } from '@fling/api/config'
@@ -40,7 +40,7 @@ describe('behind Front Door', () => {
         method: 'POST',
         headers: {
           'x-origin-verify': SECRET,
-          'x-forwarded-host': 'hello.sites.example.test',
+          'x-fling-host': 'hello.sites.example.test',
           host: 'fling-app.example.azurecontainerapps.io',
         },
         body: 'hi',
@@ -53,7 +53,49 @@ describe('behind Front Door', () => {
     })
   })
 
-  it('leaves a request without X-Forwarded-Host as it came', () => {
+  it('never routes by X-Forwarded-Host, which a visitor can write, and drops it', async () => {
+    const fetch = behindFrontDoor(echoHost, { secret: SECRET })
+    const spoofed = (extra: Record<string, string>) =>
+      fetch(
+        new Request(`${ORIGIN}/`, {
+          headers: {
+            'x-origin-verify': SECRET,
+            'x-forwarded-host': 'other.sites.example.test',
+            ...extra,
+          },
+        })
+      )
+    expect(await (await spoofed({})).json()).toMatchObject({ url: `${ORIGIN}/` })
+    expect(
+      await (await spoofed({ 'x-fling-host': 'hello.sites.example.test' })).json()
+    ).toMatchObject({ host: 'hello.sites.example.test' })
+    const seen = visitorRequest(
+      new Request(`${ORIGIN}/`, {
+        headers: { 'x-forwarded-host': 'other.example.test', 'x-fling-host': 'a.example.test' },
+      })
+    )
+    expect(seen.headers.has('x-forwarded-host')).toBe(false)
+    expect(seen.headers.has('x-fling-host')).toBe(false)
+  })
+
+  it("keeps a response to a site cookie out of Front Door's cache", async () => {
+    const cached = async () =>
+      new Response('file', { headers: { 'cache-control': 'public, max-age=31536000, immutable' } })
+    const fetch = behindFrontDoor(cached, { secret: SECRET })
+    const get = (cookie?: string) =>
+      fetch(
+        new Request(`${ORIGIN}/app.js`, {
+          headers: { 'x-origin-verify': SECRET, ...(cookie ? { cookie } : {}) },
+        })
+      )
+    const control = async (cookie?: string) => (await get(cookie)).headers.get('cache-control')
+    expect(await control()).toBe('public, max-age=31536000, immutable')
+    expect(await control('theme=dark')).toBe('public, max-age=31536000, immutable')
+    expect(await control('a=1; fling_site=x')).toBe('private, max-age=31536000, immutable')
+    expect(await control('fling_pass=y')).toBe('private, max-age=31536000, immutable')
+  })
+
+  it('leaves a request without X-Fling-Host or X-Forwarded-Host as it came', () => {
     const request = new Request(`${ORIGIN}/`)
     expect(visitorRequest(request)).toBe(request)
   })
@@ -92,10 +134,10 @@ describe.runIf(COSMOS_ENDPOINT && AZURITE_ENDPOINT)('the Azure host on the emula
   const via = (host: string, path: string, init: RequestInit = {}) =>
     new Request(`${ORIGIN}${path}`, {
       ...init,
-      headers: { 'x-origin-verify': SECRET, 'x-forwarded-host': host, ...init.headers },
+      headers: { 'x-origin-verify': SECRET, 'x-fling-host': host, ...init.headers },
     })
 
-  it('answers the app host and the sites hosts by the name Front Door forwarded', async () => {
+  it('answers the app host and the sites hosts by the name Front Door wrote', async () => {
     const { fetch } = await host()
     const meta = await fetch(via('fling.example.test', '/.well-known/fling'))
     expect(meta.status).toBe(200)

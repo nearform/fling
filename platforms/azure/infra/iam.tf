@@ -6,7 +6,9 @@
 # - deploy: what the repository's deploy workflow can do, from GitHub Actions over OIDC (a federated
 #   credential for one repository and one GitHub environment, so no Azure secret is kept in
 #   GitHub): push images, point the app and the jobs at a new image, start the migrate job, and
-#   purge Front Door's cache.
+#   purge Front Door's cache. Its roles are the Container Apps ones (nothing outside Microsoft.App)
+#   on the app, its environment and its jobs, and a purge-only role on the Front Door endpoint, so
+#   it can't read the profile's rule set, which holds the origin-verify secret.
 
 resource "azurerm_user_assigned_identity" "app" {
   name                = "${local.name}-app"
@@ -94,22 +96,50 @@ resource "azurerm_role_assignment" "deploy_push" {
 resource "azurerm_role_assignment" "deploy_apps" {
   for_each = merge(
     {
-      app         = azurerm_container_app.app.id
-      environment = azurerm_container_app_environment.this.id
+      app = {
+        scope = azurerm_container_app.app.id
+        role  = "Container Apps Contributor"
+      }
+      environment = {
+        scope = azurerm_container_app_environment.this.id
+        role  = "Container Apps ManagedEnvironments Contributor"
+      }
     },
-    { for k, j in azurerm_container_app_job.this : "job-${k}" => j.id },
+    {
+      for k, j in azurerm_container_app_job.this : "job-${k}" => {
+        scope = j.id
+        role  = "Container Apps Jobs Contributor"
+      }
+    },
   )
 
-  scope                = each.value
-  role_definition_name = "Contributor"
+  scope                = each.value.scope
+  role_definition_name = each.value.role
   principal_id         = azurerm_user_assigned_identity.deploy.principal_id
   principal_type       = "ServicePrincipal"
 }
 
-# Purge Front Door's cache after a deploy.
+# Purge Front Door's cache after a deploy, and nothing else: CDN Profile Contributor (or Reader)
+# on the profile could read the rule set, and with it the origin-verify secret.
+resource "azurerm_role_definition" "purge" {
+  name        = "${local.name} Front Door purge"
+  scope       = azurerm_cdn_frontdoor_profile.this.id
+  description = "Purge the cache of one Fling instance's Front Door endpoint."
+
+  permissions {
+    actions = [
+      "Microsoft.Cdn/profiles/read",
+      "Microsoft.Cdn/profiles/afdendpoints/read",
+      "Microsoft.Cdn/profiles/afdendpoints/purge/action",
+    ]
+  }
+
+  assignable_scopes = [azurerm_cdn_frontdoor_profile.this.id]
+}
+
 resource "azurerm_role_assignment" "deploy_purge" {
-  scope                = azurerm_cdn_frontdoor_profile.this.id
-  role_definition_name = "CDN Profile Contributor"
-  principal_id         = azurerm_user_assigned_identity.deploy.principal_id
-  principal_type       = "ServicePrincipal"
+  scope              = azurerm_cdn_frontdoor_endpoint.this.id
+  role_definition_id = azurerm_role_definition.purge.role_definition_resource_id
+  principal_id       = azurerm_user_assigned_identity.deploy.principal_id
+  principal_type     = "ServicePrincipal"
 }

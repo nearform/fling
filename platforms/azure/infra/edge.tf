@@ -6,10 +6,13 @@
 #   When the hostname is the sites domain, both validate at the same name.
 # - One route, `/*` on both domains, HTTPS only, to the app's ingress. Front Door caches what the
 #   app marks cacheable (public sites' files and the UI's hashed assets), keyed on the query
-#   string; everything private is `no-store` or `private` at the origin.
-# - A rule set adds X-Origin-Verify (the origin-verify secret) to every request it forwards; the
-#   app refuses requests without it. Front Door also forwards the visitor's Host as
-#   X-Forwarded-Host, since it sends the app's own hostname as Host.
+#   string; everything private is `no-store` or `private` at the origin, and so is any response to
+#   a request carrying a site cookie (src/front-door.ts).
+# - A rule set writes two headers on every request it forwards, overwriting any the visitor sent:
+#   X-Origin-Verify (the origin-verify secret), which the app refuses requests without, and
+#   X-Fling-Host (the host name the visitor asked for), which the app routes by, since Front Door
+#   sends the app's own hostname as Host. The app never reads X-Forwarded-Host: Front Door appends
+#   to one the visitor sends.
 
 locals {
   # Front Door resource names: letters, digits and hyphens.
@@ -87,6 +90,12 @@ resource "azurerm_cdn_frontdoor_rule" "origin_verify" {
       header_action = "Overwrite"
       header_name   = "X-Origin-Verify"
       value         = random_password.origin_verify.result
+    }
+
+    request_header_action {
+      header_action = "Overwrite"
+      header_name   = "X-Fling-Host"
+      value         = "{hostname}"
     }
   }
 }

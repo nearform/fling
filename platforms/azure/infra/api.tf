@@ -8,7 +8,7 @@
 # Ingress is external, because Front Door Standard reaches origins over the internet. The app
 # refuses a request without the X-Origin-Verify header Front Door adds (ORIGIN_VERIFY_SECRET).
 # Front Door sends the Container App's own hostname as Host, which Container Apps routes by, and
-# the visitor's as X-Forwarded-Host, which the app routes by once the header has proved Front Door.
+# its rule writes the visitor's as X-Fling-Host, which the app routes by (edge.tf).
 #
 # Until the first deploy the app and the jobs run a placeholder image. The deploy workflow points
 # them at the image it pushed (az containerapp update --image), and Terraform ignores the image
@@ -23,7 +23,6 @@ locals {
   # var.environment can still set or override any key here except those the module owns.
   environment = merge(
     {
-      APP_ENV            = "production"
       APP_ORIGIN         = local.url
       SITES_DOMAIN       = local.sites_domain
       SITE_SCHEME        = "https"
@@ -32,6 +31,7 @@ locals {
     },
     var.environment,
     {
+      APP_ENV             = "production"
       PORT                = "8080"
       STORE_DRIVER        = "cosmos"
       STORAGE_DRIVER      = "azure-blob"

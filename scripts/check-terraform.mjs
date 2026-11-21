@@ -1,17 +1,37 @@
-// The Terraform gate (part of `pnpm gate`): platforms/aws/infra is formatted (`terraform fmt`) and
-// valid, checked through its example root module (the module alone can't be validated: it takes
-// an aliased provider from its caller), and its tests (`terraform test`, infra/tests/*.tftest.hcl:
-// plans against mocked AWS providers). Offline apart from downloading the providers on first run;
-// never talks to AWS (`init -backend=false`, validate reads no state, the tests mock AWS).
+// The Terraform gate (part of `pnpm gate`): every platform's module (`platforms/*/infra`) is
+// formatted (`terraform fmt`) and valid, checked through its example root modules
+// (`infra/examples/*`: a module alone can't always be validated, as AWS's takes an aliased provider
+// from its caller; one without examples is validated as it is), and passes its tests (`terraform test`, `infra/tests/*.tftest.hcl`: plans
+// against mocked providers) when it has any. Offline apart from downloading the providers on first
+// run; never talks to a cloud (`init -backend=false`, validate reads no state, the tests mock the
+// providers).
 //
 // Without terraform on PATH this skips with a notice, so the gate still passes on a laptop without
 // it. In CI (CI=true; ci.yml installs it) a missing terraform fails instead.
 import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
-const MODULE = 'platforms/aws/infra'
-const EXAMPLES = ['platforms/aws/infra/examples/basic']
+
+/** The subdirectories of `dir` (relative to the repo), sorted; none when it doesn't exist. */
+const dirsIn = dir =>
+  existsSync(join(root, dir))
+    ? readdirSync(join(root, dir), { withFileTypes: true })
+        .filter(d => d.isDirectory())
+        .map(d => `${dir}/${d.name}`)
+        .sort()
+    : []
+
+const MODULES = dirsIn('platforms')
+  .map(platform => `${platform}/infra`)
+  .filter(module => existsSync(join(root, module)))
+
+if (MODULES.length === 0) {
+  console.log('check-terraform: no platforms/*/infra modules')
+  process.exit(0)
+}
 
 if (spawnSync('terraform', ['version'], { stdio: 'ignore' }).error) {
   if (process.env.CI) {
@@ -19,7 +39,7 @@ if (spawnSync('terraform', ['version'], { stdio: 'ignore' }).error) {
     process.exit(1)
   }
   console.log(
-    'check-terraform: skipped, terraform not found (install it to check platforms/aws/infra)'
+    `check-terraform: skipped, terraform not found (install it to check ${MODULES.join(', ')})`
   )
   process.exit(0)
 }
@@ -35,12 +55,25 @@ const run = (args, cwd = root) => {
   }
 }
 
-run(['fmt', '-check', '-recursive', '-diff', MODULE])
-for (const dir of EXAMPLES) {
-  const cwd = `${root}${dir}`
-  run(['init', '-backend=false', '-input=false', '-no-color'], cwd)
-  run(['validate', '-no-color'], cwd)
+const done = []
+for (const module of MODULES) {
+  run(['fmt', '-check', '-recursive', '-diff', module])
+  // A module without examples is validated as it is.
+  const examples = dirsIn(`${module}/examples`)
+  for (const dir of examples.length ? examples : [module]) {
+    const cwd = join(root, dir)
+    run(['init', '-backend=false', '-input=false', '-no-color'], cwd)
+    run(['validate', '-no-color'], cwd)
+  }
+  const tests = existsSync(join(root, module, 'tests'))
+    ? readdirSync(join(root, module, 'tests')).filter(f => f.endsWith('.tftest.hcl'))
+    : []
+  if (tests.length > 0) {
+    run(['init', '-backend=false', '-input=false', '-no-color'], join(root, module))
+    run(['test', '-no-color'], join(root, module))
+  }
+  done.push(
+    `fmt ${module}; validate ${examples.join(', ') || module}; ${tests.length ? `test ${module}` : 'no tests'}`
+  )
 }
-run(['init', '-backend=false', '-input=false', '-no-color'], `${root}${MODULE}`)
-run(['test', '-no-color'], `${root}${MODULE}`)
-console.log(`check-terraform: ok (fmt ${MODULE}; validate ${EXAMPLES.join(', ')}; test ${MODULE})`)
+console.log(`check-terraform: ok (${done.join('; ')})`)

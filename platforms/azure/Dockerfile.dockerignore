@@ -5,3 +5,4 @@
 !apps/web/dist-404/
 !apps/web/dist-review/
 !apps/web/sites-robots.txt
+!apps/cli/dist/fling.mcpb

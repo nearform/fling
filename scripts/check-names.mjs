@@ -30,6 +30,7 @@ const ALLOWED = {
   'platforms/gcp/DEPLOY.md': [REPO],
   'platforms/node/DEPLOY.md': [REPO],
   'platforms/digitalocean/DEPLOY.md': [REPO],
+  'platforms/azure/DEPLOY.md': [REPO],
   '.github/workflows/release-cli.yml': [PACKAGE, REPO],
   // The "Why Fling?" page, a static site published with Fling itself.
   'why/index.html': [PACKAGE, REPO],

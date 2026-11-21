@@ -32,7 +32,8 @@ FLING_TEST_POSTGRES_URL=postgres://postgres:fling-test@localhost:5432/postgres \
 
 docker run -d -p 8086:8080 gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
   gcloud emulators firestore start --host-port=0.0.0.0:8080
-docker run -d -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
+docker run -d -p 4443:4443 fsouza/fake-gcs-server:1.56.1 -scheme http -port 4443 \
+  -public-host localhost:4443
 FLING_TEST_FIRESTORE_EMULATOR_HOST=localhost:8086 \
   FLING_TEST_GCS_ENDPOINT=http://localhost:4443 pnpm --filter @fling/platform-gcp test
 

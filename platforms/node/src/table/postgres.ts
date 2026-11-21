@@ -17,25 +17,43 @@
  * in JS, the way MemoryTable evaluates them, so `1`, `'1'` and `true` stay distinct.
  *
  * Expiry: `expires_at` mirrors expiresAt in epoch ms; reads and conditions ignore dead items, and
- * `purgeExpired` (the host's maintenance tick) deletes them.
+ * `purgeExpired` (the host's maintenance tick) deletes them, checking each one is still dead as it
+ * deletes it, so an item put again meanwhile stays.
+ *
+ * SQL: values are always `$n` parameters, never text; identifiers (the schema, `items`) only
+ * through ident.ts, and integers (a LIMIT) through `int`. The rest is fixed fragments: operators
+ * of `CursorOp`, `ASC`/`DESC`. tests/sql-guard.test.ts holds every SQL string here to that.
+ *
+ * Strings: jsonb holds neither NUL nor a lone surrogate, which the other backends store. A string
+ * (value or field name) holding one is stored as `{"~fling~esc": "s", "u": [its UTF-16 code
+ * units]}`, and an object whose field names need it, or that has a `~fling~esc` field of its own,
+ * as `{"~fling~esc": "o", "e": [[name, value], …]}`; reads undo it. Only items that need it pay
+ * for it. Keys are never escaped (that would change their order): one that isn't `storableKey`
+ * reads as absent, as on every backend, and a cursor holding a NUL is compared up to the NUL,
+ * which orders the same against keys that hold none.
  */
 import { createHash } from 'node:crypto'
 import {
   type Condition,
   ConditionFailed,
   checkExpiresAt,
+  checkKey,
   decodeCursor,
   encodeCursor,
+  holdsWhenAbsent,
   type Key,
   type Page,
   type Patch,
   type QueryOptions,
   type ScanOptions,
+  storable,
+  storableKey,
   type Table,
   type TableItem,
   TRANSACT_MAX,
   type TransactOp,
 } from '@fling/api/table'
+import { int, qualified } from './ident.ts'
 import { DEFAULT_SCHEMA, schemaName } from './schema.ts'
 import type { SqlClient, SqlQueryable } from './sql.ts'
 
@@ -44,6 +62,62 @@ type Row = { pk: string; sk: string; data: Record<string, unknown> }
 /** SQLSTATEs of a transaction Postgres aborted that is safe to run again. */
 const RETRYABLE = new Set(['40P01', '40001'])
 const RETRIES = 5
+/** The first retry's pause; each one after waits up to twice as long, at random (full jitter). */
+const BACKOFF_MS = 5
+
+const pause = (attempt: number) =>
+  new Promise(resolve => setTimeout(resolve, Math.random() * BACKOFF_MS * 2 ** attempt))
+
+/** The field (`~fling~esc`) that marks a string or an object stored escaped (see the header). */
+const ESC = '~fling~esc'
+/** NUL or a lone surrogate: what a key may not hold, and what jsonb can't. */
+const needsEscape = (s: string) => !storableKey(s)
+/** What the JSON of an item that may need escaping holds: a NUL, a surrogate escape, or ESC. */
+const MAY_NEED_ESCAPE = /\\u0000|\\ud[89a-f]|~fling~esc/i
+
+function escaped(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (!needsEscape(value)) return value
+    return { [ESC]: 's', u: Array.from({ length: value.length }, (_, i) => value.charCodeAt(i)) }
+  }
+  if (Array.isArray(value)) return value.map(v => (v === undefined ? null : escaped(v)))
+  if (value === null || typeof value !== 'object') return value
+  const entries = Object.entries(value).filter(([, v]) => v !== undefined)
+  if (entries.some(([k]) => k === ESC || needsEscape(k))) {
+    return { [ESC]: 'o', e: entries.map(([k, v]) => [escaped(k), escaped(v)]) }
+  }
+  return Object.fromEntries(entries.map(([k, v]) => [k, escaped(v)]))
+}
+
+function unescaped(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(unescaped)
+  if (value === null || typeof value !== 'object') return value
+  const v = value as Record<string, unknown>
+  if (v[ESC] === 's' && Array.isArray(v.u)) {
+    let out = ''
+    for (let i = 0; i < v.u.length; i += 4096) {
+      out += String.fromCharCode(...(v.u.slice(i, i + 4096) as number[]))
+    }
+    return out
+  }
+  if (v[ESC] === 'o' && Array.isArray(v.e)) {
+    return Object.fromEntries(
+      (v.e as [unknown, unknown][]).map(([k, x]) => [unescaped(k) as string, unescaped(x)])
+    )
+  }
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, unescaped(x)]))
+}
+
+/** The comparisons a cursor makes: a closed set of fixed fragments. */
+type CursorOp = '>' | '<' | '<='
+
+/** A cursor's sk as Postgres can compare it: up to its first NUL, if it has one. */
+function cursorBound(sk: string, reverse: boolean | undefined): { op: CursorOp; sk: string } {
+  const nul = sk.indexOf('\0')
+  if (nul === -1) return { op: reverse ? '<' : '>', sk }
+  // No stored sk holds a NUL, so `> a\0…` is `> a`, and `< a\0…` is `<= a`.
+  return { op: reverse ? '<=' : '>', sk: sk.slice(0, nul) }
+}
 
 const expiryOf = (expiresAt: unknown) =>
   typeof expiresAt === 'string' ? Date.parse(expiresAt) : null
@@ -54,13 +128,19 @@ const keyOf = (k: Key) => `${k.pk}\0${k.sk}`
 const lockId = (k: Key) =>
   BigInt.asIntN(64, createHash('sha256').update(keyOf(k)).digest().readBigUInt64BE(0))
 
-const fromRow = (row: Row): TableItem => ({ ...row.data, pk: row.pk, sk: row.sk })
+const fromRow = (row: Row): TableItem => {
+  const fields = MAY_NEED_ESCAPE.test(JSON.stringify(row.data))
+    ? (unescaped(row.data) as Row['data'])
+    : row.data
+  return { ...fields, pk: row.pk, sk: row.sk }
+}
 
 /** The item's fields as stored: everything but pk and sk, `undefined` dropped. */
 function dataOf(item: TableItem): string {
   checkExpiresAt(item.expiresAt)
   const { pk: _pk, sk: _sk, ...fields } = item
-  return JSON.stringify(fields)
+  const json = JSON.stringify(fields)
+  return MAY_NEED_ESCAPE.test(json) ? JSON.stringify(escaped(fields)) : json
 }
 
 function holds(cond: Condition | undefined, item: TableItem | null): boolean {
@@ -95,6 +175,9 @@ function patched(item: TableItem, patch: Patch): TableItem {
   return next as TableItem
 }
 
+/** ` LIMIT n` for one more than a checked limit (the extra row says there is more), or nothing. */
+const limitSql = (limit: number | undefined) => (limit ? ` LIMIT ${int(limit + 1)}` : '')
+
 /** `limit` checked, as the integer the query asks for one more than. */
 function limitOf(limit: number | undefined) {
   if (limit === undefined) return undefined
@@ -117,7 +200,7 @@ export class PostgresTable implements Table {
     private db: SqlClient,
     opts: PostgresTableOptions = {}
   ) {
-    this.items = `${schemaName(opts.schema ?? DEFAULT_SCHEMA)}.items`
+    this.items = qualified(schemaName(opts.schema ?? DEFAULT_SCHEMA), 'items')
     this.now = opts.now ?? Date.now
   }
 
@@ -146,7 +229,10 @@ export class PostgresTable implements Table {
         })
       } catch (err) {
         const code = (err as { code?: unknown }).code
-        if (attempt < RETRIES && typeof code === 'string' && RETRYABLE.has(code)) continue
+        if (attempt < RETRIES && typeof code === 'string' && RETRYABLE.has(code)) {
+          await pause(attempt)
+          continue
+        }
         throw err
       }
     }
@@ -165,6 +251,7 @@ export class PostgresTable implements Table {
   }
 
   async get(pk: string, sk: string) {
+    if (!storable({ pk, sk })) return null
     const { rows } = await this.db.query<Row>(
       `SELECT pk, sk, data FROM ${this.items} ` +
         'WHERE pk = $1 AND sk = $2 AND (expires_at IS NULL OR expires_at > $3)',
@@ -175,6 +262,7 @@ export class PostgresTable implements Table {
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
     const limit = limitOf(opts.limit)
+    if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
     const params: unknown[] = [pk, this.now()]
     const where = ['pk = $1', '(expires_at IS NULL OR expires_at > $2)']
     if (opts.skPrefix) {
@@ -182,12 +270,14 @@ export class PostgresTable implements Table {
       where.push(`sk >= $${params.length}`, `starts_with(sk, $${params.length})`)
     }
     if (opts.cursor !== undefined) {
-      params.push(decodeCursor(opts.cursor))
-      where.push(`sk ${opts.reverse ? '<' : '>'} $${params.length}`)
+      const bound = cursorBound(decodeCursor(opts.cursor), opts.reverse)
+      params.push(bound.sk)
+      where.push(`sk ${bound.op} $${params.length}`)
     }
+    const order: 'ASC' | 'DESC' = opts.reverse ? 'DESC' : 'ASC'
     const { rows } = await this.db.query<Row>(
       `SELECT pk, sk, data FROM ${this.items} WHERE ${where.join(' AND ')} ` +
-        `ORDER BY sk ${opts.reverse ? 'DESC' : 'ASC'}${limit ? ` LIMIT ${limit + 1}` : ''}`,
+        `ORDER BY sk ${order}${limitSql(limit)}`,
       params
     )
     return page(rows, limit, row => encodeCursor(row.sk))
@@ -205,13 +295,14 @@ export class PostgresTable implements Table {
     }
     const { rows } = await this.db.query<Row>(
       `SELECT pk, sk, data FROM ${this.items} WHERE ${where.join(' AND ')} ` +
-        `ORDER BY pk, sk${limit ? ` LIMIT ${limit + 1}` : ''}`,
+        `ORDER BY pk, sk${limitSql(limit)}`,
       params
     )
     return page(rows, limit, row => encodeCursor(JSON.stringify([row.pk, row.sk])))
   }
 
   async put(item: TableItem, cond?: Condition) {
+    checkKey(item)
     dataOf(item)
     await this.writing([item], async (tx, live) => {
       if (!holds(cond, live.get(keyOf(item)) ?? null)) throw new ConditionFailed()
@@ -220,6 +311,7 @@ export class PostgresTable implements Table {
   }
 
   async update(pk: string, sk: string, patch: Patch, cond?: Condition) {
+    if (!storable({ pk, sk })) throw new ConditionFailed()
     return this.writing([{ pk, sk }], async (tx, live) => {
       const item = live.get(keyOf({ pk, sk })) ?? null
       if (!item || !holds(cond, item)) throw new ConditionFailed()
@@ -230,6 +322,10 @@ export class PostgresTable implements Table {
   }
 
   async delete(pk: string, sk: string, cond?: Condition) {
+    if (!storable({ pk, sk })) {
+      if (!holdsWhenAbsent(cond)) throw new ConditionFailed()
+      return null
+    }
     return this.writing([{ pk, sk }], async (tx, live) => {
       const item = live.get(keyOf({ pk, sk })) ?? null
       if (!holds(cond, item)) throw new ConditionFailed()
@@ -241,6 +337,7 @@ export class PostgresTable implements Table {
   async transact(ops: TransactOp[]) {
     if (ops.length > TRANSACT_MAX) throw new Error(`transact takes at most ${TRANSACT_MAX} ops`)
     const keys = ops.map(op => ('put' in op ? op.put : op.delete))
+    for (const k of keys) checkKey(k)
     if (new Set(keys.map(keyOf)).size !== keys.length) {
       throw new Error('transact ops must be on distinct items')
     }
@@ -262,19 +359,22 @@ export class PostgresTable implements Table {
 
   /**
    * Delete dead items, `batchSize` at a time, and return how many went. Reads already ignore them;
-   * this only reclaims space. The host's maintenance tick calls it.
+   * this only reclaims space. The host's maintenance tick calls it. The DELETE checks expiry again
+   * on each row it deletes: an item put again since the subquery read it (an `ifAbsent` over a
+   * dead lease) is live, and stays.
    */
   async purgeExpired(batchSize = 500): Promise<number> {
+    const size = Math.max(1, Math.floor(batchSize) || 1)
     let total = 0
     for (;;) {
       const { rows } = await this.db.query(
         `DELETE FROM ${this.items} WHERE (pk, sk) IN (SELECT pk, sk FROM ${this.items} ` +
-          `WHERE expires_at IS NOT NULL AND expires_at <= $1 LIMIT ${Math.floor(batchSize)}) ` +
-          'RETURNING 1',
+          `WHERE expires_at IS NOT NULL AND expires_at <= $1 LIMIT ${int(size)}) ` +
+          'AND expires_at IS NOT NULL AND expires_at <= $1 RETURNING 1',
         [this.now()]
       )
       total += rows.length
-      if (rows.length < batchSize) return total
+      if (rows.length < size) return total
     }
   }
 }

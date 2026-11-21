@@ -6,14 +6,18 @@ import {
   type Condition,
   ConditionFailed,
   checkExpiresAt,
+  checkKey,
   compareSk,
   decodeCursor,
   encodeCursor,
+  holdsWhenAbsent,
   isExpired,
   type Page,
   type Patch,
   type QueryOptions,
   type ScanOptions,
+  storable,
+  storableKey,
   type Table,
   type TableItem,
   TRANSACT_MAX,
@@ -76,6 +80,7 @@ export class MemoryTable implements Table {
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
+    if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
     const prefix = opts.skPrefix ?? ''
     const after = opts.cursor === undefined ? undefined : decodeCursor(opts.cursor)
     const dir = opts.reverse ? -1 : 1
@@ -109,6 +114,7 @@ export class MemoryTable implements Table {
   }
 
   async put(item: TableItem, cond?: Condition) {
+    checkKey(item)
     checkExpiresAt(item.expiresAt)
     if (!this.holds(cond, this.live(item.pk, item.sk))) throw new ConditionFailed()
     this.write(clean(item))
@@ -135,6 +141,10 @@ export class MemoryTable implements Table {
   }
 
   async delete(pk: string, sk: string, cond?: Condition) {
+    if (!storable({ pk, sk })) {
+      if (!holdsWhenAbsent(cond)) throw new ConditionFailed()
+      return null
+    }
     const item = this.live(pk, sk)
     if (!this.holds(cond, item)) throw new ConditionFailed()
     this.remove(pk, sk)
@@ -146,6 +156,7 @@ export class MemoryTable implements Table {
     const keys = ops.map(op => ('put' in op ? op.put : op.delete)).map(k => `${k.pk}\0${k.sk}`)
     if (new Set(keys).size !== keys.length)
       throw new Error('transact ops must be on distinct items')
+    for (const op of ops) checkKey('put' in op ? op.put : op.delete)
     // Check every condition before writing anything.
     ops.forEach((op, index) => {
       const key = 'put' in op ? op.put : op.delete

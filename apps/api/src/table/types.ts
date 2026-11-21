@@ -19,7 +19,34 @@
  * Expiry: an item with `expiresAt` (an ISO 8601 UTC timestamp exactly as `Date#toISOString`
  * writes it) is dead from that instant. Dead items are invisible to every read and every condition
  * (`ifAbsent` succeeds over one) even while the backend has not purged them yet.
+ *
+ * Keys: pk and sk are well-formed strings without NUL (`storableKey`), the strings every backend
+ * keeps as they are (Postgres's text holds no NUL, and a lone surrogate has no UTF-8). A key that
+ * isn't, which only a caller's input can make, reads as absent everywhere: `get` is null, a query
+ * finds nothing, `update` fails its condition, `delete` deletes nothing; `put` and `transact`
+ * refuse it. Values may hold any string, NUL and lone surrogates included; field names may hold
+ * NUL but no lone surrogate (DynamoDB refuses one), and `fieldEquals` compares a value with none
+ * (D1 can't).
  */
+
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+
+/** Whether a string can be a pk or an sk: no NUL, no lone surrogate. */
+export const storableKey = (s: string) => !s.includes('\0') && !LONE_SURROGATE.test(s)
+
+/** Whether a key can be stored (both parts `storableKey`). */
+export const storable = (k: Key) => storableKey(k.pk) && storableKey(k.sk)
+
+/** Throws for a key no item can have (see Keys above), as put and transact do. */
+export function checkKey(k: Key): void {
+  if (!storable(k)) throw new Error('table keys may not hold NUL or a lone surrogate')
+}
+
+/** Whether `cond` holds where there is no item: what a write to an unstorable key checks. */
+export function holdsWhenAbsent(cond: Condition | undefined): boolean {
+  if (!cond) return true
+  return cond.kind === 'ifAbsent' || (cond.kind === 'fieldEquals' && cond.orAbsent === true)
+}
 
 /** Attribute values are anything JSON can carry, except that `undefined` fields are dropped. */
 export type TableItem = {

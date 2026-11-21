@@ -23,6 +23,7 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
 | `apps/api` | The core: Hono API, policy, Records, migrations, MCP and OAuth. No cloud SDKs |
 | `platforms/aws` | Lambda entry point, DynamoDB/S3/CloudFront KVS/SSM adapters, Terraform module (`infra/`) |
 | `platforms/cloudflare` | One Worker (API, UI, sites), D1/R2/KV adapters, wrangler config, setup and deploy scripts |
+| `platforms/node` | The Node host (one server for the app and the sites), the Postgres `Table`, the SMTP mailer: shared by the Node-based platforms and runnable on its own |
 | `packages/shared` | Contracts used by every app, including the sites' routing decision (`site-routing.ts`) |
 | `packages/conformance` | Suites every adapter must pass (Table, Blobs, RouteTable, Store, migrations) |
 | `packages/e2e` | The one scenario every platform passes, locally (`pnpm e2e`) and as the post-deploy smoke test |

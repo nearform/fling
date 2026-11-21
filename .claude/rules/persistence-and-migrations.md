@@ -23,9 +23,16 @@ paths:
   new access pattern needs a list, add an index item; don't scan or add a secondary index.
 - Keep the port small, because every cloud must implement it with the same semantics. A new
   operation or condition needs the conformance suite extended (`packages/conformance/src/table.ts`)
-  and every adapter updated: memory, DynamoDB, D1.
+  and every adapter updated: memory, DynamoDB, D1, Postgres.
 - D1 stores the generic `items` table (`platforms/cloudflare/migrations/0001_init.sql`). New record
   kinds need no SQL migration. A schema change does: a new numbered `.sql` file, additive only.
+- Postgres stores the same `items` table (`platforms/node/src/table/`), its schema migrations in
+  `SCHEMA_MIGRATIONS` (`schema.ts`), applied on start and recorded in `<schema>.fling_schema`. The
+  same rule holds: new record kinds need none; a schema change is a new entry, additive only.
+- Postgres SQL is injection-safe by construction: values are always `$n` parameters; identifiers
+  (schema, table, LISTEN channel) only through `ident`/`qualified` (`table/ident.ts`), integers
+  through `int`; nothing else is interpolated but fixed fragments. `tests/sql-guard.test.ts`
+  fails on any other `${…}` in SQL text; extend its allowlist only with another such fragment.
 
 ## Records (`apps/api/src/store/`)
 

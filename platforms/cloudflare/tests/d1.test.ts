@@ -77,7 +77,7 @@ describe('D1Table specifics', () => {
     const table = new D1Table(db)
     const p = pk()
     // U+E000 sorts after 😀 in UTF-16 (JS `<`) but before it in UTF-8.
-    const sks = ['a', '', '�', '😀', 'é', 'Z', '\u0000x']
+    const sks = ['a', '', '�', '😀', 'é', 'Z', '\u0001x']
     for (const sk of sks) await table.put({ pk: p, sk })
     const got = (await table.query(p)).items.map(i => i.sk)
     expect(got).toEqual([...sks].sort(compareSk))

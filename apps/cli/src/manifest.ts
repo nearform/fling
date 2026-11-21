@@ -1,6 +1,6 @@
 /**
- * Build a deploy manifest from a folder: walk it, hash every file (sha256, streamed), guess content
- * types, and enforce the shared limits before anything is sent to the server.
+ * Build a deploy manifest from a folder: walk it, hash every file (SHA-256, and the MD5 stores that
+ * check one bind an upload to; streamed), guess content types, and enforce the shared limits before anything is sent to the server.
  *
  * Never flung (no flag or option changes this): dotfiles and dot-directories, gitignored files
  * (see gitignore.ts), and `node_modules`; anything matched by a root `.flingignore` (gitignore
@@ -71,6 +71,8 @@ export interface LocalFile {
   /** Generated in memory (e.g. the HTML listing): uploaded from here, never written to disk. */
   content?: Buffer
   sha256: string
+  /** base64, for stores that check an upload's MD5 (the manifest carries it beside the SHA-256) */
+  md5: string
   size: number
   contentType: string
 }
@@ -138,18 +140,36 @@ export function contentTypeFor(path: string): string {
   return type.startsWith('text/') || CHARSET_TYPES.has(type) ? `${type}; charset=utf-8` : type
 }
 
-export async function sha256File(path: string): Promise<string> {
-  const hash = createHash('sha256')
-  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer)
-  return hash.digest('hex')
+/** A file's digests: the SHA-256 (hex), and the MD5 (base64) as `Content-MD5` carries it. */
+export interface Digests {
+  sha256: string
+  md5: string
+}
+
+export function digestsOf(bytes: Uint8Array): Digests {
+  return {
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    md5: createHash('md5').update(bytes).digest('base64'),
+  }
+}
+
+export async function digestsOfFile(path: string): Promise<Digests> {
+  const sha256 = createHash('sha256')
+  const md5 = createHash('md5')
+  for await (const chunk of createReadStream(path)) {
+    sha256.update(chunk as Buffer)
+    md5.update(chunk as Buffer)
+  }
+  return { sha256: sha256.digest('hex'), md5: md5.digest('base64') }
 }
 
 /** The manifest body the API expects (no local paths). */
 export function toManifest(local: LocalManifest): Manifest {
   return {
-    files: local.files.map(({ path, sha256, size, contentType }) => ({
+    files: local.files.map(({ path, sha256, md5, size, contentType }) => ({
       path,
       sha256,
+      md5,
       size,
       contentType,
     })),
@@ -273,14 +293,14 @@ export async function buildManifest(
 
   const findings: SecretFinding[] = []
   const files = await mapLimit(found, 16, async f => {
-    let sha256: string
+    let digests: Digests
     if (f.size <= SECRET_SCAN_MAX_FILE_BYTES && isScannablePath(f.path)) {
       // Small enough to read whole: hash and scan for secrets in one read.
       const bytes = await readFile(f.absPath)
-      sha256 = createHash('sha256').update(bytes).digest('hex')
+      digests = digestsOf(bytes)
       findings.push(...scanBytesForSecrets(bytes, f.path))
-    } else sha256 = await sha256File(f.absPath)
-    return { ...f, sha256, contentType: contentTypeFor(f.path) }
+    } else digests = await digestsOfFile(f.absPath)
+    return { ...f, ...digests, contentType: contentTypeFor(f.path) }
   })
   if (findings.length > 0) {
     throw new SecretsFoundError(
@@ -359,7 +379,7 @@ export async function withHtmlListing(
     path: 'index.html',
     absPath: '',
     content,
-    sha256: createHash('sha256').update(content).digest('hex'),
+    ...digestsOf(content),
     size: content.length,
     contentType: contentTypeFor('index.html'),
   }

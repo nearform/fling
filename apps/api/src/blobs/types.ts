@@ -9,15 +9,28 @@ export interface PresignedPut {
   headers: Record<string, string>
 }
 
+/** What a presigned PUT is bound to. */
+export interface PresignPutOptions {
+  contentType: string
+  cacheControl: string
+  /** the body's SHA-256, hex: always given */
+  sha256: string
+  /** the body's MD5, base64, when the client sent it (older clients send none) */
+  md5?: string
+  /** seconds (default 900) */
+  expiresIn?: number
+}
+
 export interface Blobs {
   /**
-   * A PUT URL for exactly one body: the object whose SHA-256 is `sha256` (hex). Any other bytes
-   * are rejected, so the URL can never replace what was published with something else.
+   * A PUT URL for exactly one body: the object whose digest was signed. Any other bytes are
+   * rejected, so the URL can never replace what was published with something else. The store
+   * binds whichever digest it checks: the SHA-256 (S3, R2, the core's signed routes) or the MD5
+   * (`Content-MD5`: GCS, Azure Blob, S3-compatible stores). A store that checks only an MD5,
+   * asked without one, signs one of the host's upload routes instead (host-uploads.ts), where the
+   * host checks the SHA-256 itself. The client sends exactly the headers returned.
    */
-  presignPut(
-    key: string,
-    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
-  ): Promise<PresignedPut>
+  presignPut(key: string, opts: PresignPutOptions): Promise<PresignedPut>
   /**
    * A GET URL for one object, good for `expiresIn` seconds (default 900): how a pull hands out a
    * version's files without their bytes passing through the API. Fetching it after it expires, or

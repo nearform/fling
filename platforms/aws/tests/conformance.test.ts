@@ -6,6 +6,7 @@
  */
 import type { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { HeadObjectCommand, type S3Client } from '@aws-sdk/client-s3'
+import { HostUploads } from '@fling/api/blobs/host-uploads'
 import { Records } from '@fling/api/store/records'
 import {
   blobsConformance,
@@ -17,6 +18,9 @@ import { beforeAll, describe } from 'vitest'
 import { S3Blobs } from '../src/blobs/s3.ts'
 import { DynamoTable } from '../src/table/dynamo.ts'
 import { DYNAMODB_ENDPOINT, dynamoTable, S3_ENDPOINT, s3Bucket } from './services.ts'
+
+/** The platform's host, which serves HostUploads' routes. */
+const HOST = 'https://app.example.test'
 
 describe.runIf(DYNAMODB_ENDPOINT)('DynamoDB Local', () => {
   let db: { client: DynamoDBClient; table: string }
@@ -40,11 +44,22 @@ describe.runIf(S3_ENDPOINT)('MinIO', () => {
   beforeAll(async () => {
     s3 = await s3Bucket()
   }, 60_000)
-  blobsConformance('S3Blobs', () => ({
-    blobs: new S3Blobs(s3.bucket, s3.client),
-    metadata: async key => {
-      const res = await s3.client.send(new HeadObjectCommand({ Bucket: s3.bucket, Key: key }))
-      return { contentType: res.ContentType, cacheControl: res.CacheControl }
-    },
-  }))
+  const metadata = async (key: string) => {
+    const res = await s3.client.send(new HeadObjectCommand({ Bucket: s3.bucket, Key: key }))
+    return { contentType: res.ContentType, cacheControl: res.CacheControl }
+  }
+  blobsConformance('S3Blobs', () => ({ blobs: new S3Blobs(s3.bucket, s3.client), metadata }))
+  // S3-compatible stores check Content-MD5; a file sent without one goes through the host.
+  blobsConformance('S3Blobs binding Content-MD5', () => {
+    const host = new HostUploads(new S3Blobs(s3.bucket, s3.client), {
+      secret: 'u'.repeat(40),
+      baseUrl: HOST,
+    })
+    return {
+      blobs: new S3Blobs(s3.bucket, s3.client, { digest: 'md5', fallback: host }),
+      upload: (url, init) =>
+        url.startsWith(`${HOST}/`) ? host.handle(new Request(url, init)) : fetch(url, init),
+      metadata,
+    }
+  })
 })

@@ -19,6 +19,16 @@ export const ManifestFileSchema = z.object({
     .refine(isValidSitePath, 'invalid path (dotfiles are never published)')
     .refine(p => !isSecretPath(p), 'secret file (keys, certificates, credentials) never published'),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  /**
+   * The file's MD5, base64 (as `Content-MD5` carries it), for stores that check an upload's MD5
+   * rather than its SHA-256 (GCS, Azure Blob, S3-compatible stores). Optional: a client that
+   * sends none still deploys, through the host where the store needs it (`Blobs.presignPut`).
+   * The version id is the SHA-256s' alone.
+   */
+  md5: z
+    .string()
+    .regex(/^[A-Za-z0-9+/]{22}==$/)
+    .optional(),
   size: z.number().int().min(0).max(MAX_FILE_BYTES),
   contentType: z.string().min(1).max(255),
 })

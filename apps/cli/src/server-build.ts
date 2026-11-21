@@ -20,7 +20,6 @@
  * esbuild is loaded only when there is something to bundle, and the Claude Desktop extension ships
  * without it: there, a server that needs bundling asks for the CLI.
  */
-import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { builtinModules } from 'node:module'
 import { join } from 'node:path'
@@ -43,6 +42,7 @@ import { CliError } from './errors.ts'
 import {
   buildManifest,
   contentTypeFor,
+  digestsOf,
   type LocalFile,
   type LocalManifest,
   SecretsFoundError,
@@ -352,7 +352,7 @@ export async function buildSiteManifest(
     path: SERVER_BUNDLE,
     absPath: '',
     content,
-    sha256: createHash('sha256').update(content).digest('hex'),
+    ...digestsOf(content),
     size: content.byteLength,
     contentType: contentTypeFor(SERVER_BUNDLE),
   }

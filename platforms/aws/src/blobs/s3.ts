@@ -9,7 +9,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import type { Blobs, PresignedPut } from '@fling/api/blobs'
+import type { Blobs, PresignedPut, PresignPutOptions } from '@fling/api/blobs'
 
 // WHEN_REQUIRED: otherwise the SDK signs a CRC32 of the (empty) presign body into the URL.
 export const S3_CLIENT_CONFIG = {
@@ -23,17 +23,43 @@ const isNotFound = (err: unknown) =>
     err.name === 'NoSuchKey' ||
     (err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404)
 
+/**
+ * Which digest a presigned PUT binds: `sha256` (S3: `x-amz-checksum-sha256`) or `md5`
+ * (`Content-MD5`, which every S3-compatible store checks: MinIO, DigitalOcean Spaces, Tigris).
+ * Either is a signed header, so a client that leaves it off fails the signature, and the store
+ * refuses a body that doesn't match it.
+ */
+export type S3Digest = 'sha256' | 'md5'
+
+export interface S3BlobsOptions {
+  /** default `sha256` */
+  digest?: S3Digest
+  /**
+   * With `md5`: where a file whose MD5 the client did not send is uploaded instead (the core's
+   * HostUploads on the platform's host). Without one, such a file can't be presigned.
+   */
+  fallback?: Pick<Blobs, 'presignPut'>
+}
+
 export class S3Blobs implements Blobs {
   constructor(
     private bucket: string,
-    private client = new S3Client(S3_CLIENT_CONFIG)
+    private client = new S3Client(S3_CLIENT_CONFIG),
+    private opts: S3BlobsOptions = {}
   ) {}
 
-  async presignPut(
-    key: string,
-    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
-  ): Promise<PresignedPut> {
-    const checksum = Buffer.from(opts.sha256, 'hex').toString('base64')
+  async presignPut(key: string, opts: PresignPutOptions): Promise<PresignedPut> {
+    const md5 = this.opts.digest === 'md5'
+    if (md5 && !opts.md5) {
+      if (this.opts.fallback) return this.opts.fallback.presignPut(key, opts)
+      throw new Error("This store checks an upload's MD5, and the manifest gave none")
+    }
+    const digest = md5
+      ? { header: 'content-md5', value: opts.md5 as string }
+      : {
+          header: 'x-amz-checksum-sha256',
+          value: Buffer.from(opts.sha256, 'hex').toString('base64'),
+        }
     const url = await getSignedUrl(
       this.client,
       new PutObjectCommand({
@@ -41,14 +67,15 @@ export class S3Blobs implements Blobs {
         Key: key,
         ContentType: opts.contentType,
         CacheControl: opts.cacheControl,
-        ChecksumSHA256: checksum,
+        ...(md5 ? { ContentMD5: digest.value } : { ChecksumSHA256: digest.value }),
       }),
       {
         expiresIn: opts.expiresIn ?? 900,
-        // Kept as a signed header (not hoisted into the query) so S3 checks the body against it:
-        // a different body → 400 BadDigest; leaving the header off → 403 signature mismatch.
-        unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
-        signableHeaders: new Set(['content-type', 'cache-control', 'x-amz-checksum-sha256']),
+        // Kept as a signed header (not hoisted into the query) so the store checks the body
+        // against it: a different body → 400 BadDigest; leaving the header off → 403 signature
+        // mismatch.
+        unhoistableHeaders: new Set([digest.header]),
+        signableHeaders: new Set(['content-type', 'cache-control', digest.header]),
       }
     )
     return {
@@ -56,7 +83,7 @@ export class S3Blobs implements Blobs {
       headers: {
         'content-type': opts.contentType,
         'cache-control': opts.cacheControl,
-        'x-amz-checksum-sha256': checksum,
+        [digest.header]: digest.value,
       },
     }
   }

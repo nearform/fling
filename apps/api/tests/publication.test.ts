@@ -2,8 +2,10 @@
  * Publication through its own interface (stage / publish / publishBytes) on Records (memory table) + FsBlobs.
  * FsBlobs enforces the same rules as S3: upload URLs are bound to the manifest's sha256 and expire.
  */
+
+import { createHash } from 'node:crypto'
 import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FsBlobs } from '../src/blobs/fs.ts'
 import { manifestKey } from '../src/blobs/types.ts'
 import type { Principal } from '../src/policy.ts'
@@ -47,6 +49,22 @@ describe('upload URLs only accept the manifest bytes', () => {
     const { uploads } = await stageUploads([f])
     const expected = Buffer.from(f.meta.sha256, 'hex').toString('base64')
     expect(uploads[0]?.headers['x-amz-checksum-sha256']).toBe(expected)
+  })
+
+  it("give the store each file's MD5 when the manifest has it, and sign without one", async () => {
+    const signing = vi.spyOn(env.deps.blobs, 'presignPut')
+    const a = file('index.html', '<h1>hi</h1>')
+    const md5 = createHash('md5').update(a.content).digest('base64')
+    const b = file('old.html', '<h1>an older client</h1>')
+    const { uploads, versionId } = await stageUploads([{ ...a, meta: { ...a.meta, md5 } }, b])
+    const given = new Map(signing.mock.calls.map(([key, opts]) => [key.split('/').at(-1), opts]))
+    expect(given.get('index.html')).toMatchObject({ sha256: a.meta.sha256, md5 })
+    expect(given.get('old.html')).not.toHaveProperty('md5')
+    await upload(env, uploads, [a, b])
+    expect((await publish(env.deps, user, 'hello', versionId)).status).toBe('live')
+    await expect(
+      stage(env.deps, user, 'other', body([{ ...a, meta: { ...a.meta, md5: 'nope' } }]), principal)
+    ).rejects.toMatchObject({ name: 'ZodError' })
   })
 
   it('a live version cannot be overwritten with different bytes', async () => {

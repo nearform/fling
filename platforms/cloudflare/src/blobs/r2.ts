@@ -9,7 +9,7 @@
  *   the object out of R2.
  */
 import type { R2Bucket, R2ObjectBody } from '@cloudflare/workers-types'
-import type { Blobs, PresignedPut } from '@fling/api/blobs'
+import type { Blobs, PresignedPut, PresignPutOptions } from '@fling/api/blobs'
 import {
   keyFromPath,
   signDownload,
@@ -51,10 +51,7 @@ export class R2Blobs implements Blobs {
     }
   ) {}
 
-  async presignPut(
-    key: string,
-    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
-  ): Promise<PresignedPut> {
+  async presignPut(key: string, opts: PresignPutOptions): Promise<PresignedPut> {
     return signUpload({ ...this.signer, route: UPLOAD_ROUTE }, key, opts)
   }
 

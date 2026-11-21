@@ -6,7 +6,7 @@
  *
  *   stage(raw)              bytes the server never sees (CLI): admit the manifest, record a pending
  *                           version, return upload URLs that only accept the exact bytes named in
- *                           the manifest (sha256 signed in) and expire after UPLOAD_URL_TTL_SECONDS.
+ *                           the manifest (a digest signed in) and expire after UPLOAD_URL_TTL_SECONDS.
  *   publish(versionId)      make a staged version live: every object present at the right size,
  *                           read back and scanned for secrets first. No way to skip the scan.
  *   publishBytes(files)     bytes the server holds (remote MCP): admit, scan exactly these bytes,
@@ -1243,9 +1243,6 @@ async function pathHints(
   return hints
 }
 
-/** S3's `x-amz-checksum-sha256` wants base64; manifests carry hex. */
-const _sha256Base64 = (hex: string) => Buffer.from(hex, 'hex').toString('base64')
-
 // --- the interface ------------------------------------------------------------------------------
 
 /** POST /api/sites/:name/deploys — `raw` is the request body as sent. */
@@ -1265,6 +1262,7 @@ export async function stage(
       contentType: file.contentType,
       cacheControl: cacheControlFor(file.path),
       sha256: file.sha256,
+      ...(file.md5 ? { md5: file.md5 } : {}),
       expiresIn: UPLOAD_URL_TTL_SECONDS,
     })
     return { path: asSent(file.path), url: signed.url, headers: signed.headers }

@@ -21,7 +21,7 @@
   "devDependencies": {
     "@fling/conformance": "workspace:*",
     "@types/node": "^24.0.0",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.1",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12"

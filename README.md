@@ -220,3 +220,12 @@ deploy guide. Pick one per instance:
 |---|---|---|
 | AWS (Lambda, S3, DynamoDB, CloudFront) | [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md) | Terraform module [platforms/aws/infra](platforms/aws/infra) |
 | Cloudflare (Workers, D1, R2, Workers KV) | [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md) | `wrangler.jsonc` and [scripts/setup.mjs](platforms/cloudflare/scripts/setup.mjs) |
+
+Every platform meets the same contract, the [logical platform](docs/design/platform.md), and has
+a platform doc that maps it onto its cloud: [AWS](docs/platforms/aws.md),
+[Cloudflare](docs/platforms/cloudflare.md). More clouds are planned, each with its doc:
+[Google Cloud](docs/platforms/gcp.md), [Azure](docs/platforms/azure.md),
+[DigitalOcean and self-host](docs/platforms/digitalocean-self-host.md),
+[Fly.io](docs/platforms/fly.md) and [Vercel](docs/platforms/vercel.md). They build on
+[`platforms/node`](platforms/node), which runs a whole Fling in one Node server on Postgres. See
+[docs/platforms/](docs/platforms/README.md) for the comparison.

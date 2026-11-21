@@ -246,10 +246,13 @@ which the page reconnects.
 ## Cloud CDN
 
 Off by default: every request reaches the service, so a change of access, a rollback or a deleted
-site is seen at once. With `cdn = true`, Cloud CDN caches the sites' backend under the service's own
-`Cache-Control` (cache mode `USE_ORIGIN_HEADERS`): a public site's files, never a private site's
-(they are never marked public), a response that sets a cookie, or anything on `$APP_HOST`. A public
-file may then be served from the edge for its max-age after it changed.
+site is seen at once. With `cdn = true`, Cloud CDN caches the sites' backend, keyed by host, path
+and query, under the service's own `Cache-Control`: a public site's files. It never keeps what the
+service sends `private` (every file of a site that isn't public, and everything on a share link),
+`no-store` (404s, sign-in hops) or with a cookie, nor anything on `$APP_HOST`. A site's URLs stay
+the same across versions, so the module caps the edge's copy at a minute (`max_ttl` 60 s, cache
+mode `CACHE_ALL_STATIC`): a publish, a rollback, a deletion or a site made private reaches every
+viewer within that minute. Browsers keep the max-age the service sends.
 
 ## Smoke test
 

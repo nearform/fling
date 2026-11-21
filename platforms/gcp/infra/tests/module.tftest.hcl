@@ -171,6 +171,11 @@ run "with_mail_cdn_zone_and_instance" {
   }
 
   assert {
+    condition     = google_compute_backend_service.sites.cdn_policy[0].max_ttl == 60
+    error_message = "Cloud CDN keeps a site's file at most a minute: its URL stays the same across versions."
+  }
+
+  assert {
     condition     = length(google_dns_record_set.this) == 5
     error_message = "With a zone the module makes the records."
   }

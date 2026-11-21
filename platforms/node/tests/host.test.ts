@@ -19,7 +19,8 @@ import type { SiteServers } from '@fling/api/servers/types'
 import { Records } from '@fling/api/store/records'
 import { type LiveHubClient, liveHubConformance, routeTableConformance } from '@fling/conformance'
 import type { LiveServerMessage } from '@fling/shared'
-import { siteKvsKey } from '@fling/shared/route-keys'
+import { shareKvsKey, siteKvsKey } from '@fling/shared/route-keys'
+import { SITE_COOKIE_NAME, signSiteCookie } from '@fling/shared/site-cookie'
 import pg from 'pg'
 import { afterAll, describe, expect, it } from 'vitest'
 import WebSocket from 'ws'
@@ -234,6 +235,34 @@ describe('the Node host', () => {
     const robots = await get(host, 'http://pub.sites.example.test/robots.txt')
     expect(await robots.text()).toContain('Disallow: /')
     expect((await get(host, 'http://unknown.sites.example.test/')).status).toBe(404)
+  })
+
+  it('sends the files of a site that is not public, or of a share link, as private', async () => {
+    const { host, routes, blobs } = await world()
+    const members = JSON.stringify({ id: 'S2', v: 'V2', vis: 'private', spa: false })
+    await routes.put(siteKvsKey('team'), members)
+    await routes.put(shareKvsKey('abcdefghij0123456789'), members)
+    await blobs.put('sites/S2/V2/index.html', new TextEncoder().encode('<h1>team</h1>'))
+    await blobs.put('sites/S2/V2/app-Bk3x9a2Q.js', new TextEncoder().encode('1'))
+    const cookie = signSiteCookie(
+      { e: 'member@example.test', x: Math.floor(Date.now() / 1000) + 600 },
+      'h'.repeat(40)
+    )
+    const asMember = { headers: { cookie: `${SITE_COOKIE_NAME}=${cookie}` } }
+    const page = await get(host, 'http://team.sites.example.test/', asMember)
+    expect(await page.text()).toBe('<h1>team</h1>')
+    expect(page.headers.get('cache-control')).toBe('private, max-age=0, must-revalidate')
+    const asset = await get(host, 'http://team.sites.example.test/app-Bk3x9a2Q.js', asMember)
+    expect(asset.headers.get('cache-control')).toBe('private, max-age=31536000, immutable')
+    const folder = await get(host, 'http://team.sites.example.test/docs', asMember)
+    expect(folder.status).toBe(301)
+    expect(folder.headers.get('cache-control')).toBe('private, no-store')
+    const shared = await get(host, 'http://s--abcdefghij0123456789.sites.example.test/')
+    expect(await shared.text()).toBe('<h1>team</h1>')
+    expect(shared.headers.get('cache-control')).toBe('private, max-age=0, must-revalidate')
+    const signIn = await get(host, 'http://team.sites.example.test/')
+    expect(signIn.status).toBe(302)
+    expect(signIn.headers.get('cache-control')).toBe('no-store')
   })
 
   it('runs the ticks and migrations only for a caller with the secret', async () => {

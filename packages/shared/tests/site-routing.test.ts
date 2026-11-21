@@ -139,7 +139,12 @@ describe('routeSiteRequest', () => {
     const cookie = signSiteCookie({ e: 'a@example.test', x: NOW + 1 }, KEY)
     expect(
       await routeSiteRequest(req({ host: 'priv.sites.example.test', uri: '/u/1', cookie }), ctx())
-    ).toEqual({ action: 'rewrite', uri: '/sites/S2/V2/index.html', headers: served('V2') })
+    ).toEqual({
+      action: 'rewrite',
+      uri: '/sites/S2/V2/index.html',
+      headers: served('V2'),
+      private: true,
+    })
   })
 
   it("sends a guest's cookie on a members-level site through the site pass, and serves them public ones", async () => {

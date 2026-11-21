@@ -30,6 +30,9 @@ locals {
   live_on  = var.live && var.service.max_instances == 1
   live_url = local.live_on ? "wss://${var.hostname}/api/live" : null
 
+  # How long Cloud CDN (var.cdn) keeps a public site's file, in seconds (edge.tf).
+  cdn_ttl = 60
+
   apis = toset([
     "artifactregistry.googleapis.com",
     "certificatemanager.googleapis.com",

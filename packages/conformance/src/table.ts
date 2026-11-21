@@ -7,6 +7,9 @@
 import { randomUUID } from 'node:crypto'
 import {
   ConditionFailed,
+  compareSk,
+  decodeCursor,
+  encodeCursor,
   fieldEquals,
   ifAbsent,
   ifExists,
@@ -65,6 +68,57 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
         expect(await table.get(pk, 'A')).toEqual(item)
         expect(await table.get(pk, 'B')).toBeNull()
         expect(await table.get(`${pk}x`, 'A')).toBeNull()
+      })
+
+      it('round-trips NUL in strings and field names, and lone surrogates in strings', async () => {
+        const { table, pk } = await setup()
+        const odd = {
+          nul: 'a\u0000b',
+          high: 'x\ud800',
+          low: '\udc00y',
+          pair: 'smile \u{1F600}',
+          list: ['\u0000', '\udfff', 'plain'],
+          map: { 'k\u0000': 'v', nested: { '\u0000': ['\ud83d'] } },
+          // what an adapter's own escaping might look like, stored as given
+          lookalike: { '~fling~esc': 's', u: [0] },
+          text: '\\u0000 and \\ud800',
+        }
+        await table.put({ pk, sk: 'A', ...odd })
+        expect(await table.get(pk, 'A')).toEqual({ pk, sk: 'A', ...odd })
+        expect((await table.query(pk)).items).toEqual([{ pk, sk: 'A', ...odd }])
+        const updated = await table.update(
+          pk,
+          'A',
+          { set: { nul: 'b\u0000c' } },
+          fieldEquals('nul', 'a\u0000b')
+        )
+        expect(updated.nul).toBe('b\u0000c')
+        await fails(table.put({ pk, sk: 'A' }, fieldEquals('nul', 'a\u0000b')))
+        await table.put({ pk, sk: 'A' }, fieldEquals('nul', 'b\u0000c'))
+      })
+
+      it('a key no item can have (NUL, a lone surrogate) reads as absent and is never stored', async () => {
+        const { table, pk } = await setup()
+        await table.put({ pk, sk: 'a\uFFFD' })
+        for (const [p, k] of [
+          [pk, 'a\u0000'],
+          [pk, 'a\ud800'],
+          [`${pk}\u0000`, 'A'],
+          [`${pk}\udc00`, 'A'],
+        ] as const) {
+          expect(await table.get(p, k)).toBeNull()
+          expect(await table.delete(p, k)).toBeNull()
+          await fails(table.update(p, k, { set: { a: 1 } }))
+          await fails(table.delete(p, k, ifExists))
+          await expect(table.put({ pk: p, sk: k })).rejects.toThrow(/NUL or a lone surrogate/)
+          await expect(table.transact([{ put: { pk: p, sk: k } }])).rejects.toThrow(
+            /NUL or a lone surrogate/
+          )
+        }
+        expect((await table.query(pk, { skPrefix: 'a\u0000' })).items).toEqual([])
+        expect((await table.query(pk, { skPrefix: 'a\ud800' })).items).toEqual([])
+        expect((await table.query(`${pk}\ud800`)).items).toEqual([])
+        expect(sks((await table.query(pk)).items)).toEqual(['a\uFFFD'])
       })
 
       it('put replaces the whole item and drops undefined fields', async () => {
@@ -139,6 +193,50 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
         expect(sks(one.items)).toEqual(['K#0'])
         expect(one.cursor).toBeDefined()
         expect((await table.query(pk, { limit: 100 })).cursor).toBeUndefined()
+      })
+
+      it('a cursor that decodes to a NUL resumes in byte order', async () => {
+        const { table, pk } = await setup()
+        for (const sk of ['a', 'b', 'c']) await table.put({ pk, sk })
+        const at = (sk: string) => encodeCursor(sk)
+        expect(sks((await table.query(pk, { cursor: at('a\u0000z') })).items)).toEqual(['b', 'c'])
+        expect(
+          sks((await table.query(pk, { cursor: at('b\u0000'), reverse: true })).items)
+        ).toEqual(['b', 'a'])
+      })
+
+      it('takes quotes, placeholders, wildcards and comment markers as plain data', async () => {
+        const { table, pk: base } = await setup()
+        const pk = `${base}'"; DROP TABLE items; --`
+        const odd = ["a'b", 'a"b', '$1', 'a%b', 'a_b', 'axb', 'ayb', 'a\\b', '--', ';', 'é—😀']
+        for (const sk of odd) await table.put({ pk, sk, v: `${sk} $2 %_ \\ ' ; --` })
+        for (const sk of odd) {
+          expect(await table.get(pk, sk)).toEqual({ pk, sk, v: `${sk} $2 %_ \\ ' ; --` })
+        }
+        expect(sks((await table.query(pk)).items)).toEqual([...odd].sort(compareSk))
+        // A prefix matches literally: `%` and `_` are characters, never wildcards.
+        expect(sks((await table.query(pk, { skPrefix: 'a%' })).items)).toEqual(['a%b'])
+        expect(sks((await table.query(pk, { skPrefix: 'a_' })).items)).toEqual(['a_b'])
+        expect(sks((await table.query(pk, { skPrefix: "a'" })).items)).toEqual(["a'b"])
+        expect((await table.query(pk, { skPrefix: '%' })).items).toEqual([])
+        expect(await table.get(base, odd[0] as string)).toBeNull()
+      })
+
+      it('a cursor from a client is data: odd bytes resume where they sort', async () => {
+        const { table, pk } = await setup()
+        const all = ['a', 'b', "b'", 'c', '\u00e9', '\u{1F600}']
+        for (const sk of all) await table.put({ pk, sk })
+        const cursors = [
+          Buffer.from([0xff, 0xfe, 0x62]).toString('base64url'),
+          Buffer.from("b'; DROP TABLE items; --").toString('base64url'),
+          Buffer.from('$1').toString('base64url'),
+          '!!not base64!!',
+        ]
+        for (const cursor of cursors) {
+          const after = decodeCursor(cursor)
+          const expected = [...all].sort(compareSk).filter(sk => compareSk(sk, after) > 0)
+          expect(sks((await table.query(pk, { cursor })).items), cursor).toEqual(expected)
+        }
       })
 
       it('a cursor stays valid when the item it ended on is deleted', async () => {

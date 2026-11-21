@@ -20,13 +20,17 @@ import {
   type Condition,
   ConditionFailed,
   checkExpiresAt,
+  checkKey,
   decodeCursor,
   encodeCursor,
+  holdsWhenAbsent,
   type Page,
   type Patch,
   type QueryOptions,
   type Scalar,
   type ScanOptions,
+  storable,
+  storableKey,
   type Table,
   type TableItem,
   TRANSACT_MAX,
@@ -129,6 +133,7 @@ export class D1Table implements Table {
   }
 
   async get(pk: string, sk: string) {
+    if (!storable({ pk, sk })) return null
     const row = await this.db
       .prepare(
         'SELECT sk, data FROM items WHERE pk = ? AND sk = ? AND (expires_at IS NULL OR expires_at > ?)'
@@ -139,6 +144,7 @@ export class D1Table implements Table {
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
+    if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
     const where = ['pk = ?', '(expires_at IS NULL OR expires_at > ?)']
     const params: unknown[] = [pk, this.now()]
     if (opts.skPrefix) {
@@ -205,12 +211,14 @@ export class D1Table implements Table {
   }
 
   async put(item: TableItem, cond?: Condition) {
+    checkKey(item)
     const write = this.replace(item)
     if (!cond) await write.run()
     else await this.batch([this.guard(item.pk, item.sk, cond), write])
   }
 
   async update(pk: string, sk: string, patch: Patch, cond?: Condition) {
+    if (!storable({ pk, sk })) throw new ConditionFailed()
     const set = Object.entries(patch.set ?? {}).filter(([k]) => k !== 'pk' && k !== 'sk')
     const add = Object.entries(patch.add ?? {})
     if (add.some(([k]) => patch.set && k in patch.set)) {
@@ -264,6 +272,10 @@ export class D1Table implements Table {
   }
 
   async delete(pk: string, sk: string, cond?: Condition) {
+    if (!storable({ pk, sk })) {
+      if (!holdsWhenAbsent(cond)) throw new ConditionFailed()
+      return null
+    }
     const write = this.remove(pk, sk)
     const rows = cond
       ? ((await this.batch([this.guard(pk, sk, cond), write]))[1]?.results ?? [])
@@ -276,6 +288,7 @@ export class D1Table implements Table {
   async transact(ops: TransactOp[]) {
     if (ops.length > TRANSACT_MAX) throw new Error(`transact takes at most ${TRANSACT_MAX} ops`)
     const keys = ops.map(op => ('put' in op ? op.put : op.delete))
+    for (const k of keys) checkKey(k)
     if (new Set(keys.map(k => `${k.pk}\0${k.sk}`)).size !== keys.length) {
       throw new Error('transact ops must be on distinct items')
     }

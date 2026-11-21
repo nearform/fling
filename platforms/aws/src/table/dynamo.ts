@@ -22,13 +22,17 @@ import {
   type Condition,
   ConditionFailed,
   checkExpiresAt,
+  checkKey,
   decodeCursor,
   encodeCursor,
+  holdsWhenAbsent,
   isExpired,
   type Page,
   type Patch,
   type QueryOptions,
   type ScanOptions,
+  storable,
+  storableKey,
   type Table,
   type TableItem,
   TRANSACT_MAX,
@@ -154,6 +158,7 @@ export class DynamoTable implements Table {
   }
 
   async get(pk: string, sk: string) {
+    if (!storable({ pk, sk })) return null
     const res = await this.doc.send(
       new GetCommand({ TableName: this.table, Key: { PK: pk, SK: sk }, ConsistentRead: true })
     )
@@ -161,6 +166,7 @@ export class DynamoTable implements Table {
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
+    if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
     const e = new Expr()
     let keyCondition = `PK = ${e.value(pk)}`
     if (opts.skPrefix) keyCondition += ` AND begins_with(SK, ${e.value(opts.skPrefix)})`
@@ -211,6 +217,7 @@ export class DynamoTable implements Table {
   }
 
   async put(item: TableItem, cond?: Condition) {
+    checkKey(item)
     await this.send(() =>
       this.doc.send(
         new PutCommand({ TableName: this.table, Item: toAttrs(item), ...this.conditional(cond) })
@@ -219,6 +226,7 @@ export class DynamoTable implements Table {
   }
 
   async update(pk: string, sk: string, patch: Patch, cond?: Condition) {
+    if (!storable({ pk, sk })) throw new ConditionFailed()
     const e = new Expr()
     const sets: string[] = []
     const removes: string[] = []
@@ -264,6 +272,10 @@ export class DynamoTable implements Table {
   }
 
   async delete(pk: string, sk: string, cond?: Condition) {
+    if (!storable({ pk, sk })) {
+      if (!holdsWhenAbsent(cond)) throw new ConditionFailed()
+      return null
+    }
     const res = await this.send(() =>
       this.doc.send(
         new DeleteCommand({
@@ -280,6 +292,7 @@ export class DynamoTable implements Table {
 
   async transact(ops: TransactOp[]) {
     if (ops.length > TRANSACT_MAX) throw new Error(`transact takes at most ${TRANSACT_MAX} ops`)
+    for (const op of ops) checkKey('put' in op ? op.put : op.delete)
     const items = () =>
       ops.map(op =>
         'put' in op

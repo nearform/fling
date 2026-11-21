@@ -9,6 +9,7 @@
  * database whose encoding is not UTF-8: `COLLATE "C"` is byte order only over UTF-8, and byte
  * order is the order the Table port promises.
  */
+import { ident, isIdentifier } from './ident.ts'
 import type { SqlClient } from './sql.ts'
 
 export interface SchemaMigration {
@@ -39,9 +40,9 @@ export const SCHEMA_MIGRATIONS: SchemaMigration[] = [
 /** The default schema; an instance may use its own (`DATABASE_SCHEMA`). */
 export const DEFAULT_SCHEMA = 'public'
 
-/** A schema name safe to inline into SQL. */
+/** A schema name the Table can use (`ident`'s rule), returned as it is. */
 export function schemaName(schema: string): string {
-  if (!/^[a-z_][a-z0-9_]{0,62}$/.test(schema)) {
+  if (!isIdentifier(schema)) {
     throw new Error(`database schema must be lower-case letters, digits and _: ${schema}`)
   }
   return schema
@@ -56,28 +57,31 @@ export async function migrateSchema(
   schema: string = DEFAULT_SCHEMA,
   migrations: SchemaMigration[] = SCHEMA_MIGRATIONS
 ): Promise<string[]> {
-  const s = schemaName(schema)
+  const schemaSql = ident(schemaName(schema))
   const [encoding] = (await client.query<{ server_encoding: string }>('SHOW server_encoding')).rows
   if (encoding?.server_encoding !== 'UTF8') {
     throw new Error(`the database's encoding must be UTF8, not ${encoding?.server_encoding}`)
   }
   return client.transaction(async tx => {
     await tx.query('SELECT pg_advisory_xact_lock($1)', [MIGRATE_LOCK])
-    await tx.exec(
-      `CREATE SCHEMA IF NOT EXISTS ${s};
-       CREATE TABLE IF NOT EXISTS ${s}.fling_schema (
-         id text PRIMARY KEY,
-         applied_at timestamptz NOT NULL DEFAULT now()
-       );`
+    await tx.query(`CREATE SCHEMA IF NOT EXISTS ${schemaSql}`)
+    await tx.query(
+      `CREATE TABLE IF NOT EXISTS ${schemaSql}.${ident('fling_schema')} ` +
+        '(id text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())'
     )
     const done = new Set(
-      (await tx.query<{ id: string }>(`SELECT id FROM ${s}.fling_schema`)).rows.map(r => r.id)
+      (
+        await tx.query<{ id: string }>(`SELECT id FROM ${schemaSql}.${ident('fling_schema')}`)
+      ).rows.map(r => r.id)
     )
     const applied: string[] = []
     for (const m of migrations) {
       if (done.has(m.id)) continue
-      await tx.exec(`SET LOCAL search_path TO ${s}; ${m.sql}`)
-      await tx.query(`INSERT INTO ${s}.fling_schema (id) VALUES ($1)`, [m.id])
+      await tx.query(`SET LOCAL search_path TO ${schemaSql}`)
+      // The one multi-statement script: a constant of SCHEMA_MIGRATIONS (tests pass their own),
+      // never text built from config or a request.
+      await tx.exec(m.sql)
+      await tx.query(`INSERT INTO ${schemaSql}.${ident('fling_schema')} (id) VALUES ($1)`, [m.id])
       applied.push(m.id)
     }
     return applied

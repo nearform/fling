@@ -34,16 +34,22 @@ export function pgClient(pool: pg.Pool): SqlClient {
     ...onConnection(pool),
     async transaction(fn) {
       const conn = await pool.connect()
+      // PostgresTable's locking reads the rows its locks guard after taking them, which needs each
+      // statement to see what committed before it: READ COMMITTED, whatever the server's default.
+      let broken: Error | undefined
       try {
-        await conn.query('BEGIN')
+        await conn.query('BEGIN ISOLATION LEVEL READ COMMITTED')
         const result = await fn(onConnection(conn))
         await conn.query('COMMIT')
         return result
       } catch (err) {
-        await conn.query('ROLLBACK').catch(() => {})
+        await conn.query('ROLLBACK').catch((rollback: Error) => {
+          broken = rollback
+        })
         throw err
       } finally {
-        conn.release()
+        // A connection that couldn't roll back is discarded, never handed to the next caller.
+        conn.release(broken)
       }
     },
     close: () => pool.end(),
@@ -61,7 +67,11 @@ const onPglite = (db: PGlite | Transaction): SqlQueryable => ({
 export function pgliteClient(db: PGlite): SqlClient {
   return {
     ...onPglite(db),
-    transaction: fn => db.transaction(tx => fn(onPglite(tx))),
+    transaction: fn =>
+      db.transaction(async tx => {
+        await tx.query('SET TRANSACTION ISOLATION LEVEL READ COMMITTED')
+        return fn(onPglite(tx))
+      }),
     close: () => db.close(),
   }
 }

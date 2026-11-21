@@ -14,6 +14,7 @@
 import type { PGlite } from '@electric-sql/pglite'
 import type { LiveEvent, LiveFanout } from '@fling/api/live-memory'
 import type pg from 'pg'
+import { ident } from '../table/ident.ts'
 import { DEFAULT_SCHEMA, schemaName } from '../table/schema.ts'
 
 /** Postgres's limit on a notification's payload, less a margin. */
@@ -49,7 +50,7 @@ export function pgNotifier(pool: pg.Pool): Notifier {
             client = undefined
             if (!stopped) setTimeout(() => void connect(), RECONNECT_MS)
           })
-          await c.query(`LISTEN ${channel}`)
+          await c.query(`LISTEN ${ident(channel)}`)
         } catch (err) {
           console.warn(
             JSON.stringify({
@@ -65,7 +66,7 @@ export function pgNotifier(pool: pg.Pool): Notifier {
       return async () => {
         stopped = true
         if (!client) return
-        await client.query(`UNLISTEN ${channel}`).catch(() => {})
+        await client.query(`UNLISTEN ${ident(channel)}`).catch(() => {})
         client.release()
       }
     },
@@ -91,6 +92,8 @@ export class PostgresFanout implements LiveFanout {
     opts: { schema?: string } = {}
   ) {
     this.channel = `fling_live_${schemaName(opts.schema ?? DEFAULT_SCHEMA)}`
+    // A channel is an identifier: the schema's name may be at most 52 characters for it.
+    ident(this.channel)
   }
 
   async publish(event: LiveEvent) {

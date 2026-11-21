@@ -4,16 +4,26 @@ import { isSecretPath } from './secrets.ts'
 import { isStorableText, utf8Length } from './text.ts'
 
 /**
- * A site-relative POSIX path: no leading slash, no backslashes, no empty segments, and no segment
- * starting with `.` — so no `.`/`..`, and never a dotfile or dot-directory (`.env`, `.dev.vars`,
- * `.git/…`, `.well-known/…`). Fling never publishes dotfiles; there is no override. A path becomes
- * part of stored keys, so it is storable text too (no NUL, no lone surrogate: text.ts), of at most
- * MAX_PATH_BYTES bytes of UTF-8.
+ * The shape of a site's file path, whatever its length: site-relative POSIX, with no leading
+ * slash, no backslashes, no empty segments, and no segment starting with `.` — so no `.`/`..`,
+ * and never a dotfile or dot-directory (`.env`, `.dev.vars`, `.git/…`, `.well-known/…`). Fling
+ * never publishes dotfiles; there is no override. A path is part of stored keys, so it is storable
+ * text too (no NUL, no lone surrogate: text.ts). For a file a client receives (a pull): it says
+ * the file is inside the site.
+ */
+export function isSitePath(path: string): boolean {
+  if (!path || path.startsWith('/') || path.includes('\\') || !isStorableText(path)) return false
+  return path.split('/').every(seg => seg !== '' && !seg.startsWith('.'))
+}
+
+/**
+ * A path a deploy may upload a file at: a site path (isSitePath) of at most MAX_PATH_BYTES bytes
+ * of UTF-8. Stored files may have longer paths (MAX_STORED_PATH_LENGTH): they keep serving and
+ * can be pulled and removed, but not uploaded again.
  */
 export function isValidSitePath(path: string): boolean {
-  if (!path || path.length > MAX_PATH_BYTES || utf8Length(path) > MAX_PATH_BYTES) return false
-  if (path.startsWith('/') || path.includes('\\') || !isStorableText(path)) return false
-  return path.split('/').every(seg => seg !== '' && !seg.startsWith('.'))
+  if (path.length > MAX_PATH_BYTES || utf8Length(path) > MAX_PATH_BYTES) return false
+  return isSitePath(path)
 }
 
 export const ManifestFileSchema = z.object({

@@ -7,9 +7,9 @@
  */
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PULLED_SERVER_NOTE } from '@fling/shared'
+import { MAX_PATH_BYTES, PULLED_SERVER_NOTE } from '@fling/shared'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -126,6 +126,28 @@ describe('pull', () => {
     await pullSite(client(mockFetch(pullRoutes(now)).fetch), { name: 'my-app', dir, force: true })
     expect(existsSync(join(dir, 'about.html'))).toBe(false)
     expect(existsSync(join(dir, 'index.html'))).toBe(true)
+  })
+
+  it('pulls a stored file whose path is longer than an upload may be, and nothing outside the site', async () => {
+    // 1,000 characters: over MAX_PATH_BYTES, in segments a file system takes.
+    const long = `${`${'a'.repeat(199)}/`.repeat(4)}${'b'.repeat(195)}.html`
+    expect(long.length).toBeGreaterThan(MAX_PATH_BYTES)
+    const files = { 'index.html': '<h1>v1</h1>', [long]: '<h1>long</h1>' }
+    const cwd = process.cwd()
+    process.chdir(await tempDir())
+    try {
+      // Relative, so the whole path stays inside the 1,024 bytes macOS takes.
+      await pullSite(client(mockFetch(pullRoutes(files)).fetch), { name: 'my-app', dir: 'my-app' })
+      expect(await readFile(join('my-app', long), 'utf8')).toBe('<h1>long</h1>')
+    } finally {
+      await rm('my-app', { recursive: true, force: true })
+      process.chdir(cwd)
+    }
+    const outside = mockFetch(pullRoutes({ 'a/../../x.html': 'x' }))
+    const dir = join(await tempDir(), 'my-app')
+    expect(
+      (await captureError(pullSite(client(outside.fetch), { name: 'my-app', dir }))).message
+    ).toMatch(/outside the site/)
   })
 
   it('`fling pull` defaults to ./<name> and says how to deploy', async () => {

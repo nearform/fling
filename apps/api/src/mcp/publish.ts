@@ -38,9 +38,11 @@ import {
   FORMS_FILE,
   type FormsConfig,
   isHtmlPath,
+  isSitePath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
   MAX_PATH_FOLDER_LENGTH,
+  MAX_STORED_PATH_LENGTH,
   MCP_UPLOAD_MAX_FILES,
   MCP_UPLOAD_TTL_SECONDS,
   normalizePathFolder,
@@ -154,18 +156,21 @@ export type PublishOutcome =
 
 const tooLarge = (message: string) => new ApiError(413, 'too_large', message)
 
+/** A path a `remove` may name: any a stored file can have, longer than an upload's included. */
+const isStoredPath = (path: string) => path.length <= MAX_STORED_PATH_LENGTH && isSitePath(path)
+
 /**
  * `./a/b.html` or `/a/b.html` → `a/b.html`; dotfiles / secret files → 400 `dotfile` /
- * `secret_file`; anything else invalid → 400.
+ * `secret_file`; anything else invalid (for an upload, `accepts` isValidSitePath) → 400.
  */
-export function normalizePath(raw: string): string {
+export function normalizePath(raw: string, accepts = isValidSitePath): string {
   const path = raw
     .trim()
     .replace(/^(\.\/)+/, '')
     .replace(/^\/+/, '')
   if (path && !path.includes('\\') && !path.split('/').some(s => s === '..' || s === '.'))
     assertPublishablePaths([path])
-  if (!isValidSitePath(path)) {
+  if (!accepts(path)) {
     throw badRequest(
       `Invalid file path "${raw}": use a site-relative path with forward slashes, like "index.html" or "img/logo.png"`,
       'invalid_path'
@@ -205,7 +210,10 @@ export async function publishFiles(
   opts: PublishOptions
 ): Promise<PublishOutcome> {
   const { base } = opts
-  const remove = base === undefined ? [] : [...new Set((opts.remove ?? []).map(normalizePath))]
+  const remove =
+    base === undefined
+      ? []
+      : [...new Set((opts.remove ?? []).map(p => normalizePath(p, isStoredPath)))]
   if (opts.remove?.length && base === undefined) {
     throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
   }
@@ -336,7 +344,9 @@ export async function beginUpload(
   if (opts.remove?.length && opts.base === undefined) {
     throw badRequest('`remove` needs `base`: the version you read the files of', 'bad_request')
   }
-  const remove = opts.remove?.length ? [...new Set(opts.remove.map(normalizePath))] : undefined
+  const remove = opts.remove?.length
+    ? [...new Set(opts.remove.map(p => normalizePath(p, isStoredPath)))]
+    : undefined
   // Fail early on a bad or taken name, before anything is uploaded.
   const check = await sites.checkName(deps, user, name)
   if (check.status === 'invalid') {

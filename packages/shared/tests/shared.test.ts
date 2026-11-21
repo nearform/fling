@@ -16,7 +16,7 @@ import {
   signInChoices,
 } from '../src/instance.ts'
 import { MAX_PATH_BYTES } from '../src/limits.ts'
-import { isValidSitePath } from '../src/manifest.ts'
+import { isSitePath, isValidSitePath } from '../src/manifest.ts'
 import { signSiteCookie, verifySiteCookie } from '../src/site-cookie.ts'
 import { computeVersionId } from '../src/version-id.ts'
 
@@ -71,6 +71,12 @@ describe('manifest', () => {
     expect(isValidSitePath('😀'.repeat(MAX_PATH_BYTES / 4))).toBe(true)
     expect(isValidSitePath(`${'😀'.repeat(MAX_PATH_BYTES / 4)}a`)).toBe(false)
     expect(isValidSitePath('é'.repeat(MAX_PATH_BYTES / 2 + 1))).toBe(false)
+  })
+  it('takes a stored path of any length as a site path, and nothing outside the site', () => {
+    expect(isSitePath(`${'a'.repeat(1000)}.html`)).toBe(true)
+    for (const path of ['', '../x', 'a/../b', '/x', 'a\\b', 'a//b', '.env', 'a\u0000b']) {
+      expect(isSitePath(path)).toBe(false)
+    }
   })
   it('version id is order-independent and content-sensitive', () => {
     const a = [

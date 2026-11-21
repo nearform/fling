@@ -25,7 +25,7 @@
     "@fling/conformance": "workspace:*",
     "@fling/web": "workspace:*",
     "@types/node": "^24.0.0",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.1",
     "miniflare": "4.20260730.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",

@@ -21,7 +21,8 @@
  * GRACE_MS after it was replaced (`sweepHomes`).
  *
  * The revocation list (revocations.ts): due entries are taken off first, so a run that stops at its
- * deadline among the sites has still swept them. Every instance has this tick, mail or not.
+ * deadline among the sites has still swept them; one that fails is logged and the rest runs. Every
+ * instance has this tick, mail or not.
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
 import { formsKey, manifestKey } from './blobs/types.ts'
@@ -66,7 +67,19 @@ export async function maintain(
     revocations: 0,
     partial: false,
   }
-  result.revocations = await sweepRevocations(deps, opts)
+  // A sweep that fails is logged and left to the next run; the rest of maintenance still runs.
+  try {
+    result.revocations = await sweepRevocations(deps, opts)
+    if (result.revocations) {
+      console.log(
+        JSON.stringify({ level: 'info', msg: 'revocations swept', count: result.revocations })
+      )
+    }
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: 'warn', msg: 'revocation sweep failed', err: String(err) })
+    )
+  }
   const { sites } = await deps.store.listAllSites({ max: MAX_SITES })
   for (const entry of sites) {
     if (opts.deadline !== undefined && Date.now() > opts.deadline) {

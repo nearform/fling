@@ -17,6 +17,7 @@
  */
 import { createHash } from 'node:crypto'
 import { MAX_FILE_BYTES } from '@fling/shared'
+import { bodyUpTo } from '../lib/body.ts'
 import {
   keyFromPath,
   signDownload,
@@ -43,21 +44,6 @@ const refuse = (status: number, message: string) =>
     { error: { code: status === 403 ? 'forbidden' : 'bad_request', message } },
     { status, headers: { 'cache-control': 'no-store' } }
   )
-
-/** The body, or null once it passes `max` bytes (read no further). */
-async function bodyUpTo(request: Request, max: number): Promise<Uint8Array | null> {
-  const declared = Number(request.headers.get('content-length') ?? Number.NaN)
-  if (declared > max) return null
-  if (!request.body) return new Uint8Array()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for await (const chunk of request.body as unknown as AsyncIterable<Uint8Array>) {
-    size += chunk.byteLength
-    if (size > max) return null
-    chunks.push(chunk)
-  }
-  return new Uint8Array(Buffer.concat(chunks, size))
-}
 
 export class HostUploads {
   constructor(
@@ -94,6 +80,9 @@ export class HostUploads {
           'content-type': 'application/octet-stream',
           'content-length': String(object.byteLength),
           'cache-control': 'private, no-store',
+          // Never rendered on the app origin, whatever the bytes are.
+          'x-content-type-options': 'nosniff',
+          'content-disposition': 'attachment',
         },
       })
     }

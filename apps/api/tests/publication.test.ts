@@ -152,6 +152,43 @@ describe('admission', () => {
   })
 })
 
+describe('a store bound by MD5', () => {
+  // As an MD5-bound store (S3Blobs with digest: 'md5') answers: the upload URL checks no SHA-256.
+  const md5Bound = () => {
+    Object.defineProperty(env.blobs, 'uploadDigest', { value: 'md5' })
+  }
+
+  it('publishes uploads whose SHA-256 is the manifest’s', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>hi</h1>'), file('app.bin', 'binary', 'application/x')]
+    const { uploads, versionId } = await stageUploads(files)
+    await upload(env, uploads, files)
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+  })
+
+  it('refuses bytes that are not the manifest’s, every file read, and keeps nothing', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>hi</h1>'), file('app.bin', 'binary', 'application/x')]
+    const { uploads, versionId } = await stageUploads(files)
+    await upload(env, uploads, files)
+    const site = await env.store.findSite('hello')
+    // Other bytes of the same size, as an MD5 the client chose would let through.
+    await env.blobs.put(
+      siteObjectKey(site?.id as string, versionId, 'app.bin'),
+      Buffer.from('BINARY')
+    )
+    await expect(publish(env.deps, user, 'hello', versionId)).rejects.toMatchObject({
+      status: 409,
+      code: 'upload_mismatch',
+      extra: { mismatched: ['app.bin'] },
+    })
+    expect(await stored(versionId, 'index.html')).toBeNull()
+    expect((await env.store.findSite('hello'))?.currentVersionId).toBeNull()
+  })
+})
+
 describe('scanning', () => {
   it('publish reads back and refuses a secret; nothing is left behind', async () => {
     const files = [file('index.html', 'ok'), file('a.js', `k="${FAKE_AWS_KEY}"`, 'text/javascript')]

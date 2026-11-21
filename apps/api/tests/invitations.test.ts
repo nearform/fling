@@ -459,6 +459,25 @@ describe('the revocation list', () => {
     expect(await env.routeTable.get(listKey(env, PAT))).toBeUndefined()
     expect(await sweepRevocations(env.deps)).toBe(0)
   })
+
+  it('a sweep that fails leaves the rest of maintenance to run', async () => {
+    const { env } = await world()
+    const store = env.deps.store
+    const failing = Object.create(store, {
+      dueRevocations: { value: async () => Promise.reject(new Error('table down')) },
+    })
+    let listed = 0
+    failing.listAllSites = async (...args: Parameters<typeof store.listAllSites>) => {
+      listed++
+      return store.listAllSites(...args)
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = await maintain({ ...env.deps, store: failing })
+    expect(result.revocations).toBe(0)
+    expect(listed).toBe(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('revocation sweep failed'))
+    warn.mockRestore()
+  })
 })
 
 describe("the share's email to someone invited", () => {

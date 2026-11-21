@@ -61,8 +61,13 @@ export class FsBlobs implements Blobs {
   }
 
   /** Verify a dev upload and store it. Returns false if the signature/expiry/checksum is bad. */
+  /** Whether an upload's URL and headers are as signed (checked before its body is read). */
+  verifiesUpload(input: SignedUploadRequest): boolean {
+    return verifyUpload({ secret: this.secret, now: this.now }, input)
+  }
+
   async acceptUpload(input: SignedUploadRequest & { body: Uint8Array }): Promise<boolean> {
-    if (!verifyUpload({ secret: this.secret, now: this.now }, input)) return false
+    if (!this.verifiesUpload(input)) return false
     if (createHash('sha256').update(input.body).digest('base64') !== input.checksum) return false
     const file = this.pathFor(input.key)
     await mkdir(dirname(file), { recursive: true })

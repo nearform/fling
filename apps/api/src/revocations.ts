@@ -33,16 +33,20 @@ export async function revokeSiteCookies(deps: Deps, email: string, at: Date): Pr
   await deps.routeTable.put(revokedKvsKey(mac), String(before))
 }
 
+/** The most pages one sweep takes without a deadline; the rest wait for the next run. */
+const SWEEP_MAX_PAGES = 100
+
 /**
- * Take the revocations that are due off the list, a page at a time until none are due or the
- * deadline passes (the rest wait for the next run); returns how many were.
+ * Take the revocations that are due off the list, a page at a time until none are due, the
+ * deadline passes or SWEEP_MAX_PAGES pages are done (the rest wait for the next run); returns how
+ * many were.
  */
 export async function sweepRevocations(
   deps: Deps,
   opts: { deadline?: number } = {}
 ): Promise<number> {
   let swept = 0
-  for (;;) {
+  for (let pages = 1; ; pages++) {
     const due = await deps.store.dueRevocations(deps.clock.now().toISOString(), SWEEP_PAGE)
     for (const r of due) {
       const listKey = revokedKvsKey(r.mac)
@@ -54,5 +58,6 @@ export async function sweepRevocations(
     swept += due.length
     if (due.length < SWEEP_PAGE) return swept
     if (opts.deadline !== undefined && Date.now() > opts.deadline) return swept
+    if (opts.deadline === undefined && pages >= SWEEP_MAX_PAGES) return swept
   }
 }

@@ -23,6 +23,12 @@ export interface PresignPutOptions {
 
 export interface Blobs {
   /**
+   * The digest presigned uploads are bound to (default `sha256`). With `md5`, nothing ties an
+   * upload to the manifest's SHA-256, which the version id and kept-file reuse trust, so
+   * publication reads every uploaded file back and checks its SHA-256 before the version goes live.
+   */
+  readonly uploadDigest?: 'sha256' | 'md5'
+  /**
    * A PUT URL for exactly one body: the object whose digest was signed. Any other bytes are
    * rejected, so the URL can never replace what was published with something else. The store
    * binds whichever digest it checks: the SHA-256 (S3, R2, the core's signed routes) or the MD5

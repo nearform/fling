@@ -1,0 +1,8 @@
+# The build context is the repository root; the image needs only these (BuildKit reads this file for
+# platforms/gcp/Dockerfile alone).
+*
+!platforms/gcp/dist/server
+!apps/web/dist
+!apps/web/dist-404
+!apps/web/dist-review
+!apps/web/sites-robots.txt

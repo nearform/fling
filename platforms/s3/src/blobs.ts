@@ -11,6 +11,17 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import type { Blobs, PresignedPut, PresignPutOptions } from '@fling/api/blobs'
 
+/**
+ * S3Blobs: the Blobs port over any store that speaks the S3 API (AWS S3, DigitalOcean Spaces,
+ * MinIO, Tigris). AWS constructs it with the default client (platforms/aws/src/deps.ts); the Node
+ * host with one from its environment (`s3FromEnv`, env.ts).
+ *
+ * The URLs it presigns are what clients upload to and download from, so they must name the store
+ * as clients reach it. Where the host reaches the store at another address (MinIO on a private
+ * network behind a public proxy), `presigner` is a client for the public address and signs every
+ * URL; `client` does the rest.
+ */
+
 // WHEN_REQUIRED: otherwise the SDK signs a CRC32 of the (empty) presign body into the URL.
 export const S3_CLIENT_CONFIG = {
   requestChecksumCalculation: 'WHEN_REQUIRED',
@@ -39,6 +50,8 @@ export interface S3BlobsOptions {
    * HostUploads on the platform's host). Without one, such a file can't be presigned.
    */
   fallback?: Pick<Blobs, 'presignPut'>
+  /** the client that signs the URLs, for the store's public address (default: the client) */
+  presigner?: S3Client
 }
 
 export class S3Blobs implements Blobs {
@@ -47,6 +60,10 @@ export class S3Blobs implements Blobs {
     private client = new S3Client(S3_CLIENT_CONFIG),
     private opts: S3BlobsOptions = {}
   ) {}
+
+  private get signer(): S3Client {
+    return this.opts.presigner ?? this.client
+  }
 
   get uploadDigest(): S3Digest {
     return this.opts.digest ?? 'sha256'
@@ -65,7 +82,7 @@ export class S3Blobs implements Blobs {
           value: Buffer.from(opts.sha256, 'hex').toString('base64'),
         }
     const url = await getSignedUrl(
-      this.client,
+      this.signer,
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -93,7 +110,7 @@ export class S3Blobs implements Blobs {
   }
 
   async presignGet(key: string, opts: { expiresIn?: number } = {}): Promise<string> {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+    return getSignedUrl(this.signer, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: opts.expiresIn ?? 900,
     })
   }

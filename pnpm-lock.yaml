@@ -321,6 +321,9 @@ importers:
       '@fling/api':
         specifier: workspace:*
         version: link:../../apps/api
+      '@fling/platform-s3':
+        specifier: workspace:*
+        version: link:../s3
       '@fling/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -404,6 +407,9 @@ importers:
       '@fling/api':
         specifier: workspace:*
         version: link:../../apps/api
+      '@fling/platform-s3':
+        specifier: workspace:*
+        version: link:../s3
       '@fling/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -444,6 +450,9 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+      esbuild:
+        specifier: ^0.25.12
+        version: 0.25.12
       mailparser:
         specifier: ^3.9.47
         version: 3.15.0
@@ -462,6 +471,31 @@ importers:
       ws:
         specifier: ^8.21.0
         version: 8.21.0
+
+  platforms/s3:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: 3.1150.0
+        version: 3.1150.0
+      '@fling/api':
+        specifier: workspace:*
+        version: link:../../apps/api
+    devDependencies:
+      '@fling/conformance':
+        specifier: workspace:*
+        version: link:../../packages/conformance
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@24.19.2)(vite@6.4.5(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15))
 
 packages:
 
@@ -3500,8 +3534,8 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/types': 3.975.0
-      '@smithy/core': 3.36.2
-      '@smithy/types': 4.19.0
+      '@smithy/core': 3.40.0
+      '@smithy/types': 4.20.0
       tslib: 2.8.1
 
   '@aws-sdk/client-apigatewaymanagementapi@3.1150.0':
@@ -3570,10 +3604,10 @@ snapshots:
       '@aws-sdk/middleware-sdk-s3': 3.972.81
       '@aws-sdk/signature-v4-multi-region': 3.996.49
       '@aws-sdk/types': 3.975.0
-      '@smithy/core': 3.36.2
+      '@smithy/core': 3.40.0
       '@smithy/fetch-http-handler': 5.8.0
       '@smithy/node-http-handler': 4.12.1
-      '@smithy/types': 4.19.0
+      '@smithy/types': 4.20.0
       tslib: 2.8.1
 
   '@aws-sdk/client-sesv2@3.1150.0':
@@ -3728,8 +3762,8 @@ snapshots:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/signature-v4-multi-region': 3.996.49
       '@aws-sdk/types': 3.975.0
-      '@smithy/core': 3.36.2
-      '@smithy/types': 4.19.0
+      '@smithy/core': 3.40.0
+      '@smithy/types': 4.20.0
       tslib: 2.8.1
 
   '@aws-sdk/nested-clients@3.997.50':
@@ -3748,8 +3782,8 @@ snapshots:
       '@aws-sdk/core': 3.978.5
       '@aws-sdk/signature-v4-multi-region': 3.996.49
       '@aws-sdk/types': 3.975.0
-      '@smithy/core': 3.36.2
-      '@smithy/types': 4.19.0
+      '@smithy/core': 3.40.0
+      '@smithy/types': 4.20.0
       tslib: 2.8.1
 
   '@aws-sdk/signature-v4-multi-region@3.996.49':

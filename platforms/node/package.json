@@ -13,10 +13,11 @@
     "./host": "./src/host.ts",
     "./ticks": "./src/ticks.ts",
     "./route-table/cached": "./src/route-table/cached.ts",
-    "./live/postgres-fanout": "./src/live/postgres-fanout.ts"
+    "./live/postgres-fanout": "./src/live/postgres-fanout.ts",
+    "./blobs": "./src/blobs.ts"
   },
   "scripts": {
-    "build": "echo 'platform-node: consumed as source'",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "start": "tsx src/main.ts",
@@ -25,6 +26,7 @@
   "dependencies": {
     "@electric-sql/pglite": "^0.5.17",
     "@fling/api": "workspace:*",
+    "@fling/platform-s3": "workspace:*",
     "@fling/shared": "workspace:*",
     "@hono/node-server": "^2.1.6",
     "drizzle-orm": "^0.45.4",
@@ -40,6 +42,7 @@
     "@types/smtp-server": "^3.5.13",
     "@types/ws": "^8.18.2",
     "drizzle-kit": "^0.31.11",
+    "esbuild": "^0.25.12",
     "mailparser": "^3.9.47",
     "smtp-server": "^3.21.7",
     "tsx": "^4.23.13",

@@ -180,7 +180,7 @@ describe('the Node host', () => {
     expect(await blobs.head('sites/S/V/big.bin')).toBeNull()
   })
 
-  it('answers the API and the UI on the app host, and nothing on other hosts', async () => {
+  it('answers the API and the UI on the app host, and only a probe on other hosts', async () => {
     const { host } = await world()
     const health = await get(host, `${APP}/healthz`)
     expect(health.status).toBe(200)
@@ -198,7 +198,11 @@ describe('the Node host', () => {
       'public, max-age=300'
     )
     expect((await get(host, `${APP}/..%2F..%2Fetc/passwd`)).status).not.toBe(500)
-    expect((await get(host, 'http://elsewhere.example.test/healthz')).status).toBe(404)
+    expect((await get(host, 'http://10.0.0.7:8080/healthz')).status).toBe(200)
+    expect((await get(host, 'http://elsewhere.example.test/api/me')).status).toBe(404)
+    expect((await get(host, 'http://elsewhere.example.test/')).status).toBe(404)
+    // On a sites host, /healthz is the site's own path.
+    expect((await get(host, 'http://unknown.sites.example.test/healthz')).status).toBe(404)
   })
 
   it('serves a site file from Blobs with its headers, revalidates, and 404s the rest', async () => {

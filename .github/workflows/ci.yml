@@ -8,12 +8,12 @@ name: CI
 # check only skips when it is missing outside CI.
 #
 # The one addition is local stand-ins for the cloud services: DynamoDB Local, MinIO and Postgres as
-# service containers, and the env vars that point the adapter conformance suites in platforms/aws
-# and platforms/node at them. Without those env vars (a laptop without Docker) the suites skip, so
+# service containers, and the env vars that point the adapter conformance suites in platforms/aws,
+# platforms/s3 and platforms/node at them. Without those env vars (a laptop without Docker) the suites skip, so
 # `pnpm gate` still passes (the Postgres Table's suites still run on PGlite, in process); with
 # them, the adapters must behave like the core's memory/fs ones. The tests create their own table,
-# bucket and schemas. To run them locally, see platforms/aws/tests/services.ts and
-# platforms/node/tests/services.ts.
+# bucket and schemas. To run them locally, see platforms/aws/tests/services.ts,
+# platforms/s3/tests/services.ts and platforms/node/tests/services.ts.
 #
 # The Release workflow (release-cli.yml) calls it (workflow_call) on the tagged commit before
 # publishing; a successful release then deploys. Every dependency is public, so no npm token is

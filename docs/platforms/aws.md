@@ -20,7 +20,7 @@ CloudFront. Everything is serverless and in one region, except CloudFront and it
 | Element | AWS service | Adapter | Notes |
 |---|---|---|---|
 | Table | DynamoDB, one on-demand table, `PK`/`SK`, no GSIs | `platforms/aws/src/table/dynamo.ts` | `ConsistentRead` everywhere. `TransactWriteItems` for `transact`. `ttl` (epoch seconds) mirrors `expiresAt`, and reads also filter expired items because TTL lags by up to ~48 h |
-| Blobs | S3 (`sites` bucket) | `platforms/aws/src/blobs/s3.ts` | Presigned PUT signs `x-amz-checksum-sha256`, so S3 itself enforces the bytes. `CopyObject`, then `ListObjectsV2` with `DeleteObjects` for prefixes |
+| Blobs | S3 (`sites` bucket) | `platforms/s3/src/blobs.ts` | Presigned PUT signs `x-amz-checksum-sha256`, so S3 itself enforces the bytes. `CopyObject`, then `ListObjectsV2` with `DeleteObjects` for prefixes |
 | Route table | CloudFront KeyValueStore | `platforms/aws/src/route-table/cloudfront.ts` | Data-plane API (SigV4A). Writes need the store's ETag, so the adapter caches it and retries when stale. Propagation is eventual, so `waitReady` polls |
 | Sites host | CloudFront Function (`cloudfront-js-2.0`) | `edge/src/cloudfront.js`, built by `edge/build.mjs` | See §3 |
 | Live hub | API Gateway WebSocket API (stage `live`) | `platforms/aws/src/live.ts` | `$connect`/`$default`/`$disconnect` go to the API Lambda. Connections are live connection records in DynamoDB (2 h TTL). Messages go out with `PostToConnection`; a 410 deletes the connection |

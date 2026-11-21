@@ -25,6 +25,7 @@
     "@aws-sdk/s3-request-presigner": "3.1150.0",
     "@aws-sdk/signature-v4a": "^3.1138.0",
     "@fling/api": "workspace:*",
+    "@fling/platform-s3": "workspace:*",
     "@fling/shared": "workspace:*",
     "@smithy/signature-v4": "^5.7.5",
     "fflate": "^0.8.3",

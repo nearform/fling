@@ -6,8 +6,9 @@
  *   one, on PGlite (Postgres in process) under `<FS_ROOT>/pglite`, for one process on one machine.
  *   Its schema migrations, then the data migrations, run on start, as a deploy runs them.
  * - **Route table**: the Table itself (TableRouteTable), cached for a few seconds per process.
- * - **Blobs**: the filesystem under `FS_ROOT` (default `.fling-node`), its signed routes on the app
- *   host.
+ * - **Blobs** (`STORAGE_DRIVER`, blobs.ts): the filesystem under `FS_ROOT` (default `.fling-node`),
+ *   its signed routes on the app host; or (`s3`) any S3-compatible store, from `SITES_BUCKET` and
+ *   `S3_*`, with the host's upload routes for a file a store bound by MD5 can't take directly.
  * - **Live rooms**: in process, fanned out through Postgres LISTEN/NOTIFY when the Table is on a
  *   server (several processes share it); `LIVE_URL` is `ws(s)://<app host>/api/live`.
  * - **Mail**: `MAIL_DRIVER=smtp` through SmtpMailer, or the core's `file` and `memory`.
@@ -16,15 +17,16 @@
  *   endpoints (host.ts) for an outside scheduler when TICK_SECRET is set. Repeated ticks are safe.
  *
  * `PORT` (default 8080) is where it listens, `MAX_REQUEST_BYTES` (default 32 MiB) the largest
- * request body it takes; the web build (apps/web: `dist`, `dist-404`,
- * `dist-review`, `sites-robots.txt`) is read from this checkout. The e2e runs it as the `node`
- * local runtime (packages/e2e/src/local.ts).
+ * request body it takes; the web build (apps/web: `dist`, `dist-404`, `dist-review`,
+ * `sites-robots.txt`) is read from `WEB_DIR` (default: this checkout's apps/web, as the image
+ * built by scripts/build.mjs and the Dockerfile sets it). `/healthz` answers on any host that is
+ * neither the app's nor a site's, for a load balancer's or an orchestrator's probe. The e2e runs
+ * it as the `node` local runtime (packages/e2e/src/local.ts).
  */
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PGlite } from '@electric-sql/pglite'
-import { FsBlobs } from '@fling/api/blobs/fs'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
 import { MemoryLiveHub } from '@fling/api/live-memory'
@@ -37,6 +39,7 @@ import { Records } from '@fling/api/store/records'
 import type { Deps } from '@fling/api/types'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared/route-keys'
 import pg from 'pg'
+import { nodeBlobs, storageDriver } from './blobs.ts'
 import { createNodeHost, sharedSecretTicks } from './host.ts'
 import { PostgresFanout, pgNotifier } from './live/postgres-fanout.ts'
 import { smtpMailerFor } from './mail/smtp.ts'
@@ -45,17 +48,18 @@ import { pgDatabase, pgliteDatabase } from './table/database.ts'
 import { PostgresTable } from './table/postgres.ts'
 import { drain, maintain } from './ticks.ts'
 
-/** The drivers this process implements, whatever the environment names. */
+/** The drivers this process implements, whatever the environment names (and the store it names). */
 export const NODE_DRIVERS = {
   STORE_DRIVER: 'postgres',
-  STORAGE_DRIVER: 'fs',
   KVS_DRIVER: 'table',
 } as const
 
-const repo = fileURLToPath(new URL('../../../', import.meta.url))
-const web = (...p: string[]) => resolve(repo, 'apps', 'web', ...p)
+const webDir =
+  process.env.WEB_DIR?.trim() ||
+  resolve(fileURLToPath(new URL('../../../', import.meta.url)), 'apps', 'web')
+const web = (...p: string[]) => resolve(webDir, ...p)
 
-const env = { ...process.env, ...NODE_DRIVERS }
+const env = { ...process.env, ...NODE_DRIVERS, STORAGE_DRIVER: storageDriver(process.env) }
 const config: Config = { ...loadBaseConfig(env), secrets: secretsFromEnv(env) }
 const port = Number(process.env.PORT ?? 8080)
 const fsRoot = resolve(config.fsRoot ?? '.fling-node')
@@ -81,7 +85,7 @@ console.log(
 
 // One cache for the API's writes and the sites host's reads, so this process sees its writes at once.
 const routes = new CachedRouteTable(new TableRouteTable(table))
-const blobs = new FsBlobs(fsRoot, config.appOrigin, config.secrets.sessionSecret)
+const { blobs, uploads } = nodeBlobs(config, env, fsRoot)
 // Several processes share a Postgres server, so their rooms fan out through it; PGlite is one.
 const live = new MemoryLiveHub(
   pool ? { fanout: new PostgresFanout(pgNotifier(pool), { schema }) } : {}
@@ -118,6 +122,7 @@ const host = createNodeHost({
     robots: web('sites-robots.txt'),
   },
   live,
+  ...(uploads ? { uploads } : {}),
   ...(process.env.MAX_REQUEST_BYTES ? { maxBodyBytes: Number(process.env.MAX_REQUEST_BYTES) } : {}),
   ...(config.secrets.tickSecret
     ? { ticks: { authorize: sharedSecretTicks(config.secrets.tickSecret) } }

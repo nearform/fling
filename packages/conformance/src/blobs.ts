@@ -22,6 +22,7 @@ export interface BlobsHarness {
 const bytes = (s: string) => new TextEncoder().encode(s)
 const text = (b: Uint8Array | null) => (b ? new TextDecoder().decode(b) : null)
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
+const md5 = (b: Uint8Array) => createHash('md5').update(b).digest('base64')
 
 export function blobsConformance(
   name: string,
@@ -138,74 +139,83 @@ export function blobsConformance(
       expect(await blobs.head(keys[keys.length - 1] as string)).toBeNull()
     }, 120_000)
 
-    describe('presigned uploads', () => {
-      const body = bytes('<!doctype html><title>hi</title>')
-      const opts = {
-        contentType: 'text/html; charset=utf-8',
-        cacheControl: 'public, max-age=300',
-        sha256: sha256(body),
-      }
-
-      it('accept exactly the bytes they were signed for, with the headers they return', async () => {
-        const { blobs, upload, p } = await setup()
-        const signed = await blobs.presignPut(`${p}up/index.html`, opts)
-        expect(signed.headers).toMatchObject({
-          'content-type': opts.contentType,
-          'cache-control': opts.cacheControl,
+    const body = bytes('<!doctype html><title>hi</title>')
+    const signedFor = {
+      contentType: 'text/html; charset=utf-8',
+      cacheControl: 'public, max-age=300',
+      sha256: sha256(body),
+    }
+    // Every store binds a presigned PUT to its body whether or not the client sent the MD5:
+    // older clients send none, and a store that checks only an MD5 then signs the host's route.
+    for (const [given, opts] of [
+      ['the SHA-256', signedFor],
+      ['the SHA-256 and the MD5', { ...signedFor, md5: md5(body) }],
+    ] as const) {
+      describe(`presigned uploads given ${given}`, () => {
+        it('accept exactly the bytes they were signed for, with the headers they return', async () => {
+          const { blobs, upload, p } = await setup()
+          const signed = await blobs.presignPut(`${p}up/index.html`, opts)
+          expect(signed.headers).toMatchObject({
+            'content-type': opts.contentType,
+            'cache-control': opts.cacheControl,
+          })
+          const res = await upload(signed.url, { method: 'PUT', headers: signed.headers, body })
+          expect(res.ok).toBe(true)
+          expect(await blobs.head(`${p}up/index.html`)).toEqual({ size: body.length })
+          expect(text(await blobs.get(`${p}up/index.html`))).toBe(text(body))
         })
-        const res = await upload(signed.url, { method: 'PUT', headers: signed.headers, body })
-        expect(res.ok).toBe(true)
-        expect(await blobs.head(`${p}up/index.html`)).toEqual({ size: body.length })
-        expect(text(await blobs.get(`${p}up/index.html`))).toBe(text(body))
-      })
 
-      it('reject any other body', async () => {
-        const { blobs, upload, p } = await setup()
-        const signed = await blobs.presignPut(`${p}up/index.html`, opts)
-        const res = await upload(signed.url, {
-          method: 'PUT',
-          headers: signed.headers,
-          body: bytes('<!doctype html><title>evil</title>'),
+        it('reject any other body', async () => {
+          const { blobs, upload, p } = await setup()
+          const signed = await blobs.presignPut(`${p}up/index.html`, opts)
+          const res = await upload(signed.url, {
+            method: 'PUT',
+            headers: signed.headers,
+            body: bytes('<!doctype html><title>evil</title>'),
+          })
+          expect(res.ok).toBe(false)
+          expect(await blobs.head(`${p}up/index.html`)).toBeNull()
         })
-        expect(res.ok).toBe(false)
-        expect(await blobs.head(`${p}up/index.html`)).toBeNull()
-      })
 
-      it('reject an upload without the checksum header', async () => {
-        const { blobs, upload, p } = await setup()
-        const signed = await blobs.presignPut(`${p}up/index.html`, opts)
-        const headers = Object.fromEntries(
-          Object.entries(signed.headers).filter(([k]) => k !== 'x-amz-checksum-sha256')
-        )
-        const res = await upload(signed.url, { method: 'PUT', headers, body })
-        expect(res.ok).toBe(false)
-        expect(await blobs.head(`${p}up/index.html`)).toBeNull()
-      })
-
-      it('reject a different Content-Type than the one signed', async () => {
-        const { blobs, upload, p } = await setup()
-        const signed = await blobs.presignPut(`${p}up/index.html`, opts)
-        const res = await upload(signed.url, {
-          method: 'PUT',
-          headers: { ...signed.headers, 'content-type': 'application/javascript' },
-          body,
+        it('reject an upload without the digest header', async () => {
+          const { blobs, upload, p } = await setup()
+          const signed = await blobs.presignPut(`${p}up/index.html`, opts)
+          const headers = Object.fromEntries(
+            Object.entries(signed.headers).filter(
+              ([k]) => k === 'content-type' || k === 'cache-control'
+            )
+          )
+          expect(Object.keys(headers).length).toBeLessThan(Object.keys(signed.headers).length)
+          const res = await upload(signed.url, { method: 'PUT', headers, body })
+          expect(res.ok).toBe(false)
+          expect(await blobs.head(`${p}up/index.html`)).toBeNull()
         })
-        expect(res.ok).toBe(false)
-        expect(await blobs.head(`${p}up/index.html`)).toBeNull()
-      })
 
-      it('are bound to their key', async () => {
-        const { blobs, upload, p } = await setup()
-        const signed = await blobs.presignPut(`${p}up/index.html`, opts)
-        const res = await upload(signed.url.replace('/up/index.html', '/up/other.html'), {
-          method: 'PUT',
-          headers: signed.headers,
-          body,
+        it('reject a different Content-Type than the one signed', async () => {
+          const { blobs, upload, p } = await setup()
+          const signed = await blobs.presignPut(`${p}up/index.html`, opts)
+          const res = await upload(signed.url, {
+            method: 'PUT',
+            headers: { ...signed.headers, 'content-type': 'application/javascript' },
+            body,
+          })
+          expect(res.ok).toBe(false)
+          expect(await blobs.head(`${p}up/index.html`)).toBeNull()
         })
-        expect(res.ok).toBe(false)
-        expect(await blobs.head(`${p}up/other.html`)).toBeNull()
+
+        it('are bound to their key', async () => {
+          const { blobs, upload, p } = await setup()
+          const signed = await blobs.presignPut(`${p}up/index.html`, opts)
+          const res = await upload(signed.url.replace('/up/index.html', '/up/other.html'), {
+            method: 'PUT',
+            headers: signed.headers,
+            body,
+          })
+          expect(res.ok).toBe(false)
+          expect(await blobs.head(`${p}up/other.html`)).toBeNull()
+        })
       })
-    })
+    }
 
     describe('presigned downloads', () => {
       const bin = new Uint8Array([0, 137, 80, 78, 71, 255, 10, 13])

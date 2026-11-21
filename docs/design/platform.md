@@ -117,15 +117,22 @@ Each element uses the same headings:
 - **Semantics:**
   - Methods: `presignPut`, `presignGet`, `head`, `put`, `get`, `copy`, `delete` and
     `deletePrefix`.
-  - **A presigned PUT accepts only the bytes whose SHA-256 was signed.** The binding also covers
-    content type and cache-control and is tied to its key. Clients upload directly; the API never
-    sees the bytes.
+  - **A presigned PUT accepts only the bytes whose digest was signed.** The manifest carries each
+    file's SHA-256 and, from clients that send it, its MD5 (base64). `presignPut` binds whichever
+    one its store checks: the SHA-256 on S3 and R2 and through the core's signed routes, the MD5
+    (`Content-MD5`) on GCS, Azure Blob and S3-compatible stores (`S3Blobs` with `digest: 'md5'`).
+    The binding also covers content type and cache-control and is tied to its key. The client
+    sends exactly the headers `presignPut` returns. Clients upload directly; the API never sees
+    the bytes.
   - A presigned GET expires and is tied to its key.
   - `deletePrefix` pages past one listing.
   - The port has no multipart upload. Large uploads through MCP are chunked in the Table and
     assembled on the server.
-  - Where the store cannot bind an upload to its SHA-256, the platform serves the core's signed
-    routes from its own host, as Cloudflare does with R2. See §4.
+  - A store that checks only an MD5, asked to presign a file whose MD5 the client did not send (an
+    older CLI), signs the host's upload route instead (`HostUploads`,
+    `apps/api/src/blobs/host-uploads.ts`). The host checks the SHA-256 itself and writes the
+    bytes with `put`, so they pass through it and its request-size limit applies. Cloudflare
+    serves the same routes with R2's own check.
 - **Conformance:** `blobsConformance`.
 - **Gates:** nothing.
 
@@ -290,18 +297,6 @@ that routes* shape, on a Node runtime. Writing the parts they share once keeps "
 
 ## 6. Known gaps in the contract
 
-- **Upload binding.** Only S3 checks a SHA-256 on a presigned PUT. GCS checks MD5 or CRC32C, Azure
-  Blob checks MD5 or CRC64, and Tigris and Vercel Blob are unconfirmed. A platform on such a store
-  has three options:
-  1. Serve the core's signed upload routes from its host. This works everywhere, but the bytes
-     pass through the host, so its request-size limit applies.
-  2. Change the contract so the manifest also carries a digest the store checks (MD5 or CRC32C),
-     and `presignPut` binds whichever one the store supports. This changes the CLI and MCP
-     clients.
-  3. Have the core hash every uploaded file when the deploy finalises. `checkUploads` in
-     `apps/api/src/publication.ts` already reads scannable files back for the secret scan.
-
-  Option 2 keeps uploads direct and is the proposal. The decision belongs to the core.
 - **No shared conformance for edge shells.** Each sites host tests its own. The AWS route table
   (`CloudFrontRouteTable`) has no emulator and is stub-tested.
 - **CI knows two platforms.** `scripts/check-terraform.mjs` checks one Terraform module, and

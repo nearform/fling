@@ -16,7 +16,7 @@ import {
   verifyDownload,
   verifyUpload,
 } from './signed-url.ts'
-import type { Blobs, PresignedPut } from './types.ts'
+import type { Blobs, PresignedPut, PresignPutOptions } from './types.ts'
 
 /** Where the app mounts FsBlobs' signed upload and download routes. */
 export const FS_UPLOAD_ROUTE = '/dev-upload'
@@ -46,10 +46,7 @@ export class FsBlobs implements Blobs {
     return { secret: this.secret, baseUrl: this.baseUrl, route, now: this.now }
   }
 
-  async presignPut(
-    key: string,
-    opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
-  ): Promise<PresignedPut> {
+  async presignPut(key: string, opts: PresignPutOptions): Promise<PresignedPut> {
     return signUpload(this.signer(FS_UPLOAD_ROUTE), key, opts)
   }
 

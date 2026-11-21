@@ -77,6 +77,8 @@ describe('deploy flow', () => {
     expect(body.manifest.files[1]).toEqual({
       path: 'index.html',
       sha256: createHash('sha256').update('<h1>hi</h1>').digest('hex'),
+      // for stores that check an upload's MD5 rather than its SHA-256
+      md5: createHash('md5').update('<h1>hi</h1>').digest('base64'),
       size: 11,
       contentType: 'text/html; charset=utf-8',
     })

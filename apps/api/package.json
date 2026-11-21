@@ -22,6 +22,7 @@
     "./blobs": "./src/blobs/types.ts",
     "./blobs/fs": "./src/blobs/fs.ts",
     "./blobs/signed-url": "./src/blobs/signed-url.ts",
+    "./blobs/host-uploads": "./src/blobs/host-uploads.ts",
     "./route-table": "./src/route-table/types.ts",
     "./route-table/memory": "./src/route-table/memory.ts",
     "./route-table/table": "./src/route-table/table.ts",

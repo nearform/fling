@@ -12,7 +12,7 @@
  *   can never be used to upload, nor for another object.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import type { PresignedPut } from './types.ts'
+import type { PresignedPut, PresignPutOptions } from './types.ts'
 
 export interface UrlSigner {
   /** HMAC key (the session secret) */
@@ -73,11 +73,7 @@ function verify(
   return expected.length === given.length && timingSafeEqual(expected, given)
 }
 
-export function signUpload(
-  signer: UrlSigner,
-  key: string,
-  opts: { contentType: string; cacheControl: string; sha256: string; expiresIn?: number }
-): PresignedPut {
+export function signUpload(signer: UrlSigner, key: string, opts: PresignPutOptions): PresignedPut {
   const exp = expiry(signer, opts.expiresIn)
   const checksum = Buffer.from(opts.sha256, 'hex').toString('base64')
   const sig = hmac(

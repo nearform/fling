@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { MAX_FILE_BYTES, siteObjectKey } from '@fling/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FsBlobs } from '../src/blobs/fs.ts'
-import { manifestKey } from '../src/blobs/types.ts'
+import { manifestKey, stagedObjectKey } from '../src/blobs/types.ts'
 import type { Principal } from '../src/policy.ts'
 import { publish, publishBytes, stage, UPLOAD_URL_TTL_SECONDS } from '../src/publication.ts'
 import type { User } from '../src/store/types.ts'
@@ -176,7 +176,7 @@ describe('a store bound by MD5', () => {
     const site = await env.store.findSite('hello')
     // Other bytes of the same size, as an MD5 the client chose would let through.
     await env.blobs.put(
-      siteObjectKey(site?.id as string, versionId, 'app.bin'),
+      stagedObjectKey(site?.id as string, versionId, 'app.bin'),
       Buffer.from('BINARY')
     )
     await expect(publish(env.deps, user, 'hello', versionId)).rejects.toMatchObject({
@@ -185,7 +185,50 @@ describe('a store bound by MD5', () => {
       extra: { mismatched: ['app.bin'] },
     })
     expect(await stored(versionId, 'index.html')).toBeNull()
+    expect(await env.blobs.head(stagedObjectKey(site?.id as string, versionId, 'index.html'))).toBe(
+      null
+    )
     expect((await env.store.findSite('hello'))?.currentVersionId).toBeNull()
+  })
+
+  it('never presigns a version key, and serves the checked bytes whatever is PUT after', async () => {
+    md5Bound()
+    const files = [file('index.html', '<h1>checked</h1>')]
+    const { uploads, versionId } = await stageUploads(files)
+    const site = await env.store.findSite('hello')
+    const id = site?.id as string
+    const [u] = uploads as Upload[]
+    expect(u?.url).toContain(`/_staged/${versionId}/`)
+    expect(u?.url).not.toContain(siteObjectKey(id, versionId, 'index.html'))
+    await upload(env, uploads, files)
+    await publish(env.deps, user, 'hello', versionId)
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+    expect(await env.blobs.head(stagedObjectKey(id, versionId, 'index.html'))).toBeNull()
+    // A colliding body PUT to the still-valid URL afterwards lands at the staging key only.
+    await env.blobs.put(
+      stagedObjectKey(id, versionId, 'index.html'),
+      Buffer.from('<h1>collide</h1>')
+    )
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+    // Finalizing again changes nothing (maintenance deletes the leftover with the version).
+    await expect(publish(env.deps, user, 'hello', versionId)).resolves.toMatchObject({
+      status: 'live',
+    })
+    expect(await stored(versionId, 'index.html')).toBe('<h1>checked</h1>')
+  })
+
+  it('scans the staged bytes and keeps nothing when they hold a secret', async () => {
+    md5Bound()
+    const files = [file('a.js', `k="${FAKE_AWS_KEY}"`, 'text/javascript')]
+    const { uploads, versionId } = await stageUploads(files)
+    await upload(env, uploads, files)
+    await expect(publish(env.deps, user, 'hello', versionId)).rejects.toMatchObject({
+      status: 422,
+      code: 'secret_detected',
+    })
+    const id = (await env.store.findSite('hello'))?.id as string
+    expect(await env.blobs.head(stagedObjectKey(id, versionId, 'a.js'))).toBeNull()
+    expect(await stored(versionId, 'a.js')).toBeNull()
   })
 })
 

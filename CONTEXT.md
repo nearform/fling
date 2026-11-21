@@ -637,8 +637,13 @@ manifest's optional `md5`) where it checks only that. A store that checks neithe
 whose manifest has no MD5, goes through **host uploads** (`HostUploads`,
 `apps/api/src/blobs/host-uploads.ts`): signed `/blob-upload` and `/blob-download` routes on the
 app host that check the SHA-256 themselves before writing to the store. On a store bound by MD5
-(`Blobs.uploadDigest`), publication also reads every uploaded file back and checks its SHA-256
-before the version goes live, since the version id and kept files trust it.
+(`Blobs.uploadDigest`), uploads land at a staging key (`stagedObjectKey`), and publication checks
+each one's SHA-256 and scans it there before copying it into the version, since the version id and
+kept files trust it; no presigned URL can write a version's own keys.
+
+**Storable text** — text every store keeps as it is: no NUL and no lone surrogate
+(`packages/shared/src/text.ts`). A user string that becomes part of a stored key (a file path, a
+Path's folder, an email address) must be storable text, refused at admission with a 400 otherwise.
 
 **Records** — the domain persistence (users, keys, sites, versions, OAuth, uploads), written once
 over Table and exposed to routes as the `Store` interface. Every record carries `v`, the version of

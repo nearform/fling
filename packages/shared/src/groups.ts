@@ -6,6 +6,7 @@
 
 import { z } from 'zod'
 import { type AudienceEmail, AudienceEmailSchema, audienceList, groupLabel } from './audience.ts'
+import { EmailInputSchema } from './text.ts'
 
 /** The most members a group holds. */
 export const GROUP_MEMBERS_MAX = 500
@@ -30,7 +31,7 @@ export const GroupSlugSchema = z
 export const GroupNameSchema = z.string().trim().min(1).max(GROUP_NAME_MAX)
 
 const memberEmails = z
-  .array(z.string().trim().toLowerCase().min(3).max(254))
+  .array(EmailInputSchema)
   .max(GROUP_MEMBERS_MAX, `A group holds at most ${GROUP_MEMBERS_MAX} people`)
 
 /** A group as lists show it. `size`: how many members it has. */

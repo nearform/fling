@@ -12,6 +12,7 @@ import {
   SiteRoleSchema,
 } from './site-roles.ts'
 import { ServerConfigSchema, SiteServerSchema } from './site-server.ts'
+import { EmailInputSchema } from './text.ts'
 import { ThumbnailSchema, ThumbnailStampSchema } from './thumbnails.ts'
 
 // Request/response contracts for the Fling HTTP API. All JSON. Auth is either the
@@ -582,7 +583,7 @@ export type AdminInvitationList = z.infer<typeof AdminInvitationListSchema>
  * AdminInvitationSchema: revoke it, which ends the access it gave on their next request.
  */
 export const InviteRequestSchema = z.object({
-  email: z.string().trim().toLowerCase().min(3).max(254),
+  email: EmailInputSchema,
 })
 export type InviteRequest = z.infer<typeof InviteRequestSchema>
 export const AdminInviteResultSchema = z.object({
@@ -629,7 +630,7 @@ export const AuditListSchema = z.object({ entries: z.array(AuditEntrySchema) })
  * POST /api/admin/impersonate { email } (browser session, an admin) → the new Me; POST
  * /api/admin/impersonate/stop → the admin's own Me again.
  */
-export const ImpersonateRequestSchema = z.object({ email: z.string().trim().toLowerCase().min(3) })
+export const ImpersonateRequestSchema = z.object({ email: EmailInputSchema })
 
 /**
  * POST /auth/link { email, return? } (the `invites` capability): email a sign-in link to someone
@@ -638,7 +639,7 @@ export const ImpersonateRequestSchema = z.object({ email: z.string().trim().toLo
  * URL; anything else becomes the app's home).
  */
 export const SignInLinkRequestSchema = z.object({
-  email: z.string().trim().toLowerCase().min(3).max(254),
+  email: EmailInputSchema,
   return: z.string().max(2048).optional(),
 })
 export type SignInLinkRequest = z.infer<typeof SignInLinkRequestSchema>

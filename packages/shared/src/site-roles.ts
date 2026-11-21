@@ -15,6 +15,7 @@ import {
   editAudienceInput,
   groupLabel,
 } from './audience.ts'
+import { EmailInputSchema } from './text.ts'
 
 /** The most addresses a site's owners hold. */
 export const OWNER_EMAILS_MAX = 20
@@ -42,7 +43,7 @@ export type SiteRoleMembers = z.infer<typeof SiteRoleMembersSchema>
 const roleInput = (what: string, emailsMax: number, groupsMax: number) =>
   z.object({
     emails: z
-      .array(z.string().trim().toLowerCase().min(3).max(254))
+      .array(EmailInputSchema)
       .max(emailsMax, `A site has at most ${emailsMax} ${what} addresses`),
     groups: z
       .array(z.string().trim().toLowerCase().min(1).max(100))

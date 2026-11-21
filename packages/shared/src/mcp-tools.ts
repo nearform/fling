@@ -61,6 +61,7 @@ import {
   ServerConfigSchema,
 } from './site-server.ts'
 import { SITE_SORTS } from './site-sort.ts'
+import { isStorableText, STORABLE_TEXT_RULE } from './text.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
 export const MCP_PUBLISH_MAX_BYTES = 4 * 1024 * 1024
@@ -273,19 +274,25 @@ const sitePath = z
     'Site-relative path with forward slashes, e.g. "index.html", "css/app.css", "img/logo.png". The root page must be "index.html". No dotfiles (".env", ".well-known/…")'
   )
 
-const emails = z.array(z.string().min(3).max(254)).max(AUDIENCE_EMAILS_MAX)
+/** An address a tool is given, as storable text (text.ts). */
+const address = z
+  .string()
+  .min(3)
+  .max(254)
+  .refine(isStorableText, `An address ${STORABLE_TEXT_RULE}`)
+const emails = z.array(address).max(AUDIENCE_EMAILS_MAX)
 const groupSlugs = z.array(z.string().min(1).max(100)).max(AUDIENCE_GROUPS_MAX)
 /** An edit to a site's owners or publishers, as fling_set_audience edits its audience. */
 const roleChange = {
-  add: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
-  remove: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
-  set: z.array(z.string().min(3).max(254)).max(PUBLISHER_EMAILS_MAX).optional(),
+  add: z.array(address).max(PUBLISHER_EMAILS_MAX).optional(),
+  remove: z.array(address).max(PUBLISHER_EMAILS_MAX).optional(),
+  set: z.array(address).max(PUBLISHER_EMAILS_MAX).optional(),
   addGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
   removeGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
   setGroups: z.array(z.string().min(1).max(100)).max(PUBLISHER_GROUPS_MAX).optional(),
 }
 const groupSlug = z.string().min(1).max(100).describe('The group\'s slug, e.g. "design"')
-const members = z.array(z.string().min(3).max(254)).max(GROUP_MEMBERS_MAX)
+const members = z.array(address).max(GROUP_MEMBERS_MAX)
 const groupName = z.string().min(1).max(GROUP_NAME_MAX)
 
 const commentPath = z.string().max(1024)

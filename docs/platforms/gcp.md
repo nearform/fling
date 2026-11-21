@@ -52,7 +52,9 @@ Cloudflare Worker.
   order never rests on how strings compare. A prefix query is the range `[prefix, prefix + 0xFF)`:
   no UTF-8 sequence holds the byte 0xFF, so every key that starts with the prefix is inside it,
   characters above the Basic Multilingual Plane included. Composite indexes on `(pk, s)` ascending
-  and descending serve `query` and `reverse`.
+  and descending serve `query` and `reverse`. Firestore indexes, orders and compares only the
+  first 1,500 bytes of a value, so the adapter refuses a pk or sk longer than that in UTF-8; the
+  core keeps every key well under it (a site's paths are at most `MAX_PATH_BYTES`, 900 bytes).
 - **Values:** JSON keeps every value the port takes: NUL and lone surrogates are escaped, nested
   arrays (which Firestore refuses as values) are text, and no field name is reserved.
 - **Consistency and transactions:** reads are strongly consistent. The database runs with

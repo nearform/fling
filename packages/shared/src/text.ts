@@ -11,6 +11,9 @@ const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[
 /** Whether `s` holds no NUL and no lone surrogate. */
 export const isStorableText = (s: string) => !s.includes('\0') && !LONE_SURROGATE.test(s)
 
+/** How many bytes `s` takes as UTF-8. */
+export const utf8Length = (s: string) => new TextEncoder().encode(s).length
+
 export const STORABLE_TEXT_RULE = 'may not hold NUL or invalid Unicode (a lone surrogate)'
 
 /** An email address as a request gives it: trimmed, lower-cased, 3-254 characters of storable text. */

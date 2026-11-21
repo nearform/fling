@@ -32,7 +32,7 @@ import {
   MAX_DEPLOY_BYTES,
   MAX_FILE_BYTES,
   MAX_FILES,
-  MAX_PATH_LENGTH,
+  MAX_PATH_BYTES,
   type Manifest,
   markdownHomePages,
   NEVER_PUBLISHED_NOTE,
@@ -41,6 +41,7 @@ import {
   SERVER_CONFIG_FILE,
   type SecretFinding,
   scanBytesForSecrets,
+  utf8Length,
 } from '@fling/shared'
 import ignore, { type Ignore } from 'ignore'
 import mime from 'mime'
@@ -314,9 +315,9 @@ export async function buildManifest(
 
 function checkLimits(files: { path: string; size: number }[], dir: string): void {
   for (const f of files) {
-    if (f.path.length > MAX_PATH_LENGTH) {
+    if (utf8Length(f.path) > MAX_PATH_BYTES) {
       throw new CliError(
-        `Path too long (max ${MAX_PATH_LENGTH} characters): ${f.path.slice(0, 80)}…`
+        `Path too long (max ${MAX_PATH_BYTES} bytes of UTF-8): ${f.path.slice(0, 80)}…`
       )
     }
     if (!isValidSitePath(f.path)) throw new CliError(`Unsupported file path: ${f.path}`)

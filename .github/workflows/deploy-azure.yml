@@ -1,0 +1,209 @@
+name: Deploy (Azure)
+
+# Deploys Fling to Azure: the Node host as one Container App with its jobs, on the resources the
+# instance's Terraform made (platforms/azure/infra). By hand only (workflow_dispatch), with a
+# release tag as `ref`: after each release, the tag the Release workflow deployed to AWS; to roll
+# back, an earlier release tag.
+#
+# Everything instance-specific is one repository variable, AZURE_DEPLOY_CONFIG: the JSON of the
+# module's `deploy` output (the deploy identity, the registry, the app and its jobs, Front Door,
+# the origins), plus an `INSTANCE` object with the instance's own values (INSTANCE_NAME,
+# ALLOWED_EMAIL_DOMAINS and/or ALLOWED_EMAILS, OIDC_*, BRAND_*…; built into the image as
+# instance.json). The job signs in to Azure as the deploy identity over OIDC, through a federated
+# credential that trusts only this repository's `azure` environment, so there is no Azure secret in
+# GitHub. FLING_E2E_API_KEY, an API key of a test user, is the smoke test's; without it the smoke
+# test is skipped with a warning. See platforms/azure/DEPLOY.md.
+#
+# Order, so nothing is ever served that points at something missing:
+#   1. build the API with the Azure adapters, the web UI and the Claude Desktop extension, and the
+#      image around them (platforms/azure/Dockerfile); push it to the instance's registry;
+#   2. the app (a new revision on the image) and the jobs (the same image);
+#   3. the data migrations: start the migrate job, which runs them until done, and wait for it.
+#      The code just deployed serves correctly before they run, so this comes after the code;
+#   4. /.well-known/fling answers for this instance and this release;
+#   5. purge Front Door's cache;
+#   6. the e2e scenario as a smoke test.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'The release tag to deploy, e.g. v0.7.0. An older tag rolls back. Empty = the tip of the selected branch.'
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-azure
+  cancel-in-progress: false # never interrupt an in-flight deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy to Azure
+    runs-on: ubuntu-24.04
+    environment: azure
+    timeout-minutes: 45
+    env:
+      AZURE_DEPLOY_CONFIG: ${{ vars.AZURE_DEPLOY_CONFIG }}
+      SHA: ${{ inputs.ref || github.sha }}
+    steps:
+      - name: Check the deploy config is set
+        run: |
+          [ -n "$AZURE_DEPLOY_CONFIG" ] || { echo "::error::AZURE_DEPLOY_CONFIG is not set (see platforms/azure/DEPLOY.md)"; exit 1; }
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      # Only ever ship code that is on main (a pull request's commits can be fetched by SHA).
+      - name: Check the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          git merge-base --is-ancestor HEAD origin/main ||
+            { echo "::error::$(git rev-parse HEAD) is not on main; only commits on main can be deployed"; exit 1; }
+
+      - name: Read the deploy config
+        id: config
+        run: |
+          set -euo pipefail
+          c="$AZURE_DEPLOY_CONFIG"
+          for key in clientId tenantId subscriptionId resourceGroup registry repository containerApp appOrigin; do
+            value="$(jq -er --arg k "$key" '.[$k]' <<<"$c")" ||
+              { echo "::error::AZURE_DEPLOY_CONFIG has no $key (the Terraform module's deploy output)"; exit 1; }
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done
+          echo "jobs=$(jq -c '.jobs // {}' <<<"$c")" >> "$GITHUB_OUTPUT"
+          echo "migrateJob=$(jq -er '.jobs.migrate' <<<"$c")" >> "$GITHUB_OUTPUT"
+          echo "frontDoorProfile=$(jq -er '.frontDoor.profile' <<<"$c")" >> "$GITHUB_OUTPUT"
+          echo "frontDoorEndpoint=$(jq -er '.frontDoor.endpoint' <<<"$c")" >> "$GITHUB_OUTPUT"
+          echo "INSTANCE=$(jq -c '.INSTANCE // {}' <<<"$c")" >> "$GITHUB_OUTPUT"
+          # The release this build reports in /.well-known/fling (the root package.json's version).
+          echo "RELEASE=$(jq -er .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # `...` builds each package's workspace dependencies first.
+      - name: Build the API, the web UI and the Claude Desktop extension
+        env:
+          # dist/main.mjs carries the instance's values as instance.json (platforms/azure/scripts/build.mjs).
+          FLING_INSTANCE_CONFIG: ${{ steps.config.outputs.INSTANCE }}
+          # The extension this instance serves adds this instance to the Flings it knows.
+          FLING_MCPB_SERVER_URL: ${{ steps.config.outputs.appOrigin }}
+        run: |
+          set -euo pipefail
+          pnpm --filter "@fling/web..." build
+          pnpm --filter "@fling/platform-azure..." build
+          # dist/fling.mcpb: the local MCP server bundled self-contained, validated and packed.
+          pnpm --filter ./apps/cli build:mcpb
+          for f in platforms/azure/dist/main.mjs apps/web/dist/index.html apps/web/dist-404/404.html apps/web/dist-review/review-shell.html apps/cli/dist/fling.mcpb; do
+            [ -s "$f" ] || { echo "::error::build did not produce $f"; exit 1; }
+          done
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ steps.config.outputs.clientId }}
+          tenant-id: ${{ steps.config.outputs.tenantId }}
+          subscription-id: ${{ steps.config.outputs.subscriptionId }}
+
+      - name: Build and push the image
+        id: image
+        env:
+          REGISTRY: ${{ steps.config.outputs.registry }}
+          REPOSITORY: ${{ steps.config.outputs.repository }}
+        run: |
+          set -euo pipefail
+          image="$REGISTRY/$REPOSITORY:$(git rev-parse HEAD)"
+          az acr login --name "${REGISTRY%%.*}"
+          docker build --file platforms/azure/Dockerfile --tag "$image" .
+          docker push "$image"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - name: Update the app and the jobs
+        env:
+          GROUP: ${{ steps.config.outputs.resourceGroup }}
+          APP: ${{ steps.config.outputs.containerApp }}
+          JOBS: ${{ steps.config.outputs.jobs }}
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          set -euo pipefail
+          az containerapp update --resource-group "$GROUP" --name "$APP" --image "$IMAGE" \
+            --query properties.latestRevisionName --output tsv
+          for job in $(jq -r '.[]' <<<"$JOBS"); do
+            az containerapp job update --resource-group "$GROUP" --name "$job" --image "$IMAGE" \
+              --query name --output tsv
+          done
+
+      # The job runs the pending migrations until they report done (platforms/azure/src/main.ts).
+      - name: Run the data migrations
+        env:
+          GROUP: ${{ steps.config.outputs.resourceGroup }}
+          JOB: ${{ steps.config.outputs.migrateJob }}
+        run: |
+          set -euo pipefail
+          execution="$(az containerapp job start --resource-group "$GROUP" --name "$JOB" --query name --output tsv)"
+          echo "migrate execution: $execution"
+          for attempt in $(seq 1 120); do
+            status="$(az containerapp job execution show --resource-group "$GROUP" --name "$JOB" \
+              --job-execution-name "$execution" --query properties.status --output tsv)"
+            case "$status" in
+              Succeeded) echo "migrations done"; exit 0 ;;
+              Failed|Stopped|Degraded)
+                echo "::error::The migrate job's execution $execution ended $status (see its logs in Log Analytics)"; exit 1 ;;
+            esac
+            sleep 15
+          done
+          echo "::error::The migrate job's execution $execution did not finish in 30 minutes"; exit 1
+
+      # The new revision answers for this instance before anything is purged.
+      - name: Check /.well-known/fling
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.appOrigin }}
+          RELEASE: ${{ steps.config.outputs.RELEASE }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if meta="$(curl -fsS -H 'Cache-Control: no-cache' "$APP_ORIGIN/.well-known/fling?deploy=$SHA")" &&
+              jq -e --arg origin "$APP_ORIGIN" --arg release "$RELEASE" \
+                '.version >= 1 and .appOrigin == $origin and .release == $release' <<<"$meta" >/dev/null; then
+              jq -c '{name, appOrigin, sitesDomain, release, auth: .auth.kind}' <<<"$meta"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance and release $RELEASE (check the app's logs)"; exit 1
+
+      # Everything, on both domains: every client-side route is served as index.html, and the sites'
+      # 404 and review pages come from the image. Hashed assets are fetched again once, by name.
+      - name: Purge Front Door
+        env:
+          GROUP: ${{ steps.config.outputs.resourceGroup }}
+          PROFILE: ${{ steps.config.outputs.frontDoorProfile }}
+          ENDPOINT: ${{ steps.config.outputs.frontDoorEndpoint }}
+        run: |
+          set -euo pipefail
+          az afd endpoint purge --resource-group "$GROUP" --profile-name "$PROFILE" \
+            --endpoint-name "$ENDPOINT" --content-paths '/*'
+
+      - name: Smoke test
+        env:
+          APP_ORIGIN: ${{ steps.config.outputs.appOrigin }}
+          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FLING_E2E_API_KEY" ]; then
+            echo "::warning::Smoke test skipped: set FLING_E2E_API_KEY (an API key of a test user, platforms/azure/DEPLOY.md)"
+            exit 0
+          fi
+          pnpm --filter @fling/e2e smoke "$APP_ORIGIN"
+
+      - name: Summary
+        run: echo "### Deployed \`$SHA\` to ${{ steps.config.outputs.appOrigin }}" >> "$GITHUB_STEP_SUMMARY"

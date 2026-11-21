@@ -354,7 +354,7 @@ site cookie key, so no address is at the edge) whose value is the expiry a `flin
 that moment has. A member's cookie expiring no later than it was issued by the revocation's second, and the
 edge (`site-routing.ts`) sends it to sign in, where someone without standing is refused and anyone
 re-invited gets a fresh cookie. Entries stay 30 days, past the last cookie they could stop, kept as
-`REVOKED/<dueAt>#<mac>` records that each platform's one-minute tick sweeps. On Cloudflare the
+`REVOKED/<dueAt>#<mac>` records that maintenance (every platform's hourly tick) sweeps. On Cloudflare the
 Worker reads the list from KV alone, so a revocation reaches every location within about a
 minute.
 

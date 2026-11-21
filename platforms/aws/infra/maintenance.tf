@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
 # Maintenance's tick: {"fling":"maintain"} every hour (version retention, VERSION_RETENTION, and
-# deleting replaced rendered pages: apps/api/src/maintenance.ts). Always on: with retention off
-# it only tidies, and does nothing on an instance without Paths.
+# deleting replaced rendered pages: apps/api/src/maintenance.ts), which also takes due entries off
+# the edge's revocation list. Always on: with retention off it only tidies.
 # -----------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "maintain_trust" {

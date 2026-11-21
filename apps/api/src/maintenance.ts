@@ -19,10 +19,14 @@
  *
  * Rendered home pages (paths.ts `refreshHome`): each one a site replaced (`homeOld`) is deleted
  * GRACE_MS after it was replaced (`sweepHomes`).
+ *
+ * The revocation list (revocations.ts): due entries are taken off first, so a run that stops at its
+ * deadline among the sites has still swept them. Every instance has this tick, mail or not.
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
 import { formsKey, manifestKey } from './blobs/types.ts'
 import { pathRef } from './paths.ts'
+import { sweepRevocations } from './revocations.ts'
 import { serverSite, serverVersion } from './servers/index.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
@@ -43,6 +47,8 @@ export interface MaintainResult {
   swept: number
   unmarked: number
   homes: number
+  /** revocations taken off the edge's list */
+  revocations: number
   /** stopped at the deadline before the last site */
   partial: boolean
 }
@@ -57,8 +63,10 @@ export async function maintain(
     swept: 0,
     unmarked: 0,
     homes: 0,
+    revocations: 0,
     partial: false,
   }
+  result.revocations = await sweepRevocations(deps, opts)
   const { sites } = await deps.store.listAllSites({ max: MAX_SITES })
   for (const entry of sites) {
     if (opts.deadline !== undefined && Date.now() > opts.deadline) {

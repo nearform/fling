@@ -31,7 +31,7 @@ There is no separate edge function and no origin.
 | Mailer | Email Service, `send_email` binding `EMAIL` | `platforms/cloudflare/src/mail/email.ts` | One send per recipient. The binding's error codes map onto `MailResult`. The binding is present only with the deploy config's `MAIL`, and is restricted to its sender |
 | Site servers | Worker Loader (Dynamic Workers, in beta), binding `LOADER`, with the `SERVER_RATE_LIMIT` rate limit | `platforms/cloudflare/src/servers/runtime.ts`, `isolate.ts`, `entrypoints.ts` | One isolate per site, version and run (`site:<siteId>:<versionId>:<run>`). The run is a keyed hash of the options, sealed with AES-256-GCM in R2, and the route value's `t` names it, so there is no `goLive`. The isolate gets `SiteFiles` and `ServerTail`. Cloudflare enforces `SERVER_CPU_MS`; the Worker enforces wall time, body size and the rate limit |
 | Server logs | R2 `server-logs/` | `platforms/cloudflare/src/servers/logs.ts` | Pieces are written once a second per isolate and compacted hourly into one chunk per hour. An R2 lifecycle rule deletes them after `SERVER_LOG_DAYS` |
-| Ticks | Cron Triggers on the Worker's `scheduled` handler | `platforms/cloudflare/src/worker.ts` | `* * * * *` drains the outbox and sweeps revocations. It is rendered only with `MAIL` (`scripts/config.mjs`). `17 * * * *` purges expired D1 items, runs `maintain` and compacts server logs |
+| Ticks | Cron Triggers on the Worker's `scheduled` handler | `platforms/cloudflare/src/worker.ts` | `* * * * *` drains the outbox. It is rendered only with `MAIL` (`scripts/config.mjs`). `17 * * * *` purges expired D1 items, runs `maintain` (which sweeps revocations) and compacts server logs |
 | Migrations | `scripts/migrate.ts` over a remote D1 binding | `platforms/cloudflare/scripts/migrate.ts` | Run by the deploy after the code. The Worker has no admin surface. D1 schema changes are `migrations/*.sql`, applied before the code |
 | Secrets | Worker secrets (`wrangler secret put`) | `platforms/cloudflare/src/env.ts` | `SESSION_SECRET`, `SITE_HMAC_KEY`, `SITE_SECRETS_KEY` and `OIDC_CLIENT_SECRET`, plus `GOOGLE_CLIENT_*` for a Google client. `setup.mjs` only ever adds them. `SITE_SECRETS_KEY` is never replaced |
 | Sign-in | (core OIDC) | — | The client secrets are Worker secrets |
@@ -130,8 +130,6 @@ There is no Terraform. Two scripts and the rendered wrangler config own the infr
 - **Beta dependencies.** The Worker Loader (site servers) and Email Service (mail) are in beta.
   If the Worker Loader's terms change, the fallback is Workers for Platforms (DEPLOY.md, Site
   servers).
-- **The revocation sweep** runs on the minute cron, which exists only with `MAIL`
-  ([§6 of the logical platform](../design/platform.md#6-known-gaps-in-the-contract)).
 - **Stale route reads.** A changed or deleted route can be served from KV for its propagation
   time. A rollback or a revoked share link is not instant at every location.
 

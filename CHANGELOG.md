@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Revoked invitations come off the edge's list on every instance, mail or not.** The sweep that takes a revocation off the sites' revocation list after 30 days ran on the one-minute notifications tick, which an instance has only with mail, so an instance without mail kept every entry for good. It now runs in the hourly maintenance every instance has, on AWS and Cloudflare alike, and works through every entry that is due rather than 100 a run.
+
 ## 0.13.3 (2026-11-16)
 
 - **A brand-new site's home page waits for it rather than showing a 404.** For a few seconds after a first publish, the edge may not have the site's address yet. If you're signed in to Fling and can open the site, its home page now says "Your fling is flung, but hasn't fully arrived yet" and reloads by itself once the site is there (it gives up after 30 s). It asks the API only at the root of an address the edge doesn't know, and anyone who can't open the site sees the usual 404, so it says nothing about private sites.

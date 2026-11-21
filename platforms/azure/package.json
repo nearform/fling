@@ -6,7 +6,7 @@
   "description": "Fling on Azure: the Node host (platforms/node) on Container Apps with the Cosmos DB, Blob Storage, Web PubSub and Communication Services Email adapters. `build` bundles it into dist/main.mjs, the container image's entry point (Dockerfile).",
   "type": "module",
   "scripts": {
-    "build": "echo 'platform-azure: consumed as source'",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -5,10 +5,15 @@
  * engagement tracking off. ACS takes no display name per message: the sender username's display
  * name (the Terraform `mail.from_name`) is the one recipients see, so `from.name` is not sent.
  *
- * A send is an operation ACS accepts and then runs. The mailer names the operation after the batch
- * and the recipient, so a retried send names the same operation and ACS runs it once; the id is the
- * provider id. It waits for the outcome for up to `waitMs`; one still running then counts as sent,
- * since ACS has taken it. The SDK's poller reports a failed operation by throwing an Error whose
+ * A send is an operation ACS accepts and then runs. Each attempt names a new operation (a random
+ * UUID, which is the provider id). ACS's Email Send reference documents `Operation-Id` only as "the
+ * ID provided by the customer to identify the long running operation" (REST API 2025-09-01), not
+ * what a repeated one answers: a 409, or the earlier operation's outcome, would report a delivered
+ * retry as failed or keep a failed one failing. So an attempt is never named after an earlier one,
+ * and the duplicate this accepts is the one every provider here has: a send ACS accepted whose
+ * answer never arrived (the network failing after the 202) is retried and can arrive twice. A send
+ * still running when the wait ends is not retried. The mailer waits for the outcome for up to
+ * `waitMs`; one still running then counts as sent, since ACS has taken it. The SDK's poller reports a failed operation by throwing an Error whose
  * message carries ACS's error code (`The long-running operation has failed. <code>. <message>`);
  * the mailer reads the code from there.
  *
@@ -20,7 +25,7 @@
  * ACS has no daily quota, so nothing maps to `quota`. Logs carry the status and code, never
  * ACS's message, which can quote an address.
  */
-import { createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import type { EmailMessage, EmailSendResponse } from '@azure/communication-email'
 import {
   BATCH_ID_HEADER,
@@ -71,13 +76,6 @@ function operationFailure(err: unknown): { code?: string } | undefined {
   return match[1] ? { code: match[1] } : {}
 }
 
-/** The operation id for one message: a UUID-shaped hash of its batch and recipient. */
-export function operationIdOf(message: Pick<MailMessage, 'batchId' | 'to'>): string {
-  const h = createHash('sha256').update(`${message.batchId}\0${message.to}`).digest('hex')
-  const variant = ((Number.parseInt(h[16] ?? '0', 16) & 0x3) | 0x8).toString(16)
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`
-}
-
 /** An error ACS answered (or the network raised) as a `MailResult`. */
 export function acsFailure(err: unknown): Failure {
   const failed = operationFailure(err)
@@ -125,7 +123,7 @@ export class AcsMailer implements Mailer {
   async send(message: MailMessage): Promise<MailResult> {
     const prepared = prepareMessage(message)
     if (wasRefused(prepared)) return prepared.refused
-    const operationId = operationIdOf(prepared)
+    const operationId = randomUUID()
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), this.opts.waitMs ?? 10_000)
     try {

@@ -57,31 +57,33 @@ export async function migrateSchema(
   schema: string = DEFAULT_SCHEMA,
   migrations: SchemaMigration[] = SCHEMA_MIGRATIONS
 ): Promise<string[]> {
-  const schemaSql = ident(schemaName(schema))
+  schemaName(schema)
   const [encoding] = (await client.query<{ server_encoding: string }>('SHOW server_encoding')).rows
   if (encoding?.server_encoding !== 'UTF8') {
     throw new Error(`the database's encoding must be UTF8, not ${encoding?.server_encoding}`)
   }
   return client.transaction(async tx => {
     await tx.query('SELECT pg_advisory_xact_lock($1)', [MIGRATE_LOCK])
-    await tx.query(`CREATE SCHEMA IF NOT EXISTS ${schemaSql}`)
+    await tx.query(`CREATE SCHEMA IF NOT EXISTS ${ident(schema)}`)
     await tx.query(
-      `CREATE TABLE IF NOT EXISTS ${schemaSql}.${ident('fling_schema')} ` +
+      `CREATE TABLE IF NOT EXISTS ${ident(schema)}.${ident('fling_schema')} ` +
         '(id text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())'
     )
     const done = new Set(
       (
-        await tx.query<{ id: string }>(`SELECT id FROM ${schemaSql}.${ident('fling_schema')}`)
+        await tx.query<{ id: string }>(`SELECT id FROM ${ident(schema)}.${ident('fling_schema')}`)
       ).rows.map(r => r.id)
     )
     const applied: string[] = []
     for (const m of migrations) {
       if (done.has(m.id)) continue
-      await tx.query(`SET LOCAL search_path TO ${schemaSql}`)
+      await tx.query(`SET LOCAL search_path TO ${ident(schema)}`)
       // The one multi-statement script: a constant of SCHEMA_MIGRATIONS (tests pass their own),
       // never text built from config or a request.
       await tx.exec(m.sql)
-      await tx.query(`INSERT INTO ${schemaSql}.${ident('fling_schema')} (id) VALUES ($1)`, [m.id])
+      await tx.query(`INSERT INTO ${ident(schema)}.${ident('fling_schema')} (id) VALUES ($1)`, [
+        m.id,
+      ])
       applied.push(m.id)
     }
     return applied

@@ -172,6 +172,18 @@ describe('SmtpMailer', () => {
       retry: false,
     })
     expect(reply(552, '552 5.2.2 Mailbox over quota')).not.toHaveProperty('quota')
+    // Amazon SES's quota reply carries no enhanced code: it is ours, and holds until tomorrow.
+    expect(reply(454, '454 Throttling failure: Daily message quota exceeded.')).toEqual({
+      ok: false,
+      retry: true,
+      reason: 'throttled',
+      quota: true,
+      detail: 'SMTP 454',
+    })
+    expect(reply(454, '454 Throttling failure: Maximum sending rate exceeded.')).not.toHaveProperty(
+      'quota'
+    )
+    expect(reply(552, '552 Mailbox over quota')).toMatchObject({ reason: 'rejected' })
     // Greylisting asks for a later try: transient, not a rate limit.
     expect(reply(451, '451 4.7.1 Greylisted, please try again later')).toMatchObject({
       reason: 'transient',

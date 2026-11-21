@@ -113,7 +113,10 @@ describe('PostgresTable schema and purge', () => {
       `SELECT sk, data FROM "${schema}".items ORDER BY sk`
     )
     expect(raw.rows).toEqual([
-      { sk: 'odd', data: { v: { '~fling~esc': 's', u: [97, 0, 98] } } },
+      {
+        sk: 'odd',
+        data: { '~fling~esc': 'item', d: { v: { '~fling~esc': 's', u: [97, 0, 98] } } },
+      },
       { sk: 'plain', data: { v: 'ab' } },
     ])
   })

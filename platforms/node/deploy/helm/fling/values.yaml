@@ -25,7 +25,8 @@ instance:
   live: true
 
 # The instance's own configuration, as the Node host's environment (every key is in
-# platforms/aws/DEPLOY.md, Instance configuration). Secrets go in `secrets.extra` instead.
+# platforms/aws/DEPLOY.md, Instance configuration). Secrets go in `secrets.extra` instead. SERVERS
+# is refused unless off: the Node host's site servers isolate nothing.
 env:
   INSTANCE_NAME: Fling
   ALLOWED_EMAIL_DOMAINS: example.com
@@ -93,7 +94,8 @@ ingress:
     secretName: fling-tls
 
 # Runs after every install and upgrade, once the new pods are up: POST /ticks/migrate until it
-# reports done (the data migrations; each is safe to repeat). Needs secrets.tickSecret.
+# reports done (the data migrations; each is safe to repeat). Without a TICK_SECRET in the Secret
+# it says so and succeeds: the host migrates on start anyway.
 migrate:
   enabled: true
   backoffLimit: 6

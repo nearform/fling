@@ -13,9 +13,11 @@
  */
 import type { PGlite } from '@electric-sql/pglite'
 import type { LiveEvent, LiveFanout } from '@fling/api/live-memory'
+import { sql } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { drizzle as pglite } from 'drizzle-orm/pglite'
 import type pg from 'pg'
-import { ident } from '../table/ident.ts'
-import { DEFAULT_SCHEMA, schemaName } from '../table/schema.ts'
+import { DEFAULT_SCHEMA, schemaName } from '../table/items.ts'
 
 /** Postgres's limit on a notification's payload, less a margin. */
 const MAX_PAYLOAD = 7_900
@@ -33,7 +35,7 @@ export interface Notifier {
 export function pgNotifier(pool: pg.Pool): Notifier {
   return {
     async notify(channel, payload) {
-      await pool.query('SELECT pg_notify($1, $2)', [channel, payload])
+      await drizzle(pool).execute(sql`SELECT pg_notify(${channel}, ${payload})`)
     },
     async listen(channel, onPayload) {
       let stopped = false
@@ -50,7 +52,7 @@ export function pgNotifier(pool: pg.Pool): Notifier {
             client = undefined
             if (!stopped) setTimeout(() => void connect(), RECONNECT_MS)
           })
-          await c.query(`LISTEN ${ident(channel)}`)
+          await drizzle(c).execute(sql`LISTEN ${sql.identifier(channel)}`)
         } catch (err) {
           console.warn(
             JSON.stringify({
@@ -66,7 +68,9 @@ export function pgNotifier(pool: pg.Pool): Notifier {
       return async () => {
         stopped = true
         if (!client) return
-        await client.query(`UNLISTEN ${ident(channel)}`).catch(() => {})
+        await drizzle(client)
+          .execute(sql`UNLISTEN ${sql.identifier(channel)}`)
+          .catch(() => {})
         client.release()
       }
     },
@@ -77,7 +81,7 @@ export function pgNotifier(pool: pg.Pool): Notifier {
 export function pgliteNotifier(db: PGlite): Notifier {
   return {
     async notify(channel, payload) {
-      await db.query('SELECT pg_notify($1, $2)', [channel, payload])
+      await pglite(db).execute(sql`SELECT pg_notify(${channel}, ${payload})`)
     },
     listen: (channel, onPayload) => db.listen(channel, onPayload),
   }
@@ -92,8 +96,10 @@ export class PostgresFanout implements LiveFanout {
     opts: { schema?: string } = {}
   ) {
     this.channel = `fling_live_${schemaName(opts.schema ?? DEFAULT_SCHEMA)}`
-    // A channel is an identifier: the schema's name may be at most 52 characters for it.
-    ident(this.channel)
+    // A channel is an identifier, which Postgres cuts at 63 bytes: the schema's name may be at
+    // most 52 characters for it.
+    if (this.channel.length > 63)
+      throw new Error(`live channel identifier too long: ${this.channel}`)
   }
 
   async publish(event: LiveEvent) {

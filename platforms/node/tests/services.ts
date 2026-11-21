@@ -13,31 +13,30 @@
 import { randomUUID } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import pg from 'pg'
-import { migrateSchema } from '../src/table/schema.ts'
-import { pgClient, pgliteClient, type SqlClient } from '../src/table/sql.ts'
+import { type Database, pgDatabase, pgliteDatabase } from '../src/table/database.ts'
 
 export const POSTGRES_URL = process.env.FLING_TEST_POSTGRES_URL
 
 const run = randomUUID().slice(0, 8)
 let schemas = 0
 
-/** A database client of each kind, opened once per test file. */
+/** A database of each kind, opened once per test file. */
 export interface Databases {
-  pglite: () => Promise<SqlClient>
-  postgres: () => Promise<SqlClient>
+  pglite: () => Promise<Database>
+  postgres: () => Promise<Database>
   close(): Promise<void>
 }
 
 export function databases(): Databases {
-  let lite: SqlClient | undefined
-  let server: SqlClient | undefined
+  let lite: Database | undefined
+  let server: Database | undefined
   return {
     async pglite() {
-      lite ??= pgliteClient(await PGlite.create())
+      lite ??= pgliteDatabase(await PGlite.create())
       return lite
     },
     async postgres() {
-      server ??= pgClient(new pg.Pool({ connectionString: POSTGRES_URL, max: 20 }))
+      server ??= pgDatabase(new pg.Pool({ connectionString: POSTGRES_URL, max: 20 }))
       return server
     },
     async close() {
@@ -47,8 +46,8 @@ export function databases(): Databases {
 }
 
 /** A new schema with the items table in it. */
-export async function freshSchema(db: SqlClient): Promise<string> {
+export async function freshSchema(db: Database): Promise<string> {
   const schema = `t_${run}_${schemas++}`
-  await migrateSchema(db, schema)
+  await db.migrate(schema)
   return schema
 }

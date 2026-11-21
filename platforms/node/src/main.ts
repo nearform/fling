@@ -41,9 +41,8 @@ import { createNodeHost, sharedSecretTicks } from './host.ts'
 import { PostgresFanout, pgNotifier } from './live/postgres-fanout.ts'
 import { smtpMailerFor } from './mail/smtp.ts'
 import { CachedRouteTable } from './route-table/cached.ts'
+import { pgDatabase, pgliteDatabase } from './table/database.ts'
 import { PostgresTable } from './table/postgres.ts'
-import { migrateSchema } from './table/schema.ts'
-import { pgClient, pgliteClient } from './table/sql.ts'
 import { drain, maintain } from './ticks.ts'
 
 /** The drivers this process implements, whatever the environment names. */
@@ -67,15 +66,15 @@ const schema = config.databaseSchema
 const url = config.secrets.databaseUrl
 const pool = url ? new pg.Pool({ connectionString: url }) : undefined
 const lite = url ? undefined : await PGlite.create(resolve(fsRoot, 'pglite'))
-const db = pool ? pgClient(pool) : pgliteClient(lite as PGlite)
-const applied = await migrateSchema(db, schema)
-const table = new PostgresTable(db, { schema })
+const database = pool ? pgDatabase(pool) : pgliteDatabase(lite as PGlite)
+const applied = await database.migrate(schema)
+const table = new PostgresTable(database.db, { schema })
 const migrated = await runMigrations(table, { migrations: MIGRATIONS })
 console.log(
   JSON.stringify({
     level: 'info',
     msg: 'migrations',
-    schema: applied,
+    schema: `${applied} applied`,
     data: migrated.migrations.map(m => `${m.id} ${m.status}`),
   })
 )
@@ -148,7 +147,7 @@ async function shutdown() {
   await servers.close()
   await live.close()
   mailer?.close()
-  await db.close()
+  await database.close()
   process.exit(0)
 }
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown())

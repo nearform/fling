@@ -1,37 +1,39 @@
 /**
- * Postgres Table: one table `<schema>.items (pk, sk, data, expires_at)` (schema.ts), on a Postgres
- * server through `pg` or in process through PGlite (sql.ts). The sibling of the D1 Table.
+ * Postgres Table: one table `<schema>.items (pk, sk, data, expires_at)` (items.ts), through Drizzle
+ * on a Postgres server (`pg`) or in process (PGlite) (database.ts). The sibling of the D1 Table.
  *
  * Order: pk and sk are `COLLATE "C"`, which compares their UTF-8 bytes, so `ORDER BY sk` is the
  * byte order `compareSk` defines. A prefix is `sk >= prefix AND starts_with(sk, prefix)`: the
  * first bound lets the primary key's index start at the prefix.
  *
- * Writes: every write is one transaction that first takes a transaction-scoped advisory lock on
- * each key it writes (a 64-bit hash of pk and sk, taken in ascending order so two writers never
- * wait on each other), then reads the live items at those keys, checks the conditions and writes.
- * Every writer of a key takes its lock, so between the check and the write nothing else writes
- * the key: of N concurrent `ifAbsent` puts, conditional deletes or transactions, one wins, and
- * concurrent `add`s all count. Readers take no lock; a transaction's writes become visible
- * together when it commits. A transaction Postgres aborts as a deadlock or serialisation failure
- * (a hash collision can order locks across keys) is retried. Conditions and patches are evaluated
- * in JS, the way MemoryTable evaluates them, so `1`, `'1'` and `true` stay distinct.
+ * Writes: every write is one READ COMMITTED transaction that first takes a transaction-scoped
+ * advisory lock on each key it writes (a 64-bit hash of pk and sk, taken in ascending order so two
+ * writers never wait on each other), then reads the live items at those keys, checks the
+ * conditions and writes. Every writer of a key takes its lock, so between the check and the write
+ * nothing else writes the key: of N concurrent `ifAbsent` puts, conditional deletes or
+ * transactions, one wins, and concurrent `add`s all count. READ COMMITTED, whatever the server's
+ * default, because the read after the lock must see what committed before it. Readers take no
+ * lock; a transaction's writes become visible together when it commits. A transaction Postgres
+ * aborts as a deadlock or serialisation failure (a hash collision can order locks across keys) is
+ * retried after a jittered pause. Conditions and patches are evaluated in JS, the way MemoryTable
+ * evaluates them, so `1`, `'1'` and `true` stay distinct.
  *
  * Expiry: `expires_at` mirrors expiresAt in epoch ms; reads and conditions ignore dead items, and
  * `purgeExpired` (the host's maintenance tick) deletes them, checking each one is still dead as it
  * deletes it, so an item put again meanwhile stays.
  *
- * SQL: values are always `$n` parameters, never text; identifiers (the schema, `items`) only
- * through ident.ts, and integers (a LIMIT) through `int`. The rest is fixed fragments: operators
- * of `CURSOR_SQL`, `ASC`/`DESC`. tests/sql-guard.test.ts holds every SQL string here to that.
+ * SQL: Drizzle's query builder writes every statement it can, with values as parameters. The `sql`
+ * template (whose values are parameters too) writes the rest: the advisory lock, `starts_with`, a
+ * `::jsonb` cast and the purge's `(pk, sk) IN (…)`. tests/sql-guard.test.ts keeps it that way.
  *
  * Strings: jsonb holds neither NUL nor a lone surrogate, which the other backends store. A string
  * (value or field name) holding one is stored as `{"~fling~esc": "s", "u": [its UTF-16 code
  * units]}`, and an object whose field names need it, or that has a `~fling~esc` field of its own,
  * as `{"~fling~esc": "o", "e": [[name, value], …]}`, and the whole item is then stored as
  * `{"~fling~esc": "item", "d": …}`, the marker reads look for; reads undo it. Only items that need
- * it pay for it, on write and on read. Keys are never escaped (that would change their order): one that isn't `storableKey`
- * reads as absent, as on every backend, and a cursor holding a NUL is compared up to the NUL,
- * which orders the same against keys that hold none.
+ * it pay for it, on write and on read. Keys are never escaped (that would change their order): one
+ * that isn't `storableKey` reads as absent, as on every backend, and a cursor holding a NUL is
+ * compared up to the NUL, which orders the same against keys that hold none.
  */
 import { createHash } from 'node:crypto'
 import {
@@ -54,9 +56,23 @@ import {
   TRANSACT_MAX,
   type TransactOp,
 } from '@fling/api/table'
-import { int, qualified } from './ident.ts'
-import { DEFAULT_SCHEMA, schemaName } from './schema.ts'
-import type { SqlClient, SqlQueryable } from './sql.ts'
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  type SQL,
+  sql,
+} from 'drizzle-orm'
+import type { FlingDatabase } from './database.ts'
+import { DEFAULT_SCHEMA, type ItemsTable, itemsIn } from './items.ts'
 
 type Row = { pk: string; sk: string; data: Record<string, unknown> }
 
@@ -109,22 +125,15 @@ function unescaped(value: unknown): unknown {
   return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, unescaped(x)]))
 }
 
-/** The comparisons a cursor makes: a closed set of fixed fragments. */
-type CursorOp = '>' | '<' | '<='
-
-/** Each comparison as a fixed fragment around its `$n` placeholder. */
-const CURSOR_SQL: Record<CursorOp, (n: number) => string> = {
-  '>': n => `sk > $${n}`,
-  '<': n => `sk < $${n}`,
-  '<=': n => `sk <= $${n}`,
-}
-
 /** A cursor's sk as Postgres can compare it: up to its first NUL, if it has one. */
-function cursorBound(sk: string, reverse: boolean | undefined): { op: CursorOp; sk: string } {
+function cursorBound(
+  sk: string,
+  reverse: boolean | undefined
+): { op: typeof gt | typeof lt | typeof lte; sk: string } {
   const nul = sk.indexOf('\0')
-  if (nul === -1) return { op: reverse ? '<' : '>', sk }
+  if (nul === -1) return { op: reverse ? lt : gt, sk }
   // No stored sk holds a NUL, so `> a\0…` is `> a`, and `< a\0…` is `<= a`.
-  return { op: reverse ? '<=' : '>', sk: sk.slice(0, nul) }
+  return { op: reverse ? lte : gt, sk: sk.slice(0, nul) }
 }
 
 const expiryOf = (expiresAt: unknown) =>
@@ -142,7 +151,7 @@ const fromRow = (row: Row): TableItem => {
   return { ...fields, pk: row.pk, sk: row.sk }
 }
 
-/** The item's fields as stored: everything but pk and sk, `undefined` dropped. */
+/** The item's fields as stored, as JSON: everything but pk and sk, `undefined` dropped. */
 function dataOf(item: TableItem): string {
   checkExpiresAt(item.expiresAt)
   const { pk: _pk, sk: _sk, ...fields } = item
@@ -182,14 +191,21 @@ function patched(item: TableItem, patch: Patch): TableItem {
   return next as TableItem
 }
 
-/** ` LIMIT n` for one more than a checked limit (the extra row says there is more), or nothing. */
-const limitSql = (limit: number | undefined) => (limit ? ` LIMIT ${int(limit + 1)}` : '')
-
-/** `limit` checked, as the integer the query asks for one more than. */
+/** `limit` checked. */
 function limitOf(limit: number | undefined) {
   if (limit === undefined) return undefined
   if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer')
   return limit
+}
+
+/** The SQLSTATE of a failed query: Drizzle wraps the driver's error (`cause`). */
+function sqlState(err: unknown): string | undefined {
+  for (let e = err, depth = 0; e && depth < 5; depth++) {
+    const code = (e as { code?: unknown }).code
+    if (typeof code === 'string') return code
+    e = (e as { cause?: unknown }).cause
+  }
+  return undefined
 }
 
 export interface PostgresTableOptions {
@@ -200,15 +216,28 @@ export interface PostgresTableOptions {
 }
 
 export class PostgresTable implements Table {
-  private items: string
+  private items: ItemsTable
   private now: () => number
 
   constructor(
-    private db: SqlClient,
+    private db: FlingDatabase,
     opts: PostgresTableOptions = {}
   ) {
-    this.items = qualified(schemaName(opts.schema ?? DEFAULT_SCHEMA), 'items')
+    this.items = itemsIn(opts.schema ?? DEFAULT_SCHEMA)
     this.now = opts.now ?? Date.now
+  }
+
+  private columns() {
+    return { pk: this.items.pk, sk: this.items.sk, data: this.items.data }
+  }
+
+  /** Not expired at `now`. */
+  private live(): SQL {
+    return or(isNull(this.items.expiresAt), gt(this.items.expiresAt, this.now())) as SQL
+  }
+
+  private at(k: Key): SQL {
+    return and(eq(this.items.pk, k.pk), eq(this.items.sk, k.sk)) as SQL
   }
 
   /**
@@ -217,26 +246,30 @@ export class PostgresTable implements Table {
    */
   private async writing<T>(
     keys: Key[],
-    fn: (tx: SqlQueryable, live: Map<string, TableItem>) => Promise<T>
+    fn: (tx: FlingDatabase, live: Map<string, TableItem>) => Promise<T>
   ): Promise<T> {
     const locks = [...new Set(keys.map(lockId))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.db.transaction(async tx => {
-          await tx.query('SELECT pg_advisory_xact_lock(id) FROM unnest($1::bigint[]) AS t(id)', [
-            locks.map(String),
-          ])
-          const { rows } = await tx.query<Row>(
-            `SELECT pk, sk, data FROM ${this.items} ` +
-              'WHERE (pk, sk) IN (SELECT * FROM unnest($1::text[], $2::text[])) ' +
-              'AND (expires_at IS NULL OR expires_at > $3)',
-            [keys.map(k => k.pk), keys.map(k => k.sk), this.now()]
-          )
-          return fn(tx, new Map(rows.map(r => [keyOf(r), fromRow(r)])))
-        })
+        return await this.db.transaction(
+          async tx => {
+            for (const id of locks) {
+              await tx.execute(sql`SELECT pg_advisory_xact_lock(${String(id)}::bigint)`)
+            }
+            const rows = await tx
+              .select(this.columns())
+              .from(this.items)
+              .where(and(or(...keys.map(k => this.at(k))), this.live()))
+            return fn(
+              tx as unknown as FlingDatabase,
+              new Map(rows.map(r => [keyOf(r), fromRow(r)]))
+            )
+          },
+          { isolationLevel: 'read committed' }
+        )
       } catch (err) {
-        const code = (err as { code?: unknown }).code
-        if (attempt < RETRIES && typeof code === 'string' && RETRYABLE.has(code)) {
+        const code = sqlState(err)
+        if (attempt < RETRIES && code !== undefined && RETRYABLE.has(code)) {
           await pause(attempt)
           continue
         }
@@ -245,65 +278,73 @@ export class PostgresTable implements Table {
     }
   }
 
-  private async write(tx: SqlQueryable, item: TableItem) {
-    await tx.query(
-      `INSERT INTO ${this.items} (pk, sk, data, expires_at) VALUES ($1, $2, $3::jsonb, $4) ` +
-        'ON CONFLICT (pk, sk) DO UPDATE SET data = EXCLUDED.data, expires_at = EXCLUDED.expires_at',
-      [item.pk, item.sk, dataOf(item), expiryOf(item.expiresAt)]
-    )
+  private async write(tx: FlingDatabase, item: TableItem) {
+    await tx
+      .insert(this.items)
+      .values({
+        pk: item.pk,
+        sk: item.sk,
+        data: sql`${dataOf(item)}::jsonb`,
+        expiresAt: expiryOf(item.expiresAt),
+      })
+      .onConflictDoUpdate({
+        target: [this.items.pk, this.items.sk],
+        set: { data: sql`excluded.data`, expiresAt: sql`excluded.expires_at` },
+      })
   }
 
-  private async remove(tx: SqlQueryable, k: Key) {
-    await tx.query(`DELETE FROM ${this.items} WHERE pk = $1 AND sk = $2`, [k.pk, k.sk])
+  private async remove(tx: FlingDatabase, k: Key) {
+    await tx.delete(this.items).where(this.at(k))
   }
 
   async get(pk: string, sk: string) {
     if (!storable({ pk, sk })) return null
-    const { rows } = await this.db.query<Row>(
-      `SELECT pk, sk, data FROM ${this.items} ` +
-        'WHERE pk = $1 AND sk = $2 AND (expires_at IS NULL OR expires_at > $3)',
-      [pk, sk, this.now()]
-    )
-    return rows[0] ? fromRow(rows[0]) : null
+    const [row] = await this.db
+      .select(this.columns())
+      .from(this.items)
+      .where(and(this.at({ pk, sk }), this.live()))
+    return row ? fromRow(row) : null
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {
     const limit = limitOf(opts.limit)
     if (!storableKey(pk) || !storableKey(opts.skPrefix ?? '')) return { items: [] }
-    const params: unknown[] = [pk, this.now()]
-    const where = ['pk = $1', '(expires_at IS NULL OR expires_at > $2)']
+    const where: SQL[] = [eq(this.items.pk, pk), this.live()]
     if (opts.skPrefix) {
-      params.push(opts.skPrefix)
-      where.push(`sk >= $${params.length}`, `starts_with(sk, $${params.length})`)
+      where.push(
+        gte(this.items.sk, opts.skPrefix),
+        sql`starts_with(${this.items.sk}, ${opts.skPrefix})`
+      )
     }
     if (opts.cursor !== undefined) {
       const bound = cursorBound(decodeCursor(opts.cursor), opts.reverse)
-      params.push(bound.sk)
-      where.push(CURSOR_SQL[bound.op](params.length))
+      where.push(bound.op(this.items.sk, bound.sk))
     }
-    const { rows } = await this.db.query<Row>(
-      `SELECT pk, sk, data FROM ${this.items} WHERE ${where.join(' AND ')} ` +
-        `ORDER BY sk ${opts.reverse ? 'DESC' : 'ASC'}${limitSql(limit)}`,
-      params
-    )
+    const q = this.db
+      .select(this.columns())
+      .from(this.items)
+      .where(and(...where))
+      .orderBy(opts.reverse ? desc(this.items.sk) : asc(this.items.sk))
+    const rows = limit ? await q.limit(limit + 1) : await q
     return page(rows, limit, row => encodeCursor(row.sk))
   }
 
   /** In (pk, sk) byte order; the cursor is the last item's key. */
   async scan(opts: ScanOptions = {}): Promise<Page> {
     const limit = limitOf(opts.limit)
-    const params: unknown[] = [this.now()]
-    const where = ['(expires_at IS NULL OR expires_at > $1)']
+    const where: SQL[] = [this.live()]
     if (opts.cursor !== undefined) {
       const [pk, sk] = JSON.parse(decodeCursor(opts.cursor)) as [string, string]
-      params.push(pk, sk)
-      where.push('(pk, sk) > ($2, $3)')
+      where.push(
+        or(gt(this.items.pk, pk), and(eq(this.items.pk, pk), gt(this.items.sk, sk))) as SQL
+      )
     }
-    const { rows } = await this.db.query<Row>(
-      `SELECT pk, sk, data FROM ${this.items} WHERE ${where.join(' AND ')} ` +
-        `ORDER BY pk, sk${limitSql(limit)}`,
-      params
-    )
+    const q = this.db
+      .select(this.columns())
+      .from(this.items)
+      .where(and(...where))
+      .orderBy(asc(this.items.pk), asc(this.items.sk))
+    const rows = limit ? await q.limit(limit + 1) : await q
     return page(rows, limit, row => encodeCursor(JSON.stringify([row.pk, row.sk])))
   }
 
@@ -371,14 +412,15 @@ export class PostgresTable implements Table {
    */
   async purgeExpired(batchSize = 500): Promise<number> {
     const size = Math.max(1, Math.floor(batchSize) || 1)
+    const { pk, sk, expiresAt } = this.items
     let total = 0
     for (;;) {
-      const { rows } = await this.db.query(
-        `DELETE FROM ${this.items} WHERE (pk, sk) IN (SELECT pk, sk FROM ${this.items} ` +
-          `WHERE expires_at IS NOT NULL AND expires_at <= $1 LIMIT ${int(size)}) ` +
-          'AND expires_at IS NOT NULL AND expires_at <= $1 RETURNING 1',
-        [this.now()]
-      )
+      const dead = () => and(isNotNull(expiresAt), lte(expiresAt, this.now())) as SQL
+      const batch = this.db.select({ pk, sk }).from(this.items).where(dead()).limit(size)
+      const rows = await this.db
+        .delete(this.items)
+        .where(and(sql`(${pk}, ${sk}) IN ${batch}`, dead()))
+        .returning({ pk })
       total += rows.length
       if (rows.length < size) return total
     }

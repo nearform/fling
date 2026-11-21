@@ -694,9 +694,10 @@ on the app host, for a scheduler or a deploy, behind a caller check the platform
 (`TickAuthorizer`; by default `Authorization: Bearer <TICK_SECRET>`). Without one they answer 404.
 
 **Postgres Table** — the Table on Postgres (`PostgresTable`, `platforms/node/src/table/postgres.ts`),
-over `pg` or PGlite: one `items(pk, sk COLLATE "C", data jsonb, expires_at)` table in a schema of
-its own, conditions checked under per-key advisory locks so exactly one of racing writers wins, and
-its own schema migrations (`table/schema.ts`, `<schema>.fling_schema`). Expired items are hidden
+through Drizzle ORM over `pg` or PGlite: one `items(pk, sk COLLATE "C", data jsonb, expires_at)`
+table in a schema of its own, conditions checked under per-key advisory locks so exactly one of
+racing writers wins, and migrations drizzle-kit generates (`platforms/node/drizzle/`, recorded in
+`<schema>.fling_migrations`). Expired items are hidden
 at once and purged hourly. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.

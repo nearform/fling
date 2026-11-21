@@ -26,9 +26,8 @@ import WebSocket from 'ws'
 import { createNodeHost, type NodeHost, sharedSecretTicks, TICK_PATHS } from '../src/host.ts'
 import { PostgresFanout, pgliteNotifier, pgNotifier } from '../src/live/postgres-fanout.ts'
 import { CachedRouteTable } from '../src/route-table/cached.ts'
+import { pgliteDatabase } from '../src/table/database.ts'
 import { PostgresTable } from '../src/table/postgres.ts'
-import { migrateSchema } from '../src/table/schema.ts'
-import { pgliteClient } from '../src/table/sql.ts'
 import { POSTGRES_URL } from './services.ts'
 
 const APP = 'http://app.example.test'
@@ -56,11 +55,11 @@ function webBuild() {
 async function world(
   opts: { live?: MemoryLiveHub; db?: PGlite; maxBodyBytes?: number; servers?: SiteServers } = {}
 ) {
-  const db = pgliteClient(opts.db ?? (await PGlite.create()))
-  if (!opts.db) closing.push(() => db.close())
+  const database = pgliteDatabase(opts.db ?? (await PGlite.create()))
+  if (!opts.db) closing.push(() => database.close())
   const schema = `h_${randomBytes(4).toString('hex')}`
-  await migrateSchema(db, schema)
-  const table = new PostgresTable(db, { schema })
+  await database.migrate(schema)
+  const table = new PostgresTable(database.db, { schema })
   const fsRoot = mkdtempSync(join(tmpdir(), 'fling-node-host-'))
   const base = loadBaseConfig({
     APP_ORIGIN: APP,
@@ -259,17 +258,17 @@ describe('the Node host', () => {
 
 describe('CachedRouteTable', () => {
   routeTableConformance('CachedRouteTable over the Table', async () => {
-    const db = pgliteClient(await PGlite.create())
-    closing.push(() => db.close())
-    await migrateSchema(db)
-    return new CachedRouteTable(new TableRouteTable(new PostgresTable(db)))
+    const database = pgliteDatabase(await PGlite.create())
+    closing.push(() => database.close())
+    await database.migrate()
+    return new CachedRouteTable(new TableRouteTable(new PostgresTable(database.db)))
   })
 
   it('sees a new key at once, and another writer’s change within its ttl', async () => {
-    const db = pgliteClient(await PGlite.create())
-    closing.push(() => db.close())
-    await migrateSchema(db)
-    const source = new TableRouteTable(new PostgresTable(db))
+    const database = pgliteDatabase(await PGlite.create())
+    closing.push(() => database.close())
+    await database.migrate()
+    const source = new TableRouteTable(new PostgresTable(database.db))
     let now = 0
     const cached = new CachedRouteTable(source, { ttlMs: 5_000, now: () => now })
     expect(await cached.get('site:a')).toBeUndefined()

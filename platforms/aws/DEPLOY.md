@@ -11,6 +11,8 @@ Before you create or change anything, ask me for what you need
 
 Or follow the steps below yourself.
 
+How Fling works on AWS, element by element: [docs/platforms/aws.md](../../docs/platforms/aws.md).
+
 Fling runs serverless in your own AWS account (one region plus global CloudFront). The
 infrastructure is a Terraform module in this repository, [`platforms/aws/infra`](infra), that you
 call from your own Terraform; this repository's `deploy.yml` ships the code. One deployment is an

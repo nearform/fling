@@ -11,6 +11,9 @@ Before you create or change anything, ask me for what you need
 
 Or follow the steps below yourself.
 
+How Fling works on Cloudflare, element by element:
+[docs/platforms/cloudflare.md](../../docs/platforms/cloudflare.md).
+
 Fling runs on Cloudflare as **one Worker** with a D1 database, an R2 bucket and a Workers KV
 namespace. `scripts/setup.mjs` creates them once; `scripts/deploy.mjs` (run by the
 `Deploy (Cloudflare)` workflow, or by hand) ships the code. One deployment is an **instance**: its

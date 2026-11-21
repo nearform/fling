@@ -10,6 +10,8 @@ name, domains, sign-in and brand, published at `/.well-known/fling`.
   releasing): [docs/development.md](docs/development.md).
 - Deploying an instance: [platforms/aws/DEPLOY.md](platforms/aws/DEPLOY.md),
   [platforms/cloudflare/DEPLOY.md](platforms/cloudflare/DEPLOY.md).
+- The contract every platform meets: [docs/design/platform.md](docs/design/platform.md). One doc
+  per platform, supported and proposed, in [docs/platforms/](docs/platforms/README.md).
 - Area rules: [.claude/rules/](.claude/rules/), each loaded when you touch the paths it names
   (persistence and migrations, access and auth, config and branding, site routing, testing, the
   guide).
@@ -49,7 +51,8 @@ Fling runs on several clouds and is not tied to any one instance. Every change k
 
 - **The core is cloud-agnostic.** `apps/api` and `packages/shared` never import a cloud SDK; Biome
   enforces this. Cloud code lives in `platforms/<cloud>/`, behind the core's ports: `Table`,
-  `Blobs`, `RouteTable`, `IdentityProvider` and `LiveHub`. A new storage need extends a port and every
+  `Blobs`, `RouteTable`, `LiveHub`, `Mailer` and `SiteServers` (sign-in is the core's own OIDC;
+  platforms only hold its secrets). A new storage need extends a port and every
   adapter, and the conformance suite proves they agree.
 - **Write once.** Domain logic, Records, migrations, policy and the sites' routing decision exist
   once. Platforms only adapt. If you are writing the same logic in two platforms, move it into the

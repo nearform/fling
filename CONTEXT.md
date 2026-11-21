@@ -657,6 +657,14 @@ Worker, D1, R2, Workers KV with D1 behind it). Every adapter, including the core
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
 
+**Logical platform** — the contract every **Platform** meets whatever cloud it is on: the ports,
+their semantics, the sites host, ticks, secrets, domains, deploy and local runtime, and the design
+choices behind them. `docs/design/platform.md`.
+
+**Platform doc** — one platform's mapping of the **Logical platform** onto its cloud, supported or
+proposed, all written to one template: `docs/platforms/<name>.md`, indexed in
+`docs/platforms/README.md` and linked from the platform's `DEPLOY.md`.
+
 **Release** — one version of all of Fling (server, web UI, CLI, MCP servers, Claude Desktop
 extension, plugin), `x.y.z` in semver, tagged `v<x.y.z>` on `main` and described by its section of
 `CHANGELOG.md`. Not to be confused with a site's **Version**. `pnpm release` (`scripts/release.mjs`)

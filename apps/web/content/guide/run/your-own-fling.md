@@ -2,8 +2,8 @@
 title: Run your own Fling
 part: run
 order: 10
-summary: What an instance is, on AWS, Cloudflare or Google Cloud, and how its name, sign-in and brand are set.
-sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, platforms/gcp/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
+summary: What an instance is, on AWS, Cloudflare, Google Cloud or Azure, and how its name, sign-in and brand are set.
+sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, platforms/gcp/DEPLOY.md, platforms/azure/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
 verified: 9ade7007a
 ---
 
@@ -15,7 +15,7 @@ the deploy guides in the repository are the step-by-step manual.
 
 One running Fling is an **instance**. Each one has:
 
-- **One cloud**: AWS, Cloudflare or Google Cloud, in an account you own.
+- **One cloud**: AWS, Cloudflare, Google Cloud or Azure, in an account you own.
 - **Its own name**, shown in the web app, the CLI and assistants.
 - **Its own domains**: one for the web app, and one the sites hang off, so a site is
   `https://<name>.<sites domain>`.
@@ -31,28 +31,28 @@ sign-in and features from the instance when you connect.
 
 Each runs the same Fling. Pick the cloud you already use; the table says where they differ.
 
-| | AWS | Cloudflare | Google Cloud |
-|---|---|---|---|
-| Runs on | Lambda, S3, DynamoDB and CloudFront | One Worker, with D1, R2 and Workers KV | One Cloud Run service behind a load balancer, with Firestore and Cloud Storage |
-| Set up with | A Terraform module you call from your own Terraform | A setup script, run once | A Terraform module you call from your own Terraform |
-| Deployed by | A GitHub workflow, on each release | A deploy script, by hand or from a GitHub workflow | A GitHub workflow, by hand |
-| Email, optional | Amazon SES | Cloudflare Email Service | A provider's SMTP server |
-| Site servers, optional | Lambda Web Functions | The Worker Loader, in beta | Not yet |
-| Live review rooms | Yes | Yes | On one service instance |
-| Cost when idle | About nothing; you pay for use | The Workers Paid plan, plus a certificate add-on for some domain layouts | About $20–25 a month, mostly the load balancer |
+| | AWS | Cloudflare | Google Cloud | Azure |
+|---|---|---|---|---|
+| Runs on | Lambda, S3, DynamoDB and CloudFront | One Worker, with D1, R2 and Workers KV | One Cloud Run service behind a load balancer, with Firestore and Cloud Storage | Container Apps, Cosmos DB, Blob Storage and Front Door |
+| Set up with | A Terraform module you call from your own Terraform | A setup script, run once | A Terraform module you call from your own Terraform | A Terraform module you call from your own Terraform |
+| Deployed by | A GitHub workflow, on each release | A deploy script, by hand or from a GitHub workflow | A GitHub workflow, by hand | A GitHub workflow, by hand |
+| Email, optional | Amazon SES | Cloudflare Email Service | A provider's SMTP server | Azure Communication Services |
+| Site servers, optional | Lambda Web Functions | The Worker Loader, in beta | Not yet | Not yet |
+| Live review rooms | Yes | Yes | On one service instance | Yes |
+| Cost when idle | About nothing; you pay for use | The Workers Paid plan, plus a certificate add-on for some domain layouts | About $20–25 a month, mostly the load balancer | About $40 a month, mostly Front Door |
 
 The deploy guides list current costs for each.
 
 ## What you need
 
-- **A cloud account** where you can create resources: AWS, Cloudflare on the Workers Paid plan, or
-  a Google Cloud project with billing.
+- **A cloud account** where you can create resources: AWS, Cloudflare on the Workers Paid plan,
+  a Google Cloud project with billing, or an Azure subscription.
 - **A domain** whose DNS you control, for the web app and the sites. The sites' domain must sit
   under the same registrable domain as the app's (`example.com`, say).
 - **A sign-in provider**: an OpenID Connect client you register, or a Google OAuth client.
 - **The repository**: clone it, or fork it to deploy from your own copy.
-- **For email (optional)**: a sending domain set up with Amazon SES, Cloudflare Email Service or,
-  on Google Cloud, a provider that sends over SMTP.
+- **For email (optional)**: a sending domain set up with Amazon SES, Cloudflare Email Service,
+  Azure Communication Services or, on Google Cloud, a provider that sends over SMTP.
   Notifications and outside invitations need it.
 
 ## How an instance is configured
@@ -72,7 +72,7 @@ deploy. The main ones:
 | Site servers | `SERVERS`: nobody (the default), admins, named groups or every member; `SERVERS_EGRESS` for whether they reach the internet, and the `SERVER_*` limits |
 | Versions kept | `VERSION_RETENTION` (every version, unless set) |
 
-The domains come from the infrastructure: Terraform's inputs on AWS and Google Cloud, the setup
+The domains come from the infrastructure: Terraform's inputs on AWS, Google Cloud and Azure, the setup
 script's on Cloudflare. Secrets, such as the sign-in client's, are kept apart from the config, in the cloud's
 own secret store.
 
@@ -87,6 +87,7 @@ app. Changing one is a deploy.
   table.
 - [Deploying Fling on Cloudflare]({{fact:repo-url}}/blob/main/platforms/cloudflare/DEPLOY.md).
 - [Deploying Fling on Google Cloud]({{fact:repo-url}}/blob/main/platforms/gcp/DEPLOY.md).
+- [Deploying Fling on Azure]({{fact:repo-url}}/blob/main/platforms/azure/DEPLOY.md).
 
 Each opens with a prompt you can give your coding agent, which then follows the guide and asks you
 for what it needs before it creates anything.

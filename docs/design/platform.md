@@ -2,9 +2,10 @@
 
 # Design: the logical platform
 
-Status: describes the contract AWS, Cloudflare, and DigitalOcean and self-host meet today, and the
-building blocks for new platforms ([§5](#5-shared-building-blocks-for-new-platforms)), built in
-`platforms/node` and run as the e2e's third local runtime.
+Status: describes the contract AWS, Cloudflare, Google Cloud, Azure, and DigitalOcean and
+self-host meet today, and the building blocks for new platforms
+([§5](#5-shared-building-blocks-for-new-platforms)), built in `platforms/node` and run as the
+e2e's third local runtime. Google Cloud and Azure run the Node host with adapters of their own.
 
 Fling is one core and several **platforms**. The core holds every rule. A platform is
 `platforms/<cloud>/`: an entry point plus adapters that put the core on one cloud's primitives.
@@ -77,7 +78,7 @@ Each choice lists the reason for it and the file that owns it.
 | Shape | How the sites host runs | Platforms |
 |---|---|---|
 | **Edge function** | A CDN runs the routing decision at the edge against an edge key-value store, then serves from object storage. The API runs separately. | AWS (CloudFront Function + KeyValueStore) |
-| **One host that routes** | One process routes by host. It answers the app's API and UI, and runs the routing decision for the sites host itself. A CDN in front only terminates TLS and caches. | Cloudflare (one Worker), Google Cloud (the Node host on Cloud Run); proposed for Azure, Fly.io, DigitalOcean and self-host |
+| **One host that routes** | One process routes by host. It answers the app's API and UI, and runs the routing decision for the sites host itself. A CDN in front only terminates TLS and caches. | Cloudflare (one Worker); the Node host on Google Cloud (Cloud Run), Azure (Container Apps), DigitalOcean and self-host; proposed for Fly.io |
 
 The second shape needs a runtime that runs JS for every site request. In exchange, the sites host
 can add the decision's headers to every response; a viewer-request function cannot.
@@ -125,7 +126,7 @@ Each element uses the same headings:
   - **A presigned PUT accepts only the bytes whose digest was signed.** The manifest carries each
     file's SHA-256 and, from clients that send it, its MD5 (base64). `presignPut` binds whichever
     one its store checks: the SHA-256 on S3 and R2 and through the core's signed routes, the MD5
-    (`Content-MD5`) on GCS, Azure Blob and S3-compatible stores (`S3Blobs` with `digest: 'md5'`).
+    (`Content-MD5`) on GCS and S3-compatible stores (`S3Blobs` with `digest: 'md5'`).
     The binding also covers content type and cache-control and is tied to its key. The client
     sends exactly the headers `presignPut` returns. Clients upload directly; the API never sees
     the bytes.
@@ -148,6 +149,9 @@ Each element uses the same headings:
     `apps/api/src/blobs/host-uploads.ts`). The host checks the SHA-256 itself and writes the
     bytes with `put`, so they pass through it and its request-size limit applies. Cloudflare
     serves the same routes with R2's own check.
+  - A store whose presigned URLs bind no header at all signs the host's upload route for every
+    file. Azure Blob Storage is one: a SAS signs only its URL, and Put Blob takes a body without
+    the `Content-MD5` it was meant to carry (`AzureBlobs`, `platforms/azure/src/blobs/blob.ts`).
 - **Conformance:** `blobsConformance`.
 - **Gates:** nothing.
 
@@ -289,7 +293,7 @@ Differences between platforms are capability flags, never `if (platform === …)
 
 ## 5. Shared building blocks for new platforms
 
-The proposed platforms ([GCP](../platforms/gcp.md), [Azure](../platforms/azure.md),
+Azure ([its doc](../platforms/azure.md)) and the proposed platforms ([GCP](../platforms/gcp.md),
 [Fly.io](../platforms/fly.md), [Vercel](../platforms/vercel.md),
 [DigitalOcean and self-host](../platforms/digitalocean-self-host.md)) mostly have the *one host
 that routes* shape, on a Node runtime. The parts they share are written once, in `platforms/node`
@@ -345,7 +349,7 @@ that routes* shape, on a Node runtime. The parts they share are written once, in
 
    It passes the table, store, migrations and route table suites on PGlite in every gate and on a
    Postgres service in CI. It is the Table for Fly.io, Vercel (Neon), DigitalOcean and self-host,
-   and the fallback on Azure and GCP.
+   and the fallback on GCP and on Azure, whose Table is Cosmos DB (`CosmosTable`).
 3. **A mailer for clouds without a mail service**: SMTP (`src/mail/smtp.ts`, `SmtpMailer`,
    `MAIL_DRIVER=smtp`), which every transactional provider also offers, passing
    `mailerConformance` against a fake SMTP server. A provider's own HTTP API, where SMTP is

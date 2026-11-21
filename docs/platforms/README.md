@@ -20,7 +20,7 @@ maps each element of the contract onto its cloud. All platform docs share one te
 | AWS | supported | edge function (CloudFront Function) | Terraform module | [aws.md](aws.md) | [DEPLOY.md](../../platforms/aws/DEPLOY.md) |
 | Cloudflare | supported | one host that routes (one Worker) | setup and deploy scripts, wrangler | [cloudflare.md](cloudflare.md) | [DEPLOY.md](../../platforms/cloudflare/DEPLOY.md) |
 | Google Cloud | supported | one host that routes (Cloud Run, the Node host) | Terraform module (`google`) | [gcp.md](gcp.md) | [DEPLOY.md](../../platforms/gcp/DEPLOY.md) |
-| Azure | proposed | one host that routes (Container Apps) | Terraform (`azurerm`) | [azure.md](azure.md) | — |
+| Azure | supported | one host that routes (Container Apps) | Terraform module (`azurerm`) | [azure.md](azure.md) | [DEPLOY.md](../../platforms/azure/DEPLOY.md) |
 | Fly.io | proposed | one host that routes (Fly Machines) | scripts (no maintained provider) | [fly.md](fly.md) | — |
 | Vercel | proposed | edge function (Routing Middleware) | Terraform (`vercel`) | [vercel.md](vercel.md) | — |
 | DigitalOcean and self-host | supported | one host that routes (the Node host image) | Terraform (`digitalocean`), Compose or Helm | [digitalocean-self-host.md](digitalocean-self-host.md) | [DigitalOcean](../../platforms/digitalocean/DEPLOY.md), [self-host](../../platforms/node/DEPLOY.md) |
@@ -38,7 +38,7 @@ maps each element of the contract onto its cloud. All platform docs share one te
 | Ticks | EventBridge Scheduler | Cron Triggers | Cloud Scheduler | Container Apps jobs | in-process timers | Cron Jobs | in-process timers |
 | Secrets | SSM | Worker secrets | Secret Manager | Key Vault | Fly secrets | environment variables | environment / Kubernetes secrets |
 
-The platforms on Node (Google Cloud, DigitalOcean, self-host and the proposed ones) share three building blocks, each written once in `platforms/node`: the
+The platforms on Node (Google Cloud, Azure, DigitalOcean, self-host and the proposed ones) share three building blocks, each written once in `platforms/node`: the
 Node host (with its Postgres live fan-out and tick endpoints), the Postgres `Table` and the SMTP
 mailer ([§5 of the design](../design/platform.md#5-shared-building-blocks-for-new-platforms)),
 and its image (`platforms/node/Dockerfile`). `platforms/node` also runs on its own

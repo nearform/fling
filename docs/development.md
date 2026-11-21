@@ -16,8 +16,8 @@ pnpm gate     # lint (Biome, de-branding check), terraform validate, typecheck, 
 ```
 
 CI runs `pnpm gate` and nothing else, so if it passes locally it passes in CI. The one exception is
-the suites backed by DynamoDB Local, MinIO and a Postgres server, which run only when their
-endpoints are set. To run them locally:
+the suites backed by DynamoDB Local, MinIO, a Postgres server, the Cosmos DB emulator and
+Azurite, which run only when their endpoints are set. To run them locally:
 
 ```sh
 docker run -d -p 8000:8000 amazon/dynamodb-local
@@ -35,6 +35,12 @@ docker run -d -p 8086:8080 gcr.io/google.com/cloudsdktool/google-cloud-cli:emula
 docker run -d -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443
 FLING_TEST_FIRESTORE_EMULATOR_HOST=localhost:8086 \
   FLING_TEST_GCS_ENDPOINT=http://localhost:4443 pnpm --filter @fling/platform-gcp test
+
+docker run -d -p 8081:8081 mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+docker run -d -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite-blob --blobHost 0.0.0.0
+FLING_TEST_COSMOS_ENDPOINT=http://localhost:8081 \
+  FLING_TEST_AZURITE_ENDPOINT=http://127.0.0.1:10000/devstoreaccount1 \
+  pnpm --filter @fling/platform-azure test
 ```
 
 The Postgres Table's suites also run on PGlite (Postgres in process) in every `pnpm gate`, so only
@@ -283,7 +289,8 @@ Secrets go to SSM on AWS and to Worker secrets on Cloudflare.
 The contract every platform meets and the steps to add one are in
 [docs/design/platform.md](design/platform.md) (§4). A platform on a Node runtime starts from
 `platforms/node` (§5): the Node host, the Postgres Table, the Postgres live fan-out and the SMTP
-mailer, and supplies only the adapters its cloud needs, its infrastructure and a deploy. A store
+mailer, and supplies only the adapters its cloud needs, its infrastructure and a deploy, as
+`platforms/gcp` and `platforms/azure` do. A store
 that speaks the S3 API takes `S3Blobs` from `platforms/s3` (`STORAGE_DRIVER=s3` on the Node host).
 The Node host image (`platforms/node/Dockerfile`, bundled by `platforms/node/scripts/build.mjs`)
 takes another entry point as the `FLING_ENTRY` build argument, so a platform on Node can ship its

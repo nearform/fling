@@ -13,6 +13,7 @@ import {
   GroupDetailSchema,
   GroupListSchema,
   GroupMembersRequestSchema,
+  isSiteSort,
   LiveTicketSchema,
   MeSchema,
   NameCheckSchema,
@@ -36,6 +37,7 @@ import {
   ServerLogsResponseSchema,
   SharedSiteListSchema,
   ShareResponseSchema,
+  SITE_SORTS,
   SiteArrivalSchema,
   SiteDetailSchema,
   SiteListSchema,
@@ -62,6 +64,7 @@ import * as comments from '../comments.ts'
 import { formsOf, responsesOf } from '../forms.ts'
 import * as groups from '../groups.ts'
 import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.ts'
+import type { PageRequest } from '../lib/site-page.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
 import type { Acting } from '../notifications/notify.ts'
@@ -106,6 +109,21 @@ apiRoutes.use('*', requireAuth)
 /** The origin of a site's own host, `https://<name>.<sites domain>` (with the port in dev). */
 function siteHostOrigin(config: { sitesDomain: string; siteScheme: string }, name: string) {
   return new URL(siteUrl(siteLabel(name), config.sitesDomain, `${config.siteScheme}:`)).origin
+}
+
+/** A site list's `sort`, `limit` and `cursor` (a page only with `limit`; lib/site-page.ts). */
+function pageRequest(c: Context<AppEnv>): PageRequest {
+  const sort = c.req.query('sort')
+  if (sort !== undefined && !isSiteSort(sort)) {
+    throw badRequest(`sort must be one of ${SITE_SORTS.join(', ')}`)
+  }
+  const limit = c.req.query('limit')
+  const cursor = c.req.query('cursor')
+  return {
+    ...(sort ? { sort } : {}),
+    ...(limit ? { limit: Number(limit) || 1 } : {}),
+    ...(cursor ? { cursor } : {}),
+  }
 }
 
 /** The admin acting as the user, if any: what they do then notifies nobody. */
@@ -237,13 +255,13 @@ apiRoutes.get('/why', async c => c.json(WhySiteSchema.parse(await sites.whySite(
 
 apiRoutes.get('/sites', async c => {
   const archived = ['1', 'true'].includes(c.req.query('archived') ?? '')
-  const list = await sites.listSites(c.get('deps'), c.get('user'), archived)
-  return c.json(SiteListSchema.parse({ sites: list }))
+  const list = await sites.listSites(c.get('deps'), c.get('user'), archived, pageRequest(c))
+  return c.json(SiteListSchema.parse(list))
 })
 
 apiRoutes.get('/shared', async c => {
-  const list = await sites.listShared(c.get('deps'), c.get('user'))
-  return c.json(SharedSiteListSchema.parse({ sites: list }))
+  const list = await sites.listShared(c.get('deps'), c.get('user'), pageRequest(c))
+  return c.json(SharedSiteListSchema.parse(list))
 })
 
 apiRoutes.get('/sites/:name/arrival', async c => {

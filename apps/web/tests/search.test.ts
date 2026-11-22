@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { countLabel, filterSites, matchesQuery, queryTerms } from '../src/lib/search'
+import { allSitesLabel, countLabel, filterSites, matchesQuery, queryTerms } from '../src/lib/search'
 
 const site = (name: string, shareUrl: string | null = null) => ({
   name,
@@ -85,13 +85,15 @@ describe('shared sites', () => {
 })
 
 describe('all sites (admins)', () => {
-  it('count every site on the instance, and how many match', () => {
-    const label = (total: number | undefined, shown: number, searching = false) =>
-      countLabel({ total, shown, archived: false, all: true, searching })
-    expect(label(undefined, 0)).toBe('Every site on this instance')
-    expect(label(0, 0)).toBe('Nothing flung on this instance yet')
-    expect(label(1, 1)).toBe('1 site')
-    expect(label(6, 6)).toBe('6 sites')
-    expect(label(6, 2, true)).toBe('2 of 6 sites')
+  it('count the sites loaded, whether more are to load, and what a filter lets through', () => {
+    const label = (loaded: number | undefined, more = false, filtered = false) =>
+      allSitesLabel({ loaded, more, filtered })
+    expect(label(undefined)).toBe('Every site on this instance')
+    expect(label(0)).toBe('Nothing flung on this instance yet')
+    expect(label(1)).toBe('1 site')
+    expect(label(6)).toBe('6 sites')
+    expect(label(50, true)).toBe('First 50 sites, by name')
+    expect(label(2, false, true)).toBe('2 matching sites')
+    expect(label(0, false, true)).toBe('0 matching sites')
   })
 })

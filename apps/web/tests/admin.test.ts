@@ -9,6 +9,7 @@ import {
 } from '../src/components/SideNav'
 import {
   ADMIN_USERS_PATH,
+  allSitesOf,
   impersonateBlocked,
   impersonationNotice,
   invitationStatus,
@@ -18,6 +19,7 @@ import {
   showsAdmin,
   showsInvitationsAdmin,
 } from '../src/lib/admin'
+import { sitesViewOf } from '../src/lib/sites'
 
 const me = (over: Partial<Me> = {}): Me => ({
   email: 'boss@example.test',
@@ -36,7 +38,6 @@ const user = (over: Partial<AdminUser> = {}): AdminUser => ({
   userSlug: 'member',
   createdAt: null,
   lastSignInAt: null,
-  siteCount: 0,
   admin: false,
   guest: false,
   ...over,
@@ -149,5 +150,16 @@ describe('Admin → Invitations', () => {
     expect(invitationStatus({ revokedAt: null, signedIn: false })).toBe('Not signed in yet')
     expect(invitationStatus({ revokedAt: null, signedIn: true })).toBe('Signed in')
     expect(invitationStatus({ revokedAt: '2026-01-01T00:00:00Z', signedIn: true })).toBe('Revoked')
+  })
+})
+
+describe("a user's sites", () => {
+  it('link to All sites narrowed to that owner, which the Sites page reads back', () => {
+    const href = allSitesOf('a+b@example.test')
+    const params = new URL(href, 'https://fling.test').searchParams
+    expect([params.get('view'), params.get('owner')]).toEqual(['all', 'a+b@example.test'])
+    expect(sitesViewOf(params.get('view'), { guest: false, sharing: false, admin: true })).toBe(
+      'all'
+    )
   })
 })

@@ -923,7 +923,22 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       byName.every((n, i) => i === 0 || byName[i - 1] <= n),
       `fling ls --sort name is not A–Z: ${byName.join(', ')}`
     )
-    step('fling ls: last updated first, --sort name A–Z')
+    // `--limit` lists one page and the cursor for the next; two pages are the list's first four.
+    const lsPage = async (...args: string[]) =>
+      (await fling('ls', '--sort', 'name', '--limit', '2', ...args)) as {
+        sites: { name: string }[]
+        cursor: string | null
+      }
+    const firstPage = await lsPage()
+    const secondPage = firstPage.cursor ? await lsPage('--after', firstPage.cursor) : { sites: [] }
+    const paged = [...firstPage.sites, ...secondPage.sites].map(s => s.name)
+    check(
+      firstPage.sites.length === Math.min(2, byName.length) &&
+        (firstPage.cursor !== null) === byName.length > 2 &&
+        paged.join() === byName.slice(0, 4).join(),
+      `fling ls --limit 2 pages ${paged.join(', ')}, not ${byName.slice(0, 4).join(', ')}`
+    )
+    step('fling ls: last updated first, --sort name A–Z, --limit pages with --after')
 
     // The remote MCP connector publishes inline content.
     const mcp = await fetch(`${appOrigin}/mcp`, {
@@ -2996,23 +3011,50 @@ async function adminStep(ctx: {
   const listed = async (how: { cookie: string } | { key: string }) => {
     const res = await call(how, 'GET', `/api/admin/users?q=${encodeURIComponent(owner)}`)
     check(res.status === 200, `admin users list: ${res.status}`)
-    const body = (await res.json()) as { users: { email: string; siteCount: number }[] }
-    const row = body.users.find(u => u.email === owner)
-    check(row && row.siteCount >= 1, `users list: ${JSON.stringify(body.users)}`)
-  }
-  /** Every site's listing, the owner's site among them (unless the list stops short of it). */
-  const allSites = async (how: { cookie: string } | { key: string }) => {
-    const res = await call(how, 'GET', '/api/admin/sites')
-    check(res.status === 200, `admin sites list: ${res.status}`)
-    const body = (await res.json()) as {
-      sites: { name: string; owner: string }[]
-      truncated: boolean
-    }
-    const row = body.sites.find(s => s.name === name)
+    const body = (await res.json()) as { users: { email: string }[] }
     check(
-      row?.owner === owner || (!row && body.truncated),
-      `sites list: ${body.sites.length} sites, ${name} ${row ? `owned by ${row.owner}` : 'missing'}`
+      body.users.some(u => u.email === owner),
+      `users list: ${JSON.stringify(body.users)}`
     )
+  }
+  /**
+   * Every site's listing, a page at a time by name: the owner's site found by its name's prefix,
+   * and among the sites the owner owns or publishes.
+   */
+  const allSites = async (how: { cookie: string } | { key: string }) => {
+    type Page = { sites: { name: string; owner: string }[]; cursor: string | null }
+    const page = async (query: string) => {
+      const res = await call(how, 'GET', `/api/admin/sites?${query}`)
+      check(res.status === 200, `admin sites list ?${query}: ${res.status}`)
+      return (await res.json()) as Page
+    }
+    const byPrefix = await page(`q=${encodeURIComponent(name)}&limit=100`)
+    const row = byPrefix.sites.find(s => s.name === name)
+    check(
+      row?.owner === owner && byPrefix.sites.every(s => s.name.startsWith(name)),
+      `sites list ?q=${name}: ${JSON.stringify(byPrefix.sites.map(s => s.name))}`
+    )
+    const first = await page('limit=1')
+    check(
+      first.sites.length === 1 && first.cursor !== null,
+      `sites list ?limit=1: ${first.sites.length} sites, cursor ${first.cursor}`
+    )
+    const next = await page(`limit=1&after=${encodeURIComponent(first.cursor ?? '')}`)
+    check(
+      (next.sites[0]?.name ?? '') > (first.sites[0]?.name ?? ''),
+      `sites list after ${first.sites[0]?.name}: ${JSON.stringify(next.sites)}`
+    )
+    let after = ''
+    let found = false
+    for (let pages = 0; !found && pages < 50; pages++) {
+      const held = await page(
+        `owner=${encodeURIComponent(owner)}&limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`
+      )
+      found = held.sites.some(s => s.name === name)
+      if (!held.cursor) break
+      after = held.cursor
+    }
+    check(found, `sites list ?owner=${owner} leaves out ${name}`)
   }
 
   /** The instance's settings: the env keys with their values, the secrets by name only. */
@@ -3069,7 +3111,7 @@ async function adminStep(ctx: {
   }
   if (!admin.cookie) {
     step(
-      `admin (API key): lists users (${owner} included), every site (${name} included) and the settings (secrets by name only)${othersSite ? `; reads ${name} but may not change it` : ''}; may not impersonate with a key`
+      `admin (API key): lists users (${owner} included), every site a page at a time (${name} by its name and by its owner) and the settings (secrets by name only)${othersSite ? `; reads ${name} but may not change it` : ''}; may not impersonate with a key`
     )
     return
   }

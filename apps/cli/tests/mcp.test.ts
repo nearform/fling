@@ -202,6 +202,45 @@ describe('MCP server', () => {
     expect(bad.isError).toBe(true)
   })
 
+  it('fling_list pages with `limit` and `cursor`, saying how to get the next page', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      '/api/sites': url =>
+        url.searchParams.get('cursor')
+          ? jsonResponse({ sites: [site({ name: 'gamma' })], cursor: null })
+          : jsonResponse({
+              sites: [site({ name: 'alpha' }), site({ name: 'beta' })],
+              cursor: 'c1',
+            }),
+    })
+    const client = await connect(store, m.fetch)
+    const first = await client.callTool({
+      name: 'fling_list',
+      arguments: { limit: 2, sort: 'name' },
+    })
+    expect(dataOf(first).cursor).toBe('c1')
+    expect(text(first)).toContain('More sites: call fling_list again with cursor: c1')
+    const asked = m.calls.at(-1)?.url.searchParams
+    expect([asked?.get('limit'), asked?.get('sort'), asked?.get('cursor')]).toEqual([
+      '2',
+      'name',
+      null,
+    ])
+    const rest = await client.callTool({
+      name: 'fling_list',
+      arguments: { limit: 2, sort: 'name', cursor: 'c1' },
+    })
+    expect(m.calls.at(-1)?.url.searchParams.get('cursor')).toBe('c1')
+    expect([
+      (dataOf(rest).sites as { name: string }[]).map(s => s.name),
+      dataOf(rest).cursor,
+    ]).toEqual([['gamma'], null])
+    expect(text(rest)).not.toContain('More sites')
+    // Without `limit`, every site and no paging asked of the server.
+    await client.callTool({ name: 'fling_list', arguments: {} })
+    expect(m.calls.at(-1)?.url.searchParams.has('limit')).toBe(false)
+  })
+
   it('fling_list `shared` lists the sites shared with the user, in the order asked', async () => {
     const store = await loggedInStore()
     const shared = (name: string, updatedAt: string) => ({

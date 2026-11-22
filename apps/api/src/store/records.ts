@@ -451,9 +451,6 @@ const QUEUE_ATTEMPTS = 10
 /** The most operations one transaction takes (the Table port's limit). */
 const TRANSACT_MAX = 25
 
-/** Site directory items read a query. */
-const DIRECTORY_PAGE = 1000
-
 /** How many single-item deletes run at once when clearing a set of items. */
 const DELETE_CONCURRENCY = 10
 /** How many single-item reads run at once when looking up a set of items. */
@@ -913,22 +910,6 @@ export class Records implements Store {
       null
     )
     return { stored, record: record?.id === site.id ? record : null }
-  }
-
-  async listAllSites(opts: { max: number; prefix?: string; pageSize?: number }) {
-    const sites: SiteDirectoryRecord[] = []
-    let cursor: string | undefined
-    // One more than `max`, to know whether the list was cut.
-    do {
-      const page = await this.table.query('SITES', {
-        skPrefix: `SITE#${opts.prefix ?? ''}`,
-        limit: Math.min(opts.pageSize ?? DIRECTORY_PAGE, opts.max + 1 - sites.length),
-        cursor,
-      })
-      for (const item of page.items) sites.push(decode<SiteDirectoryRecord>('sitedirectory', item))
-      cursor = page.cursor
-    } while (cursor && sites.length <= opts.max)
-    return { sites: sites.slice(0, opts.max), truncated: sites.length > opts.max }
   }
 
   listSiteGrants(email: string) {
@@ -2117,11 +2098,11 @@ export class Records implements Store {
     return unless(this.table.put(encode('routeformat', key.routeFormat(), record), cond))
   }
 
-  async pageSites(opts: { after?: string | null; limit: number }) {
-    // A query's cursor is the last sk it returned (table/types.ts), so the sweep resumes after a
+  async pageSites(opts: { after?: string | null; limit: number; prefix?: string }) {
+    // A query's cursor is the last sk it returned (table/types.ts), so a page resumes after a
     // name even when that site is gone.
     const page = await this.table.query('SITES', {
-      skPrefix: 'SITE#',
+      skPrefix: `SITE#${opts.prefix ?? ''}`,
       limit: opts.limit,
       ...(opts.after ? { cursor: encodeCursor(key.siteDirectory(opts.after).sk) } : {}),
     })

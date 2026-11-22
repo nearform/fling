@@ -15,6 +15,7 @@ import {
   describeFormsSummary,
   describeGroup,
   describeGroups,
+  describeMoreSites,
   describeNotificationSettings,
   describePathDetail,
   describePaths,
@@ -58,7 +59,6 @@ import {
   SERVER_TEMPLATE_CONFIG,
   type Site,
   shareForFeedback,
-  sortSites,
   waitUntilReachable,
 } from '@fling/shared'
 import { checkPathsIndex } from '@fling/shared/paths-index'
@@ -427,22 +427,35 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   }
 
   register(mcpTools.list, async args => {
+    const page = {
+      sort: args.sort,
+      ...(args.limit !== undefined ? { limit: args.limit } : {}),
+      ...(args.cursor ? { cursor: args.cursor } : {}),
+    }
+    const paged = args.limit !== undefined
     if (args.shared || !mayOwnSites) {
-      const shared = sortSites(await sites.listShared(deps, user), args.sort)
+      const { sites: shared, cursor } = await sites.listShared(deps, user, page)
       return {
-        text: shared.length
-          ? `${shared.length} site(s) shared with you:\n${shared.map(describeSharedSite).join('\n')}`
-          : 'No sites have been shared with you.',
-        data: { sites: shared },
+        text:
+          (shared.length
+            ? `${shared.length} site(s) shared with you${paged ? ' on this page' : ''}:\n${shared.map(describeSharedSite).join('\n')}`
+            : paged
+              ? 'No more sites shared with you.'
+              : 'No sites have been shared with you.') + describeMoreSites(cursor),
+        data: { sites: shared, ...(paged ? { cursor: cursor ?? null } : {}) },
       }
     }
-    const list = sortSites(await sites.listSites(deps, user, Boolean(args.archived)), args.sort)
+    const { sites: list, cursor } = await sites.listSites(deps, user, Boolean(args.archived), page)
     const lines = list.map(s => `- ${s.name}: ${describeSite(s)}`).join('\n')
+    const kind = args.archived ? 'archived ' : ''
     return {
-      text: list.length
-        ? `${list.length} ${args.archived ? 'archived ' : ''}site(s):\n${lines}`
-        : `No ${args.archived ? 'archived ' : ''}sites yet.`,
-      data: { sites: list },
+      text:
+        (list.length
+          ? `${list.length} ${kind}site(s)${paged ? ' on this page' : ''}:\n${lines}`
+          : paged
+            ? `No more ${kind}sites.`
+            : `No ${kind}sites yet.`) + describeMoreSites(cursor),
+      data: { sites: list, ...(paged ? { cursor: cursor ?? null } : {}) },
     }
   })
 

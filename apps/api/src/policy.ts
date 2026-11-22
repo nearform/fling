@@ -484,7 +484,7 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
 /**
  * Actions on the instance and on the caller's own account:
  *
- *   admin.users.list         GET /api/admin/users (and site counts)
+ *   admin.users.list         GET /api/admin/users
  *   admin.sites.list         GET /api/admin/sites: every site's listing (the site directory)
  *   admin.audit.read         GET /api/admin/audit
  *   admin.mail.read          GET /api/admin/mail: the mail settings and the sending health

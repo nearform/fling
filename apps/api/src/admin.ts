@@ -39,22 +39,19 @@ import {
   type Principal,
 } from './policy.ts'
 import { roleSites } from './sites.ts'
-import type { User } from './store/types.ts'
+import { directoryOf, type SiteDirectoryRecord, type User } from './store/types.ts'
 import type { Deps } from './types.ts'
 
 /** Users per page of the list, by default and at most. */
 export const USERS_PAGE = 50
 export const USERS_PAGE_MAX = 100
-/**
- * The most sites the admins' list returns, so the response stays well under Lambda's 6 MB: a
- * typical row is about 270 bytes of JSON (370 with a 63-character name), so 10,000 rows are about
- * 2.7 MB (3.7 MB at worst).
- */
-export const ADMIN_SITES_MAX = 10_000
+/** Sites per page of the admins' list, by default and at most. */
+export const SITES_PAGE = 50
+export const SITES_PAGE_MAX = 100
 /** Audit entries the admin page shows. */
 export const AUDIT_PAGE = 50
-/** Site counts looked up at once (one query each). */
-const COUNT_CONCURRENCY = 10
+/** Users whose guest invitation is looked up at once. */
+const USER_CONCURRENCY = 10
 
 /** What /api/me says about the caller. */
 export function meOf(
@@ -107,11 +104,8 @@ export async function listUsers(
     limit,
     cursor: opts.cursor || undefined,
   })
-  // Site counts: the sites each user owns or publishes, from their index items and their groups'
-  // (`roleSites`), never a scan.
-  const users = await mapLimit(page.users, COUNT_CONCURRENCY, async u => ({
+  const users = await mapLimit(page.users, USER_CONCURRENCY, async u => ({
     ...u,
-    siteCount: (await roleSites(deps, u, await deps.store.listMemberships(u.email))).length,
     admin: isAdminEmail(deps.config, u.email),
     // Read only for users the configuration doesn't admit, and only with invitations on.
     guest: await invitations.isInvitedGuest(deps, u.email),
@@ -120,19 +114,38 @@ export async function listUsers(
 }
 
 /**
- * Every site's listing, by name, in one response (clients search and sort it): nothing that would
- * let an admin open it. At most `max` sites; `truncated` when there were more.
+ * Every site's listing, by name, a page at a time: nothing that would let an admin open it. `q`:
+ * only names that start with it (one query of the site directory). `owner`: only the sites that
+ * address owns or publishes, directly or through a group (`roleSites`, from their index items,
+ * never a scan), sorted by name and paged here. `after` (a page's `cursor`, the last name it
+ * listed): the page starts after that name.
  */
 export async function listSites(
   deps: Deps,
   p: Principal,
-  max = ADMIN_SITES_MAX
-): Promise<{ sites: AdminSite[]; truncated: boolean }> {
+  opts: { q?: string; owner?: string; after?: string; limit?: number } = {}
+): Promise<{ sites: AdminSite[]; cursor: string | null }> {
   ensure(p, 'admin.sites.list')
-  const { sites, truncated } = await deps.store.listAllSites({ max })
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? SITES_PAGE)), SITES_PAGE_MAX)
+  const prefix = opts.q?.trim().toLowerCase() || undefined
+  const after = opts.after || undefined
+  const owner = opts.owner?.trim().toLowerCase()
+  let page: { sites: SiteDirectoryRecord[]; more: boolean }
+  if (owner) {
+    const held = await roleSites(deps, { email: owner }, await deps.store.listMemberships(owner))
+    const named = held
+      .map(directoryOf)
+      .filter(s => (!prefix || s.name.startsWith(prefix)) && (!after || s.name > after))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    page = { sites: named.slice(0, limit), more: named.length > limit }
+  } else {
+    page = await deps.store.pageSites({ after, limit, prefix })
+  }
   const { sitesDomain, siteScheme } = deps.config
+  const last = page.sites.at(-1)
   return {
-    sites: sites.map(s => ({
+    cursor: page.more && last ? last.name : null,
+    sites: page.sites.map(s => ({
       name: s.name,
       url: siteUrl(siteLabel(s.name), sitesDomain, `${siteScheme}:`),
       owner: s.owner,
@@ -143,7 +156,6 @@ export async function listSites(
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
     })),
-    truncated,
   }
 }
 

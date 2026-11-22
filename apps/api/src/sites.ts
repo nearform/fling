@@ -86,7 +86,6 @@ import {
   sitePrefix,
   siteUrl,
   slugify,
-  sortSites,
   type Thumbnail,
   thumbnailProblem,
   type VersionFiles,
@@ -113,6 +112,7 @@ import {
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
+import { type PageRequest, pageOfSites } from './lib/site-page.ts'
 import { queueMaintenance, reviveVersion } from './maintenance.ts'
 import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
 import { refreshHome, removePath } from './paths.ts'
@@ -853,17 +853,35 @@ export async function roleSites(
 }
 
 /**
- * GET /api/sites — the sites the user owns or publishes (`roleSites`), newest first: live ones, or
- * the archived ones.
+ * GET /api/sites — the sites the user owns or publishes (`roleSites`): live ones, or the archived
+ * ones, in `page.sort` order (last updated first by default), all of them or, with `page.limit`,
+ * one page (`pageOfSites`).
  */
-export async function listSites(deps: Deps, user: User, archived: boolean): Promise<Site[]> {
-  const groups = await groupsOf(deps, user.email)
+export async function listSites(
+  deps: Deps,
+  user: User,
+  archived: boolean,
+  page: PageRequest = {}
+): Promise<{ sites: Site[]; cursor?: string | null }> {
+  const groups = await listingGroups(deps, user.email)
   const actor: Actor = { ...userActor(user), groups }
-  const sites = await roleSites(deps, user, groups)
-  return sites
-    .filter(s => s.archived === archived && (archived || s.currentVersionId !== null))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .map(s => toSite(deps, actor, s))
+  const sites = (await roleSites(deps, user, groups)).filter(
+    s => s.archived === archived && (archived || s.currentVersionId !== null)
+  )
+  const listed = pageOfSites(sites, page)
+  return { ...listed, sites: listed.sites.map(s => toSite(deps, actor, s)) }
+}
+
+/** Above this many groups, listing someone's sites logs `many groups` (each is a query). */
+export const MANY_GROUPS = 50
+
+/** The groups a listing reads, one query each: logged (without the person) when there are many. */
+async function listingGroups(deps: Deps, email: string): Promise<string[]> {
+  const groups = await groupsOf(deps, email)
+  if (groups.length > MANY_GROUPS) {
+    console.log(JSON.stringify({ level: 'info', msg: 'many groups', groups: groups.length }))
+  }
+  return groups
 }
 
 /** Group-site queries, and sites read for v1 index items, run at once while listing. */
@@ -875,7 +893,8 @@ const SHARED_READ_CONCURRENCY = 10
  * their memberships and one per group for its site items; each item carries the site's listing
  * (`SharedListing`), so no site is read. Sites that aren't live (archived, or no current version)
  * are left out, as are merely private ones, which every member sees anyway, and those the user
- * owns or publishes (`roleSites`), which are in their own list. Last updated first.
+ * owns or publishes (`roleSites`), which are in their own list. In `page.sort` order (last
+ * updated first by default), all of them or, with `page.limit`, one page (`pageOfSites`).
  *
  * Being in the audience is implied by the item existing (items are written and removed with the
  * audience, `putSite`), and a group counts only while the user is a member of it now. An item the
@@ -884,10 +903,14 @@ const SHARED_READ_CONCURRENCY = 10
  * pass, which read the audience. A v1 item (no listing) is answered from the site itself, asked
  * of policy.
  */
-export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> {
+export async function listShared(
+  deps: Deps,
+  user: User,
+  page: PageRequest = {}
+): Promise<{ sites: SharedSite[]; cursor?: string | null }> {
   const [grants, groups] = await Promise.all([
     deps.store.listSiteGrants(user.email),
-    groupsOf(deps, user.email),
+    listingGroups(deps, user.email),
   ])
   const [groupSites, held] = await Promise.all([
     mapLimit(groups, SHARED_READ_CONCURRENCY, id => deps.store.listGroupSites(id)).then(s =>
@@ -951,7 +974,7 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
     ])
   )
   const { sitesDomain, appOrigin, comments } = deps.config
-  return sortSites(
+  return pageOfSites(
     visible.map(({ listing, direct, groups }) => ({
       name: listing.name,
       url: siteUrl(siteLabel(listing.name), sitesDomain, protocol(deps)),
@@ -961,7 +984,8 @@ export async function listShared(deps: Deps, user: User): Promise<SharedSite[]> 
       ...(listing.thumbnailAt ? { thumbnail: { updatedAt: listing.thumbnailAt } } : {}),
       createdAt: listing.createdAt,
       updatedAt: listing.updatedAt,
-    }))
+    })),
+    page
   )
 }
 

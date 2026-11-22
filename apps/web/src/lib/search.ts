@@ -27,31 +27,22 @@ export function filterSites<T extends Searchable>(sites: readonly T[], query: st
 }
 
 /**
- * The header's count line: what's listed (your live or archived sites, the sites shared with you,
- * or every site on the instance), and how much of it the search lets through.
+ * The header's count line: what's listed (your live or archived sites, or the sites shared with
+ * you), and how much of it the search lets through.
  */
 export function countLabel({
   total,
   shown,
   archived,
   shared = false,
-  all = false,
   searching,
 }: {
   total: number | undefined
   shown: number
   archived: boolean
   shared?: boolean
-  all?: boolean
   searching: boolean
 }): string {
-  if (all) {
-    const sites = (n: number) => (n === 1 ? 'site' : 'sites')
-    if (total === undefined) return 'Every site on this instance'
-    if (searching) return `${shown} of ${total} ${sites(total)}`
-    if (total === 0) return 'Nothing flung on this instance yet'
-    return `${total} ${sites(total)}`
-  }
   if (shared) {
     const sites = (n: number) => (n === 1 ? 'site' : 'sites')
     if (total === undefined) return 'Restricted sites other people have shared with you'
@@ -64,4 +55,25 @@ export function countLabel({
   if (searching) return `${shown} of ${total} ${noun(total)}`
   if (total === 0) return archived ? 'Nothing archived' : 'Nothing flung yet'
   return archived ? `${total} ${noun(total)}` : `${total} live ${noun(total)}`
+}
+
+/**
+ * All sites' count line (admins), a page at a time: how many are loaded, whether more are to
+ * load, and whether a name prefix or an owner narrows them.
+ */
+export function allSitesLabel({
+  loaded,
+  more,
+  filtered,
+}: {
+  loaded: number | undefined
+  more: boolean
+  filtered: boolean
+}): string {
+  const sites = (n: number) => (n === 1 ? 'site' : 'sites')
+  if (loaded === undefined) return 'Every site on this instance'
+  if (more) return `First ${loaded} ${sites(loaded)}, by name`
+  if (filtered) return `${loaded} matching ${sites(loaded)}`
+  if (loaded === 0) return 'Nothing flung on this instance yet'
+  return `${loaded} ${sites(loaded)}`
 }

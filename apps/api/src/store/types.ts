@@ -759,16 +759,6 @@ export interface Store extends NotificationStore {
   deleteSite(site: SiteRecord): Promise<void>
   /** The sites shared with `email` directly (its grants, with their listings), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
-  /**
-   * The site directory, for admins: every site on the instance by name (byte order), at most
-   * `max` of them (`truncated` when there were more), read `pageSize` items a query (by default
-   * 1000). `prefix`: only names that start with it.
-   */
-  listAllSites(opts: {
-    max: number
-    prefix?: string
-    pageSize?: number
-  }): Promise<{ sites: SiteDirectoryRecord[]; truncated: boolean }>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */
   knownEmails(emails: readonly string[]): Promise<Set<string>>
   /**
@@ -835,12 +825,14 @@ export interface Store extends NotificationStore {
   putRouteFormat(record: RouteFormatRecord, ifSetAt?: string | null): Promise<boolean>
   putMaintenanceCursor(cursor: MaintenanceCursorRecord): Promise<void>
   /**
-   * The site directory a page at a time, by name (byte order), from the first name after `after`
-   * (from the start without it). `more` is false once the page reached the end.
+   * The site directory (every site on the instance, for admins and maintenance) a page at a time,
+   * by name (byte order), from the first name after `after` (from the start without it).
+   * `prefix`: only names that start with it. `more` is false once the page reached the end.
    */
   pageSites(opts: {
     after?: string | null
     limit: number
+    prefix?: string
   }): Promise<{ sites: SiteDirectoryRecord[]; more: boolean }>
 
   // --- groups ---

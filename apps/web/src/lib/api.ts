@@ -405,8 +405,17 @@ export const api = {
     if (cursor) params.set('cursor', cursor)
     return request(`/api/admin/users${params.size ? `?${params}` : ''}`, AdminUserListSchema)
   },
-  /** Admins only: every site's listing, by name (`truncated`: the server's ceiling cut it). */
-  adminSites: (): Promise<AdminSiteList> => request('/api/admin/sites', AdminSiteListSchema),
+  /**
+   * Admins only: a page of every site's listing, by name, optionally under a name prefix and only
+   * the sites an address owns or publishes.
+   */
+  adminSites(filter: { q?: string; owner?: string }, after?: string): Promise<AdminSiteList> {
+    const params = new URLSearchParams()
+    if (filter.q?.trim()) params.set('q', filter.q.trim())
+    if (filter.owner?.trim()) params.set('owner', filter.owner.trim())
+    if (after) params.set('after', after)
+    return request(`/api/admin/sites${params.size ? `?${params}` : ''}`, AdminSiteListSchema)
+  },
   /**
    * Admins: stop or start a site's server, and its limits (null puts one back to the instance's).
    * Audited as a change to the site.

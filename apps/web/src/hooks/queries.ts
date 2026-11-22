@@ -7,7 +7,13 @@ import type {
   SiteRoleInput,
   Visibility,
 } from '@fling/shared'
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { ADMIN_USERS_PATH } from '../lib/admin'
 import { ApiError, api, errorMessage } from '../lib/api'
 import { LOGS_FOLLOW_MS, LOGS_SINCE } from '../lib/servers'
@@ -40,6 +46,7 @@ export const queryKeys = {
   connections: ['connections'] as const,
   adminUsers: (q: string) => ['admin', 'users', q] as const,
   adminSites: ['admin', 'sites'] as const,
+  adminSitesPage: (q: string, owner: string) => ['admin', 'sites', q, owner] as const,
   adminAudit: ['admin', 'audit'] as const,
   adminInvitations: (q: string) => ['admin', 'invitations', q] as const,
   allAdminInvitations: ['admin', 'invitations'] as const,
@@ -539,9 +546,20 @@ export function useAdminUsers(q: string, enabled: boolean) {
   })
 }
 
-/** Admins: every site on the instance, whole (up to the server's ceiling); fetched when shown. */
-export function useAdminSites(enabled: boolean) {
-  return useQuery({ enabled, queryKey: queryKeys.adminSites, queryFn: api.adminSites })
+/**
+ * Admins: every site on the instance by name, under a name prefix and, with `owner`, only the
+ * sites that address owns or publishes; a page at a time ("Load more"), fetched when shown.
+ */
+export function useAdminSites(filter: { q: string; owner: string }, enabled: boolean) {
+  return useInfiniteQuery({
+    enabled,
+    queryKey: queryKeys.adminSitesPage(filter.q, filter.owner),
+    // The last answer stays up while the next search runs, so the list doesn't flash empty.
+    placeholderData: keepPreviousData,
+    queryFn: ({ pageParam }) => api.adminSites(filter, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor ?? undefined,
+  })
 }
 
 /** Admins: the invitation directory under an address prefix, a page at a time ("Load more"). */

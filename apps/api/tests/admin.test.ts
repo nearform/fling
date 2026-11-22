@@ -110,7 +110,7 @@ describe('the users list', () => {
     }
   })
 
-  it('lists every user for an admin: last sign-in, site count, admin badge', async () => {
+  it('lists every user for an admin: last sign-in, admin badge', async () => {
     const { bossCookie, boss } = await world()
     env.advance(60_000)
     await env.store.upsertUser(
@@ -122,7 +122,7 @@ describe('the users list', () => {
     const body = await json(res)
     expect(body.cursor).toBeNull()
     expect(body.users).toEqual([
-      expect.objectContaining({ email: BOSS, admin: true, siteCount: 0 }),
+      expect.objectContaining({ email: BOSS, admin: true }),
       {
         email: MEMBER,
         name: 'Member',
@@ -130,7 +130,6 @@ describe('the users list', () => {
         userSlug: 'member',
         createdAt: '2026-01-01T00:00:00.000Z',
         lastSignInAt: '2026-01-01T00:01:00.000Z',
-        siteCount: 2,
         admin: false,
         guest: false,
       },
@@ -171,7 +170,7 @@ describe('the sites list', () => {
     const res = await browser(bossCookie, 'GET', '/api/admin/sites')
     expect(res.status).toBe(200)
     const body = await json(res)
-    expect(body.truncated).toBe(false)
+    expect(body.cursor).toBeNull()
     expect(body.sites.map((s: { name: string }) => s.name)).toEqual([
       'boss-site',
       'member-docs',
@@ -195,15 +194,69 @@ describe('the sites list', () => {
     expect((await api(env, boss.key, 'GET', '/api/admin/sites')).status).toBe(200)
   })
 
-  it('stops at the ceiling and says the list was cut', async () => {
-    await world()
+  it('pages by name with a cursor, and searches by name prefix', async () => {
+    const { bossCookie } = await world()
     await env.store.createSite(site(BOSS, 'boss-site'))
+    const get = async (query: string) =>
+      json(await browser(bossCookie, 'GET', `/api/admin/sites?${query}`))
+    const names = (body: { sites: { name: string }[] }) => body.sites.map(s => s.name)
+    const first = await get('limit=2')
+    expect(names(first)).toEqual(['boss-site', 'member-docs'])
+    expect(first.cursor).toEqual(expect.any(String))
+    // The site the cursor names going away doesn't move the next page.
+    await env.store.deleteSite((await env.store.findSite('member-docs')) as SiteRecord)
+    const next = await get(`limit=2&after=${encodeURIComponent(first.cursor)}`)
+    expect(names(next)).toEqual(['member-site'])
+    expect(next.cursor).toBeNull()
+    const found = await get('q=MEMBER')
+    expect([names(found), found.cursor]).toEqual([['member-site'], null])
+    // At most SITES_PAGE_MAX a page, whatever the limit asked.
     const p = { email: BOSS, admin: true, via: 'session' as const, guest: false }
-    const cut = await admin.listSites(env.deps, p, 2)
-    expect(cut.sites.map(s => s.name)).toEqual(['boss-site', 'member-docs'])
-    expect(cut.truncated).toBe(true)
-    const whole = await admin.listSites(env.deps, p, 3)
-    expect([whole.sites.length, whole.truncated]).toEqual([3, false])
+    for (let i = 0; i <= admin.SITES_PAGE_MAX; i++) {
+      await env.store.createSite(site(BOSS, `bulk-${String(i).padStart(3, '0')}`))
+    }
+    const capped = await admin.listSites(env.deps, p, { limit: admin.SITES_PAGE_MAX * 2 })
+    expect(capped.sites).toHaveLength(admin.SITES_PAGE_MAX)
+    expect(capped.cursor).toEqual(expect.any(String))
+    expect((await admin.listSites(env.deps, p)).sites).toHaveLength(admin.SITES_PAGE)
+  })
+
+  it('filters to the sites an address owns or publishes, through a group too, by name', async () => {
+    const { bossCookie } = await world()
+    const now = env.deps.clock.now().toISOString()
+    await env.store.createGroup(
+      {
+        id: 'g1',
+        slug: 'team',
+        name: 'Team',
+        owner: BOSS,
+        size: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+      [MEMBER]
+    )
+    // Roles others hold are written by a save (putSite), as a change of roles is.
+    const team = site(BOSS, 'boss-team')
+    await env.store.createSite(team)
+    await env.store.putSite({ ...team, publishers: { emails: [], groups: ['g1'] } })
+    await env.store.createSite({ ...site(BOSS, 'boss-archive'), archived: true })
+    const alone = site(BOSS, 'boss-alone')
+    await env.store.createSite(alone)
+    await env.store.putSite({ ...alone, publishers: { emails: [MEMBER], groups: [] } })
+    const get = async (query: string) =>
+      json(await browser(bossCookie, 'GET', `/api/admin/sites?${query}`))
+    const names = (body: { sites: { name: string }[] }) => body.sites.map(s => s.name)
+    const owner = `owner=${encodeURIComponent(MEMBER.toUpperCase())}`
+    const all = await get(owner)
+    expect(names(all)).toEqual(['boss-alone', 'boss-team', 'member-docs', 'member-site'])
+    expect(all.sites[1]).toMatchObject({ owner: BOSS, access: 'members' })
+    const first = await get(`${owner}&limit=3`)
+    expect(names(first)).toEqual(['boss-alone', 'boss-team', 'member-docs'])
+    const rest = await get(`${owner}&limit=3&after=${encodeURIComponent(first.cursor)}`)
+    expect([names(rest), rest.cursor]).toEqual([['member-site'], null])
+    expect(names(await get(`${owner}&q=member`))).toEqual(['member-docs', 'member-site'])
+    expect(names(await get('owner=nobody%40example.test'))).toEqual([])
   })
 
   it('is not for an admin while impersonating', async () => {

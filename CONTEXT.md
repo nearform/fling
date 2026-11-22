@@ -414,10 +414,10 @@ login page (`link_used`, `link_expired`, `not_invited`) with the form to ask for
 
 **Admin** — a user listed in `ADMIN_EMAILS` (checked on every request; never published), who
 must still be admitted to sign in. Admins see every user (`USERS/USER#<email>` index items, with the
-last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, in one
-response of at most `ADMIN_SITES_MAX` sites, with `truncated` past it; the Sites page's All sites
-tab, shown to admins alone, searched and ordered like the other tabs, each row opening the site's
-page). Admins **administer** every site (the `admin` and `admin-token` roles in `policy.ts`):
+last sign-in) and every site's listing (the site directory, `GET /api/admin/sites`, by name a
+page at a time, searched by a name prefix or narrowed to the sites one address owns or publishes;
+the Sites page's All sites tab, shown to admins alone, ordered by name only, each row opening the
+site's page, and reached from each user's **Sites** link on Admin → Users). Admins **administer** every site (the `admin` and `admin-token` roles in `policy.ts`):
 with any credential they open, read and review any site, restricted ones included; from their
 browser session they also change it as an owner would (access, settings, owners and publishers,
 archive, roll back, share link, delete, anyone's comment). Nobody but an owner or a publisher

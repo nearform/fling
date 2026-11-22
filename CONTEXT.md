@@ -221,6 +221,32 @@ keyboard and screen readers (a link over it opens the site; `components/site/Sit
 frame holds the review shell in **preview mode** (`previewShellUrl`), so it loads private and
 restricted sites as review mode does. The `thumbnails` capability.
 
+**Metrics** — a site's counts, never who: **views** and **pushes** per UTC day, ISO week and
+month, with when it was last viewed and last pushed (`packages/shared/src/metrics.ts`;
+`apps/api/src/views.ts`). Each count is added to its day, week and month at once
+(`SITE#<id>/METRIC#<D|W|M>#<bucket>`), and each bucket expires on its own, so nothing rolls them
+up; `SITE#<id>/ACTIVITY` holds the last view, last push and the first count (`since`). Owners,
+publishers and admins read them (`site.metrics.read`: `GET /api/sites/:name/metrics`,
+`fling stats`, `fling_stats`, the site page). The `metrics` capability.
+
+**Usage** — Admin → Usage (`instanceUsage`, `apps/api/src/views.ts`; `GET /api/admin/usage`):
+every site's views and pushes added together as they are counted (`METRICS/<D|W|M>#<bucket>`, one
+add a flush), and a **usage tally** maintenance's sweep keeps as it goes round the site directory
+(`tallySite`: live sites viewed in 7, 28 and 90 days, never viewed, the most viewed, the longest
+unused), kept on its cursor and, at the end of a lap, as the last lap's (`lastUsage`).
+
+**Push** — a version going live on a site or one of its Paths: a publish, the repointed shortcut,
+a rollback (`countPush`). Counted after it is live, so a failed publish counts nothing.
+
+**View** — a page load the **view beacon** reported (`packages/shared/src/view-beacon.ts`): a
+script in a copy of each HTML page of a version (`.counted/<path>`, made at go-live by
+`apps/api/src/rendering.ts`, `VersionRecord.counted`) that posts to `/_fling-seen`
+(`SITE_SEEN_PATH`) on the site's own host. The routing decision lets it through after the same
+access checks as a page and serves the copies while the route value says `c`. The platform counts
+views in a **ViewCounter** (memory, written in batches). Not counted: prerendering until shown, a
+page framed by its own site (the review shell, previews), SPA navigations. `SITE_VIEW_COUNTS=off`
+stops it; the `viewCounts` capability.
+
 **Thumbnail** — a small PNG of a site's home page (at most 480 × 300 and 200 KB), kept beside its
 files (`thumbnailKey`, `apps/api/src/blobs/types.ts`) and recorded on the site as the version it was
 taken of and when (`SiteRecord.thumbnail`; listings carry when, as `thumbnailAt`). Browsers take

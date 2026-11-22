@@ -13,7 +13,10 @@
  *   the top once it has reached the end (a lap), so every site is maintained at least once a lap:
  *   what nothing queued (sites from before the queue, a change to VERSION_RETENTION, a queue
  *   write that failed) is found there. A lap's length is logged, and the last one is kept on the
- *   cursor for Admin → Routes (route-format.ts `routeTableStatus`).
+ *   cursor for Admin → Routes (route-format.ts `routeTableStatus`). The sweep also tallies the
+ *   sites' use as it goes (views.ts `tallySite`: how many were viewed lately, the most viewed and
+ *   the longest unused), kept on the cursor and, at the end of a lap, as the last lap's for
+ *   Admin → Usage. Runs that overlap may both tally a page; the tally is a guide, not a ledger.
  *
  * Every run is safe to repeat and to overlap another: claims are conditional writes, and work
  * found done costs only its reads.
@@ -54,6 +57,7 @@ import { serverSite, serverVersion } from './servers/index.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
+import { emptyTally, tallySite } from './views.ts'
 
 /** How long a marked version or a replaced home page waits before it is deleted. */
 export const GRACE_MS = 60 * 60 * 1000
@@ -185,15 +189,32 @@ async function sweepDirectory(
   const cursor = (await deps.store.getMaintenanceCursor()) ?? { after: null, lapStartedAt: now }
   let after = cursor.after
   let finished = false
+  // The sites' use, tallied as the lap goes (Admin → Usage); a lap that began before tallying did
+  // is partial.
+  const tally = cursor.tally ?? emptyTally(cursor.after !== null)
   try {
     for (;;) {
       const page = await deps.store.pageSites({ after, limit: SWEEP_PAGE })
       for (const entry of page.sites) {
         if (deadline !== undefined && Date.now() > deadline) return false
-        if (!done.has(entry.siteId)) {
+        const site = await deps.store.findSite(entry.name)
+        if (site && !done.has(entry.siteId)) {
           done.add(entry.siteId)
-          const site = await deps.store.findSite(entry.name)
-          if (site) await maintainSite(deps, site, result)
+          await maintainSite(deps, site, result)
+        }
+        if (site) {
+          try {
+            await tallySite(deps, tally, site)
+          } catch (err) {
+            console.warn(
+              JSON.stringify({
+                level: 'warn',
+                msg: 'usage not tallied',
+                site: site.name,
+                error: String(err),
+              })
+            )
+          }
         }
         after = entry.name
       }
@@ -211,12 +232,15 @@ async function sweepDirectory(
         after: null,
         lapStartedAt: now,
         lastLap: { lapMs, finishedAt: now },
+        lastUsage: { ...tally, lapStartedAt: cursor.lapStartedAt, finishedAt: now },
       })
     } else {
       await deps.store.putMaintenanceCursor({
         after,
         lapStartedAt: cursor.lapStartedAt,
         ...(cursor.lastLap ? { lastLap: cursor.lastLap } : {}),
+        ...(cursor.lastUsage ? { lastUsage: cursor.lastUsage } : {}),
+        tally,
       })
     }
   }

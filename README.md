@@ -85,6 +85,7 @@ several. [More](docs/how-it-works.md#instances)
 - **[Notifications](docs/how-it-works.md#notifications):** email when a site is shared with you or someone
   comments, each person choosing what they hear about.
 - **[Previews and thumbnails](docs/how-it-works.md#previews-and-thumbnails)** of each site in the web UI.
+- **[Metrics](docs/how-it-works.md#metrics):** views and pushes per day, week and month, counts only.
 
 ## Layout
 

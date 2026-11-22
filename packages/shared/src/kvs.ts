@@ -32,6 +32,8 @@ export const KvsSiteValueSchema = z.object({
   t: z.string().optional(),
   /** present when an admin stopped the site's server: SERVER_PREFIX answers 503 */
   x: z.literal(1).optional(),
+  /** present when the current version's HTML pages have copies that count views (`.counted/`) */
+  c: z.literal(1).optional(),
 })
 export type KvsSiteValue = z.infer<typeof KvsSiteValueSchema>
 
@@ -41,6 +43,8 @@ export const KvsPathValueSchema = z.object({
   v: z.string(),
   /** as on a site's value: its current version's Markdown has rendered pages */
   m: z.literal(1).optional(),
+  /** as on a site's value: its current version's pages count views */
+  c: z.literal(1).optional(),
 })
 export type KvsPathValue = z.infer<typeof KvsPathValueSchema>
 
@@ -59,7 +63,7 @@ export const sitePrefix = (siteId: string) => `sites/${siteId}/`
 export const ROUTE_FORMATS = ['json', 'compact'] as const
 export type RouteFormat = (typeof ROUTE_FORMATS)[number]
 
-const COMPACT_FLAGS = ['r', 'p', 'm', 'f', 'x'] as const
+const COMPACT_FLAGS = ['r', 'p', 'm', 'f', 'x', 'c'] as const
 
 /** A site's route value in `format` (parseRoute reads it back). */
 export function encodeSiteValue(value: KvsSiteValue, format: RouteFormat): string {
@@ -72,7 +76,7 @@ export function encodeSiteValue(value: KvsSiteValue, format: RouteFormat): strin
 /** A Path's route value in `format`. */
 export function encodePathValue(value: KvsPathValue, format: RouteFormat): string {
   if (format === 'json') return JSON.stringify(value)
-  return compact([value.id, value.v, value.m ? 'm' : ''])
+  return compact([value.id, value.v, (value.m ? 'm' : '') + (value.c ? 'c' : '')])
 }
 
 /** A share link's value: its site's, or in `compact` a pointer to the site's key. */

@@ -143,9 +143,13 @@ export async function listSites(
   }
   const { sitesDomain, siteScheme } = deps.config
   const last = page.sites.at(-1)
+  // When each was last viewed: one read a site, a page at a time.
+  const activity = await mapLimit(page.sites, USER_CONCURRENCY, s =>
+    deps.store.getSiteActivity(s.siteId)
+  )
   return {
     cursor: page.more && last ? last.name : null,
-    sites: page.sites.map(s => ({
+    sites: page.sites.map((s, i) => ({
       name: s.name,
       url: siteUrl(siteLabel(s.name), sitesDomain, `${siteScheme}:`),
       owner: s.owner,
@@ -155,6 +159,7 @@ export async function listSites(
       ...(s.thumbnailAt ? { thumbnail: { updatedAt: s.thumbnailAt } } : {}),
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
+      ...(activity[i]?.lastViewAt ? { lastViewAt: activity[i]?.lastViewAt } : {}),
     })),
   }
 }

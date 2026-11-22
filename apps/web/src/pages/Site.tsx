@@ -14,6 +14,9 @@
  * section (the kill switch and limits for admins); its owners and publishers see its Secrets once
  * any version has a server, a publish waits for secrets or a secret is set; its owners,
  * publishers and admins see its Logs. A publish waiting for secrets marks the Server tab.
+ *
+ * With the `metrics` capability, its owners, publishers and admins see its Metrics below the
+ * overview (SiteMetrics): views and pushes, counts only.
  */
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams, useSearchParams } from 'react-router-dom'
@@ -25,6 +28,7 @@ import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
 import { SiteLogs } from '../components/site/SiteLogs'
+import { SiteMetrics } from '../components/site/SiteMetrics'
 import { SiteOverview } from '../components/site/SiteOverview'
 import { SitePaths } from '../components/site/SitePaths'
 import { SiteSecrets } from '../components/site/SiteSecrets'
@@ -35,6 +39,7 @@ import { SiteVersions } from '../components/site/SiteVersions'
 import { useInstance } from '../hooks/instance'
 import { useMe, useSiteDetail, useSiteSecrets } from '../hooks/queries'
 import { ApiError, errorMessage } from '../lib/api'
+import { metricsShown } from '../lib/metrics'
 import { type SiteTab, siteTabOf, siteTabParam, siteTabsFor } from '../lib/site-tabs'
 
 export default function Site() {
@@ -151,6 +156,7 @@ export default function Site() {
         </div>
       )}
       <SiteOverview site={site} />
+      {metricsShown(instance, site, admin) && <SiteMetrics name={site.name} />}
       <SiteTabs
         tabs={tabs}
         selected={tab}

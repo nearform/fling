@@ -7,6 +7,7 @@ import type { Mailer } from './mail/types.ts'
 import type { RouteTable } from './route-table/types.ts'
 import type { ServerLogs, SiteServers } from './servers/types.ts'
 import type { Store, User } from './store/types.ts'
+import type { ViewCounter } from './views.ts'
 
 export interface Clock {
   now(): Date
@@ -40,6 +41,11 @@ export interface Deps {
   servers?: SiteServers
   /** Site servers' logs (servers/types.ts); with servers on, buildDeps keeps them in memory by default. */
   serverLogs?: ServerLogs
+  /**
+   * Where the views a page's beacon reports are counted (views.ts), held in memory and written in
+   * batches; one per runtime instance. Absent: SITE_VIEW_COUNTS is off.
+   */
+  views?: ViewCounter
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

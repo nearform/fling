@@ -151,6 +151,7 @@ import {
   type User,
 } from './store/types.ts'
 import type { Deps } from './types.ts'
+import { countPush, countsViews } from './views.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
 const MAX_LISTING_BYTES = 1024 * 1024
@@ -311,6 +312,7 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
     ...(site.paths ? { p: 1 as const } : {}),
     ...(site.paths && site.home ? { i: site.home } : {}),
     ...(version?.markdown ? { m: 1 as const } : {}),
+    ...(countsViews(deps, version) ? { c: 1 as const } : {}),
     ...(version?.server
       ? {
           f: 1 as const,
@@ -1174,6 +1176,7 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
     return true
   })
   await noteLive(deps, user.email, site, version)
+  await countPush(deps, site.id)
   await queueMaintenance(deps, site)
   // The home page is the version's: with Paths, render it again.
   if (site.paths) await refreshHome(deps, site)

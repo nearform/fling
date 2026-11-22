@@ -1,10 +1,11 @@
 /**
  * Admin's pages, as a menu down the left of each of them (`AdminLayout`, the route around every
  * admin page): Users, Invitations on an instance with outside invitations on, Mail on one that
- * sends email, Audit, Routes and Settings. Only admins see the menu; to anyone else each page says
+ * sends email, Usage on one with metrics, Audit, Routes and Settings. Only admins see the menu; to anyone else each page says
  * it is for admins.
  */
 import {
+  ChartBarSquareIcon,
   ClipboardDocumentListIcon,
   Cog6ToothIcon,
   EnvelopeIcon,
@@ -26,6 +27,7 @@ import {
   showsInvitationsAdmin,
 } from '../lib/admin'
 import { ADMIN_MAIL_PATH, showsMailAdmin } from '../lib/notifications'
+import { ADMIN_USAGE_PATH, showsUsageAdmin } from '../lib/usage'
 
 export interface AdminTab {
   to: string
@@ -40,6 +42,11 @@ export const ADMIN_INVITATIONS_TAB: AdminTab = {
   icon: UserPlusIcon,
 }
 export const ADMIN_MAIL_TAB: AdminTab = { to: ADMIN_MAIL_PATH, label: 'Mail', icon: EnvelopeIcon }
+export const ADMIN_USAGE_TAB: AdminTab = {
+  to: ADMIN_USAGE_PATH,
+  label: 'Usage',
+  icon: ChartBarSquareIcon,
+}
 export const ADMIN_AUDIT_TAB: AdminTab = {
   to: ADMIN_AUDIT_PATH,
   label: 'Audit',
@@ -52,11 +59,12 @@ export const ADMIN_SETTINGS_TAB: AdminTab = {
   icon: Cog6ToothIcon,
 }
 
-export function adminTabsFor(mail: boolean, invites = false): AdminTab[] {
+export function adminTabsFor(mail: boolean, invites = false, usage = false): AdminTab[] {
   return [
     ADMIN_USERS_TAB,
     ...(invites ? [ADMIN_INVITATIONS_TAB] : []),
     ...(mail ? [ADMIN_MAIL_TAB] : []),
+    ...(usage ? [ADMIN_USAGE_TAB] : []),
     ADMIN_AUDIT_TAB,
     ADMIN_ROUTES_TAB,
     ADMIN_SETTINGS_TAB,
@@ -67,7 +75,11 @@ function AdminNav() {
   const { data: me } = useMe()
   const instance = useInstance()
   const { pathname } = useLocation()
-  const tabs = adminTabsFor(showsMailAdmin(me, instance), showsInvitationsAdmin(me, instance))
+  const tabs = adminTabsFor(
+    showsMailAdmin(me, instance),
+    showsInvitationsAdmin(me, instance),
+    showsUsageAdmin(me, instance)
+  )
   return (
     <nav className="w-44 flex-none space-y-0.5" aria-label="Admin">
       {tabs.map(tab => (

@@ -47,6 +47,24 @@ function, `edge/src/server-status.js`, maps a site server's `x-fling-status` bac
 The known limit: a viewer-request function never sees the response, so files S3 serves do not
 carry the decision's headers. Only responses the function makes itself do.
 
+**View counts.** A page's beacon posts to `/_fling-seen` on the site's host. The sites distribution
+has a behaviour for that path with the site router attached and a second origin, `api`: the function
+URL, with the same `X-Origin-Verify` header the app distribution sends. The router makes its usual
+access checks and the cross-origin check, answering a refusal at the edge. When it lets the beacon
+through, it sets `x-fling-site` and leaves the origin as it is, so the request goes to the API's
+`POST /_fling-seen`. Each warm function counts views in memory (`ViewCounter`) and writes them at
+most every 10 seconds, after a view. The notify and maintain ticks write what the function running
+them holds. Views a frozen function still holds are lost when Lambda reclaims it. With a module
+version that lacks the behaviour, CloudFront refuses the beacon's POST and nothing is counted.
+Because the sites distribution reaches the function, the function's environment can't name the
+distribution. Its ARN, which site servers need, is the SSM parameter `sites-distribution-arn`,
+beside the secrets. So deploy a release that reads it before you apply that module version to an
+instance with servers on.
+
+The cost is about $1.50 per million views. Lambda requests and duration come to about $0.50.
+CloudFront's extra request costs $0.75 to $1.00. DynamoDB costs next to nothing, since views are
+written in batches.
+
 ## 4. Domains and TLS
 
 - One hostname serves the app, and `*.hostname` serves the sites (the sites domain equals the app

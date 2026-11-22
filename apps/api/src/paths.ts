@@ -38,6 +38,7 @@ import {
   type VersionFiles,
 } from '@fling/shared'
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
+import { withViewBeacon } from '@fling/shared/view-beacon'
 import { manifestKey } from './blobs/types.ts'
 import { ApiError, conflict, notFound } from './lib/errors.ts'
 import { GRACE_MS, queueMaintenance, reviveVersion } from './maintenance.ts'
@@ -56,6 +57,7 @@ import {
 import type { PathRecord, SiteRecord, SiteRef, User } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
+import { countPush, countsViews } from './views.ts'
 
 /** How many replaced home pages a site remembers for maintenance to delete (`homeOld`). */
 const MAX_HOME_OLD = 50
@@ -113,6 +115,7 @@ export async function syncPathRoute(deps: Deps, site: SiteRecord, path: PathReco
     id: path.id,
     v: path.currentVersionId,
     ...(version?.markdown ? { m: 1 as const } : {}),
+    ...(countsViews(deps, version) ? { c: 1 as const } : {}),
   }
   await deps.routeTable.put(key, encodePathValue(value, await routeFormat(deps)))
 }
@@ -146,7 +149,9 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
       html = bytes ? new TextDecoder().decode(bytes) : null
     }
     if (version?.home) {
-      const page = renderPathsIndex(html, paths, { siteName: site.name })
+      const rendered = renderPathsIndex(html, paths, { siteName: site.name })
+      // A version whose pages count views counts its home page too.
+      const page = version.counted ? { ...rendered, html: withViewBeacon(rendered.html) } : rendered
       home = createHash('sha256')
         .update(page.html)
         .update('\0')
@@ -334,6 +339,7 @@ export async function rollbackPath(
     throw notFound(`No version ${versionId} of ${displayPublishPath(folder)} of "${name}"`)
   }
   await makePathCurrent(deps, site, path, versionId, version.title ?? '')
+  await countPush(deps, site.id)
   return toSitePath(deps, site, siteActor, path)
 }
 

@@ -183,6 +183,12 @@ export const CORE_CAPABILITIES = {
   thumbnails: true,
   /** the user guide in the web app at `/guide` (guide.ts), readable signed out */
   guide: true,
+  /**
+   * a site's metrics (metrics.ts): its pushes, and its views where `viewCounts` is on, per day,
+   * week and month, with when it was last viewed and last pushed (`GET /api/sites/:name/metrics`,
+   * `fling stats`, `fling_stats`), for its owners, publishers and admins
+   */
+  metrics: true,
 } as const
 
 /**
@@ -196,6 +202,8 @@ export const CONFIGURED_CAPABILITIES = [
   'notifications',
   'email',
   'invites',
+  /** pages count their views (SITE_VIEW_COUNTS): a site's metrics have views as well as pushes */
+  'viewCounts',
   /** site servers (site-server.ts): a version's `_fling/server.mjs`, run for `/api/*` */
   'servers',
   /** a site server may reach the internet (`SERVERS_EGRESS=open`); without it, nothing outside */

@@ -1,0 +1,609 @@
+/* Admin → Usage (UsageCharts.tsx, pages/AdminUsage.tsx). Drawn like the rest of the app: a
+   heading above a plain panel. Colour is the brand's two: views are its primary, pushes its
+   highlight, and the rings and bars run from one to the other (the brand gradient); the rest is
+   the theme's text and border tokens, so the charts follow the instance's brand and light and
+   dark. Motion is opt-in:
+   lines draw, rings fill and bars grow only under `prefers-reduced-motion: no-preference`;
+   without it everything is simply there. */
+
+.usage-page {
+  --usage-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --usage-primary: var(--color-primary);
+  --usage-highlight: var(--highlight);
+  --usage-blend: color-mix(in oklch, var(--usage-primary), var(--usage-highlight));
+  --usage-track: var(--border-subtle);
+  display: grid;
+  gap: 2rem; /* the space-y-8 between the other admin pages' sections */
+}
+
+[data-tone="strong"] { --tone: var(--usage-primary); }
+[data-tone="mid"] { --tone: var(--usage-blend); }
+[data-tone="soft"] { --tone: var(--usage-highlight); }
+
+.usage-section {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.usage-section-head {
+  display: grid;
+  gap: 2px;
+}
+
+.usage-subhead {
+  margin-block-end: var(--space-2);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.usage-empty {
+  padding-block: var(--space-4);
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.usage-notice {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--tone-info-border);
+  border-radius: var(--radius-panel);
+  background: var(--tone-info-surface);
+  text-wrap: pretty;
+}
+
+.usage-notice[data-tone="empty"] {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  padding-block: var(--space-6);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ The totals */
+
+.usage-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.usage-total dt {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.usage-total dd {
+  margin: 0;
+}
+
+.usage-total-big {
+  font-size: 1.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+/* ------------------------------------------------------------ The pulse */
+
+.usage-pulse-wrap {
+  display: grid;
+}
+
+.usage-pulse-wrap > * {
+  grid-area: 1 / 1;
+}
+
+.usage-quiet {
+  place-self: center;
+  max-inline-size: 28ch;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklch, var(--surface-panel) 85%, transparent);
+  text-align: center;
+  pointer-events: none;
+}
+
+.usage-pulse {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.usage-pulse svg {
+  display: block;
+  inline-size: 100%;
+  block-size: auto;
+  overflow: visible;
+}
+
+.usage-pulse-plot {
+  position: relative;
+  border-radius: var(--radius-control);
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+
+.usage-pulse-plot:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.usage-pulse-grid {
+  stroke: var(--border-subtle);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+
+.usage-pulse-stop-top { stop-color: var(--usage-primary); stop-opacity: 0.16; }
+.usage-pulse-stop-bottom { stop-color: var(--usage-primary); stop-opacity: 0; }
+
+.usage-pulse-line {
+  fill: none;
+  stroke: var(--usage-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.usage-pulse-plot[data-quiet] .usage-pulse-line {
+  stroke: var(--border-strong);
+}
+
+.usage-pulse-spark {
+  fill: var(--usage-highlight);
+  fill-opacity: 0.85;
+}
+
+.usage-pulse-cursor {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.usage-pulse-peak,
+.usage-pulse-dot {
+  fill: var(--surface-panel);
+  stroke: var(--usage-primary);
+  stroke-width: 2;
+}
+
+.usage-pulse-peak {
+  fill: var(--usage-primary);
+  stroke: var(--surface-panel);
+  stroke-width: 2;
+}
+
+.usage-pulse-tip {
+  position: absolute;
+  inset-inline-start: calc(var(--x) * 100%);
+  inset-block-start: calc(var(--y) * 100%);
+  translate: -50% calc(-100% - 14px);
+  display: grid;
+  justify-items: center;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Near the top the readout hangs below its point, so it never covers the totals. */
+.usage-pulse-tip[data-below] { translate: -50% 14px; }
+.usage-pulse-tip[data-edge="start"] { translate: -12px calc(-100% - 14px); justify-items: start; }
+.usage-pulse-tip[data-edge="end"] { translate: calc(-100% + 12px) calc(-100% - 14px); justify-items: end; }
+.usage-pulse-tip[data-below][data-edge="start"] { translate: -12px 14px; }
+.usage-pulse-tip[data-below][data-edge="end"] { translate: calc(-100% + 12px) 14px; }
+
+.usage-pulse-tip strong {
+  font-size: 0.875rem;
+}
+
+.usage-pulse-tip-flag {
+  color: var(--text-secondary);
+}
+
+.usage-axis {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+}
+
+.usage-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.usage-key {
+  display: inline-block;
+  margin-inline-start: var(--space-2);
+}
+
+.usage-key:first-child { margin-inline-start: 0; }
+
+.usage-key-line {
+  inline-size: 14px;
+  block-size: 2px;
+  border-radius: 2px;
+  background: var(--usage-primary);
+}
+
+.usage-key-spark {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--usage-highlight);
+}
+
+/* ------------------------------------------------ The calendar and months */
+
+.usage-calendars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.usage-heatmap,
+.usage-months {
+  margin: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.usage-heatmap-grid {
+  display: grid;
+  grid-template-columns: auto;
+  grid-auto-columns: minmax(0, 1.625rem);
+  grid-template-rows: repeat(7, auto);
+  gap: 4px;
+  justify-content: start;
+}
+
+.usage-heatmap-weekday {
+  grid-column: 1;
+  padding-inline-end: var(--space-1);
+  font-size: 0.6875rem;
+  line-height: 1;
+  align-self: center;
+  color: var(--text-muted);
+}
+
+.usage-heat-cell,
+.usage-heat-blank {
+  display: inline-block;
+  aspect-ratio: 1;
+  min-inline-size: 0.875rem;
+  border-radius: 3px;
+}
+
+.usage-heat-cell {
+  --heat: 0%;
+  background: color-mix(in oklch, var(--usage-primary) var(--heat), var(--surface-inset));
+}
+
+.usage-heat-cell[data-level="1"] { --heat: 25%; }
+.usage-heat-cell[data-level="2"] { --heat: 48%; }
+.usage-heat-cell[data-level="3"] { --heat: 72%; }
+.usage-heat-cell[data-level="4"] { --heat: 100%; }
+
+.usage-heatmap-scale {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.usage-heatmap-scale .usage-heat-cell {
+  inline-size: 0.75rem;
+  min-inline-size: 0;
+}
+
+.usage-months-bars {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: 100%;
+  align-items: end;
+  gap: 4px;
+  block-size: 9.5rem;
+}
+
+.usage-month {
+  block-size: max(3px, calc(var(--h) * 100%));
+  border-radius: 2px;
+  background: linear-gradient(to top, var(--usage-primary), var(--usage-blend));
+  transform-origin: bottom;
+}
+
+.usage-month[data-empty] {
+  background: var(--usage-track);
+}
+
+.usage-months-labels {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 4px;
+  text-align: center;
+  font-size: 0.625rem;
+  overflow: clip;
+}
+
+/* ------------------------------------------------------------ The numbers */
+
+.usage-numbers summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  inline-size: fit-content;
+}
+
+.usage-numbers-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-4);
+  margin-block-start: var(--space-3);
+}
+
+.usage-numbers caption {
+  text-align: start;
+}
+
+.usage-numbers th[scope="row"] {
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------ The rings */
+
+.usage-rings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+.usage-rings-figure {
+  display: grid;
+  flex: 0 1 13rem;
+  min-inline-size: 10rem;
+  margin: 0;
+}
+
+.usage-rings-figure > * {
+  grid-area: 1 / 1;
+}
+
+.usage-rings-figure svg {
+  inline-size: 100%;
+  block-size: auto;
+  rotate: -90deg;
+}
+
+.usage-ring-track,
+.usage-ring-arc {
+  fill: none;
+  stroke-width: 12;
+}
+
+.usage-ring-track {
+  stroke: var(--usage-track);
+}
+
+.usage-ring-arc {
+  stroke: var(--tone);
+  stroke-dashoffset: var(--ring-off);
+}
+
+.usage-rings-centre {
+  place-self: center;
+  display: grid;
+  justify-items: center;
+  line-height: 1.1;
+}
+
+.usage-rings-centre strong {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.usage-rings-centre span {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.usage-rings-legend {
+  flex: 1 1 16rem;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.usage-rings-legend dl {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.usage-rings-legend dl > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--border-subtle);
+}
+
+.usage-rings-legend dt {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+}
+
+.usage-rings-legend dd {
+  margin: 0;
+}
+
+.usage-ring-swatch {
+  inline-size: 0.75rem;
+  aspect-ratio: 1;
+  border-radius: 2px;
+  background: var(--tone);
+}
+
+.usage-never {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--surface-inset);
+  font-size: 0.875rem;
+}
+
+.usage-never svg {
+  color: var(--text-muted);
+}
+
+/* ------------------------------------------------ Most viewed, gathering dust */
+
+.usage-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 2rem var(--space-6);
+  align-items: start;
+}
+
+.usage-board,
+.usage-dust {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-board li {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto;
+  grid-template-areas: "rank name views" "rank bar bar";
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: 4px;
+  padding-block: var(--space-2);
+}
+
+.usage-rank {
+  grid-area: rank;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-align: end;
+}
+
+.usage-board-name { font-weight: 600; }
+
+.usage-board-name {
+  grid-area: name;
+  color: var(--text-primary);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+}
+
+.usage-board-views {
+  grid-area: views;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.usage-board-bar {
+  grid-area: bar;
+  block-size: 4px;
+  border-radius: 2px;
+  background: var(--usage-track);
+  overflow: clip;
+}
+
+.usage-board-bar::before {
+  content: "";
+  display: block;
+  block-size: 100%;
+  inline-size: max(4px, calc(var(--share) * 100%));
+  border-radius: inherit;
+  background: linear-gradient(to right, var(--usage-primary), var(--usage-blend));
+  transform-origin: left;
+}
+
+.usage-dust li {
+  /* A site's name dims toward the muted text the longer it goes unused (it stays readable). */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 var(--space-3);
+  padding-block: var(--space-2);
+}
+
+.usage-dust li + li {
+  border-block-start: 1px solid var(--border-subtle);
+}
+
+.usage-dust-name {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.875rem;
+  color: color-mix(in oklch, var(--text-muted) calc(var(--dust) * 100%), var(--text-primary));
+}
+
+.usage-dust-age {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: help;
+}
+
+/* ------------------------------------------------------------ Motion */
+
+@keyframes usage-fade { from { opacity: 0; } }
+
+.usage-pulse-area,
+.usage-heat-cell {
+  animation: usage-fade 600ms var(--usage-ease, ease-out) both;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .usage-heat-cell { animation-delay: calc(var(--i, 0) * 18ms); }
+
+  @keyframes usage-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+  @keyframes usage-fill { from { stroke-dashoffset: var(--ring-c); } }
+  @keyframes usage-grow-up { from { scale: 1 0; } }
+  @keyframes usage-grow-across { from { scale: 0 1; } }
+
+  .usage-pulse-line {
+    stroke-dasharray: 1;
+    animation: usage-draw 1100ms var(--usage-ease) both;
+  }
+
+  .usage-ring-arc {
+    animation: usage-fill 1200ms var(--usage-ease) both;
+    animation-delay: calc(var(--i, 0) * 120ms);
+  }
+
+  .usage-month {
+    animation: usage-grow-up 700ms var(--usage-ease) both;
+    animation-delay: calc(var(--i, 0) * 35ms);
+  }
+
+  .usage-board-bar::before {
+    animation: usage-grow-across 800ms var(--usage-ease) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+
+  .usage-pulse-tip {
+    transition: inset-inline-start 120ms var(--usage-ease), inset-block-start 120ms var(--usage-ease);
+  }
+}

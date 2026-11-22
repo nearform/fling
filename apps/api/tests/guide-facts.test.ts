@@ -7,6 +7,7 @@ import { IMPERSONATION_TTL_SECONDS } from '../src/auth/session.ts'
 import { INVITATION_LINK_TTL_SECONDS } from '../src/auth/sign-in-link.ts'
 import { loadBaseConfig } from '../src/config.ts'
 import { SUPPRESSION_MS } from '../src/notifications/drain.ts'
+import { MAX_COUNTED_BYTES, MAX_COUNTED_PAGES } from '../src/rendering.ts'
 
 const DAY = 24 * 60 * 60
 
@@ -17,6 +18,10 @@ describe('the Guide facts pinned from the API', () => {
     expect(PINNED_GUIDE_FACTS['impersonation-ttl']).toBe('an hour')
     expect(PINNED_GUIDE_FACTS['invite-link-ttl']).toBe(`${INVITATION_LINK_TTL_SECONDS / DAY} days`)
     expect(PINNED_GUIDE_FACTS['suppression-days']).toBe(`${SUPPRESSION_MS / 1000 / DAY} days`)
+    expect(PINNED_GUIDE_FACTS['counted-pages-max']).toBe(MAX_COUNTED_PAGES.toLocaleString('en-GB'))
+    expect(PINNED_GUIDE_FACTS['counted-page-max-size']).toBe(
+      `${MAX_COUNTED_BYTES / 1024 / 1024} MB`
+    )
   })
 
   it('match the default an instance gets when it configures nothing', () => {

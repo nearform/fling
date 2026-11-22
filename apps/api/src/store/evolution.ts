@@ -61,6 +61,8 @@ export type Kind =
   | 'maintenancecursor'
   | 'routeformat'
   | 'counter'
+  | 'sitemetric'
+  | 'siteactivity'
   | 'sitesecret'
   | 'serversite'
   | 'finalizeclaim'

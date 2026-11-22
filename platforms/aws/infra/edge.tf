@@ -5,7 +5,10 @@
 #   site router) maps the Host to the site's current version through the KeyValueStore, checks the
 #   sign-in cookie for private sites, and rewrites the URI to sites/<siteId>/<versionId>/<path>. The
 #   cache key is that rewritten URI, so one cache policy serves every site. With site servers on,
-#   /api/* is uncached and takes every method (servers.tf).
+#   /api/* is uncached and takes every method (servers.tf). /_fling-seen, where a page's view
+#   beacon reports a view, goes through the same router (its access checks and the cross-origin
+#   rule) to the function URL, with the X-Origin-Verify header and the site the router names in
+#   x-fling-site; the API counts it (@fling/api/views). A refusal is answered at the edge.
 
 # AWS managed policies, by their fixed ids.
 locals {
@@ -242,6 +245,27 @@ resource "aws_cloudfront_distribution" "sites" {
     origin_access_control_id = aws_cloudfront_origin_access_control.this["sites"].id
   }
 
+  # The API, for the views the pages' beacons report (/_fling-seen below), as the app
+  # distribution reaches it: the function URL checks its own Host, and the API checks the header.
+  origin {
+    origin_id   = "api"
+    domain_name = split("/", aws_lambda_function_url.api.function_url)[2]
+
+    custom_origin_config {
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = "https-only"
+      origin_ssl_protocols     = ["TLSv1.2"]
+      origin_read_timeout      = 30
+      origin_keepalive_timeout = 5
+    }
+
+    custom_header {
+      name  = "X-Origin-Verify"
+      value = random_password.origin_verify.result
+    }
+  }
+
   default_cache_behavior {
     target_origin_id       = "sites"
     viewer_protocol_policy = "redirect-to-https"
@@ -266,6 +290,26 @@ resource "aws_cloudfront_distribution" "sites" {
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = local.cache_policy_caching_optimized
     compress               = true
+  }
+
+  # A page's view beacon (SITE_SEEN_PATH): POST, uncached, to the API. The site router decides it
+  # as it decides a page (sign-in, site pass, the cross-origin rule) and, when it lets it through,
+  # names the site in x-fling-site (overwriting any the viewer sent) and leaves the origin alone,
+  # so it goes to `api`; anything else it answers itself or rewrites to a key the API doesn't have.
+  ordered_cache_behavior {
+    path_pattern             = "/_fling-seen"
+    target_origin_id         = "api"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = local.cache_policy_caching_disabled
+    origin_request_policy_id = local.origin_request_policy_all_viewer_except_host
+    compress                 = true
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.site_router.arn
+    }
   }
 
   # With site servers (servers.tf): /api/* takes every method, uncached, with the viewer's headers

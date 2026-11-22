@@ -4,7 +4,7 @@ part: publish
 order: 30
 summary: The files Fling leaves out, the secrets it refuses, the home page it can make, and the limits.
 sources: [apps/cli/src/manifest.ts, apps/cli/src/gitignore.ts, apps/cli/src/inputs.ts, packages/shared/src/secrets.ts, packages/shared/src/limits.ts, apps/api/src/publication.ts]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 Fling publishes the files a browser needs and nothing else. It leaves out what is private to your

@@ -427,6 +427,22 @@ The full guide is `docs/site-servers.md` in the Fling repository, linked from th
 - Tell the server's code to log the viewer's `id`, never their email: everyone who publishes the
   site reads its logs.
 
+## How a site is doing (metrics)
+
+When the user asks how a site is doing, whether anyone has looked at it, how often it changes, or
+who is using it, call `fling_stats { name }` (`fling stats <name>`, `--json` for the data). It
+gives views (page loads) and pushes (versions going live) over the last 28 days and 12 months,
+when the site was last viewed and last pushed, and a count per UTC day.
+
+- **Counts only.** Fling records nothing about who viewed: no names, no cookie, no addresses.
+  Answer "who is using it" with the numbers and say so; never guess at people.
+- Only the site's owners and publishers (and admins) can read them; anyone else gets "no site".
+- Views come from the page itself as it loads, so a site counts views only for versions published
+  while the Fling counts them. Single-page-app navigations, previews in the Fling web app and the
+  review page, and pages whose Content-Security-Policy blocks inline scripts don't count. A Fling
+  can turn view counts off: then the result says so and shows pushes only.
+- `since` is when the site's first count was stored: totals cover no further back than that.
+
 ## Notifications
 
 When the Fling has notifications (it emails people when a site is shared with them, they are added
@@ -463,7 +479,7 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
   check what was published, e.g. when the user reports a 404 (no root `index.html` → the root 404s).
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
-CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
+CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling stats <name>`, `fling versions <name>`, `fling files <name>`, `fling share <name>
 [--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling owners|publishers <name> [--add|--remove|--set <emails>|--group|--remove-group <slugs>]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
 `fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

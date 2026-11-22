@@ -89,6 +89,12 @@ Google Cloud has no edge that runs this decision. Service Extensions plugins run
 Balancing but in Preview on Media CDN. Porting the decision to Wasm would fork it, which the
 logical platform rules out.
 
+**View counts.** A page's beacon posts to `/_fling-seen` on the site's host. The Node host counts it
+in the process's `ViewCounter`. It writes the counts after a view, at most every 10 seconds, and on
+a 60-second timer for a site that has gone quiet. It writes once more when the host closes (Cloud
+Run's SIGTERM). With CPU allocated only during requests, the timer may not run between them, so a
+quiet instance's last views wait for its next request or its shutdown.
+
 ## 4. Domains and TLS
 
 - One Google-managed certificate from Certificate Manager covers the hostname and `*.hostname`.

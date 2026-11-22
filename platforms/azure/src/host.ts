@@ -51,5 +51,7 @@ export function createAzureHost(opts: AzureHostOptions) {
       allowMissing: config.appEnv === 'development',
       sitesDomain: config.sitesDomain,
     }),
+    /** write the views the host holds (it writes them on a timer too) */
+    close: node.close,
   }
 }

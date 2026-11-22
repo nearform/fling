@@ -107,6 +107,7 @@ describe('/mcp tools', () => {
         'fling_set_publishers',
         'fling_set_visibility',
         'fling_share',
+        'fling_stats',
         'fling_upload_begin',
         'fling_upload_file',
         'fling_upload_finish',

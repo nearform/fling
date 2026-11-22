@@ -5,7 +5,7 @@ order: 50
 summary: Who can call a site's server, what it knows about them, and the limits it runs within.
 requires: [servers]
 sources: [packages/shared/src/site-routing.ts, packages/shared/src/site-server.ts, apps/api/src/servers/shell.ts, apps/api/src/servers/index.ts, apps/api/src/config.ts, apps/web/src/pages/Review.tsx, apps/web/src/components/site/SiteServer.tsx]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 A site's server sits behind the site's access, like its pages. It learns who is calling from

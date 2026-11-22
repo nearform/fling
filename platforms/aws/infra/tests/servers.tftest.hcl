@@ -65,6 +65,7 @@ run "without_servers" {
       length(aws_iam_role_policy.servers) == 0 &&
       length(aws_s3_bucket.server_zips) == 0 &&
       length(aws_ssm_parameter.site_secrets_key) == 0 &&
+      length(aws_ssm_parameter.sites_distribution_arn) == 0 &&
       length(aws_vpc.servers) == 0 &&
       length(aws_lambdacore_network_connector.servers) == 0
     )
@@ -79,6 +80,23 @@ run "without_servers" {
   assert {
     condition     = length([for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : b if b.path_pattern == "/api/*"]) == 0
     error_message = "Without servers, the sites distribution has no /api/* behaviour."
+  }
+
+  assert {
+    condition = alltrue([
+      for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : (
+        b.target_origin_id == "api" &&
+        contains(b.allowed_methods, "POST") &&
+        b.cache_policy_id == local.cache_policy_caching_disabled &&
+        b.origin_request_policy_id == local.origin_request_policy_all_viewer_except_host &&
+        length([for f in b.function_association : f if f.event_type == "viewer-request"]) == 1
+      ) if b.path_pattern == "/_fling-seen"
+      ]) && length([
+      for b in aws_cloudfront_distribution.sites.ordered_cache_behavior : b if b.path_pattern == "/_fling-seen"
+      ]) == 1 && length([
+      for o in aws_cloudfront_distribution.sites.origin : o if o.origin_id == "api" && length(o.custom_header) == 1
+    ]) == 1
+    error_message = "The sites distribution sends /_fling-seen (the view beacon), through the site router, uncached, to the API with X-Origin-Verify."
   }
 
   assert {
@@ -119,10 +137,10 @@ run "with_servers_fenced" {
 
   assert {
     condition = alltrue([
-      for k in ["SERVER_FUNCTION_PREFIX", "SERVER_INSTANCE", "SERVER_ROLE_ARN", "SERVER_ZIP_BUCKET", "SITES_DISTRIBUTION_ARN", "SERVER_NETWORK_CONNECTOR_ARN"] :
+      for k in ["SERVER_FUNCTION_PREFIX", "SERVER_INSTANCE", "SERVER_ROLE_ARN", "SERVER_ZIP_BUCKET", "SERVER_NETWORK_CONNECTOR_ARN"] :
       contains(keys(local.environment), k)
-    ])
-    error_message = "With servers, the function gets their plumbing."
+    ]) && length(aws_ssm_parameter.sites_distribution_arn) == 1 && aws_ssm_parameter.sites_distribution_arn[0].name == "/example/production/fling/sites-distribution-arn"
+    error_message = "With servers, the function gets their plumbing, and the sites distribution's ARN in SSM beside its secrets."
   }
 
   assert {

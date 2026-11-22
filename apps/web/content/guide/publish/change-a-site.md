@@ -5,7 +5,7 @@ order: 50
 summary: Start from what is live, change some files, and publish only what changed.
 requires: [pull]
 sources: [apps/cli/src/commands/pull.ts, apps/cli/src/pull.ts, apps/cli/src/commands/deploy.ts, apps/api/src/pull.ts, apps/api/src/publication.ts, apps/api/src/mcp/read-files.ts, apps/web/src/components/site/SiteOverview.tsx]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 To fix a typo, update a page or act on review comments, start from the files that are live, not
@@ -79,3 +79,7 @@ The site's page shows the command to pull it, under **Edit locally**.
 - Deploying the pulled folder under another `--name` publishes it to that site as a whole folder,
   not as a change to the one you pulled.
 - `fling deploy ./my-app --force` publishes the folder as the whole site, whatever is live.
+<!-- requires: viewCounts -->
+- The files you pull are the ones that were published. The small script that [counts a page's
+  views](/guide/publish/metrics#what-counts-as-a-view) is added only to the pages Fling serves.
+<!-- /requires -->

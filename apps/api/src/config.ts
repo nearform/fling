@@ -174,6 +174,8 @@ const envSchema = z.object({
   SMTP_USER: optionalString,
   /** Outside invitations: off unless `on` (or true/yes/1); on needs mail. */
   INVITES: flag,
+  /** Sites' view counts (views.ts): on unless `off` (or false/no/0). */
+  SITE_VIEW_COUNTS: flagDefaultOn,
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
   VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
   /** Maintenance's sweep of every site, behind its queue: on unless `off` (or false/no/0). */
@@ -251,6 +253,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   LIVE_URL: 'features',
   INVITES: 'features',
   INVITES_PER_DAY: 'features',
+  SITE_VIEW_COUNTS: 'features',
   VERSION_RETENTION: 'features',
   MAINTENANCE_SWEEP_ENABLED: 'features',
   SERVERS: 'features',
@@ -549,6 +552,13 @@ export interface Config {
    * On needs `mail` (the config refuses to load otherwise).
    */
   invites: boolean
+  /**
+   * Sites' view counts (`SITE_VIEW_COUNTS`, default on): versions that go live get copies of their
+   * pages with the view beacon, and the views it reports are counted (views.ts). Off, no new
+   * copies are made, route writes stop serving the ones there are, and nothing is counted.
+   * Pushes are counted either way. Advertised as the `viewCounts` capability.
+   */
+  viewCounts: boolean
   /** New outside addresses one person may invite a day (`INVITES_PER_DAY`, default 20). */
   invitesPerDay: number
   /**
@@ -679,6 +689,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     }),
     invites: e.INVITES,
     invitesPerDay: e.INVITES_PER_DAY,
+    viewCounts: e.SITE_VIEW_COUNTS,
     versionRetention: e.VERSION_RETENTION,
     maintenanceSweep: e.MAINTENANCE_SWEEP_ENABLED,
     servers: {

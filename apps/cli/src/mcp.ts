@@ -52,6 +52,7 @@ import {
   describeServerLive,
   describeSharedSite,
   describeSiteAccess,
+  describeSiteMetrics,
   describeVersionFiles,
   encodeForAgent,
   FORMS_FILE,
@@ -211,6 +212,7 @@ import {
   versionFiles,
   whoami,
 } from './sites.ts'
+import { getSiteMetrics, metricsEnabled } from './stats.ts'
 import { mcpUpdateNote, newerRelease } from './update-check.ts'
 import { silentLogger } from './utils/logger.ts'
 import { formatBytes } from './utils/output.ts'
@@ -1712,6 +1714,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       }
     })
   )
+
+  // Metrics: offered when a Fling known at start has them; each call checks the Fling it goes to.
+  if (servers.some(s => metricsEnabled(s.instance) === true)) {
+    server.registerTool(t.stats.name, serverTool(t.stats), args =>
+      run(t.stats.name, args.server, async target => {
+        const instance = await loadInstanceWith(store, target.config, fetchImpl, 'metrics')
+        if (metricsEnabled(instance) === false) {
+          throw new CliError(
+            `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)}) has no site metrics`
+          )
+        }
+        const metrics = await getSiteMetrics(target.client, args.name, instance?.name)
+        return {
+          summary: `${describeSiteMetrics(metrics, instance?.name)}${onFling(target.url, instance)}`,
+          data: metrics,
+        }
+      })
+    )
+  }
 
   // Paths: the list is offered when a Fling known at start has them, and each call checks the
   // Fling it goes to; the template and the check are local, no Fling asked.

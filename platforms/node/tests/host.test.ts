@@ -103,6 +103,27 @@ const get = (host: NodeHost, url: string, init: RequestInit = {}) =>
   host.fetch(new Request(url, init))
 
 describe('the Node host', () => {
+  it("counts a view its page's beacon reports, and writes it when it closes", async () => {
+    const { host, routes, deps } = await world()
+    await routes.put(
+      siteKvsKey('seen'),
+      JSON.stringify({ id: 'S9', v: 'V9', vis: 'public', spa: false })
+    )
+    const beacon = (origin: string, fetchSite: string) =>
+      get(host, 'http://seen.sites.example.test/_fling-seen', {
+        method: 'POST',
+        headers: { origin, 'sec-fetch-site': fetchSite },
+      })
+    const counted = await beacon('http://seen.sites.example.test', 'same-origin')
+    expect(counted.status).toBe(204)
+    expect(counted.headers.get('cache-control')).toBe('no-store')
+    expect((await beacon('http://elsewhere.example.test', 'cross-site')).status).toBe(403)
+    await host.close()
+    expect(deps.views?.waiting.size).toBe(0)
+    const { buckets } = await deps.store.getSiteMetrics('S9')
+    expect(buckets.some(b => b.views === 1)).toBe(true)
+  })
+
   it('matches hosts by name, whatever port the client names', async () => {
     const { host, routes, blobs } = await world()
     await routes.put(

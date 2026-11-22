@@ -15,7 +15,8 @@
  * ticks drain it, and `POST /dev/notify/drain` drains it at once. Site servers (SERVERS, on here
  * for members unless set) run as Node child processes (servers/node/runtime.ts): an invoke from
  * the edge harness goes to the version's server through the core's shell (servers/shell.ts), and
- * their logs are kept in memory. The e2e
+ * their logs are kept in memory. A view a page's beacon reports (SITE_SEEN_PATH, an invoke with no
+ * server) is counted in deps.views and written as the API's route writes it (views.ts). The e2e
  * (packages/e2e) runs it as the AWS-flavoured local runtime.
  */
 import { randomBytes } from 'node:crypto'
@@ -33,6 +34,7 @@ import {
   ROBOTS_TXT,
   SERVER_SITE_HEADER,
   SITE_HMAC_KVS_KEY,
+  SITE_SEEN_PATH,
   VIEWER_HEADER,
 } from '@fling/shared'
 import { serve } from '@hono/node-server'
@@ -51,6 +53,7 @@ import { MemoryServerLogs } from './servers/memory-logs.ts'
 import { restartOptions } from './servers/node/restart.ts'
 import { NodeSiteServers } from './servers/node/runtime.ts'
 import { runInvoke } from './servers/shell.ts'
+import { seenAnswer } from './sites-host.ts'
 import { Records } from './store/records.ts'
 import { FileTable } from './table/file.ts'
 import type { Deps } from './types.ts'
@@ -179,8 +182,17 @@ sites.all('*', async c => {
     headers: c.req.header(),
   })
   const result = await router(event)
+  const header = (name: string) => (isInvoke(result) && result.headers?.[name]?.value) || null
+  if (isInvoke(result) && url.pathname === SITE_SEEN_PATH) {
+    // A view the beacon reported, sent here (as AWS sends it to the API's SITE_SEEN_PATH route).
+    const site = parseServerSiteHeader(header(SERVER_SITE_HEADER))
+    if (site && deps.views && c.req.method === 'POST') {
+      deps.views.count(site.siteId)
+      await deps.views.flushDue()
+    }
+    return seenAnswer()
+  }
   if (isInvoke(result) && deps.servers) {
-    const header = (name: string) => result.headers?.[name]?.value ?? null
     const site = parseServerSiteHeader(header(SERVER_SITE_HEADER))
     if (site) {
       const request = new Request(c.req.raw, { headers: c.req.raw.headers })

@@ -254,6 +254,30 @@ describe('the sites host (src/sites.ts, in workerd)', () => {
     }
   })
 
+  it("counts a view its page's beacon reports, on the site's host only", async () => {
+    const seen = async () =>
+      (await (await cf.mf.dispatchFetch('https://worker.test/seen')).json()) as string[]
+    const before = (await seen()).length
+    const beacon = await req('pub.sites.example.test', '/_fling-seen', {
+      method: 'POST',
+      headers: { origin: 'https://pub.sites.example.test', 'sec-fetch-site': 'same-origin' },
+    })
+    expect(beacon.status).toBe(204)
+    expect(beacon.headers.get('cache-control')).toBe('no-store')
+    expect((await seen()).slice(before)).toEqual(['S1'])
+    const elsewhere = await req('pub.sites.example.test', '/_fling-seen', {
+      method: 'POST',
+      headers: { origin: 'https://evil.example.test', 'sec-fetch-site': 'cross-site' },
+    })
+    expect(elsewhere.status).toBe(403)
+    const unsigned = await req('priv.sites.example.test', '/_fling-seen', {
+      method: 'POST',
+      headers: { origin: 'https://priv.sites.example.test', 'sec-fetch-site': 'same-origin' },
+    })
+    expect(unsigned.status).not.toBe(204)
+    expect((await seen()).slice(before)).toEqual(['S1'])
+  })
+
   it('refuses other methods', async () => {
     const res = await req('pub.sites.example.test', '/', { method: 'POST' })
     expect(res.status).toBe(405)

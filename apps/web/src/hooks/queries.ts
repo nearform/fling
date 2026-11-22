@@ -53,9 +53,11 @@ export const queryKeys = {
   adminMail: ['admin', 'mail'] as const,
   adminSettings: ['admin', 'settings'] as const,
   adminRouteTable: ['admin', 'route-table'] as const,
+  adminUsage: ['admin', 'usage'] as const,
   // Under the site's key, so whatever refetches the site refetches these too.
   secrets: (name: string) => ['site', name, 'secrets'] as const,
   serverLogs: (name: string) => ['site', name, 'logs'] as const,
+  metrics: (name: string) => ['site', name, 'metrics'] as const,
   notifications: ['notifications'] as const,
   sentNotifications: ['notifications', 'sent'] as const,
 }
@@ -314,6 +316,17 @@ export function useSecretActions(name: string) {
   )
   const remove = useSiteMutation(name, (secret: string) => api.deleteSiteSecret(name, secret))
   return { set, remove }
+}
+
+/** A site's metrics (the `metrics` capability), for its owners, publishers and admins. */
+export function useSiteMetrics(name: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.metrics(name),
+    queryFn: () => api.siteMetrics(name),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  })
 }
 
 /**
@@ -624,6 +637,20 @@ export function useAdminRouteTable(enabled: boolean) {
       const rewrite = query.state.data?.rewrite
       return rewrite && !rewrite.finishedAt ? 60_000 : false
     },
+  })
+}
+
+/**
+ * Admins, on an instance with metrics: the instance's usage. The day buckets change as views come
+ * in and the lap's tally once a lap ends, so a few minutes stale is fine.
+ */
+export function useAdminUsage(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.adminUsage,
+    queryFn: api.adminUsage,
+    retry: false,
+    staleTime: 5 * 60_000,
   })
 }
 

@@ -6,7 +6,7 @@ summary: Check how the instance sends email, send a test, and see how sending we
 audience: admin
 requires: [email]
 sources: [apps/web/src/pages/AdminMail.tsx, apps/api/src/notifications/mail-admin.ts, apps/api/src/notifications/drain.ts, apps/api/src/policy.ts, apps/api/src/config.ts]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 {{instance:name}} sends email: notifications when someone shares a site or comments, and sign-in

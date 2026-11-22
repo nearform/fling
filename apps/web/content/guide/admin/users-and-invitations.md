@@ -5,7 +5,7 @@ order: 10
 summary: See who has signed in, act as someone to help them, and invite people from outside.
 audience: admin
 sources: [apps/web/src/pages/AdminUsers.tsx, apps/web/src/pages/AdminInvitations.tsx, apps/web/src/components/ImpersonationBanner.tsx, apps/web/src/lib/admin.ts, apps/api/src/admin.ts, apps/api/src/invitations.ts, apps/api/src/policy.ts, apps/api/src/audit.ts, apps/api/src/config.ts]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 As an admin of {{instance:name}} you can see everyone who has signed in, and act as one of them to
@@ -26,6 +26,9 @@ an admin gives you more than the Admin pages:
 - You can open and review any site, including ones restricted to a few people. **Sites → All
   sites** lists every site on the instance by name, a page at a time: type the start of a name to
   find one, and choose **Load more** for the next page.
+<!-- requires: metrics -->
+- You can see any site's [metrics](/guide/publish/metrics), as its owners do.
+<!-- /requires -->
 - From the web app, you can change any site as its owner would: who can open it, its settings, its
   owners and publishers, its share link; roll it back, archive it, delete it, and delete any
   comment.

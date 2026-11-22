@@ -244,7 +244,44 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       const signIn = (store: Store, e: string, at: string, name = 'N') =>
         store.upsertUser({ email: e, name, picture: null, preferredSlug: `u${uid()}` }, at)
 
-      it('every sign-in writes the index item: created once, last sign-in each time', async () => {
+      it('a sign-in later the same UTC day leaves the index item; a new day or name writes it', async () => {
+        const store = await factory()
+        const f = family()
+        const e = f.email('a')
+        const indexed = async () =>
+          (await store.listUsers({ prefix: f.prefix, limit: 10 })).users[0]?.lastSignInAt
+        await signIn(store, e, NOW, 'Alice')
+        await signIn(store, e, LATER, 'Alice')
+        // The record is exact; the index keeps the day's first sign-in.
+        expect((await store.getUser(e))?.lastSignInAt).toBe(LATER)
+        expect(await indexed()).toBe(NOW)
+        const evening = '2026-01-01T23:59:59.999Z'
+        await signIn(store, e, evening, 'Alice C')
+        expect(await store.listUsers({ prefix: f.prefix, limit: 10 })).toEqual({
+          users: [expect.objectContaining({ name: 'Alice C', lastSignInAt: evening })],
+        })
+        const nextDay = '2026-01-02T00:00:00.000Z'
+        await signIn(store, e, nextDay, 'Alice C')
+        expect(await indexed()).toBe(nextDay)
+        expect((await store.getUser(e))?.lastSignInAt).toBe(nextDay)
+      })
+
+      it('race: concurrent sign-ins leave the record and the index with one name', async () => {
+        const store = await factory()
+        const f = family()
+        const e = f.email('a')
+        await signIn(store, e, NOW, 'Alice')
+        await Promise.all(
+          ['Alice', 'Alice B', 'Alice', 'Alice C', 'Alice'].map((name, i) =>
+            signIn(store, e, new Date(Date.parse(LATER) + i).toISOString(), name)
+          )
+        )
+        const user = await store.getUser(e)
+        const { users } = await store.listUsers({ prefix: f.prefix, limit: 10 })
+        expect(users[0]?.name).toBe(user?.name)
+      })
+
+      it('the index item is written on the first sign-in, and again when the name changes', async () => {
         const store = await factory()
         const f = family()
         const user = await signIn(store, f.email('a'), NOW, 'Alice')

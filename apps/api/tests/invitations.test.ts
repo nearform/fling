@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 import type { MailConfig } from '../src/config.ts'
 import { maintain } from '../src/maintenance.ts'
 import { drain } from '../src/notifications/drain.ts'
-import { sweepRevocations } from '../src/revocations.ts'
+import { REVOCATION_KEEP_SECONDS, sweepRevocations } from '../src/revocations.ts'
 import {
   APP_ORIGIN,
   api,
@@ -433,13 +433,14 @@ describe('the revocation list', () => {
     expect(await edge(env, siteCookie(env, SAM))).toBe('served')
   })
 
-  it('the sweep takes a revocation off the list after 30 days, not one made since', async () => {
+  it('the sweep takes a revocation off the list after 8 days, a day past its last cookie, not one made since', async () => {
     const { env, bossCookie } = await world()
     await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: SAM })
     await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${SAM}`)
     await browser(env, bossCookie, 'POST', '/api/admin/invitations', { email: PAT })
     await browser(env, bossCookie, 'DELETE', `/api/admin/invitations/${PAT}`)
-    env.advance(29 * DAY)
+    expect(REVOCATION_KEEP_SECONDS).toBe(SITE_COOKIE_TTL_SECONDS + DAY / 1000)
+    env.advance(7 * DAY)
     expect(await sweepRevocations(env.deps)).toBe(0)
     // Pat, revoked again a day before the first one is due: that one must stay.
     const fresh = `${SESSION}=${(await createUser(env, BOSS)).session}`
@@ -453,8 +454,8 @@ describe('the revocation list', () => {
     expect(await sweepRevocations(env.deps)).toBe(2)
     expect(await env.routeTable.get(listKey(env, SAM))).toBeUndefined()
     expect(await env.routeTable.get(listKey(env, PAT))).toBe(again)
-    env.advance(30 * DAY)
-    // Maintenance, the hourly tick every instance has, runs the sweep.
+    env.advance(8 * DAY)
+    // Maintenance, the 15-minute tick every instance has, runs the sweep.
     expect((await maintain(env.deps)).revocations).toBe(1)
     expect(await env.routeTable.get(listKey(env, PAT))).toBeUndefined()
     expect(await sweepRevocations(env.deps)).toBe(0)

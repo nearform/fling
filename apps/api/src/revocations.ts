@@ -6,20 +6,24 @@
  * expiring no later than it (one issued by the revocation's second) to sign in, where the app refuses someone without standing and gives anyone else a fresh cookie
  * (site-routing.ts). Re-inviting needs no change here: the new sign-in's cookie is newer.
  *
- * A revocation stays on the list for REVOCATION_KEEP_SECONDS, well past the last cookie it could
- * stop. Each one is kept as a record due then (`REVOKED`, store/records.ts), and the sweep, run
+ * A revocation stays on the list for REVOCATION_KEEP_SECONDS, a day past the last cookie it could
+ * stop (8 days). Each one is kept as a record due then (`REVOKED`, store/records.ts), and the sweep, run
  * by maintenance (maintenance.ts, every platform's 15-minute tick, which every instance has with or
  * without mail), takes due ones off the list. An entry kept up to an hour past its due time stops
- * nothing more: the last cookie it could stop expired 23 days before. The record is written before the
- * list key, so no key outlives its record. A later revocation of the same address replaces the
+ * nothing more: the last cookie it could stop expired a day before. The record is written before
+ * the list key, so no key outlives its record. A later revocation of the same address replaces the
  * list's value; the earlier record, when due, sees a value that isn't its own and leaves it.
  */
 import { revokedKvsKey } from '@fling/shared'
 import { revocationMac, SITE_COOKIE_TTL_SECONDS } from '@fling/shared/site-cookie'
 import type { Deps } from './types.ts'
 
-/** How long a revocation stays on the list: well past the last cookie it could stop (7 days). */
-export const REVOCATION_KEEP_SECONDS = 30 * 24 * 60 * 60
+/**
+ * How long a revocation stays on the list: a day past the last cookie it could stop (one issued as
+ * it was made, which lasts SITE_COOKIE_TTL_SECONDS, 7 days), so 8 days. A revocation keeps the
+ * time it was given when made; this applies to the ones made from now on.
+ */
+export const REVOCATION_KEEP_SECONDS = SITE_COOKIE_TTL_SECONDS + 24 * 60 * 60
 
 /** Revocations read per page of the sweep. */
 const SWEEP_PAGE = 100

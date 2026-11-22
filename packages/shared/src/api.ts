@@ -478,6 +478,7 @@ export const AdminUserSchema = z.object({
   picture: z.string().nullable(),
   userSlug: z.string(),
   createdAt: z.string().nullable(),
+  /** to the day: the first sign-in on the (UTC) day of the last one */
   lastSignInAt: z.string().nullable(),
   admin: z.boolean(),
   /** outside the email policy, on a live guest invitation (see GET /api/admin/invitations) */

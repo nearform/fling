@@ -50,8 +50,11 @@
  *                                                        lastSignInAt, …)
  *   USERS                  USER#<email>                  users index: what the admin's users list
  *                                                        shows (name, createdAt, lastSignInAt, …),
- *                                                        written with the user (migration 0003
- *                                                        backfilled it), so users list by one query
+ *                                                        written with the user when the name, the
+ *                                                        picture or the sign-in's UTC day changes
+ *                                                        (lastSignInAt: the day's first; migration
+ *                                                        0003 backfilled it), so users list by one
+ *                                                        query
  *   SLUG#<userSlug>        SLUG                          slug claim → email (unique userSlug)
  *   USER#<email>           KEY#<id>                      api key (name, hash, createdAt, lastUsedAt)
  *   APIKEY#<sha256>        APIKEY                        api key lookup → { email, id }
@@ -548,6 +551,16 @@ const summaryOf = (user: User): UserSummary => ({
   lastSignInAt: user.lastSignInAt ?? null,
 })
 
+/** Whether `a` (absent: never) falls on the same UTC day as `b`. */
+function sameUtcDay(a: string | undefined, b: string) {
+  const day = (iso: string | undefined) => {
+    const t = iso === undefined ? Number.NaN : Date.parse(iso)
+    return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10)
+  }
+  const dayA = day(a)
+  return dayA !== null && dayA === day(b)
+}
+
 /** Run a write whose failed condition just means "no": returns false instead of throwing. */
 async function unless(write: Promise<unknown>): Promise<boolean> {
   try {
@@ -602,8 +615,33 @@ export class Records implements Store {
         updatedAt: now,
         lastSignInAt: now,
       }
-      // The record and its index item together; the slug and createdAt never change after
-      // creation, so the whole record is written over the live one.
+      // The record always, so its lastSignInAt is exact (invitations read it); the index item only
+      // when what it shows changed: the name, the picture, or the day (UTC) of the last sign-in.
+      // The index is never read here. Every write of it writes the record too, in one transact,
+      // so after either write the index has the record's name and picture and a lastSignInAt on
+      // the record's day; a record-only write keeps both, as it changes neither and stays on that
+      // day. Pairs stored by writes of both at once, and by migration 0003 (which copied the
+      // record's own lastSignInAt), start that way. So when the record already shows this name
+      // and picture from earlier today, so does the index. That holds only while nothing changed
+      // the record since it was read: the record-only write is conditional on its `updatedAt`
+      // (every write sets it to its `now`, so only another sign-in in the same millisecond could
+      // slip past), and on a race falls back to writing both. The slug and createdAt never change
+      // after creation, so the whole record is written over the live one.
+      const indexCurrent =
+        existing.name === input.name &&
+        (existing.picture ?? null) === input.picture &&
+        sameUtcDay(existing.lastSignInAt, now)
+      if (
+        indexCurrent &&
+        (await unless(
+          this.table.put(
+            encode('user', key.user(user.email), user),
+            fieldEquals('updatedAt', existing.updatedAt)
+          )
+        ))
+      ) {
+        return user
+      }
       const written = await unless(
         this.table.transact([
           { put: encode('user', key.user(user.email), user), cond: ifExists },

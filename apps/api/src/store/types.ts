@@ -50,6 +50,7 @@ export interface UserSummary {
   userSlug: string
   /** null: unknown (a user record from before it was always written) */
   createdAt: string | null
+  /** to the day: the first sign-in of the UTC day of the last one (the user record is exact) */
   lastSignInAt: string | null
 }
 
@@ -671,8 +672,9 @@ export interface Store extends NotificationStore {
   getUser(email: string): Promise<User | null>
   /**
    * A sign-in: create the user (claiming a unique userSlug derived from `preferredSlug`) or
-   * refresh name/picture on an existing one; either way `lastSignInAt` = `now`, and the users
-   * index item with it.
+   * refresh name/picture on an existing one; either way the user's `lastSignInAt` = `now`. The
+   * users index item is written with it when the name or picture changed or its last sign-in was
+   * on an earlier UTC day, so the index's `lastSignInAt` is the first sign-in of that day.
    */
   upsertUser(
     input: { email: string; name: string; picture: string | null; preferredSlug: string },

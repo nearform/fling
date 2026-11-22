@@ -5,7 +5,7 @@ order: 20
 summary: A team site's home page that lists its Paths, kept up to date by Fling.
 requires: [paths]
 sources: [packages/shared/src/paths-index.ts, packages/shared/src/paths-templates.ts, apps/api/src/paths.ts, apps/api/src/rendering.ts, apps/cli/src/commands/paths.ts, packages/shared/src/mcp-tools.ts]
-verified: 79489687d
+verified: c4b1441
 ---
 
 A team site's home page can list its [Paths](/guide/team-sites/paths), newest first, with a search

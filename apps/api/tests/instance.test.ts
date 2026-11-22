@@ -3,6 +3,8 @@ import {
   CORE_CAPABILITIES,
   INSTANCE_METADATA_PATH,
   InstanceMetadataSchema,
+  MAX_PATHS_PER_SITE,
+  pathsPerSiteOf,
   RELEASE_HEADER,
 } from '@fling/shared'
 import { Hono } from 'hono'
@@ -52,6 +54,7 @@ describe('GET /.well-known/fling', () => {
       capabilities: expect.objectContaining({ ...CORE_CAPABILITIES, comments: true }),
       installCommand: expect.stringMatching(/^npm install -g \S+$/),
       defaultAccess: 'only_me',
+      limits: { pathsPerSite: MAX_PATHS_PER_SITE },
       // The release this build is: the root package.json's version, which `pnpm release` sets.
       release: rootPackage.version,
     })
@@ -71,6 +74,24 @@ describe('GET /.well-known/fling', () => {
     const env = setup({ siteDefaultAccess: 'members' })
     const body = await (await env.app.request(INSTANCE_METADATA_PATH)).json()
     expect(body.defaultAccess).toBe('members')
+  })
+
+  it('publishes the live Paths a site may have: PATHS_PER_SITE_MAX, at most MAX_PATHS_PER_SITE', async () => {
+    const max = (env: Record<string, string>) => loadBaseConfig({ ...PROD, ...env }).pathsPerSite
+    expect(max({})).toBe(MAX_PATHS_PER_SITE)
+    expect(max({ PATHS_PER_SITE_MAX: '200' })).toBe(200)
+    expect(max({ PATHS_PER_SITE_MAX: ' ' })).toBe(MAX_PATHS_PER_SITE)
+    for (const bad of ['0', '-1', '2.5', 'lots', String(MAX_PATHS_PER_SITE + 1)]) {
+      expect(() => max({ PATHS_PER_SITE_MAX: bad }), bad).toThrow()
+    }
+    const body = await (
+      await setup({ pathsPerSite: 200 }).app.request(INSTANCE_METADATA_PATH)
+    ).json()
+    expect(body.limits).toEqual({ pathsPerSite: 200 })
+    expect(pathsPerSiteOf(InstanceMetadataSchema.parse(body))).toBe(200)
+    // An older server publishes no limits: clients fall back to the code's.
+    const { limits: _, ...older } = body
+    expect(pathsPerSiteOf(InstanceMetadataSchema.parse(older))).toBe(MAX_PATHS_PER_SITE)
   })
 
   it('advertises live rooms only with LIVE_URL, comments on and LIVE not off', async () => {

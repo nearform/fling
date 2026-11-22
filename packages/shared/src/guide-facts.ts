@@ -32,7 +32,9 @@ import {
 } from './site-server.ts'
 
 const mb = (bytes: number) => `${bytes / (1024 * 1024)} MB`
-const count = (n: number) => n.toLocaleString('en-GB')
+/** A count as the Guide writes it (`1,000`). */
+export const guideCount = (n: number) => n.toLocaleString('en-GB')
+const count = guideCount
 
 /**
  * Facts that live in other packages, checked against them: the CLI's by apps/web/tests/guide.test.ts,
@@ -66,6 +68,11 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'max-path': `${count(MAX_PATH_BYTES)} bytes`,
   'max-inline': mb(MCP_PUBLISH_MAX_BYTES),
   'max-paths': count(MAX_PATHS_PER_SITE),
+  /**
+   * the live Paths a site may have: the code's default here; the web app puts the instance's own
+   * (`limits.pathsPerSite`, PATHS_PER_SITE_MAX) in its place (apps/web/src/guide/context.ts)
+   */
+  'paths-per-site': count(MAX_PATHS_PER_SITE),
   'max-folder': count(MAX_PATH_FOLDER_LENGTH),
   'site-name-max': count(SITE_NAME_MAX),
   'mail-tests-per-hour': count(MAIL_TESTS_PER_HOUR),

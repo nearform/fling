@@ -82,6 +82,7 @@ export function instanceMetadata(config: Config): InstanceMetadata {
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,
+    limits: { pathsPerSite: config.pathsPerSite },
     ...(RELEASE ? { release: RELEASE } : {}),
   }
 }

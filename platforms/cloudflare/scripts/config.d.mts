@@ -1,5 +1,6 @@
 export declare const ROOT: string
 export declare const TEMPLATE: string
+export declare const MAX_PATHS_PER_SITE: number
 export declare function parseJsonc(text: string): unknown
 export declare function readJsonc(path: string): unknown
 export declare const DEPLOY_KEYS: Record<string, string>

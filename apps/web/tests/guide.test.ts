@@ -9,11 +9,14 @@ import {
   type GuideContext,
   type GuidePage,
   guidePageVisible,
+  type InstanceMetadata,
+  InstanceMetadataSchema,
   PINNED_GUIDE_FACTS,
   resolveGuideText,
 } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import { GUIDE_PAGES } from '../src/guide/content'
+import { guideContextFor } from '../src/guide/context'
 import { renderGuideMarkdown } from '../src/guide/render'
 import { searchGuide } from '../src/guide/search'
 
@@ -106,6 +109,28 @@ describe('the Guide pages', () => {
   it('pin the facts other packages own at their real values', () => {
     const cli = JSON.parse(readFileSync(new URL('../../cli/package.json', import.meta.url), 'utf8'))
     expect(PINNED_GUIDE_FACTS['node-version']).toBe(String(cli.engines.node).replace(/^>=/, ''))
+  })
+})
+
+describe('the facts an instance sets', () => {
+  const metadata = (extra: object = {}) =>
+    InstanceMetadataSchema.parse({
+      version: 1,
+      name: 'Fling',
+      appOrigin: 'https://fling.example.test',
+      sitesDomain: 'sites.example.test',
+      siteScheme: 'https',
+      auth: { kind: 'dev', displayName: 'Dev login' },
+      installCommand: 'npm install -g fling-cli',
+      ...extra,
+    })
+  const paths = (instance: InstanceMetadata | null) =>
+    guideContextFor(instance, null, 'https://fling.example.test').facts['paths-per-site']
+
+  it('the live Paths a site may have: the instance’s limit, else the code’s', () => {
+    expect(paths(metadata({ limits: { pathsPerSite: 200 } }))).toBe('200')
+    expect(paths(metadata())).toBe(GUIDE_FACTS['paths-per-site'])
+    expect(paths(null)).toBe(GUIDE_FACTS['paths-per-site'])
   })
 })
 

@@ -21,5 +21,8 @@ export const MAX_STORED_PATH_LENGTH = 1024
 export const MAX_KEPT_FILES = 1000
 /** A Path's folder (paths.ts in the API): one segment, at most this long. */
 export const MAX_PATH_FOLDER_LENGTH = 100
-/** How many Paths a site may have. */
+/**
+ * How many Paths a site may have in all, live or archived; also the most live Paths an instance
+ * may allow a site (`PATHS_PER_SITE_MAX`, published as `limits.pathsPerSite`), and its default.
+ */
 export const MAX_PATHS_PER_SITE = 1000

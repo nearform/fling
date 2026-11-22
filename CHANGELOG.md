@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **A Fling sets how many live Paths a site may have.** `PATHS_PER_SITE_MAX` (1 to 1000, 1000 unless set) counts a site's live Paths, the published ones that aren't archived: publishing to a new Path, or bringing back an archived one, is refused with `too_large` once a site has that many, saying to archive one (`fling paths archive <site> <folder>`) or publish to an existing Path. Archived Paths don't count; a site still keeps at most 1000 Paths in all. The instance publishes the number as `limits.pathsPerSite`: `fling paths` says how many live Paths a site has of it, `fling_paths` states it, the Guide shows the instance's number, and on that refusal both MCP servers and the plugin tell the agent to list the site's oldest Paths and ask the user before archiving any. Cloudflare's setup takes `--paths-per-site`. Upgrade note: on AWS each live Path is a key in the KeyValueStore's shared 5 MB, so the Terraform module's new `paths_per_site` input (default 200) sets it; once an instance takes the module's new tag and applies it, its sites may have 200 live Paths each. Sites that already have more keep them all but can't add any until they are under it. Set `paths_per_site` to keep a higher number.
+
 ## 0.16.0 (2026-11-22)
 
 - **Admin pages have a menu down the left, and the audit log a page of its own.** Users, Invitations, Mail, Audit, Routes and Settings are a menu with icons beside each admin page. Audit lists what admins did: impersonations, invitations, changes to other people's sites and route format choices. On the Sites page, Archived comes after Shared with me; the Sites, Groups and site page tabs have icons, and line up with the heading above them.

@@ -62,6 +62,7 @@ import {
   formsTemplate,
   GUIDE_NOTE,
   type InstanceMetadata,
+  isPathsLimitError,
   isSecretPath,
   isValidSitePath,
   MAX_DEPLOY_BYTES,
@@ -77,6 +78,7 @@ import {
   needsAudience,
   normalizePathFolder,
   PATH_PUBLISH_NOTE,
+  PATHS_LIMIT_NOTE,
   PULLED_SERVER_NOTE,
   PullResponseSchema,
   pageOfFiles,
@@ -2184,6 +2186,12 @@ function describeError(error: unknown): string {
   if (error instanceof NoServerError) return NO_SERVER_HINT
   if (error instanceof CliError && error.exitCode === EXIT_NOT_LOGGED_IN) return LOGIN_HINT
   if (error instanceof CliApiError && error.status === 401) return LOGIN_HINT
+  if (
+    error instanceof CliApiError &&
+    isPathsLimitError((error.body as { error?: Record<string, unknown> } | undefined)?.error)
+  ) {
+    return `${error.message}\n${PATHS_LIMIT_NOTE}`
+  }
   if (error instanceof CliError)
     return error.hint ? `${error.message}\n${error.hint}` : error.message
   return error instanceof Error ? error.message : String(error)

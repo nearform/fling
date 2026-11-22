@@ -29,7 +29,8 @@ data "archive_file" "placeholder" {
 # var.environment can still set or override any key here except the four the module owns. LIVE_URL
 # is the live rooms' WebSocket stage (live.tf); the instance turns them off with LIVE=false. MAIL_*
 # and SES_CONFIGURATION_SET come from var.mail (mail.tf), and only with it; the site servers'
-# plumbing and SERVERS_EGRESS from var.servers (servers.tf), and only with it.
+# plumbing and SERVERS_EGRESS from var.servers (servers.tf), and only with it; PATHS_PER_SITE_MAX
+# from var.paths_per_site, always.
 locals {
   environment = merge(
     {
@@ -49,6 +50,8 @@ locals {
       SITES_BUCKET = aws_s3_bucket.sites.bucket
       KVS_ARN      = aws_cloudfront_key_value_store.sites.arn
       SSM_PREFIX   = local.ssm_prefix
+      # Each live Path is a key in the KeyValueStore's shared 5 MB (var.paths_per_site).
+      PATHS_PER_SITE_MAX = tostring(var.paths_per_site)
     },
     local.mail_environment,
     local.servers_environment,

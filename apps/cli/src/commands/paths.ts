@@ -16,7 +16,12 @@
  */
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
-import { MAX_PATH_FOLDER_LENGTH, normalizePathFolder, type SitePath } from '@fling/shared'
+import {
+  MAX_PATH_FOLDER_LENGTH,
+  normalizePathFolder,
+  pathsPerSiteOf,
+  type SitePath,
+} from '@fling/shared'
 import { checkPathsIndex, PATHS_OPTIONS, PATHS_PLACEHOLDERS } from '@fling/shared/paths-index'
 import {
   isPathsTemplateName,
@@ -42,12 +47,17 @@ export const pathsHomeChoice = (bin: string) => [
 
 /** The client, unless the instance says it has no Paths. */
 export async function pathsClient(ctx: CommandContext): Promise<ApiClient> {
+  return (await pathsInstance(ctx)).client
+}
+
+/** The client and the instance's metadata (null when it can't be read), unless it has no Paths. */
+async function pathsInstance(ctx: CommandContext) {
   const client = requireClient(ctx)
   const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'paths')
   if (instance && !pathsEnabled(instance)) {
     throw new CliError(`${instance.name} has no Paths`, { hint: 'Ask its operator to update it.' })
   }
-  return client
+  return { client, instance }
 }
 
 /** `--path` or a folder argument, normalised: one top-level folder of the site. */
@@ -65,9 +75,12 @@ const stateOf = (p: SitePath) =>
   p.archived ? chalk.yellow('archived') : p.currentVersionId ? 'live' : chalk.dim('unpublished')
 
 export async function runPaths(ctx: CommandContext, name: string): Promise<void> {
-  const paths = await listPaths(await pathsClient(ctx), name)
+  const { client, instance } = await pathsInstance(ctx)
+  const paths = await listPaths(client, name)
   if (!ctx.json) {
     if (paths.length === 0) ctx.log.info(`${name} has no Paths yet`)
+    // Archived Paths don't count towards the instance's limit (PATHS_PER_SITE_MAX).
+    else ctx.log.hint(livePathsLine(paths, pathsPerSiteOf(instance), instance?.name))
     for (const line of pathsHomeChoice(ctx.binName)) ctx.log.hint(line)
   }
   ctx.out.data({ name, paths }, () =>
@@ -85,6 +98,10 @@ export async function runPaths(ctx: CommandContext, name: string): Promise<void>
         ])
   )
 }
+
+/** `12 of 200 live Paths (the most Fling allows a site; archived ones don't count)` */
+export const livePathsLine = (paths: readonly SitePath[], max: number, fling = 'this Fling') =>
+  `${paths.filter(p => !p.archived && p.currentVersionId).length} of ${max.toLocaleString('en-GB')} live Paths (the most ${fling} allows a site; archived ones don't count)`
 
 export async function runPathArchive(
   ctx: CommandContext,

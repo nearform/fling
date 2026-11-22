@@ -12,6 +12,7 @@ import {
   DefaultAccessLevelSchema,
   LEGACY_DEFAULT_ACCESS,
 } from './access.ts'
+import { MAX_PATHS_PER_SITE } from './limits.ts'
 
 export const INSTANCE_METADATA_PATH = '/.well-known/fling'
 export const INSTANCE_METADATA_VERSION = 1
@@ -97,6 +98,16 @@ export const InstanceBrandSchema = z.looseObject({
 })
 export type InstanceBrand = z.infer<typeof InstanceBrandSchema>
 
+/**
+ * The limits an instance sets lower than the code's own. `pathsPerSite`: the most live Paths
+ * (published, not archived) one site may have (`PATHS_PER_SITE_MAX`); missing (older servers):
+ * MAX_PATHS_PER_SITE (`pathsPerSiteOf`).
+ */
+export const InstanceLimitsSchema = z.looseObject({
+  pathsPerSite: z.number().int().positive().optional().catch(undefined),
+})
+export type InstanceLimits = z.infer<typeof InstanceLimitsSchema>
+
 export const InstanceMetadataSchema = z.looseObject({
   version: z.number().int().min(1),
   /** Display name, e.g. "Fling". */
@@ -117,6 +128,8 @@ export const InstanceMetadataSchema = z.looseObject({
    * Missing (older servers) or unknown: `members` (`defaultAccessOf`).
    */
   defaultAccess: DefaultAccessLevelSchema.optional().catch(undefined),
+  /** Limits the instance sets (InstanceLimitsSchema). Missing on older servers. */
+  limits: InstanceLimitsSchema.optional().catch(undefined),
   /**
    * The Fling release the server runs, e.g. `0.7.0` (the root package.json's version, built in).
    * Missing on servers built before releases were stamped.
@@ -199,6 +212,11 @@ export const CAPABILITY_NAMES: readonly string[] = [
 export const defaultAccessOf = (
   instance: Partial<Pick<InstanceMetadata, 'defaultAccess'>> | null | undefined
 ): DefaultAccessLevel => instance?.defaultAccess ?? LEGACY_DEFAULT_ACCESS
+
+/** The most live Paths a site may have on the instance: its `limits.pathsPerSite`, else the code's. */
+export const pathsPerSiteOf = (
+  instance: Partial<Pick<InstanceMetadata, 'limits'>> | null | undefined
+): number => instance?.limits?.pathsPerSite ?? MAX_PATHS_PER_SITE
 
 /** `https://<name>.sites.example.test/` — a site's URL on an instance. */
 export function instanceSiteUrl(

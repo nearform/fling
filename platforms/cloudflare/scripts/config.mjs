@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url'
 export const ROOT = fileURLToPath(new URL('..', import.meta.url))
 export const TEMPLATE = join(ROOT, 'wrangler.jsonc')
 
+/** MAX_PATHS_PER_SITE (packages/shared/src/limits.ts; tests/deploy-config.test.ts compares them). */
+export const MAX_PATHS_PER_SITE = 1000
+
 /** JSON with `//` and block comments (outside strings) and trailing commas. */
 export function parseJsonc(text) {
   let out = ''
@@ -93,6 +96,15 @@ export function checkDeployConfig(config) {
     .toLowerCase()
   if (['1', 'true', 'yes', 'on'].includes(invites) && !config.MAIL) {
     throw new Error('CF_DEPLOY_CONFIG.INSTANCE.INVITES needs MAIL: invitations are sent by email')
+  }
+  // The most live Paths one site may have: the Worker refuses to start on anything else.
+  if (String(instance.PATHS_PER_SITE_MAX ?? '').trim() !== '') {
+    const max = Number(instance.PATHS_PER_SITE_MAX)
+    if (!Number.isInteger(max) || max < 1 || max > MAX_PATHS_PER_SITE) {
+      throw new Error(
+        `CF_DEPLOY_CONFIG.INSTANCE.PATHS_PER_SITE_MAX must be a whole number from 1 to ${MAX_PATHS_PER_SITE}`
+      )
+    }
   }
   // Who may sign in has no default: whole domains, individual addresses, or both.
   const set = k => typeof instance[k] === 'string' && instance[k].trim() !== ''

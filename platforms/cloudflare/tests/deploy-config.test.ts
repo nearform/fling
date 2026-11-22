@@ -2,8 +2,15 @@
  * The deploy config check (scripts/config.mjs) that deploy.mjs runs before touching anything, and
  * the Worker config rendered from it.
  */
+import { MAX_PATHS_PER_SITE } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { checkDeployConfig, readJsonc, renderWranglerConfig, TEMPLATE } from '../scripts/config.mjs'
+import {
+  MAX_PATHS_PER_SITE as CONFIG_MAX_PATHS,
+  checkDeployConfig,
+  readJsonc,
+  renderWranglerConfig,
+  TEMPLATE,
+} from '../scripts/config.mjs'
 
 const config = (instance: Record<string, string>) => ({
   CLOUDFLARE_ACCOUNT_ID: 'acct',
@@ -48,6 +55,22 @@ describe('INSTANCE.INVITES', () => {
     const mail = { MAIL: { FROM: 'fling@mail.example.test' } }
     expect(() => checkDeployConfig({ ...config(instance), ...mail })).not.toThrow()
     expect(() => checkDeployConfig(config({ ...instance, INVITES: 'off' }))).not.toThrow()
+  })
+})
+
+describe('INSTANCE.PATHS_PER_SITE_MAX', () => {
+  it('takes a whole number up to the code’s ceiling, or nothing (the core’s default)', () => {
+    expect(CONFIG_MAX_PATHS).toBe(MAX_PATHS_PER_SITE)
+    const instance = (max?: string) => ({
+      ALLOWED_EMAIL_DOMAINS: 'example.test',
+      ...(max === undefined ? {} : { PATHS_PER_SITE_MAX: max }),
+    })
+    for (const ok of [undefined, '1', '200', String(MAX_PATHS_PER_SITE)]) {
+      expect(() => checkDeployConfig(config(instance(ok))), ok).not.toThrow()
+    }
+    for (const bad of ['0', '2.5', 'lots', String(MAX_PATHS_PER_SITE + 1)]) {
+      expect(() => checkDeployConfig(config(instance(bad))), bad).toThrow(/PATHS_PER_SITE_MAX/)
+    }
   })
 })
 

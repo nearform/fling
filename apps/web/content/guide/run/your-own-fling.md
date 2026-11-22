@@ -76,6 +76,7 @@ deploy. The main ones:
 | Feature switches | `COMMENTS`, `LIVE` (on unless turned off), `INVITES` (off unless turned on; needs email) |
 | Site servers | `SERVERS`: nobody (the default), admins, named groups or every member; `SERVERS_EGRESS` for whether they reach the internet, and the `SERVER_*` limits |
 | Versions kept | `VERSION_RETENTION` (every version, unless set) |
+| Live Paths per site | `PATHS_PER_SITE_MAX` ({{fact:max-paths}} unless set lower; on AWS the Terraform module's `paths_per_site`, 200 unless set) |
 
 The domains come from the infrastructure: Terraform's inputs on AWS, Google Cloud, Azure and
 DigitalOcean, the setup script's on Cloudflare, and the Compose `.env` file or the Helm chart's

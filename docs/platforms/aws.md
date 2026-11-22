@@ -110,7 +110,9 @@ the code, and the app owns KVS keys and table items.
   share links; in `compact` (Admin → Routes) about two to three times as many. Maintenance logs
   the store's size every run and `route table nearly full` from 70%, which the module turns into
   the `RouteTableFull` alarm (`alarm_actions`). Beyond that, sites would need to be served from
-  DynamoDB when they miss in the store.
+  DynamoDB when they miss in the store. Each live Path is a key in the same store, so the module
+  sets `PATHS_PER_SITE_MAX` to 200 (`paths_per_site`) where the core's default is 1000: a few
+  sites with 1000 Paths each could otherwise fill it for everyone.
 - **The decision's headers on S3 responses.** These need a response-side function or a response
   headers policy.
 - **No smoke e2e after deploy.** `deploy.yml` checks only `/.well-known/fling`, whereas the

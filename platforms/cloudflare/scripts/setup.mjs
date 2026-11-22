@@ -11,6 +11,8 @@
 //                                                   on needs MAIL in the deploy config)
 //     [--servers off|admins|members|groups:a,b]   (optional, never asked for; '' removes it:
 //                                                   site servers, on the Worker Loader's beta)
+//     [--paths-per-site 200]   (optional, never asked for; '' removes it: the most live Paths
+//                                a site may have, 1 to 1000)
 //     [--oidc-issuer https://…] [--oidc-client-id …]
 //     [--instance-name Fling] [--location weur] [--out deploy-config.json]
 //     [--oidc-client-secret-file path]   (instead of the prompt, e.g. when stdin isn't a terminal)
@@ -47,6 +49,7 @@ const { values: args } = parseArgs({
     invites: { type: 'string' },
     'invites-per-day': { type: 'string' },
     servers: { type: 'string' },
+    'paths-per-site': { type: 'string' },
     'oidc-issuer': { type: 'string' },
     'oidc-client-id': { type: 'string' },
     'oidc-client-secret-file': { type: 'string' },
@@ -193,6 +196,13 @@ if (args.servers !== undefined) {
   }
   if (servers) instance.SERVERS = servers
   else delete instance.SERVERS
+}
+// The most live Paths one site may have (PATHS_PER_SITE_MAX; the core's default unless set): only
+// from the flag, like the admins.
+if (args['paths-per-site'] !== undefined) {
+  const max = args['paths-per-site'].trim()
+  if (max) instance.PATHS_PER_SITE_MAX = max
+  else delete instance.PATHS_PER_SITE_MAX
 }
 instance.INSTANCE_NAME = await value(
   'instance-name',

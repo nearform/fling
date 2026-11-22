@@ -1212,6 +1212,38 @@ describe('local MCP server: Paths', () => {
     }
   })
 
+  it('fling_paths states the Fling’s live Paths limit; a publish past it says what to propose', async () => {
+    const instance = {
+      ...PATHS,
+      capabilities: { ...PATHS.capabilities, pathPublish: true },
+      limits: { pathsPerSite: 200 },
+    }
+    const store = await loggedInStore()
+    await store.putServer(SERVER, { instance })
+    const message =
+      '"team" has 200 live Paths, the most this Fling allows: archive one (fling paths archive team <folder>) or publish to an existing one'
+    const m = mockFetch({
+      'GET /.well-known/fling': () => jsonResponse(instance),
+      'POST /api/sites/team/deploys': () =>
+        jsonResponse(
+          { error: { code: 'too_large', message, livePaths: 200, pathsPerSite: 200 } },
+          413
+        ),
+    })
+    const client = await connect(store, m.fetch, undefined, { servers: [known(instance)] })
+    const { tools } = await client.listTools()
+    expect(tools.find(t => t.name === 'fling_paths')?.description).toContain(
+      'up to 200 live Paths on Example Fling'
+    )
+    const r = await client.callTool({
+      name: 'fling_publish',
+      arguments: { name: 'team', path: 'PAY-9', files: [{ path: 'index.html', content: 'x' }] },
+    })
+    expect(r.isError).toBe(true)
+    expect(text(r)).toContain(message)
+    expect(text(r)).toMatch(/Never archive or delete a Path on your own/)
+  })
+
   it('takes `path` on fling_info, fling_files and fling_rollback', async () => {
     const { client, calls } = await pathsFling()
     const info = await client.callTool({

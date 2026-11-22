@@ -34,6 +34,7 @@ import {
   formatLogLine,
   formsSummaryLines,
   formsTemplate,
+  isPathsLimitError,
   MCP_PUBLISH_MAX_BYTES,
   type McpToolDef,
   mcpRemoteInstructions,
@@ -42,6 +43,7 @@ import {
   NOT_READY_NOTE,
   needsAudience,
   normalizePathFolder,
+  PATHS_LIMIT_NOTE,
   type PathsHome,
   preferencesUpdateOf,
   privateAudience,
@@ -139,6 +141,9 @@ export function describeError(err: unknown): string {
       )
     }
     if (err.code === 'not_found') return err.message
+    if (isPathsLimitError({ code: err.code, ...err.extra })) {
+      return `${err.message} (${err.code})\n${PATHS_LIMIT_NOTE}`
+    }
     return `${err.message} (${err.code})`
   }
   console.error(JSON.stringify({ level: 'error', msg: 'mcp tool failed', err: String(err) }))

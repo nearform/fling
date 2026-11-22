@@ -158,7 +158,13 @@ import {
   unqueueStaleCheck,
 } from './maintenance.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
-import { isLivePath, makePathCurrent, pathRef, refreshHome } from './paths.ts'
+import {
+  ensureRoomForLivePath,
+  isLivePath,
+  makePathCurrent,
+  pathRef,
+  refreshHome,
+} from './paths.ts'
 import {
   type Action,
   type Actor,
@@ -862,11 +868,13 @@ async function preparePath(
         'path_conflict'
       )
     }
-    if ((await store.listPaths(site.id)).length >= MAX_PATHS_PER_SITE) {
+    const paths = await store.listPaths(site.id)
+    if (paths.length >= MAX_PATHS_PER_SITE) {
       throw tooLarge(
         `"${site.name}" has ${MAX_PATHS_PER_SITE} Paths, the most a site may have: delete one, or publish to an existing one`
       )
     }
+    await ensureRoomForLivePath(deps, site, { folder }, paths)
     const made: PathRecord = {
       siteId: site.id,
       folder,
@@ -902,6 +910,8 @@ async function preparePath(
       )
     }
   }
+  // Checked before the upload, and again as it goes live (makePathCurrent).
+  if (!isLivePath(path)) await ensureRoomForLivePath(deps, site, path)
   const prefix = `${folder}/`
   const what = `${displayPublishPath(folder)} of "${site.name}"`
   const layered = await layerOn(

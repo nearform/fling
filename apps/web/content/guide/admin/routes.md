@@ -34,6 +34,6 @@ choice is recorded on [Audit](/guide/admin/audit).
 
 | What you see | What it means | What to do |
 |---|---|---|
-| The route table is nearly full | The instance has a lot of sites, Paths or share links for its route store. | Switch to Compact; if it is compact already, archive sites nobody uses, or ask whoever runs {{instance:name}}. |
+| The route table is nearly full | The instance has a lot of sites, Paths or share links for its route store. | Switch to Compact; if it is compact already, archive sites and Paths nobody uses (archived ones have no entry), or ask whoever runs {{instance:name}}, who can also lower how many live Paths a site may have. |
 | The rewrite's count doesn't move | Maintenance runs every 15 minutes, and does a share of the sites each time. | Wait for the next runs. If it still doesn't move, ask whoever runs {{instance:name}} to check maintenance's logs. |
 | "This page is for the instance's admins." | Your address isn't one of the instance's admins. | Ask whoever runs {{instance:name}}. |

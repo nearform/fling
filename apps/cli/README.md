@@ -355,7 +355,7 @@ change it; the site's publishers can make new Paths. On a Fling with Paths (the 
 capability):
 
 ```sh
-fling paths payments-plans                        # its Paths: folder, title, version, state, can you publish, updated
+fling paths payments-plans                        # its Paths: folder, title, version, state, can you publish, updated; how many are live
 fling versions payments-plans --path PAY-412      # the Path's own versions (* = live)
 fling files payments-plans --path PAY-412         # the files of its live version (or give a version id)
 fling rollback payments-plans <versionId> --path PAY-412   # roll back only the Path
@@ -365,6 +365,11 @@ fling paths archive payments-plans PAY-412        # take it off the site (404), 
 fling paths delete payments-plans PAY-412         # delete it and its versions (asks first unless --yes)
 fling pull payments-plans --path PAY-412          # its files, to change and deploy back to the Path
 ```
+
+A site may have as many live Paths (published, not archived) as its Fling allows: `fling paths`
+says how many it has of that limit (the instance's `limits.pathsPerSite`, 1000 unless it sets
+fewer). Publishing to a new Path, or bringing back an archived one, past it is refused with
+`too_large`: archive one with `fling paths archive`, or publish to an existing Path.
 
 **The home page.** A site's home page (its root `index.html`) can list its Paths, three ways:
 

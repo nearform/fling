@@ -4,7 +4,7 @@
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { PathDetail, SitePath } from '@fling/shared'
+import { MAX_PATHS_PER_SITE, type PathDetail, type SitePath } from '@fling/shared'
 import { PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -62,7 +62,7 @@ const version = (id: string, createdAt: string) => ({
 })
 
 /** A Fling with Paths (unless `capabilities` says otherwise) holding team's Path PAY-1. */
-async function fling(capabilities: object = { paths: true }, json = false) {
+async function fling(capabilities: object = { paths: true }, json = false, extra: object = {}) {
   let current = sitePath()
   const bodies: { method: string; path: string; body: unknown }[] = []
   const record = (method: string, url: URL, init: RequestInit) =>
@@ -71,7 +71,11 @@ async function fling(capabilities: object = { paths: true }, json = false) {
       path: url.pathname + url.search,
       body: init.body ? JSON.parse(String(init.body)) : undefined,
     })
-  const instance = { ...INSTANCE, capabilities: { ...INSTANCE.capabilities, ...capabilities } }
+  const instance = {
+    ...INSTANCE,
+    capabilities: { ...INSTANCE.capabilities, ...capabilities },
+    ...extra,
+  }
   const m = mockFetch({
     'GET /.well-known/fling': () => jsonResponse(instance),
     'GET /api/sites/team/paths': () =>
@@ -140,6 +144,20 @@ describe('fling paths <site>', () => {
     expect(hints).toContain('fling paths init')
     expect(hints).toMatch(/no index\.html of its own/)
     expect(hints).toMatch(/without a Paths block lists no Paths/)
+  })
+
+  it('says how many live Paths the site has of the most the Fling allows', async () => {
+    const { ctx, log } = await fling({ paths: true }, false, { limits: { pathsPerSite: 200 } })
+    await runPaths(ctx, 'team')
+    expect(log.lines.join('\n')).toMatch(/1 of 200 live Paths .*archived ones don't count/)
+  })
+
+  it('falls back to the code’s limit on a Fling that publishes none', async () => {
+    const { ctx, log } = await fling()
+    await runPaths(ctx, 'team')
+    expect(log.lines.join('\n')).toContain(
+      `1 of ${MAX_PATHS_PER_SITE.toLocaleString('en-GB')} live Paths`
+    )
   })
 
   it('prints the list as JSON with --json', async () => {

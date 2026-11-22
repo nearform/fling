@@ -131,6 +131,35 @@ describe('commands', () => {
     expect(await names('name')).toEqual(['new', 'old'])
   })
 
+  it('ls --limit prints one page, then the command for the next; --after asks for it', async () => {
+    const store = await loggedInStore()
+    const m = mockFetch({
+      '/api/sites': url =>
+        url.searchParams.get('cursor')
+          ? jsonResponse({ sites: [site({ name: 'gamma' })], cursor: null })
+          : jsonResponse({
+              sites: [site({ name: 'alpha' }), site({ name: 'beta' })],
+              cursor: 'c1',
+            }),
+    })
+    const first = await testContext({ store, fetch: m.fetch })
+    await runList(first.ctx, { sort: 'name', limit: 2 })
+    expect(m.calls[0]?.url.searchParams.get('limit')).toBe('2')
+    expect(first.out.content()).toContain('More sites: fling ls --sort name --limit 2 --after c1')
+    const next = await testContext({ store, fetch: m.fetch, json: true })
+    await runList(next.ctx, { sort: 'name', limit: 2, after: 'c1' })
+    expect(m.calls[1]?.url.searchParams.get('cursor')).toBe('c1')
+    expect(JSON.parse(next.out.content())).toMatchObject({
+      sites: [{ name: 'gamma' }],
+      cursor: null,
+    })
+    // Without --limit, every site: nothing asks the server for a page.
+    const all = await testContext({ store, fetch: m.fetch })
+    await runList(all.ctx, {})
+    expect(m.calls[2]?.url.searchParams.has('limit')).toBe(false)
+    expect(all.out.content()).not.toContain('More sites')
+  })
+
   it('ls --shared lists the sites shared with you, newest first, with owner and how', async () => {
     const store = await loggedInStore()
     const shared = (name: string, updatedAt: string, groups: string[]) => ({

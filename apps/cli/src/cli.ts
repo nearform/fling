@@ -10,12 +10,12 @@ import {
   FORM_TEMPLATE_NAMES,
   FORMS_FILE,
   RESPONSE_EXPORT_FORMATS,
+  SITE_LIST_PAGE_MAX,
   SITE_SORTS,
-  type SiteSort,
 } from '@fling/shared'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import chalk from 'chalk'
-import { Command, Option } from 'commander'
+import { Command, InvalidArgumentError, Option } from 'commander'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
@@ -48,6 +48,7 @@ import { runPull } from './commands/pull.ts'
 import { runLogs, runSecretsList, runSecretsRemove, runSecretsSet } from './commands/servers.ts'
 import { runSetup } from './commands/setup.ts'
 import {
+  type ListOptions,
   runAccess,
   runArchive,
   runFiles,
@@ -116,6 +117,17 @@ ${chalk.bold(brand.primary('Examples:'))}
 ${chalk.dim(`Exit codes: 0 ok · 1 error · 2 not logged in · 3 forbidden
 Env:        ${ENV.apiKey} · ${ENV.url} · ${ENV.configDir} · ${ENV.debug}`)}`
   )
+
+/** An option's value as a whole number of at least 1 (commander's usage error otherwise). */
+function positiveInt(flag: string) {
+  return (value: string) => {
+    const n = Number(value)
+    if (!Number.isInteger(n) || n < 1) {
+      throw new InvalidArgumentError(`${flag} takes a whole number of at least 1`)
+    }
+    return n
+  }
+}
 
 /** Run a command with a context built from the global options; print + exit-code any error. */
 function action<A extends unknown[]>(handler: (ctx: CommandContext, ...args: A) => Promise<void>) {
@@ -324,10 +336,20 @@ program
       .choices(SITE_SORTS)
       .default(DEFAULT_SITE_SORT)
   )
+  .addOption(
+    new Option(
+      '--limit <n>',
+      `list one page of at most n sites (up to ${SITE_LIST_PAGE_MAX}), then the command for the next`
+    ).argParser(positiveInt('--limit'))
+  )
+  .addOption(
+    new Option('--after <cursor>', 'with --limit: list the page after this one (from its command)')
+  )
   .action(
-    action((ctx, opts: { archived?: boolean; shared?: boolean; sort?: SiteSort }) =>
-      opts.shared ? runListShared(ctx, opts) : runList(ctx, opts)
-    )
+    action((ctx, opts: { shared?: boolean } & ListOptions) => {
+      if (opts.after && opts.limit === undefined) throw new CliError('--after needs --limit')
+      return opts.shared ? runListShared(ctx, opts) : runList(ctx, opts)
+    })
   )
 program
   .command('info <name>')

@@ -2,15 +2,17 @@
  * Admin → Users (admins only; the API answers 404 to anyone else): every user of the instance, by
  * email, searched by email prefix and paged with "Load more"; Impersonate (with a confirmation)
  * on everyone but yourself and other admins; guests marked (invited from outside by a share or a
- * group). What admins did is on Admin → Audit.
+ * group). Each user's Sites link opens All sites narrowed to the sites they own or publish. What
+ * admins did is on Admin → Audit.
  */
 import type { AdminUser } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
 import { useDeferredValue, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PageHeader } from '../components/PageHeader'
 import { useAdminUsers, useImpersonation, useMe } from '../hooks/queries'
-import { impersonateBlocked, showsAdmin } from '../lib/admin'
+import { allSitesOf, impersonateBlocked, showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { fullDate, timeAgo } from '../lib/format'
 
@@ -68,7 +70,15 @@ function UsersTable({
                 <td className="text-secondary">
                   <When iso={u.lastSignInAt} never="Unknown" />
                 </td>
-                <td className="text-right tabular-nums">{u.siteCount}</td>
+                <td className="text-right">
+                  <Link
+                    className="link link-hover text-sm"
+                    to={allSitesOf(u.email)}
+                    aria-label={`Sites ${u.email} owns or publishes`}
+                  >
+                    Sites
+                  </Link>
+                </td>
                 <td className="text-right">
                   {why ? (
                     <span className="text-xs text-muted">{why}</span>

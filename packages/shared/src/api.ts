@@ -116,7 +116,16 @@ export const SiteDetailSchema = SiteWithAudienceSchema.extend({
 })
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 
-export const SiteListSchema = z.object({ sites: z.array(SiteSchema) })
+/**
+ * GET /api/sites?archived=&sort=&limit=&cursor= — the caller's sites, in `sort` order. With
+ * `limit`, one page of at most that many (`SITE_LIST_PAGE_MAX`) and the cursor for the next; without
+ * it, every one (and no cursor).
+ */
+export const SiteListSchema = z.object({
+  sites: z.array(SiteSchema),
+  /** pass back as `cursor` for the next page; null or absent: no more */
+  cursor: z.string().nullable().optional(),
+})
 
 /**
  * One of a site's Paths (`paths` capability; paths.ts in the API): a top-level folder with its own
@@ -179,7 +188,12 @@ export const SharedSiteSchema = z.object({
 })
 export type SharedSite = z.infer<typeof SharedSiteSchema>
 
-export const SharedSiteListSchema = z.object({ sites: z.array(SharedSiteSchema) })
+/** GET /api/shared?sort=&limit=&cursor= — paged as GET /api/sites is. */
+export const SharedSiteListSchema = z.object({
+  sites: z.array(SharedSiteSchema),
+  /** pass back as `cursor` for the next page; null or absent: no more */
+  cursor: z.string().nullable().optional(),
+})
 
 /**
  * GET /api/sites/:name/versions/:versionId/files — the files in one version (owner only; 404 for
@@ -465,8 +479,6 @@ export const AdminUserSchema = z.object({
   userSlug: z.string(),
   createdAt: z.string().nullable(),
   lastSignInAt: z.string().nullable(),
-  /** sites the user holds, archived ones included */
-  siteCount: z.number(),
   admin: z.boolean(),
   /** outside the email policy, on a live guest invitation (see GET /api/admin/invitations) */
   guest: z.boolean(),
@@ -480,8 +492,9 @@ export const AdminUserListSchema = z.object({
 export type AdminUserList = z.infer<typeof AdminUserListSchema>
 
 /**
- * GET /api/admin/sites — every site on the instance, by name, in one response (clients search and
- * sort it): its listing, nothing of the owner's (versions, share link, audience).
+ * GET /api/admin/sites?q=<name prefix>&owner=<email>&after=&limit= — one page of every site on the
+ * instance, by name: its listing, nothing of the owner's (versions, share link, audience). `owner`:
+ * only the sites that address owns or publishes, directly or through a group.
  */
 export const AdminSiteSchema = z.object({
   name: z.string(),
@@ -499,8 +512,8 @@ export const AdminSiteSchema = z.object({
 export type AdminSite = z.infer<typeof AdminSiteSchema>
 export const AdminSiteListSchema = z.object({
   sites: z.array(AdminSiteSchema),
-  /** the list stops at the server's ceiling: there are more sites than it holds */
-  truncated: z.boolean(),
+  /** pass back as `after` for the next page; null: no more */
+  cursor: z.string().nullable(),
 })
 export type AdminSiteList = z.infer<typeof AdminSiteListSchema>
 

@@ -593,7 +593,7 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await expect(store.putSite(copy)).rejects.toThrow(SiteChanged)
         expect(await store.findSite(s.name)).toBeNull()
         expect(await store.listSites(s.email)).toEqual([])
-        expect((await store.listAllSites({ max: 1000, prefix: s.name })).sites).toEqual([])
+        expect((await store.pageSites({ limit: 1000, prefix: s.name })).sites).toEqual([])
       })
 
       it('deleteSite of a site that does not exist is a no-op', async () => {
@@ -613,9 +613,9 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           const f = family()
           const s = site(email(), f.name('a'), { restricted: true })
           await store.createSite(s)
-          expect(await store.listAllSites({ prefix: f.prefix, max: 10 })).toEqual({
+          expect(await store.pageSites({ prefix: f.prefix, limit: 10 })).toEqual({
             sites: [{ ...listing(s), restricted: true, access: 'only_me' }],
-            truncated: false,
+            more: false,
           })
           const shared = {
             ...s,
@@ -624,36 +624,47 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
             updatedAt: LATER,
           }
           await store.putSite(shared)
-          expect((await store.listAllSites({ prefix: f.prefix, max: 10 })).sites).toEqual([
+          expect((await store.pageSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
             { ...listing(shared), access: 'people' },
           ])
           const archived = { ...shared, visibility: 'public' as const, archived: true }
           await store.putSite(archived)
-          expect((await store.listAllSites({ prefix: f.prefix, max: 10 })).sites).toEqual([
+          expect((await store.pageSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
             { ...listing(archived), access: 'public' },
           ])
           await store.deleteSite(archived)
-          expect(await store.listAllSites({ prefix: f.prefix, max: 10 })).toEqual({
+          expect(await store.pageSites({ prefix: f.prefix, limit: 10 })).toEqual({
             sites: [],
-            truncated: false,
+            more: false,
           })
         })
 
-        it('lists every owner’s sites by name in byte order, across query pages, up to max', async () => {
+        it('pages every owner’s sites by name in byte order, under a prefix, after a name', async () => {
           const store = await factory()
           const f = family()
           for (const n of ['c', 'a', 'B', 'd', 'e'])
             await store.createSite(site(email(), f.name(n)))
           await store.createSite(site(email(), `x${f.prefix}`))
           const names = ['B', 'a', 'c', 'd', 'e'].map(f.name)
-          const all = await store.listAllSites({ prefix: f.prefix, max: 10, pageSize: 2 })
-          expect(all.sites.map(x => x.name)).toEqual(names)
-          expect(all.truncated).toBe(false)
-          const exact = await store.listAllSites({ prefix: f.prefix, max: 5, pageSize: 2 })
-          expect([exact.sites.length, exact.truncated]).toEqual([5, false])
-          const cut = await store.listAllSites({ prefix: f.prefix, max: 3, pageSize: 2 })
-          expect(cut.sites.map(x => x.name)).toEqual(names.slice(0, 3))
-          expect(cut.truncated).toBe(true)
+          const seen: string[] = []
+          let after: string | null = null
+          for (let more = true; more; ) {
+            const page = await store.pageSites({ prefix: f.prefix, limit: 2, after })
+            expect(page.sites.length).toBeLessThanOrEqual(2)
+            seen.push(...page.sites.map(x => x.name))
+            after = page.sites.at(-1)?.name ?? after
+            more = page.more
+          }
+          expect(seen).toEqual(names)
+          const whole = await store.pageSites({ prefix: f.prefix, limit: 10 })
+          expect([whole.sites.map(x => x.name), whole.more]).toEqual([names, false])
+          const cut = await store.pageSites({ prefix: f.prefix, limit: 3 })
+          expect([cut.sites.map(x => x.name), cut.more]).toEqual([names.slice(0, 3), true])
+          expect(
+            (await store.pageSites({ prefix: f.prefix, limit: 10, after: f.name('a') })).sites.map(
+              x => x.name
+            )
+          ).toEqual(names.slice(2))
         })
 
         it("another user's createSite on a held name leaves the holder's entry; an access change rewrites it", async () => {
@@ -662,12 +673,12 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           const s = site(email(), f.name('held'))
           await store.createSite(s)
           expect(await store.createSite(site(email(), s.name))).toBeNull()
-          expect((await store.listAllSites({ prefix: f.prefix, max: 10 })).sites).toEqual([
+          expect((await store.pageSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
             { ...listing(s), access: 'members' },
           ])
           // Only the access level changed (nothing in the listing did): rewritten all the same.
           await store.putSite({ ...s, visibility: 'public' })
-          expect((await store.listAllSites({ prefix: f.prefix, max: 10 })).sites).toEqual([
+          expect((await store.pageSites({ prefix: f.prefix, limit: 10 })).sites).toEqual([
             { ...listing(s), access: 'public' },
           ])
         })

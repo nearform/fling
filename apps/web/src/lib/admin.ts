@@ -22,6 +22,10 @@ export function impersonationNotice(me: Me | null | undefined): string | null {
 /** Whether the side nav offers Admin: admins, in their own session. */
 export const showsAdmin = (me: Me | null | undefined) => me?.admin === true && !me.impersonator
 
+/** All sites (the Sites page's admin tab), narrowed to the sites `email` owns or publishes. */
+export const allSitesOf = (email: string) =>
+  `/?${new URLSearchParams({ view: 'all', owner: email })}`
+
 /** Why a row has no Impersonate button (the API refuses these too); null: it has one. */
 export function impersonateBlocked(me: Me, user: AdminUser): string | null {
   if (user.email === me.email) return 'You'

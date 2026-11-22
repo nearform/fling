@@ -118,6 +118,52 @@ export async function listShared(
   return sortSites(res.sites, opts.sort)
 }
 
+/** One page of a list: at most `limit` sites after `cursor`, in `sort` order. */
+export interface PageOptions {
+  sort?: SiteSort
+  limit: number
+  cursor?: string
+}
+
+/** A page, and the cursor for the next (null: no more). */
+export interface SitesPage<T> {
+  sites: T[]
+  cursor: string | null
+}
+
+const pageQuery = (opts: PageOptions) => ({
+  sort: opts.sort,
+  limit: opts.limit,
+  cursor: opts.cursor,
+})
+
+/**
+ * One page of the caller's sites (`listSites` for every one). A server that doesn't page answers
+ * with the whole list and no cursor, which this sorts as `listSites` does.
+ */
+export async function listSitesPage(
+  client: ApiClient,
+  opts: PageOptions & { archived?: boolean }
+): Promise<SitesPage<Site>> {
+  const res = await client.request('GET', '/api/sites', {
+    schema: SiteListSchema,
+    query: { archived: opts.archived ? 1 : undefined, ...pageQuery(opts) },
+  })
+  return { sites: sortSites(res.sites, opts.sort), cursor: res.cursor ?? null }
+}
+
+/** One page of the sites shared with the caller, as `listSitesPage`. */
+export async function listSharedPage(
+  client: ApiClient,
+  opts: PageOptions
+): Promise<SitesPage<SharedSite>> {
+  const res = await client.request('GET', '/api/shared', {
+    schema: SharedSiteListSchema,
+    query: pageQuery(opts),
+  })
+  return { sites: sortSites(res.sites, opts.sort), cursor: res.cursor ?? null }
+}
+
 export function getSite(client: ApiClient, name: string): Promise<SiteDetail> {
   return client.request('GET', sitePath(name), { schema: SiteDetailSchema })
 }

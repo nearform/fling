@@ -448,8 +448,11 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
   suggestions)? With `path`, checks the name `fling_deploy` would generate for that file or folder.
 - `fling_find_files { query?, limit?, days? }` — recent `.html`/`.zip` files and folders with an
   `index.html` in Downloads, Desktop and Claude output folders (last 14 days by default).
-- `fling_list { archived?, sort? }` — the user's sites with URL, visibility and share link, last
-  updated first; `sort: "created"` (newest first) or `"name"` (A–Z) for another order.
+- `fling_list { archived?, sort?, limit?, cursor? }` — the user's sites with URL, visibility and
+  share link, last updated first; `sort: "created"` (newest first) or `"name"` (A–Z) for another
+  order. Without `limit` it lists them all. With `limit` it lists one page; when more remain, the
+  result gives a `cursor`: call again with it (and the same `sort` and `limit`) for the next page.
+  Page when the user has many sites and only wants the first few.
   `shared: true` lists instead the restricted sites other people have shared with the user (by
   address or through a group), with owner and review link: use it when the user asks what has
   been shared with them. Only the owner manages those sites (and the instance's admins, from the

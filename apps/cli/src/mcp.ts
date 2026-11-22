@@ -39,6 +39,7 @@ import {
   describeFormsSummary,
   describeGroup,
   describeGroups,
+  describeMoreSites,
   describeNotificationSettings,
   describePathDetail,
   describePaths,
@@ -185,7 +186,9 @@ import {
   listGroups,
   listPaths,
   listShared,
+  listSharedPage,
   listSites,
+  listSitesPage,
   notificationsEnabled,
   pathPublishEnabled,
   pathsEnabled,
@@ -1412,6 +1415,9 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   server.registerTool(t.list.name, serverTool(t.list), args =>
     run(t.list.name, args.server, async target => {
       const { client, url } = target
+      // With `limit`, one page after `cursor`; without it, every site.
+      const paged = args.limit
+      const page = { sort: args.sort, ...(args.cursor ? { cursor: args.cursor } : {}) }
       if (args.shared) {
         const instance = await target.instance()
         if (instance && !audiencesEnabled(instance)) {
@@ -1419,15 +1425,25 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             `${instance.name} (${serverLabel(url)}) can't limit a site to listed people, so nothing is shared`
           )
         }
-        const sites = await listShared(client, { sort: args.sort })
+        const { sites, cursor } = paged
+          ? await listSharedPage(client, { ...page, limit: paged })
+          : { sites: await listShared(client, { sort: args.sort }), cursor: undefined }
         const lines = sites.map(describeSharedSite).join('\n')
         return {
-          summary: `${sites.length} site(s) shared with you on ${serverLabel(url)}${lines ? `:\n${lines}` : ''}`,
-          data: { sites },
+          summary: `${sites.length} site(s) shared with you on ${serverLabel(url)}${lines ? `:\n${lines}` : ''}${describeMoreSites(cursor)}`,
+          data: { sites, ...(paged ? { cursor } : {}) },
         }
       }
-      const sites = await listSites(client, { archived: args.archived, sort: args.sort })
-      return { summary: `${sites.length} site(s) on ${serverLabel(url)}`, data: { sites } }
+      const { sites, cursor } = paged
+        ? await listSitesPage(client, { ...page, archived: args.archived, limit: paged })
+        : {
+            sites: await listSites(client, { archived: args.archived, sort: args.sort }),
+            cursor: undefined,
+          }
+      return {
+        summary: `${sites.length} site(s) on ${serverLabel(url)}${describeMoreSites(cursor)}`,
+        data: { sites, ...(paged ? { cursor } : {}) },
+      }
     })
   )
 

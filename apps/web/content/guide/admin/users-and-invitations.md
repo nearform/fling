@@ -24,7 +24,8 @@ An admin signs in like everyone else, so their address must be one {{instance:na
 an admin gives you more than the Admin pages:
 
 - You can open and review any site, including ones restricted to a few people. **Sites → All
-  sites** lists every site on the instance.
+  sites** lists every site on the instance by name, a page at a time: type the start of a name to
+  find one, and choose **Load more** for the next page.
 - From the web app, you can change any site as its owner would: who can open it, its settings, its
   owners and publishers, its share link; roll it back, archive it, delete it, and delete any
   comment.
@@ -39,7 +40,9 @@ other people's: a leaked key can't do what your browser can.
 ### Users
 
 **Admin → Users** lists everyone who has signed in to {{instance:name}}: their name and email,
-when they first signed in, when they last did, and how many sites they own. Admins carry an
+when they first signed in and when they last did. Each row's **Sites** link opens **All sites**
+showing only the sites that person owns or publishes, directly or through a group; clear the chip
+above the list to see everyone's again. Admins carry an
 **Admin** badge. <!-- requires: invites -->People invited from outside by a share or a group carry
 a **Guest** badge: they review only what is shared with them.<!-- /requires -->
 

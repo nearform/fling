@@ -6,16 +6,16 @@
  * capability, a Shared tab (`?view=shared`) lists the restricted sites others have shared with
  * you, each a `SharedSiteCard`, searched and ordered the same way. A guest sees only that list,
  * with no tabs and no quick start: they review what is shared with them. Admins also get All sites
- * (`?view=all`): every site on the instance from the site directory, fetched whole (up to the
- * server's ceiling, with a note when it stops short) and searched and ordered the same way, each
- * an `AdminSiteCard` (the listing only).
+ * (`?view=all`): every site on the instance from the site directory, by name only, a page at a
+ * time ("Load more"); its search is a name prefix the server answers (as you pause typing), and
+ * `?owner=<email>` (Admin → Users links it) narrows it to the sites that address owns or publishes,
+ * shown as a chip that clears it. Each is an `AdminSiteCard` (the listing only).
  *
  * With the `thumbnails` capability every tab shows each site's thumbnail, and the header's
  * List / Grid switch lays them out as rows or as thumbnail-led cards in as many columns as the
  * width holds; the choice is kept per browser. The lists use the page's whole width.
  */
 import {
-  type AdminSite,
   DEFAULT_SITE_SORT,
   type SharedSite,
   SITE_SORTS,
@@ -38,10 +38,11 @@ import { SiteSearch } from '../components/SiteSearch'
 import { SitesLayoutToggle } from '../components/SitesLayoutToggle'
 import { useInstance } from '../hooks/instance'
 import { useAdminSites, useMe, useSharedSites, useSites } from '../hooks/queries'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
-import { countLabel, filterSites } from '../lib/search'
+import { allSitesLabel, countLabel, filterSites } from '../lib/search'
 import {
   chooseSiteSort,
   parseSiteSort,
@@ -69,6 +70,8 @@ function SitesHeader({
   count,
   query,
   onQueryChange,
+  searchPlaceholder,
+  searchLabel,
   sort,
   onSortChange,
   layout,
@@ -78,7 +81,10 @@ function SitesHeader({
   count: string
   query: string
   onQueryChange: (q: string) => void
-  sort: SiteSort
+  searchPlaceholder?: string
+  searchLabel?: string
+  /** absent where the list has one order (All sites, by name) */
+  sort?: SiteSort
   onSortChange: (sort: SiteSort) => void
   /** absent without the `thumbnails` capability: rows only */
   layout?: SitesLayout
@@ -102,19 +108,27 @@ function SitesHeader({
         </div>
       </div>
       <div className="flex w-full items-center gap-2 sm:w-auto">
-        <SiteSearch value={query} onChange={onQueryChange} className="min-w-0 flex-1 sm:w-72" />
-        <select
-          className="select select-sm w-auto shrink-0"
-          aria-label="Order sites by"
-          value={sort}
-          onChange={e => onSortChange(parseSiteSort(e.target.value))}
-        >
-          {SITE_SORTS.map(s => (
-            <option key={s} value={s}>
-              {SITE_SORT_LABELS[s]}
-            </option>
-          ))}
-        </select>
+        <SiteSearch
+          value={query}
+          onChange={onQueryChange}
+          className="min-w-0 flex-1 sm:w-72"
+          {...(searchPlaceholder && { placeholder: searchPlaceholder })}
+          {...(searchLabel && { label: searchLabel })}
+        />
+        {sort && (
+          <select
+            className="select select-sm w-auto shrink-0"
+            aria-label="Order sites by"
+            value={sort}
+            onChange={e => onSortChange(parseSiteSort(e.target.value))}
+          >
+            {SITE_SORTS.map(s => (
+              <option key={s} value={s}>
+                {SITE_SORT_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        )}
         {layout && <SitesLayoutToggle value={layout} onChange={onLayoutChange} />}
       </div>
     </header>
@@ -171,18 +185,21 @@ function SharedList({
   )
 }
 
-/** All sites' body (admins): loading, an error, nothing, nothing matching, or the sites. */
+/**
+ * All sites' body (admins): loading, an error, nothing, nothing matching the name prefix or the
+ * owner, or the sites loaded so far and "Load more" while there are more.
+ */
 function AllSitesList({
   list,
-  shown,
   query,
+  owner,
   me,
   layout,
   onClear,
 }: {
   list: ReturnType<typeof useAdminSites>
-  shown: AdminSite[]
   query: string
+  owner: string
   me: string
   layout: SitesLayout
   onClear: () => void
@@ -198,28 +215,63 @@ function AllSitesList({
       </div>
     )
   }
-  if (list.data.sites.length === 0) {
+  const sites = list.data.pages.flatMap(p => p.sites)
+  if (sites.length === 0) {
+    if (query.trim()) return <NoMatch query={query} label="" onClear={onClear} starts />
     return (
       <div className="surface-panel text-center text-sm text-secondary">
-        Nobody has flung anything on this instance yet.
+        {owner
+          ? `${owner} owns or publishes no sites.`
+          : 'Nobody has flung anything on this instance yet.'}
       </div>
     )
   }
-  if (shown.length === 0) return <NoMatch query={query} label="" onClear={onClear} />
   return (
     <div className="space-y-3">
       <SiteItems layout={layout}>
-        {shown.map(site => (
+        {sites.map(site => (
           <li key={site.name}>
             <AdminSiteCard site={site} mine={site.owner === me} layout={layout} />
           </li>
         ))}
       </SiteItems>
-      {list.data.truncated && (
-        <p className="text-center text-sm text-secondary">
-          The list stops at {list.data.sites.length.toLocaleString()} sites, the most it shows.
-        </p>
+      {list.hasNextPage && (
+        <div className="text-center">
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => list.fetchNextPage()}
+            disabled={list.isFetchingNextPage}
+          >
+            {list.isFetchingNextPage ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              'Load more'
+            )}
+          </button>
+        </div>
       )}
+    </div>
+  )
+}
+
+/** The owner All sites is narrowed to, as a chip that clears it. */
+function OwnerChip({ owner, onClear }: { owner: string; onClear: () => void }) {
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-secondary">Owned or published by</span>
+      <span className="badge badge-outline gap-1 pr-0.5">
+        {owner}
+        <button
+          type="button"
+          className="btn btn-ghost btn-xs btn-square h-5 min-h-5 w-5"
+          aria-label={`Show every owner's sites, not only ${owner}'s`}
+          title="Every owner"
+          onClick={onClear}
+        >
+          <XMarkIcon className="h-3.5 w-3.5" aria-hidden />
+        </button>
+      </span>
     </div>
   )
 }
@@ -236,11 +288,22 @@ function Loading() {
   )
 }
 
-function NoMatch({ query, label, onClear }: { query: string; label: string; onClear: () => void }) {
+function NoMatch({
+  query,
+  label,
+  onClear,
+  starts = false,
+}: {
+  query: string
+  label: string
+  onClear: () => void
+  /** the search is a name prefix (All sites) */
+  starts?: boolean
+}) {
   return (
     <div className="surface-panel space-y-3 text-center text-sm text-secondary">
       <p>
-        No {label}sites match{' '}
+        No {label}sites {starts ? 'have a name starting with' : 'match'}{' '}
         <span className="font-medium text-base-content">"{query.trim()}"</span>
       </p>
       <button type="button" className="btn btn-sm" onClick={onClear}>
@@ -263,7 +326,9 @@ export default function Sites() {
   const all = view === 'all'
   const query = params.get('q') ?? ''
   const searching = query.trim() !== ''
-  const allList = useAdminSites(all)
+  const owner = all ? (params.get('owner') ?? '').trim().toLowerCase() : ''
+  const prefix = useDebouncedValue(query.trim().toLowerCase())
+  const allList = useAdminSites({ q: all ? prefix : '', owner }, all)
   const [savedSort, setSavedSort] = useLocalStoragePreference<string>(
     'sitesSort',
     DEFAULT_SITE_SORT
@@ -279,16 +344,12 @@ export default function Sites() {
     () => sortSites(filterSites(list.data ?? [], query), sort),
     [list.data, query, sort]
   )
-  const allShown = useMemo(
-    () => sortSites(filterSites(allList.data?.sites ?? [], query), sort),
-    [allList.data, query, sort]
-  )
   const sharedShown = useMemo(
     () => sortSites(filterSites(sharedList.data ?? [], query), sort),
     [sharedList.data, query, sort]
   )
 
-  const update = (key: 'view' | 'q' | 'sort', value: string | null) =>
+  const update = (key: 'view' | 'q' | 'sort' | 'owner', value: string | null) =>
     setParams(
       prev => {
         const next = new URLSearchParams(prev)
@@ -312,12 +373,10 @@ export default function Sites() {
         title={all ? 'All sites' : shared ? 'Shared with you' : 'Your sites'}
         count={
           all
-            ? countLabel({
-                total: allList.data?.sites.length,
-                shown: allShown.length,
-                archived: false,
-                all: true,
-                searching,
+            ? allSitesLabel({
+                loaded: allList.data?.pages.reduce((n, p) => n + p.sites.length, 0),
+                more: allList.hasNextPage,
+                filtered: searching || owner !== '',
               })
             : shared
               ? countLabel({
@@ -331,7 +390,9 @@ export default function Sites() {
         }
         query={query}
         onQueryChange={setQuery}
-        sort={sort}
+        {...(all
+          ? { searchPlaceholder: 'Name starts with…', searchLabel: 'Search all sites by name' }
+          : { sort })}
         onSortChange={setSort}
         {...(thumbnails && { layout })}
         onLayoutChange={setLayout}
@@ -391,11 +452,13 @@ export default function Sites() {
         </div>
       )}
 
+      {all && owner && <OwnerChip owner={owner} onClear={() => update('owner', null)} />}
+
       {all ? (
         <AllSitesList
           list={allList}
-          shown={allShown}
           query={query}
+          owner={owner}
           me={me?.email ?? ''}
           layout={layout}
           onClear={() => setQuery('')}

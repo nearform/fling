@@ -259,6 +259,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 |---|---|
 | `fling ls [--archived] [--sort updated\|created\|name]` | your sites, last updated first (`created`: newest first; `name`: A–Z) |
 | `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
+| `fling ls … --limit <n> [--after <cursor>]` | one page of at most n sites, in the same order, then the command for the next page (`--after` the cursor it prints); without `--limit`, every site |
 | `fling info <name>` / `fling versions <name> [--path <folder>]` | details and version history, with who published each version; `--path`: a Path's own versions |
 | `fling pull <name> [dir] [--path <folder>] [--version-id <id>] [--force]` | download a site's files to change them; `fling deploy <dir>` publishes on the version pulled |
 | `fling files <name> [versionId] [--path <folder>]` | the files in the live version (or an earlier one), or a Path's |

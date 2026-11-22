@@ -61,7 +61,7 @@ import {
   SERVER_LOG_DAYS,
   ServerConfigSchema,
 } from './site-server.ts'
-import { SITE_SORTS } from './site-sort.ts'
+import { SITE_LIST_PAGE_MAX, SITE_SORTS } from './site-sort.ts'
 import { isStorableText, STORABLE_TEXT_RULE } from './text.ts'
 
 /** fling_publish: total decoded bytes per call (fits a ~6 MB request once base64-encoded). */
@@ -248,6 +248,13 @@ const pathsLimitSentence = (w: Pick<McpWording, 'name' | 'pathsPerSite'>) =>
 /** Whether an error body (`{ error: { code, … } }`'s `error`) is the live Paths limit's refusal. */
 export const isPathsLimitError = (error: { code?: unknown; pathsPerSite?: unknown } | undefined) =>
   error?.code === 'too_large' && typeof error.pathsPerSite === 'number'
+
+/** fling_list's line for a page with more after it; '' at the end (no cursor). */
+export function describeMoreSites(cursor: string | null | undefined): string {
+  return cursor
+    ? `\nMore sites: call fling_list again with cursor: ${cursor} (and the same sort and limit)`
+    : ''
+}
 
 /** A path publish (publish-path.ts): the Path at one top-level folder of the site. */
 export const PATH_PUBLISH_NOTE =
@@ -702,7 +709,8 @@ export function mcpToolsFor(w: McpWording) {
       description:
         "List the user's Fling sites with URL, visibility and share link. With `shared: true`, list instead " +
         "the restricted sites other people have shared with the user (by address or through a group they're in), " +
-        'with URL, review link and owner.',
+        'with URL, review link and owner. Lists every site unless `limit` asks for one page; when more ' +
+        'remain, the result gives the `cursor` to call again with.',
       inputSchema: {
         archived: z.boolean().optional().describe('List archived sites instead of live ones'),
         shared: z
@@ -714,6 +722,21 @@ export function mcpToolsFor(w: McpWording) {
           .optional()
           .describe(
             'Order: updated (last updated, newest first; the default), created (newest first) or name (A–Z)'
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(SITE_LIST_PAGE_MAX)
+          .optional()
+          .describe(
+            `List one page of at most this many sites (up to ${SITE_LIST_PAGE_MAX}); omit to list them all`
+          ),
+        cursor: z
+          .string()
+          .optional()
+          .describe(
+            'With limit: the cursor a previous page returned, to list the next page (same order)'
           ),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },

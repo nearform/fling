@@ -39,7 +39,9 @@ import {
   getSite,
   groupsEnabled,
   listShared,
+  listSharedPage,
   listSites,
+  listSitesPage,
   pathVersionFiles,
   type RoleList,
   rollback,
@@ -56,41 +58,99 @@ import {
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 import { pathFolder, pathsClient } from './paths.ts'
 
-export async function runList(
+/** `ls` and `ls --shared`: `limit` asks for one page, after `after` (a page's cursor). */
+export interface ListOptions {
+  archived?: boolean
+  sort?: SiteSort
+  limit?: number
+  after?: string
+}
+
+/**
+ * The command that lists the next page, after a page with more to come: the same flags, and
+ * `--after` the page's cursor.
+ */
+export function nextPageCommand(
+  opts: ListOptions & { shared?: boolean; limit: number },
+  cursor: string
+): string {
+  return [
+    'fling ls',
+    ...(opts.shared ? ['--shared'] : []),
+    ...(opts.archived ? ['--archived'] : []),
+    ...(opts.sort ? [`--sort ${opts.sort}`] : []),
+    `--limit ${opts.limit}`,
+    `--after ${cursor}`,
+  ].join(' ')
+}
+
+/** A page's rows, then (with more to come) the command for the next page. */
+function printList<T>(
   ctx: CommandContext,
-  opts: { archived?: boolean; sort?: SiteSort }
-): Promise<void> {
-  const sites = await listSites(requireClient(ctx), opts)
-  ctx.out.data({ sites }, () =>
-    renderTable(sites, [
-      { header: 'NAME', value: s => s.name },
-      { header: 'URL', value: s => s.url },
-      {
-        header: 'ACCESS',
-        value: s => accessLabel(s) + (s.archived ? ' (archived)' : ''),
-      },
-      ...(sites.some(s => s.role) ? [{ header: 'ROLE', value: (s: Site) => s.role ?? '-' }] : []),
-      { header: 'SHARE', value: s => s.shareUrl },
-      { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
-    ])
+  page: { sites: T[]; cursor?: string | null },
+  next: (cursor: string) => string,
+  table: () => string
+) {
+  const paged = page.cursor !== undefined
+  ctx.out.data(paged ? { sites: page.sites, cursor: page.cursor } : { sites: page.sites }, () =>
+    page.cursor ? `${table()}\n\nMore sites: ${next(page.cursor)}` : table()
+  )
+}
+
+export async function runList(ctx: CommandContext, opts: ListOptions): Promise<void> {
+  const client = requireClient(ctx)
+  const { limit } = opts
+  const page =
+    limit === undefined
+      ? { sites: await listSites(client, opts) }
+      : await listSitesPage(client, { ...opts, limit, cursor: opts.after })
+  const { sites } = page
+  printList(
+    ctx,
+    page,
+    cursor => nextPageCommand({ ...opts, limit: limit ?? 0 }, cursor),
+    () =>
+      renderTable(sites, [
+        { header: 'NAME', value: s => s.name },
+        { header: 'URL', value: s => s.url },
+        {
+          header: 'ACCESS',
+          value: s => accessLabel(s) + (s.archived ? ' (archived)' : ''),
+        },
+        ...(sites.some(s => s.role) ? [{ header: 'ROLE', value: (s: Site) => s.role ?? '-' }] : []),
+        { header: 'SHARE', value: s => s.shareUrl },
+        { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
+      ])
   )
 }
 
 /** `ls --shared`: the restricted sites others have shared with the caller. */
-export async function runListShared(ctx: CommandContext, opts: { sort?: SiteSort }): Promise<void> {
+export async function runListShared(
+  ctx: CommandContext,
+  opts: Omit<ListOptions, 'archived'>
+): Promise<void> {
   const instance = ctx.config.instance
   if (instance && !audiencesEnabled(instance)) {
     throw new CliError(`${instance.name} can't limit a site to listed people, so nothing is shared`)
   }
-  const sites = await listShared(requireClient(ctx), opts)
-  ctx.out.data({ sites }, () =>
-    renderTable(sites, [
-      { header: 'NAME', value: s => s.name },
-      { header: 'URL', value: s => s.url },
-      { header: 'OWNER', value: s => s.owner },
-      { header: 'VIA', value: s => sharedVia(s) },
-      { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
-    ])
+  const client = requireClient(ctx)
+  const { limit } = opts
+  const page =
+    limit === undefined
+      ? { sites: await listShared(client, opts) }
+      : await listSharedPage(client, { ...opts, limit, cursor: opts.after })
+  printList(
+    ctx,
+    page,
+    cursor => nextPageCommand({ ...opts, shared: true, limit: limit ?? 0 }, cursor),
+    () =>
+      renderTable(page.sites, [
+        { header: 'NAME', value: s => s.name },
+        { header: 'URL', value: s => s.url },
+        { header: 'OWNER', value: s => s.owner },
+        { header: 'VIA', value: s => sharedVia(s) },
+        { header: 'UPDATED', value: s => formatDate(s.updatedAt) },
+      ])
   )
 }
 

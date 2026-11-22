@@ -100,5 +100,7 @@ problem, each warning and problem with its fix. It only looks; it changes nothin
 <!-- requires: servers -->
 - `fling dev`, `fling secrets` and `fling logs` are for [site servers](/guide/servers/what-is-a-site-server).
 <!-- /requires -->
+- `fling ls` lists all your sites. With many, `fling ls --limit 20` lists the first 20 and prints
+  the command for the next page (the same flags with `--after`).
 - `fling help <command>` explains any command. Add `--json` to any command for output a script can
   read.

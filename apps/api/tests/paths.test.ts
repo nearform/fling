@@ -5,10 +5,12 @@
  * routing decision (site-routing.ts) over the route table and the bucket.
  */
 import { createHmac } from 'node:crypto'
+import { MAX_PATHS_PER_SITE } from '@fling/shared'
 import { routeSiteRequest } from '@fling/shared/site-routing'
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '../src/policy.ts'
 import { publishBytes } from '../src/publication.ts'
+import type { PathRecord } from '../src/store/types.ts'
 import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 
 const ALICE = 'alice@example.test'
@@ -62,8 +64,8 @@ const plan = (n: string, body = `<h1>${n}</h1>`) => [
   file(`${n}/index.html`, `<title>Plan ${n}</title>${body}`),
 ]
 
-async function world() {
-  const env = setup()
+async function world(overrides: Parameters<typeof setup>[0] = {}) {
+  const env = setup(overrides)
   const alice = await createUser(env, ALICE)
   const bob = await createUser(env, BOB)
   const carol = await createUser(env, CAROL)
@@ -278,6 +280,88 @@ describe('the Path routes', () => {
     expect(await env.store.getPath(site?.id as string, 'PAY-1')).toBeNull()
     expect((await api(env, alice.key, 'DELETE', '/api/sites/team')).status).toBe(204)
     expect([...env.routeTable.data.keys()].filter(k => k.startsWith('path:'))).toEqual([])
+  })
+})
+
+describe('the live Paths limit (PATHS_PER_SITE_MAX)', () => {
+  const refusal = (body: { error: { code: string; message: string } }) => {
+    expect(body.error.code).toBe('too_large')
+    expect(body.error.message).toMatch(/"team" has 2 live Paths, the most this Fling allows/)
+    expect(body.error.message).toContain('fling paths archive team <folder>')
+  }
+
+  it('refuses a new Path once the site has that many live; an existing one still publishes', async () => {
+    const { env, bob } = await world({ pathsPerSite: 2 })
+    await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await deploy(env, bob.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
+    const third = await stageAs(env, bob.key, 'team', plan('PAY-3'), { path: 'PAY-3' })
+    expect(third.status).toBe(413)
+    refusal(third.body)
+    expect(third.body.error).toMatchObject({ livePaths: 2, pathsPerSite: 2 })
+    const site = await env.store.findSite('team')
+    expect(await env.store.getPath(site?.id as string, 'PAY-3')).toBeNull()
+    expect(
+      (await deploy(env, bob.key, 'team', plan('PAY-1', 'again'), { path: 'PAY-1' })).status
+    ).toBe(200)
+  })
+
+  it('archived Paths don’t count, and unarchiving one is refused at the limit', async () => {
+    const { env, alice, bob } = await world({ pathsPerSite: 2 })
+    await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await deploy(env, bob.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
+    const archive = (folder: string, archived: boolean) =>
+      api(env, alice.key, 'PATCH', `/api/sites/team/paths/${folder}`, { archived })
+    expect((await archive('PAY-1', true)).status).toBe(200)
+    expect((await deploy(env, bob.key, 'team', plan('PAY-3'), { path: 'PAY-3' })).status).toBe(200)
+    const back = await archive('PAY-1', false)
+    expect(back.status).toBe(413)
+    refusal(await json(back))
+    expect(await get(env, 'team', '/PAY-1/')).toBe(404)
+    // Publishing to the archived Path would unarchive it: refused the same way.
+    const again = await stageAs(env, alice.key, 'team', plan('PAY-1', 'new'), { path: 'PAY-1' })
+    expect(again.status).toBe(413)
+    refusal(again.body)
+    expect((await archive('PAY-3', true)).status).toBe(200)
+    expect((await archive('PAY-1', false)).status).toBe(200)
+    expect(await get(env, 'team', '/PAY-1/')).toContain('Plan PAY-1')
+  })
+
+  it('rolling an archived Path back is refused at the limit', async () => {
+    const { env, alice, bob } = await world({ pathsPerSite: 1 })
+    const first = await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
+    await api(env, alice.key, 'PATCH', '/api/sites/team/paths/PAY-1', { archived: true })
+    await deploy(env, bob.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
+    const rolled = await api(env, alice.key, 'POST', '/api/sites/team/paths/PAY-1/current', {
+      versionId: first.body.versionId,
+    })
+    expect(rolled.status).toBe(413)
+    expect((await json(rolled)).error.code).toBe('too_large')
+  })
+
+  it(`still holds every site to ${MAX_PATHS_PER_SITE} Paths in all, archived ones included`, async () => {
+    const { env, bob } = await world()
+    const site = await env.store.findSite('team')
+    const now = env.deps.clock.now().toISOString()
+    for (let i = 0; i < MAX_PATHS_PER_SITE; i++) {
+      await env.store.createPath({
+        siteId: site?.id as string,
+        folder: `OLD-${i}`,
+        id: `old${i}`,
+        currentVersionId: null,
+        owners: { emails: [BOB], groups: [] },
+        publishers: { emails: [], groups: [] },
+        archived: true,
+        title: '',
+        createdBy: BOB,
+        createdAt: now,
+        updatedAt: now,
+      } satisfies PathRecord)
+    }
+    const res = await stageAs(env, bob.key, 'team', plan('NEW'), { path: 'NEW' })
+    expect(res.status).toBe(413)
+    expect(res.body.error.message).toContain(
+      `${MAX_PATHS_PER_SITE} Paths, the most a site may have`
+    )
   })
 })
 

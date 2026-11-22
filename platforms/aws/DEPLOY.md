@@ -125,6 +125,7 @@ resources with the providers' `default_tags`.
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |
 | `mail` | `null` (no email) | Email notifications through an SES identity you already have: `{ from, from_name, reply_to, identity_arn, configuration_set_name, events_topic_arn }`. See [Email](#email) |
 | `servers` | `{}` (off) | Site servers' infrastructure: `{ enabled = false, egress = "none", vpc_cidr = "10.240.0.0/16" }`. See [Site servers](#site-servers) |
+| `paths_per_site` | `200` | The most live Paths (published, not archived) one site may have, from 1 to 1000: the function's `PATHS_PER_SITE_MAX`, over anything in `INSTANCE` (the module refuses it there and in `environment`). Each live Path is a key in the KeyValueStore's shared 5 MB. See [Route table size and format](#route-table-size-and-format) |
 | `alarm_actions` | `[]` | ARNs (an SNS topic, say) the module's alarms notify: `RouteTableFull`, raised when maintenance logs `route table nearly full`. See [Route table size and format](#route-table-size-and-format) |
 
 | Output | What |
@@ -213,6 +214,7 @@ Values reach the function two ways, and the function's own environment wins:
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
 | `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
 | `MAINTENANCE_SWEEP_ENABLED` | no (on) | Maintenance works on the sites queued for it, then sweeps every site in turn, a little each run. `off` maintains only queued sites, for the least background work: sites from before the queue, and every site after a change to `VERSION_RETENTION`, then wait until something queues them (a publish, a rollback). |
+| `PATHS_PER_SITE_MAX` | no (`1000`; AWS: `200`) | The most live Paths (published, not archived) one site may have, from 1 to 1000. Publishing to a new Path, and bringing back an archived one, are refused with `too_large` once a site has that many; archived Paths don't count. A site can keep at most 1000 Paths in all, archived ones included. Published as `limits.pathsPerSite` in the metadata, which the CLI, the MCP servers and the Guide state. Lowering it stops sites that have more from adding any, and takes none away. AWS: the module sets it from `paths_per_site` (default 200), over anything in `INSTANCE`. |
 | `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
 | `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
 | `SERVERS_MAX_SITES` | no (`50`) | The most sites that may have a server at once; one more is refused with `too_many_servers`. |
@@ -752,6 +754,10 @@ links ([sizing](../../docs/platforms/aws.md#8-gaps-and-open-questions)). Mainten
 store's size every run (`route table usage`) and `route table nearly full` from 70%, which raises
 the `RouteTableFull` alarm in the instance's metric namespace (`Fling/<name>`); give it
 `alarm_actions` to be told. **Admin → Routes** shows the same.
+
+Each live Path is a key of its own, so one site with many Paths takes room from every other site.
+The module's `paths_per_site` (default 200, at most 1000) caps the live Paths one site may have;
+archived Paths have no key and don't count.
 
 To make room, an admin chooses the `compact` format there: about a third of the size, with each
 share link a pointer to its site's route. Route writes take the new format at once, and

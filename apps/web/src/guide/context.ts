@@ -1,15 +1,18 @@
 /**
  * What the Guide's placeholders become on this instance, for this reader: its address, name and
- * install command from the instance metadata, the facts from the code, and which capabilities and
- * admin pages the reader gets. Until the metadata arrives, this page's own origin stands in.
+ * install command from the instance metadata, the facts from the code (the limits an instance sets
+ * from its metadata), and which capabilities and admin pages the reader gets. Until the metadata
+ * arrives, this page's own origin stands in.
  */
 import {
   DEFAULT_INSTALL_COMMAND,
   GUIDE_FACTS,
   type GuideContext,
+  guideCount,
   type InstanceMetadata,
   instanceSiteUrl,
   type Me,
+  pathsPerSiteOf,
 } from '@fling/shared'
 import { showsAdmin } from '../lib/admin'
 import { audienceFor, DEFAULT_INSTANCE_NAME } from '../lib/instance'
@@ -34,7 +37,8 @@ export function guideContextFor(
       instance
         ? instanceSiteUrl(instance, name).replace(/\/$/, '')
         : `https://${name}.<sites domain>`,
-    facts: GUIDE_FACTS,
+    // The facts an instance sets, in place of the code's defaults.
+    facts: { ...GUIDE_FACTS, 'paths-per-site': guideCount(pathsPerSiteOf(instance)) },
     reader: { capabilities: instance?.capabilities ?? {}, admin: showsAdmin(me) },
   }
 }

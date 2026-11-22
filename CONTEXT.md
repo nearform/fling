@@ -21,8 +21,12 @@ version or another Path, and teammates publishing different Paths never collide.
 by `path:<siteId>/<folder>` in the route table (the site's value says `p` when it has live ones)
 and serves it in place of the site's own copy of that folder. Policy asks of it as the site
 actions on `pathPolicySite`: its owners and the site's change it, its publishers publish to it; a
-site publisher making a new Path owns it (403 `path_not_yours` to publish someone else's). At most
-`MAX_PATHS_PER_SITE`, folders of at most `MAX_PATH_FOLDER_LENGTH` characters. `/api/sites/<name>/paths`,
+site publisher making a new Path owns it (403 `path_not_yours` to publish someone else's). A
+**live Path** is published and not archived (`isLivePath`); only live ones have a route key, so a
+site may have at most the instance's `PATHS_PER_SITE_MAX` of them (`pathsPerSite`, published as
+`limits.pathsPerSite`; 1000 unless set, 200 on AWS), checked before one goes live
+(`ensureRoomForLivePath`, 413 `too_large`), and at most `MAX_PATHS_PER_SITE` Paths in all,
+archived ones included; folders of at most `MAX_PATH_FOLDER_LENGTH` characters. `/api/sites/<name>/paths`,
 `fling paths`, `fling_paths`; the `paths` capability.
 
 **Site server** — a version's `_fling/server.mjs`: one bundled ES module, importing only `node:*`

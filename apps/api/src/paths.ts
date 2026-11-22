@@ -39,7 +39,7 @@ import {
 } from '@fling/shared'
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
 import { manifestKey } from './blobs/types.ts'
-import { conflict, notFound } from './lib/errors.ts'
+import { ApiError, conflict, notFound } from './lib/errors.ts'
 import { GRACE_MS, queueMaintenance, reviveVersion } from './maintenance.ts'
 import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
 import { routeFormat } from './route-format.ts'
@@ -74,6 +74,32 @@ export const isPathFolder = (path: string) => path.indexOf('/') === -1
 
 /** Served at `/<folder>/`: not archived, and published. */
 export const isLivePath = (path: PathRecord) => !path.archived && path.currentVersionId !== null
+
+/**
+ * Before `path` becomes live (a first publish, a publish or rollback to an archived or unpublished
+ * Path, unarchiving one): refuse when its site already has as many live Paths as the instance
+ * allows (`pathsPerSite`, PATHS_PER_SITE_MAX), since each live Path is a route key and some
+ * platforms' route tables are small and shared by every site. Archived Paths don't count. 413
+ * `too_large`, with the count and the limit, naming the way out. `paths`: the site's Paths, when
+ * the caller has them.
+ */
+export async function ensureRoomForLivePath(
+  deps: Deps,
+  site: SiteRecord,
+  path: Pick<PathRecord, 'folder'> | null,
+  paths?: readonly PathRecord[]
+) {
+  const all = paths ?? (await deps.store.listPaths(site.id))
+  const live = all.filter(p => isLivePath(p) && p.folder !== path?.folder).length
+  const max = deps.config.pathsPerSite
+  if (live < max) return
+  throw new ApiError(
+    413,
+    'too_large',
+    `"${site.name}" has ${live} live Paths, the most this Fling allows: archive one (fling paths archive ${site.name} <folder>) or publish to an existing one`,
+    { livePaths: live, pathsPerSite: max }
+  )
+}
 
 /** Make the Path's route key match it: present while it is live (and its site is), else gone. */
 export async function syncPathRoute(deps: Deps, site: SiteRecord, path: PathRecord) {
@@ -182,6 +208,7 @@ export async function makePathCurrent(
   title: string | null,
   base: string | null = path.currentVersionId
 ) {
+  if (!isLivePath(path)) await ensureRoomForLivePath(deps, site, path)
   path.currentVersionId = versionId
   path.archived = false
   if (title !== null) path.title = title
@@ -336,6 +363,9 @@ export async function updatePath(
   const base = path.currentVersionId
   if (patch.owners !== undefined || patch.publishers !== undefined) {
     await applyRoles(deps, path, patch)
+  }
+  if (patch.archived === false && path.archived && path.currentVersionId !== null) {
+    await ensureRoomForLivePath(deps, site, path)
   }
   if (patch.archived !== undefined) path.archived = patch.archived
   path.updatedAt = deps.clock.now().toISOString()

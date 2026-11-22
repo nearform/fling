@@ -72,6 +72,29 @@ describe('fling_paths', () => {
   })
 })
 
+describe('the live Paths limit', () => {
+  it('fling_paths states the instance’s limit; a publish past it says what to propose', async () => {
+    env = setup({ pathsPerSite: 1 })
+    bearer = (await connect(env)).accessToken
+    const body = await (await rpc(env, bearer, 'tools/list')).json()
+    const tools = body.result.tools as { name: string; description: string }[]
+    expect(tools.find(t => t.name === 'fling_paths')?.description).toMatch(
+      /up to 1 live Paths on .*archived ones don't count/
+    )
+    await publish('team', { 'index.html': page('Plan 1') }, { path: 'PAY-1' })
+    const r = await callTool(env, bearer, 'fling_publish', {
+      name: 'team',
+      path: 'PAY-2',
+      files: [{ path: 'index.html', content: page('Plan 2') }],
+    })
+    expect(r.isError).toBe(true)
+    const text = r.content[0]?.text ?? ''
+    expect(text).toMatch(/"team" has 1 live Paths, the most this Fling allows/)
+    expect(text).toContain('fling_paths')
+    expect(text).toMatch(/Never archive or delete a Path on your own/)
+  })
+})
+
 describe('path on fling_info, fling_files and fling_rollback', () => {
   it('shows the Path, lists its files and rolls back only it', async () => {
     await publish('team', { 'index.html': page('Team', '<!-- fling:paths -->') })

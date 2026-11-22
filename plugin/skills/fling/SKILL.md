@@ -264,6 +264,14 @@ publishing different Paths never collide.
   Publish them to the Path instead, or leave them out.
 - `base_changed` on a Path: another publish to it went live first. The CLI retries once; with the
   MCP tools, publish again.
+- `too_large`, "has … live Paths, the most this Fling allows": the site has as many live Paths
+  (published, not archived) as its Fling allows (`fling paths <site>` says how many of how many).
+  List the site's Paths (`fling_paths` or `fling paths <site>`) by when each was last updated,
+  show the user the oldest, and propose archiving some (an archived Path keeps its files and
+  versions, and no longer counts). Archive only the ones the user agrees to, with
+  `fling paths archive <site> <folder>`, then publish again. **Never archive or delete a Path on
+  your own.** Or offer to publish to one of the site's existing Paths instead. Bringing back an
+  archived Path (`fling paths unarchive`) is refused the same way.
 
 ## Markdown
 

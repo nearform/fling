@@ -39,6 +39,7 @@ import {
   defaultAccessOf,
   type InstanceMetadata,
   instanceSitesPattern,
+  pathsPerSiteOf,
   privateAudience,
 } from './instance.ts'
 import { MAX_FILES, MAX_PATH_FOLDER_LENGTH } from './limits.ts'
@@ -113,6 +114,11 @@ export interface McpWording {
   invites?: boolean
   /** The instance's user guide (`https://fling.example.test/guide`), when it has one. */
   guide?: string
+  /**
+   * The most live Paths one site may have on the instance (`limits.pathsPerSite`, else
+   * MAX_PATHS_PER_SITE); unset when the wording names no one instance.
+   */
+  pathsPerSite?: number
 }
 
 const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
@@ -121,7 +127,7 @@ const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<na
 export function mcpWording(
   instance?:
     | (Pick<InstanceMetadata, 'name' | 'sitesDomain' | 'siteScheme' | 'auth'> &
-        Partial<Pick<InstanceMetadata, 'appOrigin' | 'defaultAccess' | 'capabilities'>>)
+        Partial<Pick<InstanceMetadata, 'appOrigin' | 'defaultAccess' | 'capabilities' | 'limits'>>)
     | null
 ): McpWording {
   if (!instance) {
@@ -141,6 +147,7 @@ export function mcpWording(
     reviewPattern: instance.appOrigin ? reviewUrl(instance.appOrigin, '<name>') : GENERIC_REVIEW,
     defaultAccess: defaultAccessOf(instance),
     invites: instance.capabilities?.invites === true,
+    pathsPerSite: pathsPerSiteOf(instance),
     ...(instanceGuideUrl(instance) ? { guide: instanceGuideUrl(instance) } : {}),
   }
 }
@@ -223,6 +230,24 @@ export function describePublishHints(hints: readonly { message: string }[] | und
   if (!hints?.length) return ''
   return `\nWorth doing:\n- ${hints.map(h => h.message).join('\n- ')}`
 }
+
+/**
+ * What both servers add to a refusal because the site has as many live Paths as its instance
+ * allows (413 `too_large` with `pathsPerSite`, paths.ts in the API): propose, never act.
+ */
+export const PATHS_LIMIT_NOTE =
+  "List the site's Paths (fling_paths) and show the user the ones updated longest ago; propose archiving some " +
+  '(an archived Path keeps its files and versions and no longer counts), and archive only the ones the user ' +
+  "agrees to, with `fling paths archive <site> <folder>` or on the Path's page in the web app. Never archive or " +
+  'delete a Path on your own. Or publish to one of its existing Paths instead.'
+
+/** How many live Paths a site may have, for the fling_paths description. */
+const pathsLimitSentence = (w: Pick<McpWording, 'name' | 'pathsPerSite'>) =>
+  `A site may have ${w.pathsPerSite === undefined ? 'as many live Paths as its Fling allows' : `up to ${w.pathsPerSite.toLocaleString('en-GB')} live Paths on ${w.name}`} (published and not archived; archived ones don't count).`
+
+/** Whether an error body (`{ error: { code, … } }`'s `error`) is the live Paths limit's refusal. */
+export const isPathsLimitError = (error: { code?: unknown; pathsPerSite?: unknown } | undefined) =>
+  error?.code === 'too_large' && typeof error.pathsPerSite === 'number'
 
 /** A path publish (publish-path.ts): the Path at one top-level folder of the site. */
 export const PATH_PUBLISH_NOTE =
@@ -1322,7 +1347,7 @@ export function mcpToolsFor(w: McpWording) {
         "List a site's Paths: the top-level folders (e.g. one per ticket, PAY-412) published on their own with " +
         '`path`, each with its title, URL, current version, when it was updated, whether it is archived and whether ' +
         'the user can publish to it. Use it before publishing to a shared team site, to find a Path to change or ' +
-        `roll back (fling_info, fling_files and fling_rollback take \`path\`), or when the user asks what is on it. ${PATHS_HOME_CHOICE} ${PATHS_BLOCK_FORMAT}`,
+        `roll back (fling_info, fling_files and fling_rollback take \`path\`), or when the user asks what is on it. ${pathsLimitSentence(w)} ${PATHS_HOME_CHOICE} ${PATHS_BLOCK_FORMAT}`,
       inputSchema: { name: siteName },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),

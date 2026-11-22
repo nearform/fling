@@ -5,7 +5,7 @@ order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
 sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: bd7a6b7
+verified: c4b1441
 ---
 
 A team site holds many pieces of work in one place: a plan per ticket, a report per week. Each
@@ -38,7 +38,7 @@ fling deploy ./plan --name payments-plans --path PAY-412
 Manage a site's Paths:
 
 ```sh
-fling paths payments-plans                          # every Path: folder, title, version, state, updated
+fling paths payments-plans                          # every Path: folder, title, version, state, updated; how many are live
 fling versions payments-plans --path PAY-412        # the Path's own versions
 fling rollback payments-plans <versionId> --path PAY-412
 fling owners payments-plans --path PAY-412 --add cat@example.com
@@ -88,10 +88,18 @@ Click a Path's folder to open its own page. There you can:
   `api`; or a server can't be published onto a site that has an `api` Path. Use another folder.
 <!-- /requires -->
 - **`owner_only`**: the Path is archived, and only its owners can bring it back.
+- **`too_large`, "has … live Paths, the most this Fling allows"**: the site already has as many
+  live Paths as {{instance:name}} allows ({{fact:paths-per-site}}). Archive one you no longer need
+  (`fling paths archive <site> <folder>`) and publish again, or publish to an existing Path. Your
+  assistant lists the oldest and asks you before it archives anything. Bringing back an archived
+  Path is refused the same way.
 
 ## Good to know
 
-- A site can have up to {{fact:max-paths}} Paths, and a Path's folder name up to
+- A site can have up to {{fact:paths-per-site}} live Paths on {{instance:name}}. A live Path is
+  published and not archived; archived Paths don't count. {{fact:max-paths}} is the most any
+  Fling allows, and an instance may set a lower number. A site can keep up to {{fact:max-paths}}
+  Paths in all, archived ones included, and a Path's folder name can be up to
   {{fact:max-folder}} characters.
 - A Path's title is the title of its home page.
 - The site's home page can list its Paths: see [The Paths block](/guide/team-sites/paths-block).

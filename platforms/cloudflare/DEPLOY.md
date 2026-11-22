@@ -120,6 +120,8 @@ neither header (see
    `--invites-per-day 20` sets how many new outside addresses a person may invite a day
    (`INVITES_PER_DAY`). `--servers members` (optional, not asked for; `''` removes it) lets
    members publish site servers (`SERVERS`; see [Site servers](#site-servers) first).
+   `--paths-per-site 200` (optional, not asked for; `''` removes it) sets the most live Paths
+   one site may have, from 1 to 1000 (`PATHS_PER_SITE_MAX`; 1000 unless set).
 
    It creates the D1 database (`--location` is a placement hint), the R2 bucket and the KV
    namespace unless they exist, gives the bucket a lifecycle rule that deletes site servers' logs
@@ -177,7 +179,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION` and `MAINTENANCE_SWEEP_ENABLED` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION`, `MAINTENANCE_SWEEP_ENABLED` and `PATHS_PER_SITE_MAX` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
 | `MAIL` | Optional: `{ "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }`, email notifications through Email Service ([Email](#email)). `FROM` is required in it; `FROM_NAME` defaults to `INSTANCE_NAME`, `REPLY_TO` to none. Not in `INSTANCE`, because the binding needs `FROM` too. `setup.mjs` keeps it when rerun |
 
 The rendered config replaces the template's local-development vars wholesale: production gets

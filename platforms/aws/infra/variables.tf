@@ -75,7 +75,8 @@ variable "environment" {
     APP_ORIGIN, SITES_DOMAIN, SITE_SCHEME, SITE_COOKIE_DOMAIN and the drivers (from the hostname)
     and LIVE_URL (the live rooms' stage, live.tf), and always sets TABLE_NAME, SITES_BUCKET, KVS_ARN
     and SSM_PREFIX. Not secret: they are in the function's configuration. Instance values belong in var.instance instead. MAIL_* and
-    SES_CONFIGURATION_SET are refused: email is set in var.mail.
+    SES_CONFIGURATION_SET are refused: email is set in var.mail; PATHS_PER_SITE_MAX too: it is
+    var.paths_per_site.
   EOT
   type        = map(string)
   default     = {}
@@ -83,6 +84,11 @@ variable "environment" {
   validation {
     condition     = length([for k in keys(var.environment) : k if can(regex("^(MAIL|SES)_", k))]) == 0
     error_message = "environment may not set MAIL_* or SES_*: email is set in var.mail."
+  }
+
+  validation {
+    condition     = !contains(keys(var.environment), "PATHS_PER_SITE_MAX")
+    error_message = "environment may not set PATHS_PER_SITE_MAX: it is set by var.paths_per_site."
   }
 }
 
@@ -92,7 +98,8 @@ variable "instance" {
     OIDC_CLIENT_ID, INSTANCE_NAME, BRAND_*...; see platforms/aws/DEPLOY.md, Instance configuration),
     passed through as INSTANCE in the deploy output. The deploy workflow writes them into the
     function's bundle, so they need no apply to reach it, only a redeploy. Empty: the deploy output has no INSTANCE (add it yourself).
-    MAIL_* and SES_CONFIGURATION_SET are refused: email is set in var.mail.
+    MAIL_* and SES_CONFIGURATION_SET are refused: email is set in var.mail; PATHS_PER_SITE_MAX
+    too: it is var.paths_per_site.
   EOT
   type        = map(string)
   default     = {}
@@ -100,6 +107,28 @@ variable "instance" {
   validation {
     condition     = length([for k in keys(var.instance) : k if can(regex("^(MAIL|SES)_", k))]) == 0
     error_message = "instance may not set MAIL_* or SES_*: email is set in var.mail."
+  }
+
+  validation {
+    condition     = !contains(keys(var.instance), "PATHS_PER_SITE_MAX")
+    error_message = "instance may not set PATHS_PER_SITE_MAX: it is set by var.paths_per_site."
+  }
+}
+
+variable "paths_per_site" {
+  description = <<-EOT
+    The most live Paths (published, not archived) one site may have: the function's
+    PATHS_PER_SITE_MAX, from 1 to 1000. Each live Path is a key in the CloudFront KeyValueStore,
+    whose 5 MB every site shares, so a few sites with many Paths could fill it for everyone: the
+    default, 200, keeps that out of reach. A number lower than a site has already only stops it
+    adding more.
+  EOT
+  type        = number
+  default     = 200
+
+  validation {
+    condition     = var.paths_per_site >= 1 && var.paths_per_site <= 1000 && floor(var.paths_per_site) == var.paths_per_site
+    error_message = "paths_per_site must be a whole number from 1 to 1000."
   }
 }
 

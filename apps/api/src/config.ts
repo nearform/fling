@@ -10,6 +10,7 @@ import {
   type DefaultAccessLevel,
   HEX_COLOR_RE,
   type InstanceBrand,
+  MAX_PATHS_PER_SITE,
   RESERVED_SITE_NAMES,
   type SettingGroup,
   type SettingValue,
@@ -145,6 +146,11 @@ const envSchema = z.object({
   OIDC_SCOPES: optionalString,
   OIDC_ASSUME_EMAIL_VERIFIED: flag,
   SITE_DEFAULT_ACCESS: z.preprocess(blank, z.enum(DEFAULT_ACCESS_LEVELS).default('only_me')),
+  /** The most live Paths one site may have (each is a route key), at most MAX_PATHS_PER_SITE. */
+  PATHS_PER_SITE_MAX: z.preprocess(
+    blank,
+    z.coerce.number().int().min(1).max(MAX_PATHS_PER_SITE).default(MAX_PATHS_PER_SITE)
+  ),
   COMMENTS: flagDefaultOn,
   LIVE: flagDefaultOn,
   LIVE_URL: z.preprocess(
@@ -229,6 +235,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   SITE_SCHEME: 'sites',
   SITE_COOKIE_DOMAIN: 'sites',
   SITE_DEFAULT_ACCESS: 'sites',
+  PATHS_PER_SITE_MAX: 'sites',
   INSTANCE_NAME: 'branding',
   INSTALL_COMMAND: 'branding',
   BRAND_LOGO_URL: 'branding',
@@ -498,6 +505,12 @@ export interface Config {
    * `only_me` (the default) or `members`. Published as `defaultAccess`; existing sites keep theirs.
    */
   siteDefaultAccess: DefaultAccessLevel
+  /**
+   * The most live Paths (published, not archived) one site may have (`PATHS_PER_SITE_MAX`, default
+   * and ceiling MAX_PATHS_PER_SITE). Each live Path is a key in the route table, which on some
+   * platforms is small and shared by every site. Published as `limits.pathsPerSite`.
+   */
+  pathsPerSite: number
   tableName?: string
   sitesBucket?: string
   kvsArn?: string
@@ -634,6 +647,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     }),
     installCommand: e.INSTALL_COMMAND,
     siteDefaultAccess: e.SITE_DEFAULT_ACCESS,
+    pathsPerSite: e.PATHS_PER_SITE_MAX,
     tableName: e.TABLE_NAME,
     databaseSchema: e.DATABASE_SCHEMA,
     sitesBucket: e.SITES_BUCKET,

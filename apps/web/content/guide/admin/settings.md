@@ -5,7 +5,7 @@ order: 30
 summary: See how the instance is configured, and choose the route table's format.
 audience: admin
 sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts, apps/api/src/route-format.ts]
-verified: 0669f1e87
+verified: bd7a6b7
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its

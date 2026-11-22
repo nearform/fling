@@ -111,7 +111,7 @@ import {
 import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newShareToken } from './lib/ids.ts'
-import { reviveVersion } from './maintenance.ts'
+import { queueMaintenance, reviveVersion } from './maintenance.ts'
 import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
 import { refreshHome, removePath } from './paths.ts'
 import {
@@ -1144,6 +1144,7 @@ export async function rollback(deps: Deps, user: User, name: string, versionId: 
     return true
   })
   await noteLive(deps, user.email, site, version)
+  await queueMaintenance(deps, site)
   // The home page is the version's: with Paths, render it again.
   if (site.paths) await refreshHome(deps, site)
   return toSite(deps, as, site)

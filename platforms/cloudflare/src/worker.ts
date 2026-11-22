@@ -28,7 +28,7 @@ import type { ExecutionContext, ScheduledController } from '@cloudflare/workers-
 import { createApp } from '@fling/api/app'
 import { isApiPath, MCPB_PATH, uiHeaders } from '@fling/api/app-host'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
-import { maintain } from '@fling/api/maintenance'
+import { MAINTAIN_BUDGET_MS, maintain } from '@fling/api/maintenance'
 import { drain, errorName, logNotify } from '@fling/api/notifications'
 import type { Deps } from '@fling/api/types'
 import { DOWNLOAD_ROUTE, R2Blobs, UPLOAD_ROUTE } from './blobs/r2.ts'
@@ -47,8 +47,8 @@ export { ServerTail, SiteFiles } from './servers/entrypoints.ts'
 
 /** The every-minute cron: the notifications outbox's tick. Any other cron purges expired items. */
 const NOTIFY_CRON = '* * * * *'
-/** How long the hourly maintenance runs (maintenance.ts); the next hour carries on. */
-const MAINTAIN_BUDGET_MS = 20_000
+/** How long server-log compaction runs on a maintenance cron; the next one carries on. */
+const COMPACT_BUDGET_MS = 20_000
 
 /** The web UI from Static Assets, with the headers the AWS app distribution gives it. */
 async function serveUi(request: Request, env: Env, https: boolean): Promise<Response> {
@@ -174,7 +174,7 @@ export default {
     if (deps.serverLogs instanceof R2ServerLogs) {
       ctx.waitUntil(
         deps.serverLogs
-          .compact(Date.now() + MAINTAIN_BUDGET_MS)
+          .compact(Date.now() + COMPACT_BUDGET_MS)
           .then(n => {
             if (n)
               console.log(JSON.stringify({ level: 'info', msg: 'server logs compacted', count: n }))

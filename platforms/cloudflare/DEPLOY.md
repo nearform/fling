@@ -40,7 +40,7 @@ $APP_HOST        Worker Custom Domain ─┬─ /api/*, /auth/*, /healthz, /mcp,
                                         (route table: KV, D1 on a miss) → R2;
                                         /api/* of a site server → its isolate
                                         (Worker Loader binding LOADER; only with SERVERS)
-cron (hourly)    Worker scheduled ───── delete expired D1 items; maintenance (retention);
+cron (15 min)    Worker scheduled ───── delete expired D1 items; maintenance (retention);
                                         fold site servers' log pieces into hourly chunks
 cron (minutely)  Worker scheduled ───── drain the notifications' outbox → Email Service
                                         (send_email binding EMAIL; only with MAIL)
@@ -177,7 +177,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION` and `MAINTENANCE_SWEEP_ENABLED` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
 | `MAIL` | Optional: `{ "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }`, email notifications through Email Service ([Email](#email)). `FROM` is required in it; `FROM_NAME` defaults to `INSTANCE_NAME`, `REPLY_TO` to none. Not in `INSTANCE`, because the binding needs `FROM` too. `setup.mjs` keeps it when rerun |
 
 The rendered config replaces the template's local-development vars wholesale: production gets
@@ -185,7 +185,7 @@ The rendered config replaces the template's local-development vars wholesale: pr
 domain the app and the sites share), `LIVE_URL=wss://$APP_HOST/api/live` (the live rooms, below),
 the `d1`/`r2`/`workers-kv` drivers, and `INSTANCE`, never the dev login. `LIVE=false` in `INSTANCE`
 turns the live rooms off. With `MAIL` it also gets the `send_email` binding `EMAIL`
-(`allowed_sender_addresses: [FROM]`), the every-minute cron `* * * * *` beside the hourly one, and
+(`allowed_sender_addresses: [FROM]`), the every-minute cron `* * * * *` beside the maintenance one (`*/15 * * * *`), and
 `MAIL_DRIVER=cloudflare`, `MAIL_FROM`, `MAIL_FROM_NAME` and `MAIL_REPLY_TO`; without it, none of
 them. With `INSTANCE.SERVERS` on it keeps the `worker_loaders` binding `LOADER` and the rate limit
 `SERVER_RATE_LIMIT`, and requires the `SITE_SECRETS_KEY` secret ([Site servers](#site-servers));
@@ -287,7 +287,7 @@ its files, and retention with the version.
 **Logs.** Each isolate is loaded with a tail consumer, the Fling Worker's `ServerTail` entrypoint,
 which writes what the server prints and its uncaught exceptions to R2, beside Fling's request line
 for every invoke (`server-logs/<siteId>/<hour>/…`), gathered for a second at a time so a busy site
-costs about one write a second per Worker isolate. The hourly cron folds each past hour into one
+costs about one write a second per Worker isolate. The maintenance cron folds each past hour into one
 chunk, and the bucket's lifecycle rule (setup) deletes them after 7 days. What a server prints
 while its module loads is kept and written with its first request. `fling logs` and the site page
 read them.

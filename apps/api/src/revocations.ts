@@ -8,7 +8,7 @@
  *
  * A revocation stays on the list for REVOCATION_KEEP_SECONDS, well past the last cookie it could
  * stop. Each one is kept as a record due then (`REVOKED`, store/records.ts), and the sweep, run
- * by maintenance (maintenance.ts, every platform's hourly tick, which every instance has with or
+ * by maintenance (maintenance.ts, every platform's 15-minute tick, which every instance has with or
  * without mail), takes due ones off the list. An entry kept up to an hour past its due time stops
  * nothing more: the last cookie it could stop expired 23 days before. The record is written before the
  * list key, so no key outlives its record. A later revocation of the same address replaces the

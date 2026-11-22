@@ -54,7 +54,7 @@ Each choice lists the reason for it and the file that owns it.
 5. **The Table is the queue.** The notifications outbox, the revocation list and the leases are
    all Table items (`apps/api/src/notifications/`). The platform supplies only the clock:
    - a tick every minute (`notify`);
-   - a tick every hour (`maintain`);
+   - a tick every 15 minutes (`maintain`);
    - a `migrate` run from the deploy.
 
    *Why:* there is no queue service to map per cloud, and every cloud can call an endpoint on a
@@ -136,7 +136,7 @@ Each element uses the same headings:
     copies each staged file into the version, which no URL can write, then checks the copy's size
     and SHA-256 and scans it (409 `upload_mismatch` or 422, nothing kept), and deletes the staging
     copies. A URL is still good meanwhile, so a colliding body PUT to it lands at the staging key,
-    never in what is checked and served; the hourly maintenance deletes such leftovers once the
+    never in what is checked and served; maintenance deletes such leftovers once the
     URLs expire. On such a store a deploy reads each uploaded byte once more. One finalize of a
     version runs at a time (a claim in the Table, `Store.claimFinalize`, on every store), so no
     second one copies over, or discards, what the first checked and made live.
@@ -224,8 +224,14 @@ Each element uses the same headings:
 
 - **Port:** entry-point handlers that call the core's `drain`, `maintain` and `runMigrations`.
 - **Semantics:**
-  - `notify` runs every minute (with mail) and drains the outbox. `maintain` runs hourly on every
-    instance: version retention, replaced home pages, and the revocation sweep.
+  - `notify` runs every minute (with mail) and drains the outbox. `maintain` runs every 15
+    minutes on every instance (`MAINTAIN_EVERY_MS`, `apps/api/src/maintenance.ts`), for up to 4
+    minutes (`MAINTAIN_BUDGET_MS`): the revocation sweep, then the sites queued for maintenance
+    (`MAINTAIN/DUE#<dueAt>#<siteId>`, queued as a version goes live, a deploy is staged or a home
+    page is replaced, and by maintenance for a site's next due time), then a sweep of every site
+    from a cursor (`MAINTAIN/CURSOR`; off with `MAINTENANCE_SWEEP_ENABLED=off`). The work is
+    version retention and replaced home pages. Each finished lap of the sweep is logged
+    (`maintenance lap`, `lapMs`).
   - `migrate` runs from the deploy, after the new code is live, until it reports done.
   - Every tick is safe to repeat, because leases are conditional updates in the Table.
 - **Conformance:** `migrationsConformance`. The ticks are covered by the e2e.
@@ -335,7 +341,7 @@ host that routes* shape, on a Node runtime. The parts they share are written onc
      serialisation failures are retried;
    - each transaction runs at READ COMMITTED, whatever the server's default, and retries after a
      jittered backoff;
-   - expired items are hidden at once and purged by the hourly tick, whose DELETE checks expiry
+   - expired items are hidden at once and purged by the maintenance tick, whose DELETE checks expiry
      again on each row, so an item put again over a dead one meanwhile stays;
    - a string jsonb can't hold (NUL, a lone surrogate) is stored escaped and read back as it was,
      so the Table keeps what the other backends keep;

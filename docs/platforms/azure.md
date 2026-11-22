@@ -33,7 +33,7 @@ the routing decision runs in the Container App, as it does in the Cloudflare Wor
 | Live hub | Azure Web PubSub, one group per site | `platforms/azure/src/live.ts` (`WebPubSubLiveHub`) | See "Live rooms" below |
 | Mailer | Azure Communication Services Email | `platforms/azure/src/mail/acs.ts` (`AcsMailer`, `MAIL_DRIVER=acs`) | A verified domain, `mail.<sites domain>` by default. The sender's display name is the sender username's (the Terraform `mail.from_name`): ACS takes none per message |
 | Site servers | — | — | Not built: `SERVERS` stays off (§7) |
-| Ticks | Container Apps jobs with a cron trigger | `platforms/azure/src/main.ts` (`tick notify`, `tick maintain`) | `notify` every minute (with mail), `maintain` hourly. Each job runs the tick in its own process with the same image and identity, so no endpoint can start one |
+| Ticks | Container Apps jobs with a cron trigger | `platforms/azure/src/main.ts` (`tick notify`, `tick maintain`) | `notify` every minute (with mail), `maintain` every 15 minutes (`*/15 * * * *`). Each job runs the tick in its own process with the same image and identity, so no endpoint can start one |
 | Migrations | a Container Apps job, started by the deploy | `platforms/azure/src/main.ts` (`migrate`) | Runs until the runner reports done, then exits; a failure fails the execution |
 | Secrets | Key Vault, as Container Apps secret references | `platforms/azure/infra/secrets.tf` | Container Apps resolves them with the host's identity into environment variables, so nothing reads Key Vault at start |
 | Sign-in | (core OIDC) | — | Entra ID is one OIDC issuer. The client secrets are in Key Vault |

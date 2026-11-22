@@ -105,6 +105,26 @@ export interface RevocationRecord {
 }
 
 /**
+ * Maintenance a site has due (`MAINTAIN/DUE#<dueAt>#<siteId>`): at `dueAt` something it holds
+ * needs work (maintenance.ts). Sorted by when, so the due ones are one query; one site may have
+ * several, and the same site and time is one record.
+ */
+export interface MaintenanceDueRecord {
+  siteId: string
+  /** the site's name when it was queued: what maintenance looks it up by */
+  name: string
+  dueAt: string
+}
+
+/** How far maintenance's sweep of the site directory has gone (`MAINTAIN/CURSOR`). */
+export interface MaintenanceCursorRecord {
+  /** the last site name swept; null at the start of a lap */
+  after: string | null
+  /** when the lap under way began: a lap's length is how long every site waits for a sweep */
+  lapStartedAt: string
+}
+
+/**
  * An emailed single-use sign-in link (`MAGIC#<sha256 of the token>/MAGIC`). Only the hash of the
  * token is stored; consuming it deletes it.
  */
@@ -782,6 +802,24 @@ export interface Store extends NotificationStore {
   dueRevocations(now: string, limit: number): Promise<RevocationRecord[]>
   /** Forget a revocation (no-op when it is gone already). */
   deleteRevocation(revocation: RevocationRecord): Promise<void>
+
+  // --- maintenance ---
+  /** Queue maintenance for a site at `dueAt` (a no-op when the same site and time is queued). */
+  queueMaintenance(due: MaintenanceDueRecord): Promise<void>
+  /** Maintenance due by `now`, oldest first, at most `limit`. */
+  dueMaintenance(now: string, limit: number): Promise<MaintenanceDueRecord[]>
+  /** Take one off the queue (no-op when it is gone already). */
+  deleteMaintenance(due: MaintenanceDueRecord): Promise<void>
+  getMaintenanceCursor(): Promise<MaintenanceCursorRecord | null>
+  putMaintenanceCursor(cursor: MaintenanceCursorRecord): Promise<void>
+  /**
+   * The site directory a page at a time, by name (byte order), from the first name after `after`
+   * (from the start without it). `more` is false once the page reached the end.
+   */
+  pageSites(opts: {
+    after?: string | null
+    limit: number
+  }): Promise<{ sites: SiteDirectoryRecord[]; more: boolean }>
 
   // --- groups ---
   /**

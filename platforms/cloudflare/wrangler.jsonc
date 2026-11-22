@@ -51,8 +51,9 @@
   "ratelimits": [
     { "name": "SERVER_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 1000, "period": 10 } }
   ],
-  // Expired items (sessions, OAuth codes, upload staging) are already invisible; this deletes them.
-  "triggers": { "crons": ["17 * * * *"] },
+  // Every 15 minutes: maintenance (apps/api/src/maintenance.ts), and the purge of expired items
+  // (sessions, OAuth codes, upload staging), which are already invisible.
+  "triggers": { "crons": ["*/15 * * * *"] },
   "secrets": { "required": ["SESSION_SECRET", "SITE_HMAC_KEY"] },
   // Local development only (replaced wholesale on deploy). lvh.me and its subdomains resolve to
   // 127.0.0.1, so the app is http://flingcf.lvh.me:47103 and sites http://<name>.flingcf.lvh.me:47103.

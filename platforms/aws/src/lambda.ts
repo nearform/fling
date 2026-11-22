@@ -29,7 +29,7 @@
 import { readFileSync } from 'node:fs'
 import { createApp } from '@fling/api/app'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
-import { type MaintainResult, maintain } from '@fling/api/maintenance'
+import { MAINTAIN_BUDGET_MS, type MaintainResult, maintain } from '@fling/api/maintenance'
 import { MIGRATIONS, type RunReport, runMigrations } from '@fling/api/migrations'
 import { DRAIN_BUDGET_MS, type DrainResult, drain } from '@fling/api/notifications'
 import type { RouteTable } from '@fling/api/route-table'
@@ -188,7 +188,12 @@ export const handler = async (
   }
   if (isMaintain(event)) {
     const result: MaintainResult = await maintain(deps, {
-      deadline: Date.now() + Math.max(0, context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS),
+      deadline:
+        Date.now() +
+        Math.max(
+          0,
+          Math.min(MAINTAIN_BUDGET_MS, context.getRemainingTimeInMillis() - NOTIFY_MARGIN_MS)
+        ),
     })
     console.log(JSON.stringify({ level: 'info', msg: 'maintenance', ...result }))
     if (servers) await sweepServers(deps, servers)

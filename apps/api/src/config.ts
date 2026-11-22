@@ -170,6 +170,8 @@ const envSchema = z.object({
   INVITES: flag,
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
   VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
+  /** Maintenance's sweep of every site, behind its queue: on unless `off` (or false/no/0). */
+  MAINTENANCE_SWEEP_ENABLED: flagDefaultOn,
   /** Who may publish a site server: `off`, `admins`, `members` or `groups:<slug>,<slug>`. */
   SERVERS: z.preprocess(
     value => (typeof value === 'string' ? value.trim().toLowerCase() : value),
@@ -243,6 +245,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   INVITES: 'features',
   INVITES_PER_DAY: 'features',
   VERSION_RETENTION: 'features',
+  MAINTENANCE_SWEEP_ENABLED: 'features',
   SERVERS: 'features',
   SERVERS_EGRESS: 'features',
   SERVERS_MAX_SITES: 'features',
@@ -540,6 +543,12 @@ export interface Config {
    * (`VERSION_RETENTION`, default 0: every version kept); maintenance.ts deletes the rest.
    */
   versionRetention: number
+  /**
+   * Whether maintenance also sweeps every site, a lap at a time, behind its queue
+   * (`MAINTENANCE_SWEEP_ENABLED`, default on; maintenance.ts). Off, only queued sites are
+   * maintained.
+   */
+  maintenanceSweep: boolean
   /** Site servers: who publishes them, what they reach, their limits (`SERVERS*`, `SERVER_*`). */
   servers: ServersConfig
   /** `/auth/dev-login` enabled (never in production) */
@@ -657,6 +666,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     invites: e.INVITES,
     invitesPerDay: e.INVITES_PER_DAY,
     versionRetention: e.VERSION_RETENTION,
+    maintenanceSweep: e.MAINTENANCE_SWEEP_ENABLED,
     servers: {
       publish: parseServersPublish(e.SERVERS),
       egress: e.SERVERS_EGRESS,

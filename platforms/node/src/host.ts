@@ -44,6 +44,7 @@ import { ApiError } from '@fling/api/errors'
 import { contentTypeFor } from '@fling/api/lib/mime'
 import type { MemoryLiveHub } from '@fling/api/live-memory'
 import { acceptLiveSockets } from '@fling/api/live-ws'
+import { MAINTAIN_BUDGET_MS } from '@fling/api/maintenance'
 import { MIGRATIONS, runMigrations } from '@fling/api/migrations'
 import type { RouteTable } from '@fling/api/route-table'
 import { handleSiteRequest, invokeSiteServer, type SitesPage } from '@fling/api/sites-host'
@@ -97,7 +98,10 @@ export interface NodeHostOptions {
   maxBodyBytes?: number
   ticks?: {
     authorize: TickAuthorizer
-    /** how long a tick or a migrate call may run before it returns (default 50 s) */
+    /**
+     * how long a notify tick or a migrate call may run before it returns (default 50 s);
+     * maintenance takes MAINTAIN_BUDGET_MS
+     */
     budgetMs?: number
     /** more hourly work (the platform's own), after maintenance */
     maintain?: () => Promise<unknown>
@@ -265,7 +269,7 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
     if (!(await opts.ticks.authorize(request))) return notFound()
     if (path === TICK_PATHS.notify) return json((await drain(deps, budget())) ?? { mail: false })
     if (path === TICK_PATHS.maintain) {
-      const result = await maintain(deps, opts.table, budget())
+      const result = await maintain(deps, opts.table, Date.now() + MAINTAIN_BUDGET_MS)
       await opts.ticks.maintain?.()
       return json(result)
     }

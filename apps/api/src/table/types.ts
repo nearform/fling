@@ -107,7 +107,11 @@ export interface QueryOptions {
   skPrefix?: string
   /** at most this many items per page (absent: all of them, in one page) */
   limit?: number
-  /** from a previous page of the same query */
+  /**
+   * From a previous page of the same query. A query's cursor is `encodeCursor` of the last sk its
+   * page returned, on every adapter, so a caller may resume after any sk it has seen, later on and
+   * even when that item is gone (maintenance's sweep of the site directory does).
+   */
   cursor?: string
   /** descending sk order */
   reverse?: boolean

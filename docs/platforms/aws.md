@@ -27,7 +27,7 @@ CloudFront. Everything is serverless and in one region, except CloudFront and it
 | Mailer | SES v2 `SendEmail` | `platforms/aws/src/mail/ses.ts` | One send per recipient. The SES identity is brought by the operator, and the IAM grant is limited to the `from` address |
 | Site servers | Lambda Web Functions, one per site, a revision per version | `platforms/aws/src/servers/` | `live` endpoint reached by CloudFront through OAC; `probe` for the API role; `goLive` moves revision weights. Egress `none` uses a VPC network connector. 120 s wall-time cap |
 | Server logs | CloudWatch Logs (`FilterLogEvents`) | `platforms/aws/src/servers/server-logs.ts` | Read-only; the function writes its own log |
-| Ticks | EventBridge Scheduler invoking the Lambda | `platforms/aws/src/lambda.ts` | `{"fling":"notify"}` every minute (with mail); `{"fling":"maintain"}` hourly |
+| Ticks | EventBridge Scheduler invoking the Lambda | `platforms/aws/src/lambda.ts` | `{"fling":"notify"}` every minute (with mail); `{"fling":"maintain"}` every 15 minutes, up to 4 minutes of the function's timeout (300 s by default) |
 | Migrations | Lambda invoke `{"fling":"migrate"}` | `platforms/aws/src/lambda.ts` | Looped by the deploy until done |
 | Secrets | SSM Parameter Store SecureStrings under `SSM_PREFIX` | `platforms/aws/src/secrets.ts` | Read at cold start. Generated secrets are written write-only, never into state. The site HMAC key is copied into the KVS as `cfg:site-hmac` |
 | Sign-in | (core OIDC) | — | The client secrets are in SSM |

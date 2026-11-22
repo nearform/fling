@@ -87,8 +87,8 @@ run "without_servers" {
   }
 
   assert {
-    condition     = aws_lambda_function.api.timeout == 30
-    error_message = "Without servers, the function's timeout is var.lambda's."
+    condition     = aws_lambda_function.api.timeout == 300
+    error_message = "Without servers, the function's timeout is var.lambda's (5 minutes by default, for maintenance)."
   }
 }
 
@@ -151,7 +151,7 @@ run "with_servers_fenced" {
   }
 
   assert {
-    condition     = aws_lambda_function.api.timeout == 60
+    condition     = aws_lambda_function.api.timeout >= 60
     error_message = "With servers, the function waits long enough for a start probe."
   }
 }

@@ -67,7 +67,7 @@ locals {
       }
       maintain = {
         command  = ["node", "main.mjs", "tick", "maintain"]
-        schedule = "17 * * * *"
+        schedule = "*/15 * * * *"
         timeout  = 900
       }
     },

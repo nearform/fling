@@ -496,9 +496,9 @@ How it fits:
 - The deploy config gains a top-level `MAIL: { FROM, FROM_NAME?, REPLY_TO? }`, beside `INSTANCE`
   rather than in it, because `scripts/render-config.mjs` needs `FROM` for the binding.
 - The template **wrangler.jsonc** has an unrestricted `"send_email": [{ "name": "EMAIL" }]`, for
-  `wrangler dev`, and only the hourly cron. `render-config.mjs` (`scripts/config.mjs`), given
+  `wrangler dev`, and only the maintenance cron (`*/15 * * * *`). `render-config.mjs` (`scripts/config.mjs`), given
   `MAIL`, renders `"send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["<MAIL.FROM>"] }]`
-  and the crons `["17 * * * *", "* * * * *"]`, and sets `MAIL_DRIVER=cloudflare` and the `MAIL_*`
+  and the crons `["*/15 * * * *", "* * * * *"]`, and sets `MAIL_DRIVER=cloudflare` and the `MAIL_*`
   vars. No `MAIL` block: no binding, no minute cron, no email. `MAIL_*` in `INSTANCE` is refused.
 - Locally, `scripts/dev.mjs --mail` sets `MAIL_DRIVER=cloudflare` and `MAIL_FROM`, so the real
   `CloudflareMailer` sends through the simulated binding.

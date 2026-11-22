@@ -39,7 +39,7 @@ import {
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
 import { manifestKey } from './blobs/types.ts'
 import { conflict, notFound } from './lib/errors.ts'
-import { reviveVersion } from './maintenance.ts'
+import { GRACE_MS, queueMaintenance, reviveVersion } from './maintenance.ts'
 import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
 import {
   actorOn,
@@ -142,10 +142,12 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
   const versionId = site.currentVersionId
   // Only the Paths fields change, on the site as it is when written; a rendered page is not a
   // change to the site, so `updatedAt` stays.
+  let replaced = false
   await writeSite(
     deps,
     site,
     s => {
+      replaced = false
       if (s.currentVersionId !== versionId) return false
       if ((s.paths === true) === hasPaths && s.home === home) return false
       if (hasPaths) s.paths = true
@@ -153,6 +155,7 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
       if (s.home && s.home !== home) {
         const at = deps.clock.now().toISOString()
         s.homeOld = [...(s.homeOld ?? []), { sha: s.home, at }].slice(-MAX_HOME_OLD)
+        replaced = true
       }
       if (home) s.home = home
       else delete s.home
@@ -160,6 +163,8 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
     },
     { touch: false }
   )
+  // The page it replaced is maintenance's to delete, after the grace.
+  if (replaced) await queueMaintenance(deps, site, deps.clock.now().getTime() + GRACE_MS)
 }
 
 /**

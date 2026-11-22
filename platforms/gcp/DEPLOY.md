@@ -42,7 +42,7 @@ $APP_HOST, *.$APP_HOST   global external Application Load Balancer
                                    /ticks/* → ticks and migrations (Google ID tokens only)
                                    everything else on $APP_HOST → the web UI (in the image)
                                    *.$APP_HOST → the shared site routing decision → GCS
-Cloud Scheduler   maintain hourly, notify every minute (with mail): POST /ticks/* with OIDC
+Cloud Scheduler   maintain every 15 min, notify every minute (with mail): POST /ticks/* with OIDC
 Firestore $NAME (items), bucket <prefix>$NAME-sites, Secret Manager $NAME-*, Artifact Registry $NAME
 ```
 
@@ -216,7 +216,8 @@ SPF, DKIM and DMARC are the provider's to set up; `from` must not be on the site
 
 ## Ticks
 
-Cloud Scheduler calls `POST https://$APP_HOST/ticks/maintain` hourly and, with mail,
+Cloud Scheduler calls `POST https://$APP_HOST/ticks/maintain` every 15 minutes
+(`maintenance_schedule`, waiting up to 300 s) and, with mail,
 `/ticks/notify` every minute, through the load balancer, each with a Google-signed ID token for the
 scheduler's service account whose audience is the app origin. The service checks the token's
 signature, issuer, expiry, audience and service account (`platforms/gcp/src/ticks.ts`); anything

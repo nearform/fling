@@ -31,6 +31,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
 import { buildDeps } from '@fling/api/deps'
 import { MemoryLiveHub } from '@fling/api/live-memory'
+import { MAINTAIN_BUDGET_MS, MAINTAIN_EVERY_MS } from '@fling/api/maintenance'
 import { MIGRATIONS, runMigrations } from '@fling/api/migrations'
 import { TableRouteTable } from '@fling/api/route-table/table'
 import { MemoryServerLogs } from '@fling/api/servers/memory-logs'
@@ -144,7 +145,10 @@ console.log(
 const ready = deps
 const timers = [
   ...(ready.mailer ? [setInterval(() => void drain(ready).catch(() => {}), 60_000)] : []),
-  setInterval(() => void maintain(ready, table).catch(() => {}), 60 * 60_000),
+  setInterval(
+    () => void maintain(ready, table, Date.now() + MAINTAIN_BUDGET_MS).catch(() => {}),
+    MAINTAIN_EVERY_MS
+  ),
 ]
 
 async function shutdown() {

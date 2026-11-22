@@ -1,5 +1,5 @@
 /**
- * The route table's format (kvs.ts RouteFormat), which an admin chooses (Admin → Settings): `json`,
+ * The route table's format (kvs.ts RouteFormat), which an admin chooses (Admin → Routes): `json`,
  * which every release's edge reads, or `compact`, about a third of the size, for a store with a
  * size limit (CloudFront KeyValueStore: 5 MB). The edge reads both, so a choice takes effect as
  * the API writes: every route write from then on is in the chosen format (sites.ts
@@ -28,7 +28,7 @@ export async function routeFormat(deps: Deps): Promise<RouteFormat> {
   return (await deps.store.getRouteFormat())?.format ?? 'json'
 }
 
-/** What Admin → Settings shows of the route table: its format, the rewrite, how full it is. */
+/** What Admin → Routes shows of the route table: its format, the rewrite, how full it is. */
 export async function routeTableStatus(deps: Deps, p: Principal) {
   ensure(p, 'admin.routes.read')
   const record = await deps.store.getRouteFormat()

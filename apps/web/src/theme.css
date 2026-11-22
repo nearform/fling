@@ -367,6 +367,12 @@
 }
 
 @layer components {
+  /* A tab strip's first label lines up with the heading above it: pulled back by the tab's own
+     padding (daisyUI's --tab-p), which also places its underline. */
+  .tabs-border > .tab:first-child {
+    margin-inline-start: calc(var(--tab-p) * -1);
+  }
+
   /* Flat by default — a hairline border on the canvas defines every surface. */
   .btn {
     box-shadow: none;

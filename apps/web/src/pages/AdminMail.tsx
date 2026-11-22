@@ -9,7 +9,6 @@ import type { MailAdmin, MailTestResult } from '@fling/shared'
 import { EnvelopeIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline'
 import { type FormEvent, type ReactNode, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AdminTabs } from '../components/AdminTabs'
 import { PageHeader } from '../components/PageHeader'
 import { useInstance } from '../hooks/instance'
 import { useAdminMail, useMe, useSendTestMail } from '../hooks/queries'
@@ -261,7 +260,6 @@ export default function AdminMail() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="space-y-4">
-        <AdminTabs />
         <PageHeader
           title="Mail"
           description="How this instance sends email, a test send, and how sending went in the last day."

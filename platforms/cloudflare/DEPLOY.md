@@ -433,7 +433,7 @@ until you roll forward again (the audiences are kept). Rolling back to a release
 lets no one in through a group: a site whose audience names one is shut to its members until you
 roll forward.
 
-Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Settings
+Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Routes
 and wait until its panel says the rewrite has finished: those releases read only `json` routes
 ([Route table size and format](../aws/DEPLOY.md#route-table-size-and-format)).
 

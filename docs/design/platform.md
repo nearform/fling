@@ -161,7 +161,7 @@ Each element uses the same headings:
   over string keys. The keys are `site:<label>`, `share:<token>`, `path:<siteId>/<folder>`,
   `revoked:<mac>` and `cfg:site-hmac`. A store with a size limit also has `usage()`, which says
   how full it is (`{ bytes, limitBytes }`; CloudFront KeyValueStore's 5 MB). Maintenance logs it
-  every run (`route table usage`, or `route table nearly full` from 70%), and Admin → Settings
+  every run (`route table usage`, or `route table nearly full` from 70%), and Admin → Routes
   shows it. A store without a limit leaves `usage` out.
 - **Values:** a site's, a share link's and a Path's value come in two formats
   (`RouteFormat`, `packages/shared/src/kvs.ts`), and every sites host reads both
@@ -172,7 +172,7 @@ Each element uses the same headings:
     empty trailing fields left out; about a third of the size. A share link holds a pointer to
     its site's key (`>` and the site's label), which costs the sites host one lookup more.
 
-  An admin chooses the format the API writes (Admin → Settings, `apps/api/src/route-format.ts`,
+  An admin chooses the format the API writes (Admin → Routes, `apps/api/src/route-format.ts`,
   stored at `ROUTES/FORMAT`). Every route write from then on takes it, and maintenance rewrites
   every site's routes into it, a page of the site directory at a time, until all are done. The
   default is `json`, which every release reads.

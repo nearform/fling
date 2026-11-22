@@ -2,15 +2,14 @@
  * Admin → Users (admins only; the API answers 404 to anyone else): every user of the instance, by
  * email, searched by email prefix and paged with "Load more"; Impersonate (with a confirmation)
  * on everyone but yourself and other admins; guests marked (invited from outside by a share or a
- * group); and the latest impersonations, invitations and admins' changes to other people's sites, from the audit log.
+ * group). What admins did is on Admin → Audit.
  */
-import type { AdminUser, AuditEntry } from '@fling/shared'
+import type { AdminUser } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
 import { useDeferredValue, useState } from 'react'
-import { AdminTabs } from '../components/AdminTabs'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PageHeader } from '../components/PageHeader'
-import { useAdminAudit, useAdminUsers, useImpersonation, useMe } from '../hooks/queries'
+import { useAdminUsers, useImpersonation, useMe } from '../hooks/queries'
 import { impersonateBlocked, showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
 import { fullDate, timeAgo } from '../lib/format'
@@ -93,81 +92,6 @@ function UsersTable({
   )
 }
 
-const ACTION_LABEL: Record<AuditEntry['action'], string> = {
-  'impersonation.start': 'started impersonating',
-  'impersonation.stop': 'stopped impersonating',
-  'invitation.create': 'invited',
-  'invitation.revoke': 'revoked the invitation of',
-  'site.change': 'changed',
-  'site.open': 'opened',
-  'site.server_published': 'published a site server on',
-  'viewer.resolved': 'resolved a viewer id on',
-  'routes.format': 'chose the route table format',
-}
-
-/** What an admin did to someone else's site (a policy action), as a verb for its name. */
-const CHANGE_LABEL: Record<string, string> = {
-  'site.visibility': 'changed who can open',
-  'site.audience': 'changed the audience of',
-  'site.settings': 'changed the settings of',
-  'site.archive': 'archived or unarchived',
-  'site.rollback': 'rolled back',
-  'site.delete': 'deleted',
-  'share.create': 'made a share link for',
-  'share.revoke': 'revoked the share link of',
-  'comment.delete': 'deleted a comment on',
-}
-
-const labelOf = (e: AuditEntry) => (e.change && CHANGE_LABEL[e.change]) ?? ACTION_LABEL[e.action]
-
-/** How an invitation came about, after its target: " as a guest, by sharing". */
-function invitedHow(e: AuditEntry): string {
-  if (e.action !== 'invitation.create') return ''
-  const role = e.role === 'guest' ? ' as a guest' : e.role === 'member' ? ' as a member' : ''
-  const via = e.via === 'share' ? ', by sharing a site' : e.via === 'group' ? ', by a group' : ''
-  return `${role}${via}`
-}
-
-function AuditLog() {
-  const audit = useAdminAudit()
-  return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-base font-semibold">Recent activity</h2>
-        <p className="text-sm text-secondary">
-          Every impersonation's start and stop, every invitation made or revoked, and what admins
-          changed on other people's sites or opened of their restricted ones, kept for 180 days.
-        </p>
-      </div>
-      <div className="surface-panel">
-        {audit.isPending ? (
-          <span className="loading loading-spinner loading-sm text-muted" />
-        ) : audit.isError ? (
-          <p className="text-sm text-error">{errorMessage(audit.error)}</p>
-        ) : audit.data.length === 0 ? (
-          <p className="text-sm text-secondary">Nothing yet.</p>
-        ) : (
-          <ul className="space-y-1.5 text-sm">
-            {audit.data.map(e => (
-              <li key={e.id}>
-                <span className="font-medium">{e.actor}</span> {labelOf(e)}{' '}
-                <span className="font-medium">{e.target}</span>
-                {e.owner && <span className="text-secondary">, {e.owner}’s site</span>}
-                {invitedHow(e)}
-                {e.lapsed && <span className="text-secondary"> (it had lapsed)</span>}
-                <span className="text-secondary">
-                  {' · '}
-                  <When iso={e.at} />
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
-  )
-}
-
 export default function AdminUsers() {
   const { data: me } = useMe()
   const [search, setSearch] = useState('')
@@ -190,7 +114,6 @@ export default function AdminUsers() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="space-y-4">
-        <AdminTabs />
         <PageHeader
           title="Users"
           description="Everyone who has signed in to this instance. Impersonate someone to see and do what they do, for up to an hour."
@@ -243,8 +166,6 @@ export default function AdminUsers() {
           </button>
         )}
       </section>
-
-      <AuditLog />
 
       <ConfirmModal
         isOpen={pending !== null}

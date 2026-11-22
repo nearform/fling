@@ -4,7 +4,7 @@
  * to make one, and then shows it. Any member may use any group in a site's audience; only its
  * owner changes it.
  */
-import { PlusIcon, UserGroupIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, UserGroupIcon, UserIcon } from '@heroicons/react/24/outline'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmailBadge } from '../components/EmailBadge'
@@ -66,6 +66,7 @@ export default function Groups() {
           className={`tab ${mine ? '' : 'tab-active'}`}
           onClick={() => setMine(false)}
         >
+          <UserGroupIcon className="mr-1.5 h-4 w-4" aria-hidden />
           All
         </button>
         <button
@@ -75,6 +76,7 @@ export default function Groups() {
           className={`tab ${mine ? 'tab-active' : ''}`}
           onClick={() => setMine(true)}
         >
+          <UserIcon className="mr-1.5 h-4 w-4" aria-hidden />
           Mine
         </button>
       </div>

@@ -22,7 +22,13 @@ import {
   type SiteSort,
   sortSites,
 } from '@fling/shared'
-import { ShieldCheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import {
+  ArchiveBoxIcon,
+  GlobeAltIcon,
+  ShieldCheckIcon,
+  UserGroupIcon,
+  XMarkIcon,
+} from '@heroicons/react/24/outline'
 import { type ReactNode, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminSiteCard } from '../components/AdminSiteCard'
@@ -340,17 +346,9 @@ export default function Sites() {
             className={`tab ${archived || shared || all ? '' : 'tab-active'}`}
             onClick={() => setView('active')}
           >
+            <GlobeAltIcon className="mr-1.5 h-4 w-4" aria-hidden />
             Active
             {active.data && <span className="ml-1.5 text-muted">{active.data.length}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={archived}
-            className={`tab ${archived ? 'tab-active' : ''}`}
-            onClick={() => setView('archived')}
-          >
-            Archived
           </button>
           {sharing && (
             <button
@@ -360,12 +358,23 @@ export default function Sites() {
               className={`tab ${shared ? 'tab-active' : ''}`}
               onClick={() => setView('shared')}
             >
+              <UserGroupIcon className="mr-1.5 h-4 w-4" aria-hidden />
               Shared with me
               {sharedList.data && (
                 <span className="ml-1.5 text-muted">{sharedList.data.length}</span>
               )}
             </button>
           )}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={archived}
+            className={`tab ${archived ? 'tab-active' : ''}`}
+            onClick={() => setView('archived')}
+          >
+            <ArchiveBoxIcon className="mr-1.5 h-4 w-4" aria-hidden />
+            Archived
+          </button>
           {admin && (
             <button
               type="button"

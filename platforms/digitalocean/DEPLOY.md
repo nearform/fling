@@ -225,7 +225,7 @@ migrations don't (they are forward-only and written so the release before keeps 
 neither does site content. App Platform's own rollback (the app → Activity → a deployment →
 Rollback) also works.
 
-Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Settings
+Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Routes
 and wait until its panel says the rewrite has finished: those releases read only `json` routes
 ([Route table size and format](../aws/DEPLOY.md#route-table-size-and-format)).
 

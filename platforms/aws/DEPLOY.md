@@ -751,15 +751,15 @@ The site router reads every site's route from a CloudFront KeyValueStore, which 
 links ([sizing](../../docs/platforms/aws.md#8-gaps-and-open-questions)). Maintenance logs the
 store's size every run (`route table usage`) and `route table nearly full` from 70%, which raises
 the `RouteTableFull` alarm in the instance's metric namespace (`Fling/<name>`); give it
-`alarm_actions` to be told. **Admin → Settings** shows the same.
+`alarm_actions` to be told. **Admin → Routes** shows the same.
 
 To make room, an admin chooses the `compact` format there: about a third of the size, with each
 share link a pointer to its site's route. Route writes take the new format at once, and
-maintenance rewrites every site's routes into it, a page at a time over the next runs; the panel
+maintenance rewrites every site's routes into it, a page at a time over the next runs; the page
 shows how far it has got. Choosing `json` again rewrites them back.
 
-**Before rolling back to a release before 0.16.0**, choose `json` in Admin → Settings and wait
-until the panel says the rewrite has finished: those releases' site router reads only `json`.
+**Before rolling back to a release before 0.16.0**, choose `json` in Admin → Routes and wait
+until the page says the rewrite has finished: those releases' site router reads only `json`.
 
 ## Rollback
 

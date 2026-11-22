@@ -45,6 +45,7 @@ export const queryKeys = {
   allAdminInvitations: ['admin', 'invitations'] as const,
   adminMail: ['admin', 'mail'] as const,
   adminSettings: ['admin', 'settings'] as const,
+  adminRouteTable: ['admin', 'route-table'] as const,
   // Under the site's key, so whatever refetches the site refetches these too.
   secrets: (name: string) => ['site', name, 'secrets'] as const,
   serverLogs: (name: string) => ['site', name, 'logs'] as const,
@@ -593,6 +594,28 @@ export function useAdminMail(enabled: boolean) {
 /** Admins: the instance's configuration (it changes only with a deploy). */
 export function useAdminSettings(enabled: boolean) {
   return useQuery({ enabled, queryKey: queryKeys.adminSettings, queryFn: api.adminSettings })
+}
+
+/** Admins: the route table's format and its rewrite, polled while the rewrite runs. */
+export function useAdminRouteTable(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.adminRouteTable,
+    queryFn: api.adminRouteTable,
+    refetchInterval: query => {
+      const rewrite = query.state.data?.rewrite
+      return rewrite && !rewrite.finishedAt ? 60_000 : false
+    },
+  })
+}
+
+/** Admins: choose the route format; the panel shows the rewrite it starts. */
+export function useSetRouteFormat() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.setRouteFormat,
+    onSuccess: data => queryClient.setQueryData(queryKeys.adminRouteTable, data),
+  })
 }
 
 /** Admins: send a test email. The page shows the result; the remaining count refetches. */

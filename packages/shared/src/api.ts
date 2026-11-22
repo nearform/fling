@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { FormsConfigSchema } from './forms.ts'
+import { ROUTE_FORMATS } from './kvs.ts'
 import { MAX_FILES, MAX_STORED_PATH_LENGTH } from './limits.ts'
 import { DeployManifestSchema } from './manifest.ts'
 import { PublishPathSchema } from './publish-path.ts'
@@ -542,6 +543,28 @@ export type AdminSettings = z.infer<typeof AdminSettingsSchema>
 export type AdminSetting = AdminSettings['settings'][number]
 export type AdminSecret = AdminSettings['secrets'][number]
 
+/**
+ * GET /api/admin/route-table — the route table's format (kvs.ts RouteFormat), who chose it and
+ * maintenance's rewrite of every site's routes into it, and how full the store is where it has a
+ * size limit (`usage`; null where it has none). POST it `{ format }` (a browser session's admin)
+ * to choose the format and start the rewrite.
+ */
+export const AdminRouteTableSchema = z.object({
+  format: z.enum(ROUTE_FORMATS),
+  setBy: z.string().optional(),
+  setAt: z.string().optional(),
+  rewrite: z
+    .object({
+      after: z.string().nullable(),
+      sites: z.number().int(),
+      finishedAt: z.string().optional(),
+    })
+    .optional(),
+  usage: z.object({ bytes: z.number(), limitBytes: z.number() }).nullable(),
+})
+export type AdminRouteTable = z.infer<typeof AdminRouteTableSchema>
+export const RouteFormatRequestSchema = z.object({ format: z.enum(ROUTE_FORMATS) })
+
 /** What an invitation lets someone outside the email policy be: a full user, or a guest. */
 export const InvitationRoleSchema = z.enum(['member', 'guest'])
 export type InvitationRole = z.infer<typeof InvitationRoleSchema>
@@ -608,6 +631,7 @@ export const AuditEntrySchema = z.object({
     'site.open',
     'site.server_published',
     'viewer.resolved',
+    'routes.format',
   ]),
   actor: z.string(),
   /** the person, or for site.change and site.open the site's name */

@@ -125,6 +125,7 @@ resources with the providers' `default_tags`.
 | `error_page_path` | `/_fling/404.html` | The sites' error page in the sites bucket (deploy.yml writes it) |
 | `mail` | `null` (no email) | Email notifications through an SES identity you already have: `{ from, from_name, reply_to, identity_arn, configuration_set_name, events_topic_arn }`. See [Email](#email) |
 | `servers` | `{}` (off) | Site servers' infrastructure: `{ enabled = false, egress = "none", vpc_cidr = "10.240.0.0/16" }`. See [Site servers](#site-servers) |
+| `alarm_actions` | `[]` | ARNs (an SNS topic, say) the module's alarms notify: `RouteTableFull`, raised when maintenance logs `route table nearly full`. See [Route table size and format](#route-table-size-and-format) |
 
 | Output | What |
 | --- | --- |
@@ -742,6 +743,23 @@ ask for more.
 - A site secret can't have one of Fling's reserved names (`AWS_*`, `LAMBDA_*`, `FLING_*`,
   `_X_AMZN*`, `PORT`, `HOST`, `PATH`, `TZ`, `LANG`, `_HANDLER`, `FILES`), on any platform:
   setting one, or declaring one in `fling.json`, is refused with 400 `invalid_secret_name`.
+
+## Route table size and format
+
+The site router reads every site's route from a CloudFront KeyValueStore, which holds 5 MB. In the
+`json` route format that is room for about 30–50k live sites, fewer with many Paths or share
+links ([sizing](../../docs/platforms/aws.md#8-gaps-and-open-questions)). Maintenance logs the
+store's size every run (`route table usage`) and `route table nearly full` from 70%, which raises
+the `RouteTableFull` alarm in the instance's metric namespace (`Fling/<name>`); give it
+`alarm_actions` to be told. **Admin → Settings** shows the same.
+
+To make room, an admin chooses the `compact` format there: about a third of the size, with each
+share link a pointer to its site's route. Route writes take the new format at once, and
+maintenance rewrites every site's routes into it, a page at a time over the next runs; the panel
+shows how far it has got. Choosing `json` again rewrites them back.
+
+**Before rolling back to a release before 0.16.0**, choose `json` in Admin → Settings and wait
+until the panel says the rewrite has finished: those releases' site router reads only `json`.
 
 ## Rollback
 

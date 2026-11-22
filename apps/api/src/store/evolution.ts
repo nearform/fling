@@ -59,6 +59,7 @@ export type Kind =
   | 'revocation'
   | 'maintenancedue'
   | 'maintenancecursor'
+  | 'routeformat'
   | 'counter'
   | 'sitesecret'
   | 'serversite'

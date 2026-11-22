@@ -218,6 +218,10 @@ Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 To roll back, run it with an earlier release tag. Data migrations are written to survive a rollback
 by one release ([Data migrations](../aws/DEPLOY.md#data-migrations)).
 
+Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Settings
+and wait until its panel says the rewrite has finished: those releases read only `json` routes
+([Route table size and format](../aws/DEPLOY.md#route-table-size-and-format)).
+
 ## Email
 
 Set the module's `mail` variable to send notifications (and to allow outside invitations,
@@ -263,6 +267,8 @@ off and a publish with a server is refused. The design (Container Apps dynamic s
 - **Cosmos DB, one partition.** Every item is in one logical partition, so every transaction is one
   batch. One logical partition holds at most 20 GB and serves at most 10,000 RU/s: the ceiling of
   an instance on Azure.
+  The route table lives in it too, so the number of sites is bounded by it, not by a store of its
+  own.
 - **Uploads pass through the app.** A SAS can't bind an upload to its bytes, so the CLI uploads
   each file to the app's upload route, which checks its SHA-256 and writes it to Blob Storage.
   The app takes request bodies up to 32 MiB (a file's limit is 25 MiB).

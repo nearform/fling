@@ -641,7 +641,16 @@ expires after 30 days (`SUPPRESSION_MS`, `apps/api/src/notifications/drain.ts`).
 ports:
 **Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),
 **Blobs** (site files and manifests, including upload URLs bound to the file's digest) and
-**RouteTable** (the keys the edge routes site hosts by).
+**RouteTable** (the keys the edge routes site hosts by; `usage()` where the store has a size
+limit).
+
+**Route format** — how the API writes the route table's values (`packages/shared/src/kvs.ts`
+`RouteFormat`; `apps/api/src/route-format.ts`): `json`, which every release's edge reads, or
+`compact` (`~<id>|<v>|<flags>…`, about a third of the size, a share link as a pointer `>` to its
+site's value), for a store with a size limit (CloudFront KeyValueStore: 5 MB). The edge reads both
+(`parseRoute` in `site-routing.ts`). An admin chooses it in Admin → Settings (`ROUTES/FORMAT`);
+route writes take it at once and maintenance rewrites every site's routes into it. Before a
+rollback to a release before 0.16.0, `json` and its rewrite finished.
 
 **Upload binding** — what holds a presigned upload to the exact bytes the manifest names: the
 SHA-256 (`x-amz-checksum-sha256`) where the store checks one, the MD5 (`Content-MD5`, from the

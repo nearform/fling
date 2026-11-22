@@ -48,6 +48,7 @@ import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
 import { formsKey, manifestKey, stagedPrefix, UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
 import { pathRef } from './paths.ts'
 import { sweepRevocations } from './revocations.ts'
+import { rewriteRoutes } from './route-format.ts'
 import { serverSite, serverVersion } from './servers/index.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
@@ -87,6 +88,8 @@ export interface MaintainResult {
   homes: number
   /** revocations taken off the edge's list */
   revocations: number
+  /** sites whose routes were rewritten into the chosen format (route-format.ts) */
+  routes: number
   /** stopped at the deadline with work left (queued, or the sweep's lap unfinished) */
   partial: boolean
   /** the sweep reached the end of the directory, a lap that began then (ISO) */
@@ -105,6 +108,7 @@ export async function maintain(
     unmarked: 0,
     homes: 0,
     revocations: 0,
+    routes: 0,
     partial: false,
   }
   const started = Date.now()
@@ -128,7 +132,13 @@ export async function maintain(
       ? opts.deadline
       : opts.deadline - Math.max(0, opts.deadline - started) * SWEEP_SHARE
   if (!(await drainQueue(deps, queueDeadline, done, result))) result.partial = true
+  try {
+    result.routes = await rewriteRoutes(deps, opts.deadline)
+  } catch (err) {
+    console.warn(JSON.stringify({ level: 'warn', msg: 'route rewrite failed', err: String(err) }))
+  }
   if (sweep && !(await sweepDirectory(deps, opts.deadline, done, result))) result.partial = true
+  await logRouteTableUsage(deps)
   return result
 }
 
@@ -235,6 +245,30 @@ async function maintainSite(
     )
     await queueMaintenance(deps, site, now + GRACE_MS)
     return false
+  }
+}
+
+/** From how full a route table with a size limit is logged as nearly full (AWS alarms on it). */
+const ROUTE_TABLE_WARN = 0.7
+
+async function logRouteTableUsage(deps: Deps) {
+  if (!deps.routeTable.usage) return
+  try {
+    const { bytes, limitBytes } = await deps.routeTable.usage()
+    const percent = Math.round((bytes / limitBytes) * 1000) / 10
+    const full = bytes >= limitBytes * ROUTE_TABLE_WARN
+    const fields = { bytes, limitBytes, percent }
+    console.log(
+      JSON.stringify(
+        full
+          ? { level: 'warn', msg: 'route table nearly full', ...fields }
+          : { level: 'info', msg: 'route table usage', ...fields }
+      )
+    )
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: 'warn', msg: 'route table usage failed', err: String(err) })
+    )
   }
 }
 

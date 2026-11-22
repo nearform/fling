@@ -90,6 +90,11 @@ run "without_servers" {
     condition     = aws_lambda_function.api.timeout == 300
     error_message = "Without servers, the function's timeout is var.lambda's (5 minutes by default, for maintenance)."
   }
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.route_table_full.pattern == "\"route table nearly full\"" && length(aws_cloudwatch_metric_alarm.route_table_full.alarm_actions) == 0
+    error_message = "The route table alarm counts maintenance's 'nearly full' lines, and notifies nobody by default."
+  }
 }
 
 run "with_servers_fenced" {

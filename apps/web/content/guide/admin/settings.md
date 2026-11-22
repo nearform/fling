@@ -2,16 +2,16 @@
 title: Settings
 part: admin
 order: 30
-summary: See how the instance is configured; changing it is a deploy.
+summary: See how the instance is configured, and choose the route table's format.
 audience: admin
-sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts]
-verified: 79489687d
+sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts, apps/api/src/route-format.ts]
+verified: 0669f1e87
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its
-addresses, its brand, which features are on, how it sends email. It is read only. Every value comes
-from the instance's deployment, so whoever runs {{instance:name}} changes it there and deploys
-again.
+addresses, its brand, which features are on, how it sends email. The settings are read only:
+every value comes from the instance's deployment, so whoever runs {{instance:name}} changes it
+there and deploys again. The one thing you choose here is the route table's format.
 
 ## In the web app
 
@@ -33,9 +33,24 @@ never their value.
 Each group links to the part of the deploy guide, for AWS and for Cloudflare, that explains its
 settings.
 
+## The route table
+
+The **Route table** panel shows how every site's address finds its files. Where the instance keeps
+its routes in a store with a size limit, the panel shows how full it is.
+
+The format is **JSON** until you choose otherwise. **Compact** takes about a third of the room,
+for an instance whose route table is filling up. Choose **Switch to Compact** (or **Switch to
+JSON**) and confirm. Sites published from then on take the new format at once; the others are
+rewritten in the background over the next maintenance runs, and the panel shows how many are
+done. Sites keep working throughout.
+
+> **Warning** Before whoever runs {{instance:name}} rolls it back to an older release, switch back
+> to JSON and wait until the panel says the rewrite has finished. Older releases read only JSON.
+
 ## What you change here, and what at deploy
 
-Nothing on this page changes from the web app. What admins do day to day is elsewhere:
+Apart from the route table's format, nothing on this page changes from the web app. What admins
+do day to day is elsewhere:
 
 | You want to | Where |
 |---|---|
@@ -55,6 +70,7 @@ who the admins are, the name and brand, the addresses, and which features are on
 |---|---|---|
 | "This page is for the instance's admins." | Your address isn't one of the instance's admins. | Ask whoever runs {{instance:name}}. |
 | "Stop impersonating to get back to the admin pages." | You are acting as someone else. | Choose **Stop** in the bar at the top. |
+| The route table is nearly full | The instance has a lot of sites, Paths or share links for its route store. | Switch to compact; if it is compact already, ask whoever runs {{instance:name}}. |
 | A value isn't what you expected | The deployment didn't set it (it shows **default**), or set it differently. | Ask whoever runs {{instance:name}} to change it and deploy again. |
 
 ## Good to know

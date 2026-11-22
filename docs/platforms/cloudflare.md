@@ -117,6 +117,10 @@ There is no Terraform. Two scripts and the rendered wrangler config own the infr
 
 ## 8. Gaps and open questions
 
+- **Size.** Workers KV has no store limit that Fling meets, and D1 answers a miss, so the route
+  table does not bound the number of sites. D1's 10 GB database is the ceiling, reached first by
+  comments and form responses (hundreds of thousands of sites). The route format still applies:
+  `compact` makes each KV value smaller.
 - **Terraform.** Cloudflare has an official provider, `cloudflare/cloudflare`. Terraform could own:
   - the D1 database, R2 bucket and lifecycle rule, and KV namespace;
   - the wildcard DNS record and the Advanced Certificate;

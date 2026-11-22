@@ -63,3 +63,38 @@ resource "aws_scheduler_schedule" "maintain" {
     }
   }
 }
+
+# -----------------------------------------------------------------------------
+# The route table's size: the KeyValueStore holds 5 MB, and a site can't go live once it is full.
+# Each maintenance run logs how full it is (apps/api/src/maintenance.ts): "route table usage", or
+# from 70% up "route table nearly full", which the filter counts (the logs are text, so it matches
+# the message); one in an hour sets the alarm off. Room is made by choosing the compact format in Admin → Settings.
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_log_metric_filter" "route_table_full" {
+  name           = "${local.name}-route-table-full"
+  log_group_name = aws_cloudwatch_log_group.this.name
+  pattern        = "\"route table nearly full\""
+
+  metric_transformation {
+    name          = "RouteTableFull"
+    namespace     = "Fling/${local.name}"
+    value         = "1"
+    default_value = "0"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "route_table_full" {
+  alarm_name          = "${local.name}-route-table-full"
+  alarm_description   = "${var.name} (${var.env})'s route table (CloudFront KeyValueStore) is 70% full or more. Choose the compact route format in Admin → Settings, or archive unused sites."
+  namespace           = "Fling/${local.name}"
+  metric_name         = aws_cloudwatch_log_metric_filter.route_table_full.metric_transformation[0].name
+  statistic           = "Sum"
+  period              = 3600
+  evaluation_periods  = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.alarm_actions
+}

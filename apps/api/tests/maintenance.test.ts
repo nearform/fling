@@ -5,7 +5,7 @@
  * an abandoned pending deploy goes too; replaced home pages are deleted after the grace period.
  */
 import { siteObjectKey } from '@fling/shared'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { manifestKey, stagedObjectKey, UPLOAD_URL_TTL_SECONDS } from '../src/blobs/types.ts'
 import { GRACE_MS, maintain, PENDING_TTL_MS } from '../src/maintenance.ts'
 import { api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
@@ -247,6 +247,24 @@ describe('the queue and the sweep', () => {
     // Nothing queued now: no site is visited, and the sweep keeps no place.
     expect(await maintain(env.deps)).toMatchObject({ sites: 0, partial: false })
     expect(await env.store.getMaintenanceCursor()).toBeNull()
+  })
+
+  it('logs how full a route table with a size limit is, nearly full from 70%', async () => {
+    const env = setup()
+    const lines: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation(line => void lines.push(String(line)))
+    for (const bytes of [100, 800]) {
+      const routeTable = Object.assign(Object.create(env.deps.routeTable), {
+        usage: async () => ({ bytes, limitBytes: 1000 }),
+      })
+      await maintain({ ...env.deps, routeTable })
+    }
+    log.mockRestore()
+    const usage = lines.filter(l => l.includes('route table')).map(l => JSON.parse(l))
+    expect(usage).toEqual([
+      { level: 'info', msg: 'route table usage', bytes: 100, limitBytes: 1000, percent: 10 },
+      { level: 'warn', msg: 'route table nearly full', bytes: 800, limitBytes: 1000, percent: 80 },
+    ])
   })
 
   it('drops what is queued for a site that is gone', async () => {

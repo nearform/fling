@@ -104,6 +104,8 @@ bucket is private.
 
 ## 8. Gaps and open questions
 
+- **Size.** The route table is Postgres behind a cache, so it does not bound the number of sites:
+  the database's size and maintenance's queue (about 1,000–3,000 sites' work an hour) do.
 - **Spaces and SHA-256.** Whether a presigned PUT with a signed `x-amz-checksum-sha256` rejects
   other bytes on Spaces is unconfirmed, so uploads there are bound by `Content-MD5`
   (`S3_UPLOAD_DIGEST=md5`): each staged file is copied into the version and checked before it goes

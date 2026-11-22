@@ -10,6 +10,7 @@ import type {
   InvitationVia,
   LivePeer,
   NotificationPreferences,
+  RouteFormat,
   Visibility,
 } from '@fling/shared'
 import { accessLevelOf } from '@fling/shared'
@@ -63,6 +64,8 @@ export type AuditAction =
   | 'site.server_published'
   /** an admin learned whose a viewer id is (`target`: the site; `change`: the id) */
   | 'viewer.resolved'
+  /** an admin chose the route table's format (`target`: the format) */
+  | 'routes.format'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -114,6 +117,18 @@ export interface MaintenanceDueRecord {
   /** the site's name when it was queued: what maintenance looks it up by */
   name: string
   dueAt: string
+}
+
+/**
+ * The route table's format (`ROUTES/FORMAT`, route-format.ts): what the API writes, chosen by an
+ * admin, and maintenance's rewrite of every site's routes into it. Absent: `json`, nothing to do.
+ */
+export interface RouteFormatRecord {
+  format: RouteFormat
+  setBy: string
+  setAt: string
+  /** how far the rewrite has gone: the last site name done, how many so far, when it finished */
+  rewrite: { after: string | null; sites: number; finishedAt?: string }
 }
 
 /** How far maintenance's sweep of the site directory has gone (`MAINTAIN/CURSOR`). */
@@ -811,6 +826,13 @@ export interface Store extends NotificationStore {
   /** Take one off the queue (no-op when it is gone already). */
   deleteMaintenance(due: MaintenanceDueRecord): Promise<void>
   getMaintenanceCursor(): Promise<MaintenanceCursorRecord | null>
+  getRouteFormat(): Promise<RouteFormatRecord | null>
+  /**
+   * Write the route format. With `ifSetAt`, only while the stored one is that choice (its
+   * `setAt`; null: none stored), so a rewrite's progress never undoes a newer choice; returns
+   * whether it was written.
+   */
+  putRouteFormat(record: RouteFormatRecord, ifSetAt?: string | null): Promise<boolean>
   putMaintenanceCursor(cursor: MaintenanceCursorRecord): Promise<void>
   /**
    * The site directory a page at a time, by name (byte order), from the first name after `after`

@@ -214,7 +214,7 @@ yet provide.
 Run the previous release's image (`FLING_IMAGE`, or `image.tag` and `helm upgrade`). Every
 release serves the data the next one wrote ([Data migrations](../aws/DEPLOY.md#data-migrations)).
 
-Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Settings
+Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Routes
 and wait until its panel says the rewrite has finished: those releases read only `json` routes
 ([Route table size and format](../aws/DEPLOY.md#route-table-size-and-format)).
 

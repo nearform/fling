@@ -46,10 +46,7 @@ a **Guest** badge: they review only what is shared with them.<!-- /requires -->
 Type the start of an email address in the search box to find someone. **Load more** shows the
 next page.
 
-Below the list, **Recent activity** shows every impersonation's start and stop, every invitation
-made or revoked, and what admins changed on other people's sites or opened of their restricted
-ones.<!-- requires: servers --> It also shows each site server published, and each viewer id an
-admin looked up.<!-- /requires --> Entries are kept for {{fact:audit-days}}.
+Every impersonation and invitation is recorded on [Audit](/guide/admin/audit).
 
 ### Impersonate someone
 

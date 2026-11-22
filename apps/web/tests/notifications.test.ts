@@ -1,8 +1,10 @@
 import { type Me, notificationSettings } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import {
+  ADMIN_AUDIT_TAB,
   ADMIN_INVITATIONS_TAB,
   ADMIN_MAIL_TAB,
+  ADMIN_ROUTES_TAB,
   ADMIN_SETTINGS_TAB,
   ADMIN_USERS_TAB,
   adminTabsFor,
@@ -76,7 +78,12 @@ describe('where notifications show', () => {
     expect(adminTabsFor(false)).not.toContain(ADMIN_MAIL_TAB)
     for (const mail of [true, false]) {
       expect(adminTabsFor(mail)).toEqual(
-        expect.arrayContaining([ADMIN_USERS_TAB, ADMIN_SETTINGS_TAB])
+        expect.arrayContaining([
+          ADMIN_USERS_TAB,
+          ADMIN_AUDIT_TAB,
+          ADMIN_ROUTES_TAB,
+          ADMIN_SETTINGS_TAB,
+        ])
       )
     }
   })

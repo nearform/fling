@@ -218,7 +218,7 @@ Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 To roll back, run it with an earlier release tag. Data migrations are written to survive a rollback
 by one release ([Data migrations](../aws/DEPLOY.md#data-migrations)).
 
-Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Settings
+Before rolling back to a release before 0.16.0, choose the `json` route format in Admin → Routes
 and wait until its panel says the rewrite has finished: those releases read only `json` routes
 ([Route table size and format](../aws/DEPLOY.md#route-table-size-and-format)).
 

@@ -429,7 +429,7 @@ impersonation). Every start and stop is audited.
 **Audit log** — what admins did (impersonations, invitations and revocations, changes to other
 people's sites, opening restricted ones) and every invitation made by sharing
 (`apps/api/src/audit.ts`): an `AUDIT` item per entry, time-ordered and kept 180 days, and a log
-line. Admin → Users shows the latest 50 (`GET /api/admin/audit`).
+line. Admin → Audit shows the latest 50 (`GET /api/admin/audit`).
 
 Admins also read the instance's **settings** (`/admin/settings`, `GET /api/admin/settings`,
 `admin.settings.read`; from a browser session or an admin's API key): every key of the env schema
@@ -648,7 +648,7 @@ limit).
 `RouteFormat`; `apps/api/src/route-format.ts`): `json`, which every release's edge reads, or
 `compact` (`~<id>|<v>|<flags>…`, about a third of the size, a share link as a pointer `>` to its
 site's value), for a store with a size limit (CloudFront KeyValueStore: 5 MB). The edge reads both
-(`parseRoute` in `site-routing.ts`). An admin chooses it in Admin → Settings (`ROUTES/FORMAT`);
+(`parseRoute` in `site-routing.ts`). An admin chooses it in Admin → Routes (`ROUTES/FORMAT`);
 route writes take it at once and maintenance rewrites every site's routes into it. Before a
 rollback to a release before 0.16.0, `json` and its rewrite finished.
 

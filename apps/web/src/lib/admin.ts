@@ -47,6 +47,12 @@ export function invitationStatus(i: Pick<AdminInvitation, 'revokedAt' | 'signedI
   return i.signedIn ? 'Signed in' : 'Not signed in yet'
 }
 
+/** Admin → Audit: the audit log. */
+export const ADMIN_AUDIT_PATH = '/admin/audit'
+
+/** Admin → Routes: the route table's usage and format. */
+export const ADMIN_ROUTES_PATH = '/admin/routes'
+
 /** Admin → Settings. */
 export const ADMIN_SETTINGS_PATH = '/admin/settings'
 

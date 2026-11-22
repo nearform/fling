@@ -2,17 +2,26 @@ import { SIGN_IN_LINK_PAGE } from '@fling/shared'
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { AdminLayout } from './components/AdminTabs'
 import { ImpersonationBanner } from './components/ImpersonationBanner'
 import Layout from './components/Layout'
 import { NotFound } from './components/NotFound'
 import { Toasts } from './components/Toasts'
 import { AppInstanceProvider } from './hooks/instance'
 import { queryKeys, useMe } from './hooks/queries'
-import { ADMIN_INVITATIONS_PATH, ADMIN_SETTINGS_PATH, ADMIN_USERS_PATH } from './lib/admin'
+import {
+  ADMIN_AUDIT_PATH,
+  ADMIN_INVITATIONS_PATH,
+  ADMIN_ROUTES_PATH,
+  ADMIN_SETTINGS_PATH,
+  ADMIN_USERS_PATH,
+} from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
 import { ADMIN_MAIL_PATH, NOTIFICATION_SETTINGS_PATH } from './lib/notifications'
+import AdminAudit from './pages/AdminAudit'
 import AdminInvitations from './pages/AdminInvitations'
 import AdminMail from './pages/AdminMail'
+import AdminRoutes from './pages/AdminRoutes'
 import AdminSettings from './pages/AdminSettings'
 import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
@@ -116,10 +125,14 @@ export default function App() {
                 <Route path="keys" element={<Navigate to="/connections" replace />} />
               </Route>
               <Route path={NOTIFICATION_SETTINGS_PATH.slice(1)} element={<Notifications />} />
-              <Route path="admin/users" element={<AdminUsers />} />
-              <Route path={ADMIN_INVITATIONS_PATH.slice(1)} element={<AdminInvitations />} />
-              <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
-              <Route path={ADMIN_SETTINGS_PATH.slice(1)} element={<AdminSettings />} />
+              <Route element={<AdminLayout />}>
+                <Route path="admin/users" element={<AdminUsers />} />
+                <Route path={ADMIN_INVITATIONS_PATH.slice(1)} element={<AdminInvitations />} />
+                <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
+                <Route path={ADMIN_AUDIT_PATH.slice(1)} element={<AdminAudit />} />
+                <Route path={ADMIN_ROUTES_PATH.slice(1)} element={<AdminRoutes />} />
+                <Route path={ADMIN_SETTINGS_PATH.slice(1)} element={<AdminSettings />} />
+              </Route>
               <Route path="admin" element={<Navigate to={ADMIN_USERS_PATH} replace />} />
             </Route>
             <Route element={<Authenticated bare />}>

@@ -107,7 +107,7 @@ the code, and the app owns KVS keys and table items.
 
 - **The route table's 5 MB.** CloudFront KeyValueStore holds 5 MB per store, and a function has
   one store. In the `json` route format that is about 30–50k live sites, fewer with many Paths or
-  share links; in `compact` (Admin → Settings) about two to three times as many. Maintenance logs
+  share links; in `compact` (Admin → Routes) about two to three times as many. Maintenance logs
   the store's size every run and `route table nearly full` from 70%, which the module turns into
   the `RouteTableFull` alarm (`alarm_actions`). Beyond that, sites would need to be served from
   DynamoDB when they miss in the store.

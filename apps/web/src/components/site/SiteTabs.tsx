@@ -3,9 +3,28 @@
  * WAI-ARIA tabs pattern: only the selected tab is in the Tab order, the arrow keys move between
  * tabs and select them, Home and End go to the first and last. The panel is `SiteTabPanel`.
  */
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline'
+import {
+  ClockIcon,
+  Cog6ToothIcon,
+  ExclamationTriangleIcon,
+  LockClosedIcon,
+  ServerIcon,
+} from '@heroicons/react/24/outline'
+import type { ComponentType } from 'react'
 import { type KeyboardEvent, type ReactNode, useRef } from 'react'
 import { SITE_TAB_LABELS, type SiteTab } from '../../lib/site-tabs'
+
+const TAB_ICONS: Record<SiteTab, ComponentType<{ className?: string }>> = {
+  access: LockClosedIcon,
+  versions: ClockIcon,
+  server: ServerIcon,
+  settings: Cog6ToothIcon,
+}
+
+function TabIcon({ tab }: { tab: SiteTab }) {
+  const Icon = TAB_ICONS[tab]
+  return <Icon className="size-4" aria-hidden="true" />
+}
 
 export const siteTabId = (tab: SiteTab) => `site-tab-${tab}`
 const PANEL_ID = 'site-tabpanel'
@@ -69,6 +88,7 @@ export function SiteTabs({
             className={`tab shrink-0 gap-1.5 ${active ? 'tab-active' : ''}`}
             onClick={() => onSelect(tab)}
           >
+            <TabIcon tab={tab} />
             {SITE_TAB_LABELS[tab]}
             {note && (
               <>

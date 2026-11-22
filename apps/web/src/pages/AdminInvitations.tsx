@@ -14,7 +14,6 @@ import {
   UserPlusIcon,
 } from '@heroicons/react/24/outline'
 import { type FormEvent, useDeferredValue, useState } from 'react'
-import { AdminTabs } from '../components/AdminTabs'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PageHeader } from '../components/PageHeader'
 import { useInstance } from '../hooks/instance'
@@ -186,7 +185,6 @@ export default function AdminInvitations() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="space-y-4">
-        <AdminTabs />
         <PageHeader
           title="Invitations"
           description="People from outside the sign-in allowlist: members an admin invited, and guests who came in by a share or a group and review only what is shared with them."

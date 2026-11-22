@@ -98,8 +98,18 @@ page at `.rendered/<path>.html` beside its files (`apps/api/src/rendering.ts`,
 `?raw=1` (the route's `m`). A folder without an index.html has its `index.md`, else `README.md`,
 else its only Markdown file, as its home page. The `markdown` capability.
 
+**Maintenance** — the scheduled work that deletes what nothing serves any more
+(`apps/api/src/maintenance.ts`): every 15 minutes on every platform, up to 4 minutes a run
+(`MAINTAIN_EVERY_MS`, `MAINTAIN_BUDGET_MS`). It works first from the **maintenance queue**
+(`MAINTAIN/DUE#<dueAt>#<siteId>`): going live, staging a deploy and replacing a home page queue
+the site for when that work falls due, and maintaining a site queues it again for its next due
+time. Then the **sweep** goes through every site, a page at a time from where the last run stopped
+(`MAINTAIN/CURSOR`), starting again at the top after each **lap** (its length is logged,
+`maintenance lap`). The sweep reaches what nothing queued; `MAINTENANCE_SWEEP_ENABLED=off` turns
+it off.
+
 **Retention** — how many complete versions of each site and Path are kept besides the current one
-(`VERSION_RETENTION`, 0 = all; `apps/api/src/maintenance.ts`, run hourly). Older ones are marked
+(`VERSION_RETENTION`, 0 = all; carried out by maintenance). Older ones are marked
 `pruning`, then at least an hour later claimed `sweeping` and deleted, files and records; one
 published again or rolled back to meanwhile is kept.
 
@@ -354,7 +364,7 @@ site cookie key, so no address is at the edge) whose value is the expiry a `flin
 that moment has. A member's cookie expiring no later than it was issued by the revocation's second, and the
 edge (`site-routing.ts`) sends it to sign in, where someone without standing is refused and anyone
 re-invited gets a fresh cookie. Entries stay 30 days, past the last cookie they could stop, kept as
-`REVOKED/<dueAt>#<mac>` records that maintenance (every platform's hourly tick) sweeps. On Cloudflare the
+`REVOKED/<dueAt>#<mac>` records that maintenance (every platform's 15-minute tick) sweeps. On Cloudflare the
 Worker reads the list from KV alone, so a revocation reaches every location within about a
 minute.
 
@@ -720,7 +730,7 @@ through Drizzle ORM over `pg` or PGlite: one `items(pk, sk COLLATE "C", data jso
 table in a schema of its own, conditions checked under per-key advisory locks so exactly one of
 racing writers wins, and migrations drizzle-kit generates (`platforms/node/drizzle/`, recorded in
 `<schema>.fling_migrations`). Expired items are hidden
-at once and purged hourly. Every adapter, including the core's memory/fs ones,
+at once and purged by maintenance. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
 scenario (`packages/e2e`) locally and as its post-deploy smoke test.
 

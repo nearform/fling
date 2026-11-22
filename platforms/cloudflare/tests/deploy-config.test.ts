@@ -91,7 +91,7 @@ describe('MAIL', () => {
     expect(out.send_email).toEqual([
       { name: 'EMAIL', allowed_sender_addresses: ['fling@mail.example.test'] },
     ])
-    expect(out.triggers.crons).toEqual(['17 * * * *', '* * * * *'])
+    expect(out.triggers.crons).toEqual(['*/15 * * * *', '* * * * *'])
     expect(out.vars).toMatchObject({
       MAIL_DRIVER: 'cloudflare',
       MAIL_FROM: 'fling@mail.example.test',
@@ -109,7 +109,7 @@ describe('MAIL', () => {
   it('without MAIL: no binding, no every-minute cron, no mail vars', () => {
     const out = render({})
     expect(out).not.toHaveProperty('send_email')
-    expect(out.triggers.crons).toEqual(['17 * * * *'])
+    expect(out.triggers.crons).toEqual(['*/15 * * * *'])
     expect(Object.keys(out.vars).filter(k => k.startsWith('MAIL_'))).toEqual([])
   })
 

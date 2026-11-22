@@ -151,7 +151,12 @@ import { mapLimit } from './lib/concurrency.ts'
 import { ApiError, badRequest, conflict, notFound } from './lib/errors.ts'
 import { newId } from './lib/ids.ts'
 import { contentTypeFor } from './lib/mime.ts'
-import { reviveVersion } from './maintenance.ts'
+import {
+  PENDING_TTL_MS,
+  queueMaintenance,
+  reviveVersion,
+  unqueueStaleCheck,
+} from './maintenance.ts'
 import { type Acting, notifyAudienceChange } from './notifications/notify.ts'
 import { isLivePath, makePathCurrent, pathRef, refreshHome } from './paths.ts'
 import {
@@ -718,6 +723,7 @@ async function prepare(
         recheck
       )
       await noteLive(deps, user.email, existing, live)
+      await queueMaintenance(deps, existing)
       return {
         kind: 'done',
         result: { status: 'repointed', versionId, site: toSite(deps, as, existing) },
@@ -747,6 +753,8 @@ async function prepare(
   } satisfies StoredManifest)
   await writeForms(deps, site.id, versionId, forms ?? null)
   await store.putVersion(site, version)
+  // A deploy nobody finalizes is maintenance's to delete, once it is stale.
+  await queueMaintenance(deps, site, Date.parse(now) + PENDING_TTL_MS)
   // A newer publish: the one that waited for secrets no longer goes live when they are set.
   if (site.server?.awaiting && site.server.awaiting.versionId !== version.id) {
     await writeSite(deps, site, s => {
@@ -956,6 +964,7 @@ async function preparePath(
     ...(layer ? { layer } : {}),
   } satisfies StoredManifest)
   await store.putVersion(ref, version)
+  await queueMaintenance(deps, site, Date.parse(now) + PENDING_TTL_MS)
   const expires = new Date(clock.now().getTime() + PATH_DEPLOY_TTL_MS).toISOString()
   await store.notePathDeploy(site.id, versionId, folder, expires)
   const kept = new Set(layer?.kept)
@@ -1015,6 +1024,8 @@ async function goLivePath(
     }
     throw err
   }
+  await queueMaintenance(deps, site)
+  if (version.status === 'pending') await unqueueStaleCheck(deps, site, version)
   const hints = await pathHints(deps, site)
   return {
     status: 'live',
@@ -1251,6 +1262,9 @@ async function goLive(
     throw err
   }
   await noteLive(deps, user.email, site, version)
+  // Retention: the version this one replaced may now be past the newest N.
+  await queueMaintenance(deps, site)
+  if (version.status === 'pending') await unqueueStaleCheck(deps, site, version)
   if (first && isRestricted(site)) {
     await notifyAudienceChange(deps, user.email, site, { emails: [], groups: [] }, acting)
   }

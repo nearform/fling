@@ -212,6 +212,20 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
         expect((await table.query(pk, { limit: 100 })).cursor).toBeUndefined()
       })
 
+      it("a page's cursor is its last sk, which resumes later even once that item is gone", async () => {
+        const { table, pk } = await setup()
+        for (const sk of ['S#a', 'S#b', 'S#c', 'S#d']) await table.put({ pk, sk })
+        const first = await table.query(pk, { skPrefix: 'S#', limit: 2 })
+        expect(first.cursor).toBe(encodeCursor('S#b'))
+        await table.delete(pk, 'S#b')
+        const rest = await table.query(pk, {
+          skPrefix: 'S#',
+          limit: 5,
+          cursor: encodeCursor('S#b'),
+        })
+        expect(sks(rest.items)).toEqual(['S#c', 'S#d'])
+      })
+
       it('a cursor that decodes to a NUL resumes in byte order', async () => {
         const { table, pk } = await setup()
         for (const sk of ['a', 'b', 'c']) await table.put({ pk, sk })

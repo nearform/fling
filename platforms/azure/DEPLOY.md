@@ -40,7 +40,7 @@ $APP_DOMAIN, *.$SITES_DOMAIN  Front Door Standard (managed certificates; adds X-
                                  └─ sites host: the shared site routing decision
                                     (route table in Cosmos DB, cached) → Blob Storage `sites`
 wss://…webpubsub.azure.com/client/hubs/fling  Web PubSub (live rooms) ── events → the app
-Container Apps jobs: migrate (by the deploy), maintain (hourly), notify (every minute, with mail)
+Container Apps jobs: migrate (by the deploy), maintain (every 15 min), notify (every minute, with mail)
 Cosmos DB (serverless, one container), Key Vault (secrets), Log Analytics, a container registry
 ```
 
@@ -274,7 +274,7 @@ off and a publish with a server is refused. The design (Container Apps dynamic s
 At idle, roughly $40–45 a month: Front Door Standard's base fee (about $35) and small amounts for
 Key Vault, Log Analytics, the registry (Basic, about $5) and storage. The app scales to zero;
 Cosmos DB serverless, Blob Storage and Web PubSub's free tier are paid per use. The jobs run a few
-seconds each (the hourly maintain, and the minute's notify with mail).
+seconds each (maintain every 15 minutes, and the minute's notify with mail).
 
 ## Checking the edge cache
 

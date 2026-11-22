@@ -101,6 +101,11 @@
  *                                                        (mac, revokedAt), until it comes off it:
  *                                                        sorted by when, so the due ones are one
  *                                                        query
+ *   MAINTAIN               DUE#<dueAt>#<siteId>          maintenance a site has due then (name):
+ *                                                        sorted by when, so the due ones are one
+ *                                                        query
+ *   MAINTAIN               CURSOR                        how far the sweep of the site directory
+ *                                                        has gone (after, lapStartedAt)
  *
  * An invitation and its directory copy are written together, each write conditioned on the
  * `updatedAt` read (or on there being none), so racing invites of one address store one.
@@ -244,6 +249,7 @@ import { newId, newSortableId } from '../lib/ids.ts'
 import {
   ConditionFailed,
   compareSk,
+  encodeCursor,
   fieldEquals,
   ifAbsent,
   ifExists,
@@ -272,6 +278,8 @@ import {
   isLiveInvitation,
   type LiveConnectionRecord,
   listingOf,
+  type MaintenanceCursorRecord,
+  type MaintenanceDueRecord,
   type Minute,
   minuteStart,
   type NameClaim,
@@ -398,6 +406,11 @@ const key = {
   signInLinkRate: (email: string, hour: Hour) => ({ pk: `MAGICRATE#${email}`, sk: hour }),
   signInLinkInstanceRate: (minute: Minute) => ({ pk: 'MAGICRATE', sk: minute }),
   revocation: (r: { dueAt: string; mac: string }) => ({ pk: 'REVOKED', sk: `${r.dueAt}#${r.mac}` }),
+  maintenanceDue: (d: { dueAt: string; siteId: string }) => ({
+    pk: 'MAINTAIN',
+    sk: `DUE#${d.dueAt}#${d.siteId}`,
+  }),
+  maintenanceCursor: () => ({ pk: 'MAINTAIN', sk: 'CURSOR' }),
 }
 
 /** The outbox's partition for a minute. */
@@ -2056,6 +2069,46 @@ export class Records implements Store {
   async deleteRevocation(revocation: RevocationRecord) {
     const k = key.revocation(revocation)
     await this.table.delete(k.pk, k.sk)
+  }
+
+  async queueMaintenance(due: MaintenanceDueRecord) {
+    await this.table.put(encode('maintenancedue', key.maintenanceDue(due), due))
+  }
+
+  async dueMaintenance(now: string, limit: number) {
+    const page = await this.table.query('MAINTAIN', { skPrefix: 'DUE#', limit })
+    return page.items
+      .map(i => decode<MaintenanceDueRecord>('maintenancedue', i))
+      .filter(d => d.dueAt <= now)
+  }
+
+  async deleteMaintenance(due: MaintenanceDueRecord) {
+    const k = key.maintenanceDue(due)
+    await this.table.delete(k.pk, k.sk)
+  }
+
+  async getMaintenanceCursor() {
+    const k = key.maintenanceCursor()
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? decode<MaintenanceCursorRecord>('maintenancecursor', item) : null
+  }
+
+  async putMaintenanceCursor(cursor: MaintenanceCursorRecord) {
+    await this.table.put(encode('maintenancecursor', key.maintenanceCursor(), cursor))
+  }
+
+  async pageSites(opts: { after?: string | null; limit: number }) {
+    // A query's cursor is the last sk it returned (table/types.ts), so the sweep resumes after a
+    // name even when that site is gone.
+    const page = await this.table.query('SITES', {
+      skPrefix: 'SITE#',
+      limit: opts.limit,
+      ...(opts.after ? { cursor: encodeCursor(key.siteDirectory(opts.after).sk) } : {}),
+    })
+    return {
+      sites: page.items.map(i => decode<SiteDirectoryRecord>('sitedirectory', i)),
+      more: page.cursor !== undefined,
+    }
   }
 }
 

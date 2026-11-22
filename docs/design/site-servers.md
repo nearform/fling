@@ -373,7 +373,7 @@ won't exist; a `--isolate` mode on workerd is later (§19).
 Seven days of logs, no emails.
 
 - A **`ServerLogs`** port. Cloudflare: a tail consumer in the Fling Worker writes each site's
-  output to R2, a second's lines at a time, and the hourly cron folds each past hour into one
+  output to R2, a second's lines at a time, and the maintenance cron folds each past hour into one
   chunk. AWS: `read` calls CloudWatch on the site's log group. The local runtime keeps them in
   memory.
 - `fling logs <site> [--since 1h] [--follow]`, `fling_logs` on both MCP servers, and the Logs
@@ -516,7 +516,7 @@ Web Function actions (prefix `lambda:`) only on `<namespace>-<env>-<name>-site-*
 (Web Functions do not evaluate tag conditions on `CreateWebFunction`); `iam:PassRole` only on the one
 server role, which can write nothing but its own logs; object reads, writes and deletes (with their
 versions) only on the zip bucket; log-group calls only on `/aws/lambda/web/<prefix>*`; no other
-compute. Deleting a site or retention removes its function, and an hourly sweep deletes any tagged
+compute. Deleting a site or retention removes its function, and maintenance (every 15 minutes) deletes any tagged
 function with no site and any log group whose function is gone. Terraform also adds the `/api/*`
 cache behaviour (all methods, no caching, `AllViewerExceptHostHeader`).
 

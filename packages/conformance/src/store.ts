@@ -1562,6 +1562,50 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
       })
     })
 
+    describe('maintenance', () => {
+      it('queues: the due ones oldest first, one per site and time, each deleted once', async () => {
+        const store = await factory()
+        const d = (dueAt: string, siteId = uid()) => ({ siteId, name: `m-${siteId}`, dueAt })
+        const later = d('2001-01-02T00:00:00.000Z')
+        const first = d('2001-01-01T00:00:00.000Z')
+        const notYet = d('2999-01-01T00:00:00.000Z')
+        for (const x of [later, first, notYet, first]) await store.queueMaintenance(x)
+        const ours = (all: { siteId: string; dueAt: string }[]) =>
+          all.filter(x => [later, first, notYet].some(y => y.siteId === x.siteId))
+        expect(ours(await store.dueMaintenance(NOW, 1000))).toEqual([first, later])
+        await store.deleteMaintenance(first)
+        await store.deleteMaintenance(first)
+        expect(ours(await store.dueMaintenance(NOW, 1000))).toEqual([later])
+        for (const x of [later, notYet]) await store.deleteMaintenance(x)
+      })
+
+      it('keeps the cursor, and pages the site directory on from a name, gone or not', async () => {
+        const store = await factory()
+        const owner = email()
+        const tag = uid()
+        const made = ['a', 'b', 'c'].map(x => site(owner, `mt-${tag}-${x}`))
+        for (const s of made) await store.createSite(s)
+        const names: string[] = []
+        let after: string | null = `mt-${tag}-`
+        for (let more = true; more; ) {
+          const page = await store.pageSites({ after, limit: 1 })
+          const mine = page.sites.filter(s => s.name.startsWith(`mt-${tag}-`))
+          names.push(...mine.map(s => s.name))
+          if (page.sites.length && !mine.length) break
+          after = page.sites.at(-1)?.name ?? null
+          more = page.more
+        }
+        expect(names).toEqual(made.map(s => s.name))
+        const [a, b] = made as [SiteRecord, SiteRecord, SiteRecord]
+        await store.deleteSite(b)
+        const next = await store.pageSites({ after: b.name, limit: 1 })
+        expect(next.sites[0]?.name).toBe(`mt-${tag}-c`)
+        await store.putMaintenanceCursor({ after: a.name, lapStartedAt: NOW })
+        expect(await store.getMaintenanceCursor()).toEqual({ after: a.name, lapStartedAt: NOW })
+        for (const s of made) await store.deleteSite(s)
+      })
+    })
+
     describe('site servers', () => {
       const secret = (siteId: string, name: string, sealed = 'sealed') => ({
         siteId,

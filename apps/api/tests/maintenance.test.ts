@@ -183,3 +183,76 @@ describe('retention', () => {
     expect(await env.blobs.get(`sites/${site?.id}/_rendered/${site?.home}.html`)).not.toBeNull()
   })
 })
+
+describe('the queue and the sweep', () => {
+  const iso = (env: Env, plusMs = 0) =>
+    new Date(env.deps.clock.now().getTime() + plusMs).toISOString()
+
+  it('a publish queues its site, and the queue carries it through the mark and the sweep', async () => {
+    const { env, site } = await world(2)
+    const first = await maintain(env.deps)
+    expect(first).toMatchObject({ queued: 1, marked: 2, swept: 0 })
+    // Maintaining it queued it again for when the marks' grace ends, and not before.
+    expect(await env.store.dueMaintenance(iso(env), 100)).toEqual([])
+    const followUp = await env.store.dueMaintenance(iso(env, GRACE_MS), 100)
+    expect(followUp.map(d => d.siteId)).toEqual([site.id])
+    env.advance(GRACE_MS)
+    expect(await maintain(env.deps)).toMatchObject({ queued: 1, swept: 2 })
+    // Nothing else is queued but each deploy's check for a stale pending version.
+    expect(await env.store.dueMaintenance(iso(env, PENDING_TTL_MS - GRACE_MS), 100)).toEqual([])
+  })
+
+  it('a deploy staged and never finalized is queued for when it goes stale', async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    const res = await api(env, alice.key, 'POST', '/api/sites/stale/deploys', {
+      manifest: { files: [file('index.html', 'x').meta] },
+    })
+    expect(res.status).toBe(200)
+    const site = await env.store.findSite('stale')
+    const due = await env.store.dueMaintenance(iso(env, PENDING_TTL_MS), 100)
+    expect(due.map(d => d.siteId)).toContain(site?.id)
+  })
+
+  it('the sweep goes on from where it stopped, and starts a lap again at the end', async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    for (const name of ['sweep-a', 'sweep-b', 'sweep-c']) {
+      await deploy(env, alice.key, name, [file('index.html', name)])
+    }
+    expect((await maintain(env.deps)).sites).toBe(3)
+    const lap = '2020-01-01T00:00:00.000Z'
+    await env.store.putMaintenanceCursor({ after: 'sweep-b', lapStartedAt: lap })
+    expect(await maintain(env.deps)).toMatchObject({ sites: 1, queued: 0, lapStartedAt: lap })
+    expect(await env.store.getMaintenanceCursor()).toEqual({ after: null, lapStartedAt: iso(env) })
+  })
+
+  it('stops at the deadline and keeps its place', async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    await deploy(env, alice.key, 'late', [file('index.html', 'x')])
+    await env.store.putMaintenanceCursor({ after: 'k', lapStartedAt: iso(env) })
+    const result = await maintain(env.deps, { deadline: Date.now() - 1 })
+    expect(result).toMatchObject({ sites: 0, partial: true })
+    expect((await env.store.getMaintenanceCursor())?.after).toBe('k')
+    expect((await env.store.dueMaintenance(iso(env), 100)).length).toBe(1)
+  })
+
+  it('with MAINTENANCE_SWEEP_ENABLED off, maintains only the sites queued', async () => {
+    const env = setup({ maintenanceSweep: false })
+    const alice = await createUser(env, ALICE)
+    for (const name of ['only-a', 'only-b'])
+      await deploy(env, alice.key, name, [file('index.html', name)])
+    expect(await maintain(env.deps)).toMatchObject({ sites: 2, queued: 2 })
+    // Nothing queued now: no site is visited, and the sweep keeps no place.
+    expect(await maintain(env.deps)).toMatchObject({ sites: 0, partial: false })
+    expect(await env.store.getMaintenanceCursor()).toBeNull()
+  })
+
+  it('drops what is queued for a site that is gone', async () => {
+    const env = setup()
+    await env.store.queueMaintenance({ siteId: 'gone', name: 'gone', dueAt: iso(env) })
+    expect(await maintain(env.deps)).toMatchObject({ queued: 0 })
+    expect(await env.store.dueMaintenance(iso(env), 100)).toEqual([])
+  })
+})

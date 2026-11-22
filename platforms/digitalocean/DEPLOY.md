@@ -40,7 +40,7 @@ $APP_HOST, *.$SITES_DOMAIN   App Platform (TLS: Let's Encrypt, wildcard) ── 
                              everything else → the web UI
   *.$SITES_DOMAIN            the shared site routing decision (route table in Postgres,
                              cached per container) → the file from Spaces
-in each container            notifications every minute (with mail), maintenance hourly
+in each container            notifications every minute (with mail), maintenance every 15 min
 Managed PostgreSQL           the Table, and the live rooms' LISTEN/NOTIFY fan-out
 Spaces <name>-sites          site files; clients upload and download with presigned URLs
 ```
@@ -212,7 +212,7 @@ with a release tag as `ref`. In order:
 
 ## Ticks
 
-Each container runs the notifications tick every minute (with mail) and maintenance hourly, in
+Each container runs the notifications tick every minute (with mail) and maintenance every 15 minutes, in
 process. Every tick is safe to repeat (its leases are conditional writes in the Table), so any
 number of containers may run them. App Platform's scheduled jobs run at most every 15 minutes, too
 seldom for the minute tick. `POST /ticks/notify` and `/ticks/maintain` also answer with

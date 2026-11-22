@@ -467,9 +467,9 @@ describe('the revocation list', () => {
       dueRevocations: { value: async () => Promise.reject(new Error('table down')) },
     })
     let listed = 0
-    failing.listAllSites = async (...args: Parameters<typeof store.listAllSites>) => {
+    failing.pageSites = async (...args: Parameters<typeof store.pageSites>) => {
       listed++
-      return store.listAllSites(...args)
+      return store.pageSites(...args)
     }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const result = await maintain({ ...env.deps, store: failing })

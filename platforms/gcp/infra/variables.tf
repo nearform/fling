@@ -253,7 +253,7 @@ variable "mail" {
 }
 
 variable "maintenance_schedule" {
-  description = "When Cloud Scheduler runs the hourly maintenance (cron, in UTC)."
+  description = "When Cloud Scheduler runs maintenance (cron, in UTC): every 15 minutes, as every platform does (MAINTAIN_EVERY_MS)."
   type        = string
-  default     = "17 * * * *"
+  default     = "*/15 * * * *"
 }

@@ -49,7 +49,7 @@ $APP_HOST        Caddy or the Ingress → the Node host ─┬─ /api/*, /auth/
                                                           the object store
 $STORAGE_HOST    Caddy → MinIO ──── /<bucket>/* only ───── presigned PUTs and GETs (CLI, pull)
 in process       every minute: the notifications' outbox → SMTP (with MAIL_DRIVER=smtp);
-                 hourly: maintenance (retention, expired items, staged uploads)
+                 every 15 minutes: maintenance (retention, expired items, staged uploads)
 ```
 
 ## Requirements
@@ -113,7 +113,7 @@ docker compose up -d --build      # or set FLING_IMAGE to a published image and 
 - **Storage.** MinIO keeps a private bucket (`FLING_BUCKET`, default `fling-sites`).
   `minio-init` creates it on every start, idempotently, with a lifecycle rule for chunked MCP
   uploads (`uploads/`, swept after a day) and the host's own key (`fling`, read and write on that
-  bucket only). Staged uploads (`sites/<id>/_staged/`) are swept by the host's hourly maintenance.
+  bucket only). Staged uploads (`sites/<id>/_staged/`) are swept by the host's maintenance.
   Uploads are bound by `Content-MD5` (`S3_UPLOAD_DIGEST=md5`); a file whose MD5 an older CLI did
   not send goes through the host. Caddy passes only the bucket's path-style URLs
   (`/<bucket>/*`, so `S3_FORCE_PATH_STYLE=true`) to MinIO and answers 404 for the rest of its

@@ -29,6 +29,7 @@ import { DefaultAzureCredential } from '@azure/identity'
 import { BlobServiceClient } from '@azure/storage-blob'
 import { WebPubSubServiceClient } from '@azure/web-pubsub'
 import { type Config, loadBaseConfig, secretsFromEnv } from '@fling/api/config'
+import { MAINTAIN_BUDGET_MS } from '@fling/api/maintenance'
 import { MIGRATIONS, runMigrations } from '@fling/api/migrations'
 import { drain, maintain } from '@fling/platform-node/ticks'
 import { SITE_HMAC_KVS_KEY } from '@fling/shared/route-keys'
@@ -117,7 +118,7 @@ async function main(args: string[]) {
   }
   if (mode === 'tick' && what === 'maintain') {
     // The container's TTL purges expired items, so there is no purge to run here.
-    await maintain(deps, {}, Date.now() + JOB_BUDGET_MS)
+    await maintain(deps, {}, Date.now() + MAINTAIN_BUDGET_MS)
     return
   }
   if (mode !== undefined) throw new Error(`Unknown command: ${args.join(' ')}`)

@@ -57,6 +57,8 @@ export type Kind =
   | 'signinlink'
   | 'signinlinkused'
   | 'revocation'
+  | 'maintenancedue'
+  | 'maintenancecursor'
   | 'counter'
   | 'sitesecret'
   | 'serversite'

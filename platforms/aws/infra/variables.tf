@@ -104,11 +104,15 @@ variable "instance" {
 }
 
 variable "lambda" {
-  description = "The API function's runtime and size."
+  description = <<-EOT
+    The API function's runtime, size and timeout. The timeout bounds the scheduled runs
+    (maintenance takes up to 4 minutes of it, migrations run until shortly before it); requests
+    through the app distribution are cut at its 60 s origin timeout whatever it is.
+  EOT
   type = object({
     runtime     = optional(string, "nodejs24.x")
     memory_size = optional(number, 512)
-    timeout     = optional(number, 30)
+    timeout     = optional(number, 300)
   })
   default = {}
 }

@@ -86,12 +86,16 @@ only from `mail.from`), sets `MAIL_DRIVER=ses`, `MAIL_FROM`, `MAIL_FROM_NAME`, `
 `MAIL_*` and `SES_*` come only from `mail`: the module refuses them in `environment` and
 `instance`, and the build refuses them in `INSTANCE`.
 
-Every instance also gets an hourly EventBridge Scheduler schedule
-([`maintenance.tf`](infra/maintenance.tf); `<namespace>-<env>-<name>-maintain`, `rate(1 hour)`)
-that invokes the function with `{"fling":"maintain"}` through its own role. It deletes what
-nothing serves any more: versions past `VERSION_RETENTION`, deploys staged and never finalized
-for a day, and replaced rendered home pages of sites with Paths
-([`maintenance.ts`](../../apps/api/src/maintenance.ts)).
+Every instance also gets an EventBridge Scheduler schedule every 15 minutes
+([`maintenance.tf`](infra/maintenance.tf); `<namespace>-<env>-<name>-maintain`,
+`rate(15 minutes)`) that invokes the function with `{"fling":"maintain"}` through its own role.
+Each run takes up to 4 minutes of the function's timeout. It deletes what nothing serves any
+more: versions past `VERSION_RETENTION`, deploys staged and never finalized for a day, and
+replaced rendered home pages of sites with Paths
+([`maintenance.ts`](../../apps/api/src/maintenance.ts)). It works first on the sites queued for
+it (as a version goes live, a deploy is staged or a home page is replaced), then sweeps every
+site from where the last run stopped, unless `MAINTENANCE_SWEEP_ENABLED` is `off`. The log line
+`maintenance lap` (`lapMs`) says how long a sweep of every site took.
 
 Needs Terraform 1.11 or later (the generated secrets are write-only, never in state) and the AWS
 provider 6.72 or later in 6.x (the site servers' network connector is a 6.72 resource; run
@@ -114,7 +118,7 @@ resources with the providers' `default_tags`.
 | `generated_secrets` | `["session-secret", "site-hmac-key"]` | SSM parameters Terraform generates, never in state |
 | `secrets_version` | `1` | Bump to regenerate the generated secrets and `origin-verify-secret` |
 | `enable_data_migrations` | `true` | The [data migrations](#data-migrations) grants: `lambda:InvokeFunction` on the function for the deploy role, `dynamodb:Scan` on the table for the function's role |
-| `lambda` | Node 24, 512 MB, 30 s | `{ runtime, memory_size, timeout }`. With `servers`, the timeout is at least 60 s |
+| `lambda` | Node 24, 512 MB, 300 s | `{ runtime, memory_size, timeout }`. The timeout bounds the scheduled runs: maintenance takes up to 4 minutes of it, and each migration invoke runs until shortly before it. Requests through the app distribution are cut at CloudFront's 60 s origin timeout whatever it is. With `servers`, the timeout is at least 60 s |
 | `api_paths` | `/api/*`, `/auth/*`, `/healthz`, `/mcp`, `/mcp/*`, `/oauth/*`, `/.well-known/*` | App paths routed to the function, uncached. With `mail`, `/notifications/*` is added |
 | `price_class` | `PriceClass_100` | CloudFront price class (Europe and North America edges) |
 | `log_retention_days` | `30` | The function's log retention |
@@ -206,7 +210,8 @@ Values reach the function two ways, and the function's own environment wins:
 | `SMTP_USER` | no (none: no authentication) | The user name to authenticate as; its password is the `SMTP_PASSWORD` secret. |
 | `INVITES` | no (`off`) | `on` turns on outside invitations: people the email policy doesn't admit can be invited, and sign in with an emailed link. Needs email (`MAIL_DRIVER`): the function refuses to start with it on and no mail. See [Outside invitations](#outside-invitations). |
 | `INVITES_PER_DAY` | no (`20`) | How many new outside addresses one person may invite a day, a positive whole number. |
-| `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, the hourly maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
+| `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
+| `MAINTENANCE_SWEEP_ENABLED` | no (on) | Maintenance works on the sites queued for it, then sweeps every site in turn, a little each run. `off` maintains only queued sites, for the least background work: sites from before the queue, and every site after a change to `VERSION_RETENTION`, then wait until something queues them (a publish, a rollback). |
 | `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
 | `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
 | `SERVERS_MAX_SITES` | no (`50`) | The most sites that may have a server at once; one more is refused with `too_many_servers`. |
@@ -601,7 +606,7 @@ invitation:
 - **Admins invite members** from **Admin → Invitations** (`/admin/invitations`): a full user, like
   anyone the policy admits. Revoking an invitation there cuts that person off on their next request,
   and puts them on the edge's revocation list, so their `fling_site` cookie stops opening
-  members-level sites within seconds too. The hourly maintenance tick takes entries off the
+  members-level sites within seconds too. The maintenance tick takes entries off the
   list after 30 days.
 - **Guests sign in with an emailed link**, single use, never at the OIDC issuer (which usually
   admits only your organisation): the share's notification email carries their first one, and the
@@ -717,7 +722,7 @@ What the API does ([`src/servers/`](src/servers/)):
   (method, path, status, time to headers, viewer id, version), are read back from
   `/aws/lambda/web/<function>` with FilterLogEvents.
 - **Deleting a site** deletes its function, both log groups and its zips; retention deletes a
-  version's revisions and zip. The hourly maintenance also deletes functions whose site is gone and
+  version's revisions and zip. Maintenance also deletes functions whose site is gone and
   log groups Lambda wrote again after their function was deleted.
 
 **The vCPU quota.** Each environment takes 2 Arm vCPUs, and the account has a quota for every

@@ -268,7 +268,9 @@ off and a publish with a server is refused. The design (Container Apps dynamic s
   batch. One logical partition holds at most 20 GB and serves at most 10,000 RU/s: the ceiling of
   an instance on Azure.
   The route table lives in it too, so the number of sites is bounded by it, not by a store of its
-  own.
+  own. A site takes about 5 KB plus 1.4 KB a version kept, and the throughput binds before the
+  storage: an instance expecting tens of thousands of sites should choose another platform
+  ([known limits](../../docs/platforms/azure.md#known-limits-one-logical-partition)).
 - **Uploads pass through the app.** A SAS can't bind an upload to its bytes, so the CLI uploads
   each file to the app's upload route, which checks its SHA-256 and writes it to Blob Storage.
   The app takes request bodies up to 32 MiB (a file's limit is 25 MiB).

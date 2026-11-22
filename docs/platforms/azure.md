@@ -81,6 +81,45 @@ services' locations are in `platforms/azure/src/settings.ts` (`COSMOS_ENDPOINT`,
 - **Consistency:** the account is single-region with Strong consistency, so a read by any replica
   of the host sees every committed write. The races suite passes on the emulator.
 
+### Known limits: one logical partition
+
+Every item of an instance, the route table's included, is in one Cosmos DB logical partition. That
+is why `transact` works: Cosmos DB runs a transactional batch only within one partition key, and a
+`transact` spans several pks (a record and its index items, a claim and its site). The cost is
+the logical partition's caps, which no setting raises:
+
+- **20 GB of data**, the instance's whole table.
+- **About 10,000 RU/s**, shared by every request, maintenance's sweep, the notifications tick and
+  the sites host's route reads that miss its cache. A point read of a 1 KB document costs about
+  1 RU; a write costs several, and every write here reads the items it touches first. A partition
+  is never split, so a busy instance can't be given more.
+
+**Rough size of a site.** Measured from the documents the adapter writes (each item's JSON with
+its `id`, `pk`, `sk`, `skx` and `j`, plus about 220 bytes of Cosmos DB's own properties; index
+storage not counted), for a site created, published and given a share link:
+
+| Item | Documents | Bytes each |
+|---|---|---|
+| The site record (`SITE#<id>/SITE`) | 1 | ~900 |
+| Its copy under the creator (`USER#<email>/SITE#<name>`) | 1 | ~950 |
+| The directory entry (`SITES/SITE#<name>`) | 1 | ~700 |
+| The name claim (`NAME#<name>/NAME`) | 1 | ~530 |
+| Its maintenance queue entry (`MAINTAIN/DUE#…`) | 1 | ~600 |
+| Its route and its share link's (`ROUTE#…`) | 2 | ~500 |
+| Each version kept (stored under the site and under its creator) | 2 | ~700 |
+
+So about 4.7 KB a site, plus about 1.4 KB for each version kept. Assuming 20 versions kept a site
+(`VERSION_RETENTION=20`; the default, 0, keeps every version, so a site published every working
+day grows by about 350 KB a year) and a quarter more for indexes, a site is about 40 KB: 20 GB holds
+about half a million sites with no comments. Comments and form responses (a document each), owners,
+groups, audit and notifications come out of the same 20 GB, and a reviewed site can hold more in
+comments than in versions.
+
+Storage is not what binds first: one partition's throughput is. An instance expecting tens of
+thousands of sites, or the traffic that comes with them, should choose another platform (AWS,
+Cloudflare, Google Cloud, or the Node host on PostgreSQL). Moving off Cosmos DB later is a data
+copy with the migrations runner's scan onto the Postgres Table.
+
 ### Blobs
 
 A SAS signs its URL (permissions, blob, times) and no request header, so a SAS PUT can't be
@@ -222,8 +261,8 @@ The module's tests run as `terraform test` with mocked providers (`infra/tests/`
   written to Key Vault with a write-only attribute, so they are never in state. The origin-verify
   and live-events secrets are, as AWS's origin-verify secret is, because Front Door's rule and the
   hub's event handler URL hold their values. The sign-in client secrets are set outside Terraform.
-- **The 20 GB partition** is the ceiling of an instance. Measure a real instance's table size
-  before committing. Postgres is the escape.
+- **The 20 GB partition** is the ceiling of an instance ([Known limits](#known-limits-one-logical-partition)).
+  Measure a real instance's table size before committing. Postgres is the escape.
 - **Uploads pass through the host**, so a deploy's bytes cost Front Door and Container Apps
   traffic. A store-side binding would need Blob Storage to sign request headers.
 - **The emulator is a preview.** The vNext Linux emulator passes every suite; its tag moves.

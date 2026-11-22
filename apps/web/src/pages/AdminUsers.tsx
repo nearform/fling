@@ -2,8 +2,9 @@
  * Admin → Users (admins only; the API answers 404 to anyone else): every user of the instance, by
  * email, searched by email prefix and paged with "Load more"; Impersonate (with a confirmation)
  * on everyone but yourself and other admins; guests marked (invited from outside by a share or a
- * group). Each user's Sites link opens All sites narrowed to the sites they own or publish. What
- * admins did is on Admin → Audit.
+ * group). Each user's Sites link opens All sites narrowed to the sites they own or publish. The
+ * last sign-in is to the day: the users index is written once a day per user, not on every sign-in
+ * (store/records.ts `upsertUser`). What admins did is on Admin → Audit.
  */
 import type { AdminUser } from '@fling/shared'
 import { EyeIcon, MagnifyingGlassIcon, UsersIcon } from '@heroicons/react/24/outline'
@@ -14,11 +15,17 @@ import { PageHeader } from '../components/PageHeader'
 import { useAdminUsers, useImpersonation, useMe } from '../hooks/queries'
 import { allSitesOf, impersonateBlocked, showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
-import { fullDate, timeAgo } from '../lib/format'
+import { daysAgo, fullDate, timeAgo, utcDate } from '../lib/format'
 
 function When({ iso, never = '—' }: { iso: string | null; never?: string }) {
   if (!iso) return <span className="text-muted">{never}</span>
   return <span title={fullDate(iso)}>{timeAgo(iso)}</span>
+}
+
+/** A last sign-in, kept to the day (UTC): "today", "yesterday", "3 days ago", then a date. */
+function OnDay({ iso, never }: { iso: string | null; never: string }) {
+  if (!iso) return <span className="text-muted">{never}</span>
+  return <span title={utcDate(iso)}>{daysAgo(iso)}</span>
 }
 
 function UsersTable({
@@ -68,7 +75,7 @@ function UsersTable({
                   <When iso={u.createdAt} />
                 </td>
                 <td className="text-secondary">
-                  <When iso={u.lastSignInAt} never="Unknown" />
+                  <OnDay iso={u.lastSignInAt} never="Unknown" />
                 </td>
                 <td className="text-right">
                   <Link

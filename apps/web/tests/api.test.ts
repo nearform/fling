@@ -1,7 +1,7 @@
 import { MeSchema } from '@fling/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api, isUnauthorized, request } from '../src/lib/api'
-import { timeAgo } from '../src/lib/format'
+import { daysAgo, timeAgo } from '../src/lib/format'
 
 function respond(status: number, body?: unknown) {
   const text = body === undefined ? '' : typeof body === 'string' ? body : JSON.stringify(body)
@@ -116,6 +116,16 @@ describe('timeAgo', () => {
     expect(timeAgo('2026-01-02T11:59:30Z', now)).toBe('just now')
     expect(timeAgo('2026-01-02T09:00:00Z', now)).toBe('3 hours ago')
     expect(timeAgo('2026-01-01T12:00:00Z', now)).toBe('yesterday')
+  })
+})
+
+describe('daysAgo', () => {
+  it('counts UTC days, not hours', () => {
+    const now = Date.parse('2026-01-02T00:30:00Z')
+    expect(daysAgo('2026-01-02T00:00:00Z', now)).toBe('today')
+    expect(daysAgo('2026-01-01T23:59:00Z', now)).toBe('yesterday')
+    expect(daysAgo('2025-12-30T08:00:00Z', now)).toBe('3 days ago')
+    expect(daysAgo('2025-10-01T08:00:00Z', now)).toBe('3 months ago')
   })
 })
 

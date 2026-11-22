@@ -40,7 +40,7 @@ other people's: a leaked key can't do what your browser can.
 ### Users
 
 **Admin → Users** lists everyone who has signed in to {{instance:name}}: their name and email,
-when they first signed in and when they last did. Each row's **Sites** link opens **All sites**
+when they first signed in and the day they last did. Each row's **Sites** link opens **All sites**
 showing only the sites that person owns or publishes, directly or through a group; clear the chip
 above the list to see everyone's again. Admins carry an
 **Admin** badge. <!-- requires: invites -->People invited from outside by a share or a group carry

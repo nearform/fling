@@ -42,6 +42,25 @@ export function timeAgo(iso: string, now: number = Date.now()): string {
   return 'just now'
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000
+const utcDay = (t: number) => Math.floor(t / DAY_MS)
+
+/** By UTC day: "today", "yesterday", "3 days ago"; from 30 days, as `timeAgo`. */
+export function daysAgo(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return '—'
+  const days = Math.max(0, utcDay(now) - utcDay(then))
+  return days < 30 ? relative.format(-days, 'day') : timeAgo(iso, now)
+}
+
+/** The UTC date alone, for a `title` beside `daysAgo`. */
+export function utcDate(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleDateString(undefined, { timeZone: 'UTC', dateStyle: 'medium' })
+}
+
 /** Full local date and time, for a `title` beside a relative time. */
 export function fullDate(iso: string): string {
   const date = new Date(iso)

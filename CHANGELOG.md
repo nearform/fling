@@ -19,6 +19,10 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 - **Admin → Routes shows maintenance's last lap, and the AWS module saves queries to watch it.** The page shows how long maintenance last took to go round every site and when it finished, or that it hasn't finished a lap yet. The AWS module saves three CloudWatch Logs Insights queries on the API's log group, under `<name>/`: maintenance lap lengths, the route table's usage, and KeyValueStore writes retried; `platforms/aws/DEPLOY.md` (Saved queries) explains them, and `docs/platforms/cloudflare.md` where the same lines and KV and D1 usage are seen on Cloudflare. The `<name>-route-table-full` alarm points to Admin → Routes. Upgrade note: on AWS, take the module's new tag and apply it for the saved queries and the alarm's text.
 
+- **Admin → Users shows the last sign-in to the day.** The Last sign-in column says "today", "yesterday" or how many days ago, with the date beside it. Each sign-in still records its exact time on the user (invitations show that), but the admin's users list is written only when a person's name or picture changes or on their first sign-in of a UTC day, so a busy instance's sign-ins cost one write, not two.
+
+- **A revocation leaves the route table after 8 days.** When an admin revokes an invitation, the entry that stops the person's 7-day site cookie at the edge is taken off a day after the last such cookie expires, rather than after 30 days, leaving more of the route table for sites. Entries already on the list keep the 30 days they were given.
+
 ## 0.16.0 (2026-11-22)
 
 - **Admin pages have a menu down the left, and the audit log a page of its own.** Users, Invitations, Mail, Audit, Routes and Settings are a menu with icons beside each admin page. Audit lists what admins did: impersonations, invitations, changes to other people's sites and route format choices. On the Sites page, Archived comes after Shared with me; the Sites, Groups and site page tabs have icons, and line up with the heading above them.

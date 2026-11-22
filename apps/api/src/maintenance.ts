@@ -12,7 +12,8 @@
  *   with what time is left, at least SWEEP_SHARE of the budget. It goes on from where the last run stopped (`MAINTAIN/CURSOR`) and starts again at
  *   the top once it has reached the end (a lap), so every site is maintained at least once a lap:
  *   what nothing queued (sites from before the queue, a change to VERSION_RETENTION, a queue
- *   write that failed) is found there. A lap's length is logged.
+ *   write that failed) is found there. A lap's length is logged, and the last one is kept on the
+ *   cursor for Admin → Routes (route-format.ts `routeTableStatus`).
  *
  * Every run is safe to repeat and to overlap another: claims are conditional writes, and work
  * found done costs only its reads.
@@ -206,9 +207,17 @@ async function sweepDirectory(
       result.lapStartedAt = cursor.lapStartedAt
       const lapMs = Date.parse(now) - Date.parse(cursor.lapStartedAt)
       console.log(JSON.stringify({ level: 'info', msg: 'maintenance lap', lapMs }))
-      await deps.store.putMaintenanceCursor({ after: null, lapStartedAt: now })
+      await deps.store.putMaintenanceCursor({
+        after: null,
+        lapStartedAt: now,
+        lastLap: { lapMs, finishedAt: now },
+      })
     } else {
-      await deps.store.putMaintenanceCursor({ after, lapStartedAt: cursor.lapStartedAt })
+      await deps.store.putMaintenanceCursor({
+        after,
+        lapStartedAt: cursor.lapStartedAt,
+        ...(cursor.lastLap ? { lastLap: cursor.lastLap } : {}),
+      })
     }
   }
 }

@@ -137,6 +137,8 @@ export interface MaintenanceCursorRecord {
   after: string | null
   /** when the lap under way began: a lap's length is how long every site waits for a sweep */
   lapStartedAt: string
+  /** the last lap finished: how long it took and when (Admin → Routes); absent before the first */
+  lastLap?: { lapMs: number; finishedAt: string }
 }
 
 /**

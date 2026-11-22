@@ -214,7 +214,7 @@ describe('the queue and the sweep', () => {
     expect(due.map(d => d.siteId)).toContain(site?.id)
   })
 
-  it('the sweep goes on from where it stopped, and starts a lap again at the end', async () => {
+  it('the sweep goes on from where it stopped, and starts a lap again at the end, keeping the last', async () => {
     const env = setup()
     const alice = await createUser(env, ALICE)
     for (const name of ['sweep-a', 'sweep-b', 'sweep-c']) {
@@ -224,17 +224,22 @@ describe('the queue and the sweep', () => {
     const lap = '2020-01-01T00:00:00.000Z'
     await env.store.putMaintenanceCursor({ after: 'sweep-b', lapStartedAt: lap })
     expect(await maintain(env.deps)).toMatchObject({ sites: 1, queued: 0, lapStartedAt: lap })
-    expect(await env.store.getMaintenanceCursor()).toEqual({ after: null, lapStartedAt: iso(env) })
+    expect(await env.store.getMaintenanceCursor()).toEqual({
+      after: null,
+      lapStartedAt: iso(env),
+      lastLap: { lapMs: Date.parse(iso(env)) - Date.parse(lap), finishedAt: iso(env) },
+    })
   })
 
   it('stops at the deadline and keeps its place', async () => {
     const env = setup()
     const alice = await createUser(env, ALICE)
     await deploy(env, alice.key, 'late', [file('index.html', 'x')])
-    await env.store.putMaintenanceCursor({ after: 'k', lapStartedAt: iso(env) })
+    const lastLap = { lapMs: 60_000, finishedAt: iso(env) }
+    await env.store.putMaintenanceCursor({ after: 'k', lapStartedAt: iso(env), lastLap })
     const result = await maintain(env.deps, { deadline: Date.now() - 1 })
     expect(result).toMatchObject({ sites: 0, partial: true })
-    expect((await env.store.getMaintenanceCursor())?.after).toBe('k')
+    expect(await env.store.getMaintenanceCursor()).toMatchObject({ after: 'k', lastLap })
     expect((await env.store.dueMaintenance(iso(env), 100)).length).toBe(1)
   })
 

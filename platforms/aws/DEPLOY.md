@@ -767,6 +767,22 @@ shows how far it has got. Choosing `json` again rewrites them back.
 **Before rolling back to a release before 0.16.0**, choose `json` in Admin → Routes and wait
 until the page says the rewrite has finished: those releases' site router reads only `json`.
 
+### Saved queries
+
+The module saves three CloudWatch Logs Insights queries on the API function's log group, under
+`<namespace>-<env>-<name>/` in **CloudWatch → Logs Insights → Saved queries**. Pick one, choose a
+time range and run it:
+
+| Query | What it shows | From the log line |
+|---|---|---|
+| `maintenance-lap` | How many laps of every site maintenance finished each day, and their average and longest length in ms. A lap's length is how long a site waits for what nothing queued; it grows with the number of sites. | `maintenance lap` (`lapMs`) |
+| `route-table-usage` | The KeyValueStore's size each hour: bytes, the 5 MB limit and the percentage. From 70% the line is `route table nearly full`, which also raises `RouteTableFull`. | `route table usage`, `route table nearly full` (`bytes`, `limitBytes`, `percent`) |
+| `kvs-write-retried` | Each hour, how many KeyValueStore writes had to retry because another write changed the store's ETag first, and the most attempts one took. Many an hour means publishes are colliding. | `kvs write retried` (`attempts`) |
+
+The function logs in the Text format, so each JSON line follows Lambda's own prefix: the queries
+match the message as text and parse the numbers out of it. **Admin → Routes** shows the last lap's
+length and when it finished.
+
 ## Rollback
 
 Run the **Deploy** workflow by hand from `main` (Actions, Deploy, Run workflow) with `ref` set to an

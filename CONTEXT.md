@@ -109,7 +109,7 @@ else its only Markdown file, as its home page. The `markdown` capability.
 the site for when that work falls due, and maintaining a site queues it again for its next due
 time. Then the **sweep** goes through every site, a page at a time from where the last run stopped
 (`MAINTAIN/CURSOR`), starting again at the top after each **lap** (its length is logged,
-`maintenance lap`). The sweep reaches what nothing queued; `MAINTENANCE_SWEEP_ENABLED=off` turns
+`maintenance lap`, and the last one kept for Admin → Routes). The sweep reaches what nothing queued; `MAINTENANCE_SWEEP_ENABLED=off` turns
 it off.
 
 **Retention** — how many complete versions of each site and Path are kept besides the current one

@@ -136,6 +136,16 @@ There is no Terraform. Two scripts and the rendered wrangler config own the infr
   servers).
 - **Stale route reads.** A changed or deleted route can be served from KV for its propagation
   time. A rollback or a revoked share link is not instant at every location.
+- **Watching maintenance and storage.** The Worker has Workers Logs on (`observability` in
+  `wrangler.jsonc`), so its JSON log lines can be searched in the dashboard: **Workers & Pages →
+  the Worker → Observability**, filtered on the message text. `maintenance lap` (with `lapMs`)
+  is logged when maintenance has gone round every site, as on AWS (whose module saves Logs
+  Insights queries for it, `platforms/aws/DEPLOY.md`, Saved queries); **Admin → Routes** shows
+  the last lap. `route table usage` and `kvs write retried` are AWS lines: KV has no store limit
+  Fling meets and no ETag to race for. KV's reads, writes and stored bytes are under **Storage &
+  databases → KV → the namespace → Metrics**, and D1's rows read and written and its database size
+  under **Storage & databases → D1 → the database → Metrics**. Workers Logs keeps events for days,
+  not weeks, so note a lap's length if it is wanted later.
 
 ## 9. Sources
 

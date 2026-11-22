@@ -2,10 +2,10 @@
 title: Routes
 part: admin
 order: 28
-summary: See how full the route table is, and choose the format its entries are written in.
+summary: See how full the route table is, choose the format its entries are written in, and how long maintenance takes to go round every site.
 audience: admin
 sources: [apps/web/src/pages/AdminRoutes.tsx, apps/api/src/route-format.ts, apps/api/src/maintenance.ts]
-verified: 50e9901
+verified: c4b1441
 ---
 
 Every site's address finds its files through the **route table**, which the edge reads on every
@@ -26,6 +26,11 @@ To change it, choose **Switch to Compact** (or **Switch to JSON**) and confirm. 
 from then on take the new format at once; the others are rewritten in the background over the
 next maintenance runs, and the page shows how many are done. Sites keep working throughout. The
 choice is recorded on [Audit](/guide/admin/audit).
+
+**Maintenance** shows how long maintenance last took to go round every site, and when it
+finished. Every site is maintained at least once a lap, so a lap's length is how long a site can
+wait for a change such as a new version retention to reach it. Until maintenance has finished its
+first lap, the page says so.
 
 > **Warning** Before whoever runs {{instance:name}} rolls it back to an older release, switch back
 > to JSON and wait until the page says the rewrite has finished. Older releases read only JSON.

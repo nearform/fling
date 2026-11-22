@@ -51,7 +51,7 @@ describe('the route table format', () => {
   it('is json until an admin chooses; new writes take the choice at once', async () => {
     const { env, boss, alice } = await world()
     const before = await json(await browser(env, boss.session, 'GET', '/api/admin/route-table'))
-    expect(before).toEqual({ format: 'json', usage: null })
+    expect(before).toEqual({ format: 'json', usage: null, lastLap: null })
     await deploy(env, alice.key, 'early')
     expect(value(env, siteKvsKey('early')).startsWith('{')).toBe(true)
 
@@ -86,6 +86,11 @@ describe('the route table format', () => {
       expect((await maintain(env.deps)).routes).toBeGreaterThan(0)
       const status = await json(await browser(env, boss.session, 'GET', '/api/admin/route-table'))
       expect(status.rewrite.finishedAt).toBeDefined()
+      // Maintenance went round every site: its last lap is shown beside the rewrite.
+      expect(status.lastLap).toMatchObject({
+        lapMs: expect.any(Number),
+        finishedAt: expect.any(String),
+      })
       if (format === 'compact') {
         expect(value(env, keys[0] as string).startsWith('~')).toBe(true)
         expect(value(env, keys[1] as string)).toBe('>team')

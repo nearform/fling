@@ -206,6 +206,8 @@ The module's tests run as `terraform test` with mocked providers (`infra/tests/`
 
 ## 8. Gaps and open questions
 
+- **Size.** The route table lives in the same Cosmos DB partition as everything else, so the
+  20 GB partition (below) is its ceiling too.
 - **Not yet run on a real subscription.** The adapters pass their suites on the emulators and
   fakes, and the module plans against mocked providers. These need a real instance to confirm:
   the Front Door wildcard managed certificate (announced GA in June 2025; older Learn pages still

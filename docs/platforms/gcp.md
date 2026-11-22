@@ -151,6 +151,8 @@ Terraform owns the shape, `deploy-gcp.yml` owns the image, and the app owns docu
 
 ## 8. Gaps and open questions
 
+- **Size.** The route table is Firestore behind a cache, so it does not bound the number of
+  sites. Maintenance's queue (about 1,000–3,000 sites' work an hour) is the throughput limit.
 - **Site servers:** a Cloud Run service per site, a revision per version, egress `none` through
   Direct VPC egress into a VPC with no route out. Not built; check Cloud Run's per-project service
   quota (1,000 per region by default) against the sites expected to have servers.

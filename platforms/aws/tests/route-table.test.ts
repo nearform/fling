@@ -10,7 +10,7 @@ import {
   ValidationException,
 } from '@aws-sdk/client-cloudfront-keyvaluestore'
 import { describe, expect, it } from 'vitest'
-import { CloudFrontRouteTable } from '../src/route-table/cloudfront.ts'
+import { CloudFrontRouteTable, KVS_LIMIT_BYTES } from '../src/route-table/cloudfront.ts'
 
 const $metadata = {}
 
@@ -20,7 +20,9 @@ function stubStore(failures: Error[]) {
   const puts: string[] = []
   const client = {
     send: async (command: unknown) => {
-      if (command instanceof DescribeKeyValueStoreCommand) return { ETag: etag }
+      if (command instanceof DescribeKeyValueStoreCommand) {
+        return { ETag: etag, TotalSizeInBytes: 1_234_567 }
+      }
       if (command instanceof PutKeyCommand) {
         puts.push(command.input.IfMatch ?? '')
         const failure = failures.shift()
@@ -56,5 +58,13 @@ describe('CloudFrontRouteTable', () => {
     await expect(new CloudFrontRouteTable('arn:kvs', client).put('site', 'v')).rejects.toThrow(
       'Key too long'
     )
+  })
+
+  it('reports how full the store is against its 5 MB', async () => {
+    const { client } = stubStore([])
+    expect(await new CloudFrontRouteTable('arn:kvs', client).usage()).toEqual({
+      bytes: 1_234_567,
+      limitBytes: KVS_LIMIT_BYTES,
+    })
   })
 })

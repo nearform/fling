@@ -159,7 +159,23 @@ Each element uses the same headings:
 
 - **Port:** `RouteTable` (`apps/api/src/route-table/types.ts`) has `get`, `put` and `delete`
   over string keys. The keys are `site:<label>`, `share:<token>`, `path:<siteId>/<folder>`,
-  `revoked:<mac>` and `cfg:site-hmac`.
+  `revoked:<mac>` and `cfg:site-hmac`. A store with a size limit also has `usage()`, which says
+  how full it is (`{ bytes, limitBytes }`; CloudFront KeyValueStore's 5 MB). Maintenance logs it
+  every run (`route table usage`, or `route table nearly full` from 70%), and Admin → Settings
+  shows it. A store without a limit leaves `usage` out.
+- **Values:** a site's, a share link's and a Path's value come in two formats
+  (`RouteFormat`, `packages/shared/src/kvs.ts`), and every sites host reads both
+  (`parseRoute`, `site-routing.ts`):
+  - `json`: the value as JSON (`KvsSiteValueSchema`, `KvsPathValueSchema`). A share link holds a
+    copy of its site's value.
+  - `compact`: `~<id>|<v>|<flags>|<i>|<t>`, a letter in `flags` for each flag that is set, the
+    empty trailing fields left out; about a third of the size. A share link holds a pointer to
+    its site's key (`>` and the site's label), which costs the sites host one lookup more.
+
+  An admin chooses the format the API writes (Admin → Settings, `apps/api/src/route-format.ts`,
+  stored at `ROUTES/FORMAT`). Every route write from then on takes it, and maintenance rewrites
+  every site's routes into it, a page of the site directory at a time, until all are done. The
+  default is `json`, which every release reads.
 - **Semantics:**
   - Reads happen on every site request, at the edge or in the sites host.
   - Eventual consistency is allowed. A platform with a delay supplies `waitReady`

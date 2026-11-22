@@ -49,3 +49,40 @@ export const siteObjectKey = (siteId: string, versionId: string, path: string) =
 export const siteVersionPrefix = (siteId: string, versionId: string) =>
   `sites/${siteId}/${versionId}/`
 export const sitePrefix = (siteId: string) => `sites/${siteId}/`
+
+/**
+ * How the API writes route values. `json` is what every release's edge reads; `compact` is about
+ * a third of the size (CloudFront KeyValueStore holds 5 MB in all) and stores a share link as a
+ * pointer to its site's value (`>` and the site's label). The edge reads both
+ * (site-routing.ts `parseRoute`); an admin chooses which the API writes (route-format.ts).
+ */
+export const ROUTE_FORMATS = ['json', 'compact'] as const
+export type RouteFormat = (typeof ROUTE_FORMATS)[number]
+
+const COMPACT_FLAGS = ['r', 'p', 'm', 'f', 'x'] as const
+
+/** A site's route value in `format` (parseRoute reads it back). */
+export function encodeSiteValue(value: KvsSiteValue, format: RouteFormat): string {
+  if (format === 'json') return JSON.stringify(value)
+  let flags = (value.vis === 'public' ? 'u' : '') + (value.spa ? 's' : '')
+  for (const f of COMPACT_FLAGS) if (value[f]) flags += f
+  return compact([value.id, value.v, flags, value.i ?? '', value.t ?? ''])
+}
+
+/** A Path's route value in `format`. */
+export function encodePathValue(value: KvsPathValue, format: RouteFormat): string {
+  if (format === 'json') return JSON.stringify(value)
+  return compact([value.id, value.v, value.m ? 'm' : ''])
+}
+
+/** A share link's value: its site's, or in `compact` a pointer to the site's key. */
+export function encodeShareValue(label: string, siteValue: string, format: RouteFormat): string {
+  return format === 'json' ? siteValue : `>${label}`
+}
+
+/** `~` and the fields joined by `|`, the empty trailing ones left out. */
+function compact(fields: string[]): string {
+  let end = fields.length
+  while (end > 2 && !fields[end - 1]) end--
+  return `~${fields.slice(0, end).join('|')}`
+}

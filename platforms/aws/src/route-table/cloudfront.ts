@@ -12,9 +12,14 @@ import {
   GetKeyCommand,
   PutKeyCommand,
 } from '@aws-sdk/client-cloudfront-keyvaluestore'
-import type { RouteTable } from '@fling/api/route-table'
+import type { RouteTable, RouteTableUsage } from '@fling/api/route-table'
 
 const MAX_ATTEMPTS = 6
+/**
+ * A store's size limit: 5 MB (CloudFront's quotas). Taken as decimal megabytes, the lower
+ * reading, so the usage is never understated.
+ */
+export const KVS_LIMIT_BYTES = 5_000_000
 
 const named = (err: unknown, ...names: string[]) => err instanceof Error && names.includes(err.name)
 
@@ -49,6 +54,12 @@ export class CloudFrontRouteTable implements RouteTable {
       try {
         const res = await op(await this.currentEtag(attempt > 0))
         this.etag = res.ETag
+        // Another instance wrote in between: how often is what the ETag costs under load.
+        if (attempt > 0) {
+          console.log(
+            JSON.stringify({ level: 'info', msg: 'kvs write retried', attempts: attempt })
+          )
+        }
         return
       } catch (err) {
         if (!staleEtag(err) || attempt >= MAX_ATTEMPTS) {
@@ -57,6 +68,12 @@ export class CloudFrontRouteTable implements RouteTable {
         await new Promise(r => setTimeout(r, 25 * 2 ** attempt + Math.random() * 25))
       }
     }
+  }
+
+  async usage(): Promise<RouteTableUsage> {
+    const res = await this.client.send(new DescribeKeyValueStoreCommand({ KvsARN: this.arn }))
+    if (res.ETag) this.etag = res.ETag
+    return { bytes: res.TotalSizeInBytes ?? 0, limitBytes: KVS_LIMIT_BYTES }
   }
 
   async get(key: string) {

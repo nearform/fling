@@ -537,6 +537,8 @@ export const INSTANCE_ACTIONS = [
   'admin.impersonate.stop',
   'admin.invitations.read',
   'admin.invitations.manage',
+  'admin.routes.read',
+  'admin.routes.write',
   'account.site.create',
   'account.group.create',
   'account.groups.read',
@@ -570,6 +572,9 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.impersonate.stop': role => role === 'impersonating',
   'admin.invitations.read': isAdminRole,
   'admin.invitations.manage': role => role === 'admin',
+  'admin.routes.read': isAdminRole,
+  // Choosing the format rewrites every site's routes: a browser session's admin only.
+  'admin.routes.write': role => role === 'admin',
   'account.site.create': notGuest,
   'account.group.create': notGuest,
   'account.groups.read': notGuest,

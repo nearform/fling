@@ -106,6 +106,8 @@
  *                                                        query
  *   MAINTAIN               CURSOR                        how far the sweep of the site directory
  *                                                        has gone (after, lapStartedAt)
+ *   ROUTES                 FORMAT                        the route table's format an admin chose,
+ *                                                        and the rewrite into it (route-format.ts)
  *
  * An invitation and its directory copy are written together, each write conditioned on the
  * `updatedAt` read (or on there being none), so racing invites of one address store one.
@@ -297,6 +299,7 @@ import {
   type RefreshTokenRecord,
   type ResponseUpdate,
   type RevocationRecord,
+  type RouteFormatRecord,
   type SentNotificationRecord,
   type SharedListing,
   type SignInLinkRecord,
@@ -411,6 +414,7 @@ const key = {
     sk: `DUE#${d.dueAt}#${d.siteId}`,
   }),
   maintenanceCursor: () => ({ pk: 'MAINTAIN', sk: 'CURSOR' }),
+  routeFormat: () => ({ pk: 'ROUTES', sk: 'FORMAT' }),
 }
 
 /** The outbox's partition for a minute. */
@@ -2095,6 +2099,22 @@ export class Records implements Store {
 
   async putMaintenanceCursor(cursor: MaintenanceCursorRecord) {
     await this.table.put(encode('maintenancecursor', key.maintenanceCursor(), cursor))
+  }
+
+  async getRouteFormat() {
+    const k = key.routeFormat()
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? decode<RouteFormatRecord>('routeformat', item) : null
+  }
+
+  async putRouteFormat(record: RouteFormatRecord, ifSetAt?: string | null) {
+    const cond =
+      ifSetAt === undefined
+        ? undefined
+        : ifSetAt === null
+          ? ifAbsent
+          : fieldEquals('setAt', ifSetAt)
+    return unless(this.table.put(encode('routeformat', key.routeFormat(), record), cond))
   }
 
   async pageSites(opts: { after?: string | null; limit: number }) {

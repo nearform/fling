@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto'
 import {
   cacheControlFor,
   displayPublishPath,
+  encodePathValue,
   type KvsPathValue,
   type PathDetail,
   pathKvsKey,
@@ -41,6 +42,7 @@ import { manifestKey } from './blobs/types.ts'
 import { conflict, notFound } from './lib/errors.ts'
 import { GRACE_MS, queueMaintenance, reviveVersion } from './maintenance.ts'
 import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
+import { routeFormat } from './route-format.ts'
 import {
   actorOn,
   applyRoles,
@@ -86,7 +88,7 @@ export async function syncPathRoute(deps: Deps, site: SiteRecord, path: PathReco
     v: path.currentVersionId,
     ...(version?.markdown ? { m: 1 as const } : {}),
   }
-  await deps.routeTable.put(key, JSON.stringify(value))
+  await deps.routeTable.put(key, encodePathValue(value, await routeFormat(deps)))
 }
 
 /** The listing the home page shows: the live Paths, as paths-index.ts takes them. */

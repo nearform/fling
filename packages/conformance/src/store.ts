@@ -1604,6 +1604,28 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.getMaintenanceCursor()).toEqual({ after: a.name, lapStartedAt: NOW })
         for (const s of made) await store.deleteSite(s)
       })
+
+      it('keeps the route format; its rewrite saves only under the choice it began with', async () => {
+        const store = await factory()
+        const chosen = {
+          format: 'compact' as const,
+          setBy: email(),
+          setAt: `${NOW}#${uid()}`,
+          rewrite: { after: null, sites: 0 },
+        }
+        expect(await store.putRouteFormat(chosen)).toBe(true)
+        expect(await store.getRouteFormat()).toEqual(chosen)
+        const progress = { ...chosen, rewrite: { after: 'm', sites: 3 } }
+        expect(await store.putRouteFormat(progress, 'another choice')).toBe(false)
+        expect(await store.putRouteFormat(progress, chosen.setAt)).toBe(true)
+        expect(await store.putRouteFormat(chosen, null)).toBe(false)
+        expect(await store.getRouteFormat()).toEqual(progress)
+        await store.putRouteFormat({
+          ...chosen,
+          format: 'json',
+          rewrite: { after: null, sites: 0 },
+        })
+      })
     })
 
     describe('site servers', () => {

@@ -105,6 +105,12 @@ the code, and the app owns KVS keys and table items.
 
 ## 8. Gaps and open questions
 
+- **The route table's 5 MB.** CloudFront KeyValueStore holds 5 MB per store, and a function has
+  one store. In the `json` route format that is about 30–50k live sites, fewer with many Paths or
+  share links; in `compact` (Admin → Settings) about two to three times as many. Maintenance logs
+  the store's size every run and `route table nearly full` from 70%, which the module turns into
+  the `RouteTableFull` alarm (`alarm_actions`). Beyond that, sites would need to be served from
+  DynamoDB when they miss in the store.
 - **The decision's headers on S3 responses.** These need a response-side function or a response
   headers policy.
 - **No smoke e2e after deploy.** `deploy.yml` checks only `/.well-known/fling`, whereas the

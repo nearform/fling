@@ -10,6 +10,7 @@ import {
   AdminInvitationListSchema,
   AdminInvitationSchema,
   AdminInviteResultSchema,
+  AdminRouteTableSchema,
   AdminSettingsSchema,
   AdminSiteListSchema,
   AdminUserListSchema,
@@ -20,6 +21,7 @@ import {
   MailTestRequestSchema,
   MailTestResultSchema,
   MeSchema,
+  RouteFormatRequestSchema,
 } from '@fling/shared'
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -28,6 +30,7 @@ import { principalOf } from '../auth/middleware.ts'
 import { IMPERSONATION_TTL_SECONDS, reissueSession } from '../auth/session.ts'
 import { notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
+import { routeTableStatus, setRouteFormat } from '../route-format.ts'
 import * as servers from '../servers/api.ts'
 import type { AppEnv } from '../types.ts'
 
@@ -86,6 +89,18 @@ adminRoutes.post('/mail/test', async c => {
   const { to } = await jsonBody(c, MailTestRequestSchema)
   const result = await admin.mailTest(c.get('deps'), p, to)
   return c.json(MailTestResultSchema.parse(result))
+})
+
+adminRoutes.get('/route-table', async c =>
+  c.json(AdminRouteTableSchema.parse(await routeTableStatus(c.get('deps'), principalOf(c))))
+)
+
+adminRoutes.post('/route-table', async c => {
+  const p = principalOf(c)
+  admin.ensure(p, 'admin.routes.write')
+  const { format } = await jsonBody(c, RouteFormatRequestSchema)
+  const status = await setRouteFormat(c.get('deps'), p, format)
+  return c.json(AdminRouteTableSchema.parse(status))
 })
 
 adminRoutes.get('/settings', c =>

@@ -52,6 +52,8 @@ import {
   accessProblem,
   deletedGroupId,
   deletedGroupRef,
+  encodeShareValue,
+  encodeSiteValue,
   initialsFromEmail,
   isGeneratedListing,
   isValidSiteName,
@@ -125,6 +127,7 @@ import {
   SITE_CHANGES,
   userActor,
 } from './policy.ts'
+import { routeFormat } from './route-format.ts'
 import {
   applyServer,
   limitsOf,
@@ -316,9 +319,12 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
         }
       : {}),
   }
-  const json = JSON.stringify(value)
-  await routeTable.put(siteKvsKey(label), json)
-  if (site.shareToken) await routeTable.put(shareKvsKey(site.shareToken), json)
+  const format = await routeFormat(deps)
+  const encoded = encodeSiteValue(value, format)
+  await routeTable.put(siteKvsKey(label), encoded)
+  if (site.shareToken) {
+    await routeTable.put(shareKvsKey(site.shareToken), encodeShareValue(label, encoded, format))
+  }
 }
 
 const SUGGESTION_COUNT = 3

@@ -165,6 +165,15 @@ variable "enable_data_migrations" {
   default     = true
 }
 
+variable "alarm_actions" {
+  description = <<-EOT
+    What the module's alarms notify (SNS topic ARNs, say). Empty: the alarms still change state in
+    CloudWatch, and notify nobody. One alarm so far: the route table (the KeyValueStore) 70% full.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "log_retention_days" {
   description = "How long the function's logs are kept."
   type        = number

@@ -11,6 +11,8 @@ import {
   AdminInvitationSchema,
   type AdminInviteResult,
   AdminInviteResultSchema,
+  type AdminRouteTable,
+  AdminRouteTableSchema,
   type AdminServerState,
   AdminServerStateSchema,
   type AdminSettings,
@@ -67,6 +69,7 @@ import {
   type ResponseExportFormat,
   type ResponsesExport,
   ResponsesExportSchema,
+  type RouteFormat,
   type SentNotification,
   SentNotificationListSchema,
   type ServerLogLine,
@@ -459,6 +462,12 @@ export const api = {
   adminMail: (): Promise<MailAdmin> => request('/api/admin/mail', MailAdminSchema),
   /** Admins: the instance's configuration, secrets by name only. */
   adminSettings: (): Promise<AdminSettings> => request('/api/admin/settings', AdminSettingsSchema),
+  /** Admins: the route table's format, its rewrite, and how full the store is. */
+  adminRouteTable: (): Promise<AdminRouteTable> =>
+    request('/api/admin/route-table', AdminRouteTableSchema),
+  /** Admins, in a browser session: choose the route format and start the rewrite into it. */
+  setRouteFormat: (format: RouteFormat): Promise<AdminRouteTable> =>
+    request('/api/admin/route-table', AdminRouteTableSchema, { method: 'POST', body: { format } }),
   /** Admins: send a test email to any address; the provider's id or the mapped error. */
   sendTestMail: (to: string): Promise<MailTestResult> =>
     request('/api/admin/mail/test', MailTestResultSchema, { method: 'POST', body: { to } }),

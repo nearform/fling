@@ -545,8 +545,30 @@ function notAllowed(): SiteResponse {
   }
 }
 
-function parseRoute(raw: string | null): RouteValue | null {
+/**
+ * A route value in either format (kvs.ts, RouteFormat): `json`, or `compact`,
+ * `~<id>|<v>|<flags>|<i>|<t>` with a letter for each field that is set (`u`: public, `s`: spa,
+ * and `r`, `p`, `m`, `f`, `x` as named, each read as the field set to 1) and the trailing fields
+ * left out when empty; `t`, last, may hold a `|`.
+ */
+export function parseRoute(raw: string | null): RouteValue | null {
   if (!raw) return null
+  if (raw.charAt(0) === '~') {
+    const a = raw.slice(1).split('|')
+    // biome-ignore lint/suspicious/noExplicitAny: each flag letter names a field
+    const value: any = {
+      id: a[0],
+      v: a[1],
+      i: a[3] || undefined,
+      t: a.slice(4).join('|') || undefined,
+    }
+    ;(a[2] || '').split('').forEach(c => {
+      value[c] = 1
+    })
+    if (value.u) value.vis = 'public'
+    value.spa = !!value.s
+    return value
+  }
   try {
     return JSON.parse(raw)
   } catch (_e) {
@@ -598,6 +620,10 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
   const target = routeKeyForHost(host)
   let raw: string | null = null
   if (target) raw = await ctx.getRoute(target.key)
+  // A share link's value may point at its site's (`>` and the site's label): one lookup more.
+  if (target && target.share && raw && raw.charAt(0) === '>') {
+    raw = await ctx.getRoute(siteKvsKey(raw.slice(1)))
+  }
   const site = parseRoute(raw)
   if (!target || !site || !site.id || !site.v || DOT_SEGMENT_RE.test(decoded)) {
     return rewrite(MISSING_KEY)

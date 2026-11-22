@@ -559,7 +559,8 @@ export type AdminSecret = AdminSettings['secrets'][number]
 /**
  * GET /api/admin/route-table — the route table's format (kvs.ts RouteFormat), who chose it and
  * maintenance's rewrite of every site's routes into it, and how full the store is where it has a
- * size limit (`usage`; null where it has none). POST it `{ format }` (a browser session's admin)
+ * size limit (`usage`; null where it has none), and maintenance's last lap of the site directory
+ * (`lastLap`: how long it took and when it finished; null before the first). POST it `{ format }` (a browser session's admin)
  * to choose the format and start the rewrite.
  */
 export const AdminRouteTableSchema = z.object({
@@ -574,6 +575,7 @@ export const AdminRouteTableSchema = z.object({
     })
     .optional(),
   usage: z.object({ bytes: z.number(), limitBytes: z.number() }).nullable(),
+  lastLap: z.object({ lapMs: z.number(), finishedAt: z.string() }).nullable(),
 })
 export type AdminRouteTable = z.infer<typeof AdminRouteTableSchema>
 export const RouteFormatRequestSchema = z.object({ format: z.enum(ROUTE_FORMATS) })

@@ -28,15 +28,21 @@ export async function routeFormat(deps: Deps): Promise<RouteFormat> {
   return (await deps.store.getRouteFormat())?.format ?? 'json'
 }
 
-/** What Admin → Routes shows of the route table: its format, the rewrite, how full it is. */
+/**
+ * What Admin → Routes shows of the route table: its format, the rewrite, how full it is, and
+ * maintenance's last lap of the site directory (null before it has finished one): how long every
+ * site waits for a sweep.
+ */
 export async function routeTableStatus(deps: Deps, p: Principal) {
   ensure(p, 'admin.routes.read')
   const record = await deps.store.getRouteFormat()
   const usage = deps.routeTable.usage ? await deps.routeTable.usage() : null
+  const cursor = await deps.store.getMaintenanceCursor()
   return {
     format: record?.format ?? 'json',
     ...(record ? { setBy: record.setBy, setAt: record.setAt, rewrite: record.rewrite } : {}),
     usage,
+    lastLap: cursor?.lastLap ?? null,
   }
 }
 

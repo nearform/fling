@@ -11,7 +11,7 @@ export interface RouteTable {
   delete(key: string): Promise<void>
   /**
    * How full the store is, where it has a size limit (CloudFront KeyValueStore's 5 MB); absent
-   * where it has none. Maintenance logs it and Admin → Settings shows it.
+   * where it has none. Maintenance logs it and Admin → Routes shows it.
    */
   usage?(): Promise<RouteTableUsage>
 }

@@ -68,7 +68,8 @@ resource "aws_scheduler_schedule" "maintain" {
 # The route table's size: the KeyValueStore holds 5 MB, and a site can't go live once it is full.
 # Each maintenance run logs how full it is (apps/api/src/maintenance.ts): "route table usage", or
 # from 70% up "route table nearly full", which the filter counts (the logs are text, so it matches
-# the message); one in an hour sets the alarm off. Room is made by choosing the compact format in Admin → Settings.
+# the message); one in an hour sets the alarm off. Room is made by choosing the compact format in
+# Admin → Routes.
 # -----------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "route_table_full" {
@@ -86,7 +87,7 @@ resource "aws_cloudwatch_log_metric_filter" "route_table_full" {
 
 resource "aws_cloudwatch_metric_alarm" "route_table_full" {
   alarm_name          = "${local.name}-route-table-full"
-  alarm_description   = "${var.name} (${var.env})'s route table (CloudFront KeyValueStore) is 70% full or more. Choose the compact route format in Admin → Settings, or archive unused sites."
+  alarm_description   = "${var.name} (${var.env})'s route table (CloudFront KeyValueStore) is 70% full or more. Choose the compact route format in Admin → Routes, or archive unused sites."
   namespace           = "Fling/${local.name}"
   metric_name         = aws_cloudwatch_log_metric_filter.route_table_full.metric_transformation[0].name
   statistic           = "Sum"
@@ -97,4 +98,45 @@ resource "aws_cloudwatch_metric_alarm" "route_table_full" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = var.alarm_actions
   ok_actions          = var.alarm_actions
+}
+
+# -----------------------------------------------------------------------------
+# Saved Logs Insights queries (CloudWatch → Logs Insights → Saved queries, under <name>/): how long
+# maintenance takes to go round every site, how full the route table is, and how often a
+# KeyValueStore write lost the race for its ETag (platforms/aws/src/route-table/cloudfront.ts).
+# The function logs in the Text format, so each JSON line follows Lambda's prefix: the queries
+# match the message as text, as the metric filter does, and parse the numbers out of it.
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_query_definition" "maintenance_lap" {
+  name            = "${local.name}/maintenance-lap"
+  log_group_names = [aws_cloudwatch_log_group.this.name]
+  query_string    = <<-EOT
+    fields @timestamp
+    | filter @message like /"msg":"maintenance lap"/
+    | parse @message /"lapMs":(?<lapMs>\d+)/
+    | stats count() as laps, avg(lapMs) as avgLapMs, max(lapMs) as maxLapMs by bin(1d)
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "route_table_usage" {
+  name            = "${local.name}/route-table-usage"
+  log_group_names = [aws_cloudwatch_log_group.this.name]
+  query_string    = <<-EOT
+    fields @timestamp
+    | filter @message like /"msg":"route table (usage|nearly full)"/
+    | parse @message /"bytes":(?<bytes>\d+),"limitBytes":(?<limitBytes>\d+),"percent":(?<percent>[\d.]+)/
+    | stats max(bytes) as maxBytes, max(limitBytes) as limitBytes, max(percent) as maxPercent by bin(1h)
+  EOT
+}
+
+resource "aws_cloudwatch_query_definition" "kvs_write_retried" {
+  name            = "${local.name}/kvs-write-retried"
+  log_group_names = [aws_cloudwatch_log_group.this.name]
+  query_string    = <<-EOT
+    fields @timestamp
+    | filter @message like /"msg":"kvs write retried"/
+    | parse @message /"attempts":(?<attempts>\d+)/
+    | stats count() as retried, sum(attempts) as retries, max(attempts) as maxAttempts by bin(1h)
+  EOT
 }

@@ -1613,6 +1613,13 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(next.sites[0]?.name).toBe(`mt-${tag}-c`)
         await store.putMaintenanceCursor({ after: a.name, lapStartedAt: NOW })
         expect(await store.getMaintenanceCursor()).toEqual({ after: a.name, lapStartedAt: NOW })
+        const lastLap = { lapMs: 90_000, finishedAt: NOW }
+        await store.putMaintenanceCursor({ after: null, lapStartedAt: NOW, lastLap })
+        expect(await store.getMaintenanceCursor()).toEqual({
+          after: null,
+          lapStartedAt: NOW,
+          lastLap,
+        })
         for (const s of made) await store.deleteSite(s)
       })
 

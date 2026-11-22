@@ -2,16 +2,17 @@
  * One site of the instance in All sites (admins). As a row (`layout` list): its thumbnail, when
  * the instance has thumbnails, its name, the card's link to its site page (CardLink; an admin
  * manages anyone's), then its owner and when it was updated (plain muted text, on the name's left
- * edge); Review (when the instance has comments) and View; then its access level (or archived, or
- * not yet published).
+ * edge) and, on an instance that counts views, when it was last viewed; Review (when the instance
+ * has comments) and View; then its access level (or archived, or not yet published).
  * Laid out like your own sites' rows. As a card (`layout` grid), small so many fit a row: the
- * thumbnail on top, then the name and owner on a line each, when it was updated with the badges as
- * icons, and the links as icon buttons.
+ * thumbnail on top, then the name, the owner and when it was last viewed on a line each, when it
+ * was updated with the badges as icons, and the links as icon buttons.
  */
 import type { AdminSite } from '@fling/shared'
 import { useInstance } from '../hooks/instance'
 import { displayUrl, fullDate, timeAgo } from '../lib/format'
 import { type SitesLayout, siteHref } from '../lib/sites'
+import { showsLastViewed } from '../lib/usage'
 import { CardLink } from './CardLink'
 import { ReviewButton, ViewSiteButton } from './SiteButtons'
 import { SiteThumbnail } from './SiteThumbnail'
@@ -31,6 +32,17 @@ export function AdminSiteCard({
   const thumbs = instance?.capabilities.thumbnails === true
   const visibility = site.access === 'public' ? 'public' : 'private'
   const grid = layout === 'grid'
+  // When a view was last counted: "—" for never.
+  const lastViewed = showsLastViewed(instance) && (
+    <>
+      Last viewed{' '}
+      {site.lastViewAt ? (
+        <span title={fullDate(site.lastViewAt)}>{timeAgo(site.lastViewAt)}</span>
+      ) : (
+        <span title="Never viewed">—</span>
+      )}
+    </>
+  )
 
   // An admin manages any site: its site page.
   const link = <CardLink name={site.name} target={{ kind: 'site-page', to: siteHref(site.name) }} />
@@ -44,6 +56,7 @@ export function AdminSiteCard({
         <span>
           · <span title={fullDate(site.updatedAt)}>{timeAgo(site.updatedAt)}</span>
         </span>
+        {lastViewed && <span>· {lastViewed}</span>}
       </p>
     </div>
   )
@@ -87,6 +100,11 @@ export function AdminSiteCard({
           <p className="site-tile-meta" title={site.owner}>
             <span className="truncate">{site.owner}</span>
           </p>
+          {lastViewed && (
+            <p className="site-tile-meta">
+              <span className="truncate">{lastViewed}</span>
+            </p>
+          )}
           <div className="site-tile-meta">
             <span className="truncate" title={fullDate(site.updatedAt)}>
               {timeAgo(site.updatedAt)}

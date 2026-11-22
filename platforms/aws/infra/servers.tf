@@ -37,13 +37,25 @@ locals {
       SERVER_INSTANCE        = local.name
       SERVER_ROLE_ARN        = aws_iam_role.server[0].arn
       SERVER_ZIP_BUCKET      = aws_s3_bucket.server_zips[0].bucket
-      SITES_DISTRIBUTION_ARN = aws_cloudfront_distribution.sites.arn
       SERVERS_EGRESS         = var.servers.egress
     },
     local.servers_fenced ? {
       SERVER_NETWORK_CONNECTOR_ARN = aws_lambdacore_network_connector.servers[0].latest_version_arn
     } : {},
   ) : {}
+}
+
+# The sites distribution's ARN, the only caller each site's `live` endpoint allows (the API writes
+# it into the function's resource policy). An SSM parameter the API reads with its secrets, not an
+# environment value: the sites distribution reaches the API (edge.tf, /_fling-seen), so the
+# function's environment can't name it without a cycle.
+resource "aws_ssm_parameter" "sites_distribution_arn" {
+  count = local.servers_on ? 1 : 0
+
+  name        = "${local.ssm_prefix}sites-distribution-arn"
+  description = "${var.name} (${var.env}): the sites distribution, the only caller of site servers."
+  type        = "String"
+  value       = aws_cloudfront_distribution.sites.arn
 }
 
 # -----------------------------------------------------------------------------

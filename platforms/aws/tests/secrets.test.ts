@@ -1,6 +1,6 @@
 import type { SSMClient } from '@aws-sdk/client-ssm'
 import { describe, expect, it } from 'vitest'
-import { loadSecretsFromSsm } from '../src/secrets.ts'
+import { loadFromSsm, loadSecretsFromSsm } from '../src/secrets.ts'
 
 /** An SSM client that answers GetParametersByPath from `params` (names relative to the prefix). */
 function fakeSsm(params: Record<string, string>) {
@@ -65,5 +65,17 @@ describe('loadSecretsFromSsm', () => {
     await expect(
       loadSecretsFromSsm('/example/fling/', fakeSsm({ ...core, 'google-client-id': 'gid' }))
     ).rejects.toThrow(/oidc-client-secret/)
+  })
+})
+
+describe('loadFromSsm', () => {
+  it('reads the settings Terraform keeps out of the environment, apart from the secrets', async () => {
+    const arn = 'arn:aws:cloudfront::123456789012:distribution/E1'
+    const { secrets, settings } = await loadFromSsm(
+      '/example/fling',
+      fakeSsm({ ...core, 'oidc-client-secret': 'oidc', 'sites-distribution-arn': arn })
+    )
+    expect(settings).toEqual({ SITES_DISTRIBUTION_ARN: arn })
+    expect(Object.values(secrets)).not.toContain(arn)
   })
 })

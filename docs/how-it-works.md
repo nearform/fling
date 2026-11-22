@@ -132,6 +132,20 @@ that version (just after a publish it can take up to a minute). The site lists s
 thumbnail (a faded logo until it has one), as rows or, with the List / Grid switch, as a grid of
 small cards; the choice is kept per browser. The `thumbnails` capability turns this on in every client.
 
+## Metrics
+
+Each site counts its views and pushes, and keeps nothing about who viewed. A push is a version
+going live: a publish, a rollback, or the same on one of its Paths. A view is a page load: every
+HTML page a version serves has a copy with a small script, made when the version goes live and
+served in the page's place, that tells the site's own host once per load that the page was viewed
+(`/_fling-seen`, which passes the same access checks as the page). What `fling pull` downloads is
+the page as published. The review page and previews don't count, nor do pages being prerendered,
+a single-page app's navigations, or pages whose Content-Security-Policy blocks inline scripts.
+Owners, publishers and admins see the counts per day, week and month, with when the site was last
+viewed and last pushed: on its page in the web UI, with `fling stats`, or `fling_stats` over MCP.
+An instance can turn view counting off (`SITE_VIEW_COUNTS=off`); pushes are counted either way.
+The `metrics` and `viewCounts` capabilities tell clients.
+
 ## Live review
 
 Everyone with a site's review page open is in that site's room. New comments,

@@ -41,6 +41,18 @@ export const SITE_PASS_PATH = '/_fling-pass'
  */
 export const SITE_VERSION_PATH = '/_fling-version'
 /**
+ * Where a page's view beacon (view-beacon.ts) says the page was viewed: a POST on the site's own
+ * host, after the same access checks as its pages. The routing decision makes it an invoke with no
+ * target, which the platform counts (views.ts) and answers with a 204; nothing is stored about who
+ * viewed. Not under `/_fling/`, for the same reason as SITE_PASS_PATH.
+ */
+export const SITE_SEEN_PATH = '/_fling-seen'
+/**
+ * Where a version whose pages count views keeps each HTML page's copy with the beacon (route
+ * value `c`): `<COUNTED_DIR><path>` beside its files, a dot segment, so never a site path.
+ */
+export const COUNTED_DIR = '.counted/'
+/**
  * A site with Paths: its live Paths as JSON, the data its home page's Paths block lists
  * (paths-index.ts). Rewritten to the rendered listing, only while the route value names one (`i`).
  */

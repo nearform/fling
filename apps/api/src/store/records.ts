@@ -16,7 +16,13 @@
  *                                                        (`R<hash>`), so the core sorts by createdAt
  *   SITE#<siteId>          SECRET#<name>                 site secret (sealed value, setBy, setAt):
  *                                                        listed by prefix, deleted with the site
- *   SERVERS                SITE#<siteId>                 a site whose current version has a server
+ *   SITE#<siteId>          METRIC#<D|W|M>#<bucket>       a day's, ISO week's or month's views and
+ *                                                        pushes (views.ts): atomic adds; 29 days,
+ *                                                        9 weeks, 13 months
+ *   SITE#<siteId>          ACTIVITY                      last view, last push, first count (since)
+ *   METRICS                <D|W|M>#<bucket>              every site's views and pushes together, as a
+ *                                                        site's buckets (one add per flush)
+ *   SERVERS               SITE#<siteId>                 a site whose current version has a server
  *                                                        (name): what SERVERS_MAX_SITES counts
  *   SITE#<siteId>          LIVE#<connectionId>           a connection to the site's live room (peer,
  *                                                        connectedAt) — 2 h; only hubs that keep
@@ -249,6 +255,7 @@
  * records (they can be large); they live in blobs.
  */
 import { type ChannelId, knownCells, type NotificationPreferences } from '@fling/shared'
+import { dayOf, monthOf, weekOf } from '@fling/shared/metrics'
 import { mapLimit } from '../lib/concurrency.ts'
 import { newId, newSortableId } from '../lib/ids.ts'
 import {
@@ -306,9 +313,12 @@ import {
   type SentNotificationRecord,
   type SharedListing,
   type SignInLinkRecord,
+  type SiteActivityRecord,
   SiteChanged,
+  type SiteCounts,
   type SiteDirectoryRecord,
   type SiteGrantRecord,
+  type SiteMetricRecord,
   type SiteRecord,
   type SiteRef,
   type SiteRoleName,
@@ -361,6 +371,15 @@ const key = {
   }),
   liveRef: (connectionId: string) => ({ pk: `LIVE#${connectionId}`, sk: 'LIVE' }),
   siteSecret: (siteId: string, name: string) => ({ pk: sitePk(siteId), sk: `SECRET#${name}` }),
+  siteMetric: (siteId: string, size: SiteMetricRecord['size'], bucket: string) => ({
+    pk: sitePk(siteId),
+    sk: `METRIC#${size}#${bucket}`,
+  }),
+  siteActivity: (siteId: string) => ({ pk: sitePk(siteId), sk: 'ACTIVITY' }),
+  instanceMetric: (size: SiteMetricRecord['size'], bucket: string) => ({
+    pk: 'METRICS',
+    sk: `${size}#${bucket}`,
+  }),
   serverSite: (siteId: string) => ({ pk: 'SERVERS', sk: `SITE#${siteId}` }),
   /** LEGACY (expand phase): where versions lived before the site-centric keys */
   legacyVersion: (email: string, siteId: string, id: string) => ({
@@ -2118,6 +2137,91 @@ export class Records implements Store {
 
   async putMaintenanceCursor(cursor: MaintenanceCursorRecord) {
     await this.table.put(encode('maintenancecursor', key.maintenanceCursor(), cursor))
+  }
+
+  // --- site metrics ---
+
+  async addSiteCounts(
+    siteId: string,
+    at: Date,
+    counts: Partial<SiteCounts>,
+    expiry: Record<SiteMetricRecord['size'], string>
+  ) {
+    const add = await this.addBuckets(
+      (size, bucket) => key.siteMetric(siteId, size, bucket),
+      at,
+      counts,
+      expiry
+    )
+    if (!add) return
+    const when = at.toISOString()
+    const set: Record<string, string> = {}
+    if (add.views) set.lastViewAt = when
+    if (add.pushes) set.lastPushAt = when
+    const k = key.siteActivity(siteId)
+    for (;;) {
+      if (await unless(this.table.update(k.pk, k.sk, { set }))) return
+      const item = encode('siteactivity', k, { since: when, ...set } satisfies SiteActivityRecord)
+      if (await unless(this.table.put(item, ifAbsent))) return
+    }
+  }
+
+  /** Add `counts` to the day, week and month of `at` at `keyOf`; the adds, or null for none. */
+  private async addBuckets(
+    keyOf: (size: SiteMetricRecord['size'], bucket: string) => { pk: string; sk: string },
+    at: Date,
+    counts: Partial<SiteCounts>,
+    expiry: Record<SiteMetricRecord['size'], string>
+  ): Promise<Record<string, number> | null> {
+    const add: Record<string, number> = {}
+    if (counts.views) add.views = counts.views
+    if (counts.pushes) add.pushes = counts.pushes
+    if (Object.keys(add).length === 0) return null
+    const buckets: [SiteMetricRecord['size'], string][] = [
+      ['D', dayOf(at)],
+      ['W', weekOf(at)],
+      ['M', monthOf(at)],
+    ]
+    for (const [size, bucket] of buckets) {
+      await this.bump(
+        keyOf(size, bucket),
+        'sitemetric',
+        add,
+        { size, bucket, views: 0, pushes: 0 },
+        expiry[size]
+      )
+    }
+    return add
+  }
+
+  private async listBuckets(pk: string, prefix: string) {
+    const buckets = await this.list<SiteMetricRecord>('sitemetric', pk, prefix)
+    return buckets.map(b => ({ ...b, views: Number(b.views), pushes: Number(b.pushes) }))
+  }
+
+  async getSiteMetrics(siteId: string) {
+    return {
+      buckets: await this.listBuckets(sitePk(siteId), 'METRIC#'),
+      activity: await this.getSiteActivity(siteId),
+    }
+  }
+
+  async getSiteActivity(siteId: string) {
+    const k = key.siteActivity(siteId)
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? decode<SiteActivityRecord>('siteactivity', item) : null
+  }
+
+  async addInstanceCounts(
+    at: Date,
+    counts: Partial<SiteCounts>,
+    expiry: Record<SiteMetricRecord['size'], string>
+  ) {
+    await this.addBuckets((size, bucket) => key.instanceMetric(size, bucket), at, counts, expiry)
+  }
+
+  getInstanceMetrics() {
+    return this.listBuckets('METRICS', '')
   }
 
   async getRouteFormat() {

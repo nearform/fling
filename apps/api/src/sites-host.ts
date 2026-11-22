@@ -9,7 +9,10 @@
  * - `page`: Fling's own pages (the sites' 404, the review shell, robots.txt), filled in for this
  *   instance (`__APP_ORIGIN__`);
  * - `object`: a site file from the platform's store, null when there is none;
- * - `invoke`: a site server's request (absent: SERVERS off, answered as a missing page).
+ * - `invoke`: a site server's request (absent: SERVERS off, answered as a missing page);
+ * - `seen`: a view the page's beacon reported (SITE_SEEN_PATH, which the decision makes an invoke
+ *   with no server): the platform counts it (views.ts `ViewCounter`). It is answered with a 204
+ *   either way, and absent nothing is counted.
  *
  * Unknown hosts, archived sites and missing files get the 404 page, never cached. What a site that
  * isn't public, or a share host, serves goes out `private` (serverCacheControl), so a cache keyed
@@ -26,6 +29,7 @@ import {
   REVIEW_SHELL,
   ROBOTS_TXT,
   SITE_PASS_COOKIE_NAME,
+  SITE_SEEN_PATH,
 } from '@fling/shared/route-keys'
 import { SITE_COOKIE_NAME } from '@fling/shared/site-cookie'
 import { normalizeQuery, routeSiteRequest, type SiteInvoke } from '@fling/shared/site-routing'
@@ -51,6 +55,8 @@ export interface SitesHostOptions {
   object(request: Request, key: string): Promise<Response | null>
   /** a site server's request, as the decision says (absent: no site servers) */
   invoke?(request: Request, decision: SiteInvoke): Promise<Response>
+  /** a view of the site `siteId` (absent: views are not counted) */
+  seen?(siteId: string): void
   now?: () => number
   /** how long a site pass lasts (default: the routing decision's, 5 minutes) */
   passTtlSeconds?: number
@@ -149,6 +155,11 @@ export async function handleSiteRequest(
     }
     return new Response(decision.body ?? null, { status: decision.status, headers })
   }
+  if (decision.action === 'invoke' && url.pathname === SITE_SEEN_PATH) {
+    // Only the beacon's POST counts (as on AWS, where the API takes only a POST there).
+    if (request.method === 'POST') opts.seen?.(decision.siteId)
+    return withHeaders(seenAnswer(), decision.headers)
+  }
   if (decision.action === 'invoke') {
     if (!opts.invoke)
       return withHeaders(await notFound(opts, 404, request.method), decision.headers)
@@ -164,6 +175,10 @@ export async function handleSiteRequest(
   }
   return withHeaders(res, headers)
 }
+
+/** What a view beacon gets back: nothing, never stored. */
+export const seenAnswer = () =>
+  new Response(null, { status: 204, headers: { 'cache-control': 'no-store' } })
 
 async function serveRewrite(
   request: Request,

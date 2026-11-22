@@ -4,7 +4,7 @@
  * (`base_changed`) when the deploy is made and at finalize, who may, the MAX_KEPT_FILES cap, and
  * publication's own interface (`publishBytes`, the remote MCP's).
  */
-import { MAX_KEPT_FILES, MAX_PATH_BYTES, siteObjectKey } from '@fling/shared'
+import { COUNTED_DIR, MAX_KEPT_FILES, MAX_PATH_BYTES, siteObjectKey } from '@fling/shared'
 import { describe, expect, it, vi } from 'vitest'
 import { manifestKey } from '../src/blobs/types.ts'
 import type { Principal } from '../src/policy.ts'
@@ -272,8 +272,10 @@ describe('publish on a base', () => {
       { principal, base, remove: ['old.html'] }
     )
     expect(done.status).toBe('live')
-    // about.html is the base's, byte for byte: copied, not written.
-    expect(put.mock.calls.map(([key]) => key.split('/').slice(3).join('/'))).toEqual(['index.html'])
+    // about.html is the base's, byte for byte: copied, not written. (The pages' copies with the
+    // view beacon are written for every version.)
+    const written = put.mock.calls.map(([key]) => key.split('/').slice(3).join('/'))
+    expect(written.filter(k => !k.startsWith(COUNTED_DIR))).toEqual(['index.html'])
     expect(await served(env)).toEqual({
       'index.html': '<h1>v2</h1>',
       'about.html': '<h1>about</h1>',

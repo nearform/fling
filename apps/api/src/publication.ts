@@ -206,6 +206,7 @@ import {
 import type { PathRecord, ServerMark, SiteRecord, User, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
+import { countPush } from './views.ts'
 
 export { UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
 
@@ -729,6 +730,7 @@ async function prepare(
         recheck
       )
       await noteLive(deps, user.email, existing, live)
+      await countPush(deps, existing.id)
       await queueMaintenance(deps, existing)
       return {
         kind: 'done',
@@ -955,6 +957,7 @@ async function preparePath(
   const known = await reviveVersion(deps, ref, await store.getVersion(ref, versionId))
   if (known?.status === 'complete') {
     await makePathCurrent(deps, site, path, versionId, known.title ?? null)
+    await countPush(deps, site.id)
     return result('repointed')
   }
   if (known && known.status !== 'pending') throw retryLater(folder)
@@ -1034,6 +1037,7 @@ async function goLivePath(
     }
     throw err
   }
+  await countPush(deps, site.id)
   await queueMaintenance(deps, site)
   if (version.status === 'pending') await unqueueStaleCheck(deps, site, version)
   const hints = await pathHints(deps, site)
@@ -1272,6 +1276,7 @@ async function goLive(
     throw err
   }
   await noteLive(deps, user.email, site, version)
+  await countPush(deps, site.id)
   // Retention: the version this one replaced may now be past the newest N.
   await queueMaintenance(deps, site)
   if (version.status === 'pending') await unqueueStaleCheck(deps, site, version)

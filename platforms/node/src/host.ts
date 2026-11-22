@@ -11,7 +11,10 @@
  *   fan-out spreads across processes.
  * - **The sites host** (`*.<SITES_DOMAIN>`): the core's sites host (@fling/api/sites-host: the
  *   shared routing decision over the route table), with site files from the Blobs store, Fling's
- *   pages from the web build (`pages`) and site servers through the core's shell.
+ *   pages from the web build (`pages`) and site servers through the core's shell. A view a page's
+ *   beacon reports is counted in the process's ViewCounter (deps.views, @fling/api/views), which
+ *   writes after a view at most every FLUSH_INTERVAL_MS, on a timer every VIEW_FLUSH_EVERY_MS
+ *   (what a quiet site's last views wait for) and once more when the host closes.
  *
  * Ticks and migrations are endpoints a scheduler or the deploy calls, `POST /ticks/notify` (every
  * minute, with mail), `POST /ticks/maintain` (hourly) and `POST /ticks/migrate` (the deploy, until
@@ -108,8 +111,17 @@ export interface NodeHostOptions {
   }
 }
 
+/** How often the host writes the views it holds: a stopped process loses at most this much. */
+export const VIEW_FLUSH_EVERY_MS = 60_000
+
 /** The largest request body the Node host takes by default: 32 MiB. */
 export const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024
+
+/** A view of the site: counted now, written once the counter's interval has passed. */
+function seen(views: NonNullable<Deps['views']>, siteId: string) {
+  views.count(siteId)
+  void views.flushDue().catch(() => {})
+}
 
 const tooLarge = (max: number) =>
   new ApiError(413, 'too_large', `The request is too large (at most ${max} bytes)`)
@@ -241,6 +253,8 @@ async function serveUi(uiDir: string, request: Request, https: boolean): Promise
 export interface NodeHost {
   /** one request, whatever its host */
   fetch(request: Request): Promise<Response>
+  /** write the views held now and stop the flush timer (listen's close does this too) */
+  close(): Promise<void>
   /** serve on `port` (0: any free one), WebSocket upgrades included */
   listen(
     port: number,
@@ -263,6 +277,16 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
   const page = pageReader(opts.pages ?? {}, config.appOrigin)
   const budget = () => Date.now() + (opts.ticks?.budgetMs ?? 50_000)
   const routes = opts.siteRoutes ?? deps.routeTable
+  const views = deps.views
+  // Unref'd, so a host that is never closed (a test, a one-off) doesn't keep the process up.
+  const flushTimer = views
+    ? setInterval(() => void views.flush().catch(() => {}), VIEW_FLUSH_EVERY_MS)
+    : undefined
+  flushTimer?.unref()
+  async function close() {
+    if (flushTimer) clearInterval(flushTimer)
+    await views?.flush().catch(() => {})
+  }
 
   async function tick(request: Request, path: string): Promise<Response> {
     if (!opts.ticks || request.method !== 'POST') return notFound()
@@ -332,6 +356,7 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
                 ),
             }
           : {}),
+        ...(views ? { seen: (siteId: string) => seen(views, siteId) } : {}),
         now: () => deps.clock.now().getTime(),
       })
     }
@@ -342,6 +367,7 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
 
   return {
     fetch,
+    close,
     listen(port, hostname) {
       return new Promise(resolveListen => {
         const server = serve({ fetch, port, ...(hostname ? { hostname } : {}) }, info => {
@@ -361,7 +387,7 @@ export function createNodeHost(opts: NodeHostOptions): NodeHost {
               new Promise<void>(done => {
                 closeSockets()
                 server.close(() => done())
-              }),
+              }).then(close),
           })
         }) as unknown as Server
       })

@@ -228,6 +228,8 @@ describe('the queue and the sweep', () => {
       after: null,
       lapStartedAt: iso(env),
       lastLap: { lapMs: Date.parse(iso(env)) - Date.parse(lap), finishedAt: iso(env) },
+      // The lap began before this run tallied it: its usage covers only the sites after sweep-b.
+      lastUsage: expect.objectContaining({ sites: 1, partial: true, lapStartedAt: lap }),
     })
   })
 

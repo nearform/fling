@@ -5,7 +5,8 @@
  * `POST /copy` runs `R2Blobs.copy` on a list of `[from, to]` pairs in workerd (where R2 streams
  * need a known length, which the Node proxy can't show); and
  * `*.sites.example.test` is the sites host (src/sites.ts) over the KV + D1 route table and R2,
- * with a stub for the assets' 404 page, review shell and robots.txt.
+ * with a stub for the assets' 404 page, review shell and robots.txt. The views it is handed (`seen`)
+ * are kept in the isolate, and `GET /seen` lists them.
  */
 import type { D1Database, KVNamespace, R2Bucket } from '@cloudflare/workers-types'
 import { TableRouteTable } from '@fling/api/route-table/table'
@@ -24,6 +25,7 @@ interface Env {
 }
 
 const TEST_APP_ORIGIN = 'https://app.example.test'
+const seen: string[] = []
 
 export default {
   async fetch(request: Request, env: Env) {
@@ -43,6 +45,9 @@ export default {
       await Promise.all(pairs.map(([from, to]) => blobs.copy(from, to)))
       return Response.json({ ms: Date.now() - started })
     }
+    if (url.pathname === '/seen' && !url.hostname.endsWith('.sites.example.test')) {
+      return Response.json(seen)
+    }
     if (!url.hostname.endsWith('.sites.example.test')) return new Response(null, { status: 404 })
     return handleSiteRequest(request, {
       appOrigin: TEST_APP_ORIGIN,
@@ -54,6 +59,9 @@ export default {
       ),
       revocations: new WorkersKvRouteTable(env.KV),
       bucket: env.BUCKET,
+      seen: siteId => {
+        seen.push(siteId)
+      },
       assets: {
         fetch: async (url: string) =>
           new Response(

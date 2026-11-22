@@ -3,7 +3,9 @@
  * to `appOrigin` only as a user would: the real CLI (apps/cli, run from source) for deploys and site
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
- *   metadata → whoami → deploy v1 (`--access public`) → view → robots.txt → the version served
+ *   metadata → whoami → deploy v1 (`--access public`) → view → metrics (the push counted; with
+ *   view counts, the page's beacon, a beacon counted as a view, a cross-origin one refused) →
+ *   robots.txt → the version served
  *   (`/_fling-version`) → 404 / trailing-slash → deploy v2 (keeps its access) → view, and the
  *   version served follows → versions (who published) → rollback to v1 → open to
  *   members: anonymous redirect to sign-in, member view (with a site cookie) → share link (its answers send no Referer) → a new
@@ -77,6 +79,7 @@ import {
   type LiveServerMessage,
   RELEASE_HEADER,
 } from '@fling/shared'
+import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { REPO, runCli, runCliOutcome } from './cli.ts'
 import { cookiePairs, type Session } from './sign-in.ts'
 
@@ -216,6 +219,65 @@ async function eventually(
   throw new ScenarioError(
     `${what}: ${url} answered ${last.status}${last.location ? ` → ${last.location}` : ''}: ${last.text.slice(0, 200)}`
   )
+}
+
+/**
+ * Metrics: the publish just made counted a push; with view counts on, the page carries the view
+ * beacon (served from its counted copy), and a beacon posted the way a browser posts it, on the
+ * site's own host, is counted and read back from the site's metrics, while one from another
+ * origin is refused. A runtime writes views at most every few seconds, so the read polls, posting
+ * the beacon again each time round for a runtime that writes only after a view.
+ */
+async function metricsChecks(o: {
+  api: (method: string, path: string, body?: unknown) => Promise<Response>
+  siteUrl: string
+  name: string
+  page: string
+  viewCounts: boolean
+  propagationMs: number
+  step: (line: string) => void
+}) {
+  const read = async () => {
+    const res = await o.api('GET', `/api/sites/${o.name}/metrics`)
+    check(res.ok, `GET /api/sites/${o.name}/metrics: ${res.status} ${await res.clone().text()}`)
+    return (await res.json()) as {
+      viewCounts: boolean
+      totals: { days: { views: number; pushes: number } }
+    }
+  }
+  const first = await read()
+  check(first.totals.days.pushes >= 1, `metrics after a publish: ${JSON.stringify(first.totals)}`)
+  check(first.viewCounts === o.viewCounts, `metrics viewCounts ${first.viewCounts}`)
+  if (!o.viewCounts) {
+    o.step('metrics: the publish counted a push (view counts off here, skipped)')
+    return
+  }
+  check(o.page.includes(VIEW_BEACON), 'the page was served without the view beacon')
+  const origin = new URL(o.siteUrl).origin
+  const beacon = (from: string, fetchSite: string) =>
+    fetch(`${origin}/_fling-seen`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { origin: from, 'sec-fetch-site': fetchSite },
+    })
+  const crossed = await beacon('https://elsewhere.example.test', 'cross-site')
+  const crossedText = await crossed.text()
+  check(
+    crossed.status === 403 && crossedText.includes('cross_origin'),
+    `cross-origin beacon: ${crossed.status} ${crossedText.slice(0, 200)}`
+  )
+  const deadline = Date.now() + Math.max(30_000, o.propagationMs)
+  let views = 0
+  for (;;) {
+    const sent = await beacon(origin, 'same-origin')
+    await sent.arrayBuffer()
+    check(sent.status === 204, `beacon: ${sent.status}`)
+    views = (await read()).totals.days.views
+    if (views >= 1 || Date.now() > deadline) break
+    await sleep(2000)
+  }
+  check(views >= 1, `views never counted: ${views}`)
+  o.step(`metrics: a push for the publish; the page carries the beacon, ${views} view(s) counted`)
 }
 
 interface CliSite {
@@ -502,6 +564,19 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `content-type ${home.headers.get('content-type')}`
     )
     step(`deployed ${name} and viewed it at ${siteUrl}`)
+    if (meta.capabilities.metrics === true) {
+      await metricsChecks({
+        api,
+        siteUrl,
+        name,
+        page: home.text,
+        viewCounts: meta.capabilities.viewCounts === true,
+        propagationMs,
+        step,
+      })
+    } else {
+      step('metrics: not on this instance (skipped)')
+    }
     // Review mode iframes sites from the app origin: nothing on the way may forbid framing them.
     const csp = home.headers.get('content-security-policy') ?? ''
     check(

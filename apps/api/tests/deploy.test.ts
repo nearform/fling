@@ -79,6 +79,7 @@ describe('deploy', () => {
       vis: 'private',
       spa: false,
       r: 1,
+      c: 1,
     })
 
     // finalize is idempotent

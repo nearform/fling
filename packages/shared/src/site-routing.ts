@@ -79,6 +79,14 @@
 // `viewer` (null on a public site or a share host), never from a credential: the shell drops the
 // browser's cookies and any VIEWER_HEADER it sent. Nothing under FLING_DIR is a site's file.
 //
+// View counts. A page's beacon (view-beacon.ts) posts to SITE_SEEN_PATH on the site's host. That
+// path is an invoke on every site, with or without a server: after the same access checks as a
+// page, and the cross-origin rule, so only a page the viewer may open, on the site's own host, can
+// count a view. It never has a target and ignores a stopped server: the platform counts it
+// (views.ts), it never reaches a site's server. A version whose pages count views has a copy of
+// each HTML page with the beacon (`.counted/<path>`, rendering.ts), served in its place while its
+// route value says `c`.
+//
 // Contracts: route-keys.ts (keys), site-labels.ts (labels), site-cookie.ts (the cookie format).
 
 import {
@@ -95,6 +103,7 @@ import {
   SITE_PASS_COOKIE_NAME,
   SITE_PASS_PATH,
   SITE_PASS_TTL_SECONDS,
+  SITE_SEEN_PATH,
   SITE_VERSION_HEADER,
   SITE_VERSION_PATH,
   shareKvsKey,
@@ -228,6 +237,8 @@ interface RouteValue {
   t?: string
   /** 1: an admin stopped the server: SERVER_PREFIX answers 503 */
   x?: number
+  /** 1: the version's HTML pages have copies with the view beacon (`.counted/<path>`) */
+  c?: number
 }
 
 // Any path segment starting with a dot (incl. `.`/`..` traversal and `.env`, `.git/…`,
@@ -595,7 +606,7 @@ export async function routeSiteRequest(
 async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDecision> {
   const uri = req.uri
   const readOnly = req.method === 'GET' || req.method === 'HEAD'
-  const api = uri.indexOf(SERVER_PREFIX) === 0
+  const api = uri === SITE_SEEN_PATH || uri.indexOf(SERVER_PREFIX) === 0
   // Only a site's server takes other methods: a path it can't own is refused before any lookup.
   if (!readOnly && !api) return notAllowed()
   // Static pages that hold no site data, on any host: the 404 page, the review shell (the site it
@@ -629,7 +640,7 @@ async function decide(req: SiteRequest, ctx: SiteRoutingContext): Promise<SiteDe
     return rewrite(MISSING_KEY)
   }
 
-  const invoke = site.f === 1 && api
+  const invoke = api && (site.f === 1 || uri === SITE_SEEN_PATH)
   if (!readOnly && !invoke) return notAllowed()
   if (invoke && !readOnly && req.method !== 'OPTIONS' && crossOrigin(req, ctx, host)) {
     return refuse(403, 'Forbidden', 'cross_origin', 'Not from this site')
@@ -681,7 +692,8 @@ async function serveSite(
   checked: boolean
 ): Promise<SiteDecision> {
   if (invoke) {
-    if (site.x) {
+    const seen = uri === SITE_SEEN_PATH
+    if (site.x && !seen) {
       return refuse(503, 'Service Unavailable', 'server_stopped', 'Server stopped')
     }
     // Who the checks above let in: a restricted site's pass names them, else their `fling_site`
@@ -701,7 +713,7 @@ async function serveSite(
       action: 'invoke',
       siteId: site.id,
       v: site.v,
-      target: site.t || null,
+      target: seen ? null : site.t || null,
       private: site.vis !== 'public',
       viewer: viewer,
       headers: {},
@@ -746,10 +758,7 @@ async function serveSite(
         } else if (inner.slice(inner.lastIndexOf('/') + 1).indexOf('.') === -1) {
           return redirect(301, `${uri}/${req.query}`, false)
         }
-        return served(
-          `/sites/${mounted.id}/${mounted.v}${markdown(inner, mounted, req)}`,
-          mounted.v
-        )
+        return served(`/sites/${mounted.id}/${mounted.v}${variant(inner, mounted, req)}`, mounted.v)
       }
     }
   }
@@ -762,17 +771,19 @@ async function serveSite(
     path = '/index.html'
     if (site.i) return served(`/sites/${site.id}/_rendered/${site.i}.html`, site.v)
   }
-  return served(`/sites/${site.id}/${site.v}${markdown(path, site, req)}`, site.v)
+  return served(`/sites/${site.id}/${site.v}${variant(path, site, req)}`, site.v)
 }
 
 /**
- * A Markdown file of a version whose Markdown was rendered: its rendered page, unless the request
- * asks for the source (`?raw=1`).
+ * What stands in for a version's file: a Markdown file's rendered page, when its Markdown was
+ * rendered and the request doesn't ask for the source (`?raw=1`); an HTML page's copy with the
+ * view beacon (COUNTED_DIR), when its pages count views. Else the file itself.
  */
-function markdown(path: string, route: RouteValue, req: SiteRequest): string {
-  if (!route.m || !/\.(md|markdown)$/i.test(path) || queryParam(req.query, 'raw') !== null)
-    return path
-  return `/.rendered${path}.html`
+function variant(path: string, route: RouteValue, req: SiteRequest): string {
+  if (route.m && /\.(md|markdown)$/i.test(path) && queryParam(req.query, 'raw') === null)
+    return `/.rendered${path}.html`
+  if (route.c && /\.html?$/i.test(path)) return `/.counted${path}`
+  return path
 }
 
 /** Serve an object of version `v` (`x-fling-version` says which). */

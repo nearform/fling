@@ -7,8 +7,9 @@
  * - The live rooms (src/live.ts): `GET /api/live?ticket=` WebSocket upgrades on the app origin go
  *   to the site's `LiveRoom` Durable Object, exported from here for the LIVE_ROOMS binding.
  * - The sites host (`*.<SITES_DOMAIN>`): the shared routing decision over the route table and R2
- *   (sites.ts), and site servers' `/api/*` through the Worker Loader (src/servers/), whose isolates
- *   are handed the `SiteFiles` and `ServerTail` entrypoints exported from here.
+ *   (sites.ts), the views pages' beacons report (counted per isolate, written after the response
+ *   at most every FLUSH_INTERVAL_MS, @fling/api/views), and site servers' `/api/*` through the
+ *   Worker Loader (src/servers/), whose isolates are handed the `SiteFiles` and `ServerTail` entrypoints exported from here.
  * - `scheduled` (the crons in wrangler.jsonc): every minute (`* * * * *`, with mail) drains the
  *   notifications outbox (@fling/api/notifications); hourly, deletes expired items from D1. Reads
  *   already ignore them; that reclaims the space; and runs maintenance (@fling/api/maintenance:
@@ -84,6 +85,17 @@ function init(env: Env): Instance {
   return { config, deps, app: createApp(deps), appHost: new URL(config.appOrigin).host }
 }
 
+/**
+ * A view counted in the isolate's ViewCounter (built once with the deps, so views batch across
+ * the isolate's requests), written after the response at most every FLUSH_INTERVAL_MS.
+ */
+function seenIn(views: NonNullable<Deps['views']>, ctx: ExecutionContext) {
+  return (siteId: string) => {
+    views.count(siteId)
+    ctx.waitUntil(views.flushDue())
+  }
+}
+
 /** The request's host (port included): in Workers the URL's host is the Host header's. */
 function hostOf(request: Request) {
   return new URL(request.url).host.toLowerCase()
@@ -125,6 +137,7 @@ export default {
           deps.routeTable instanceof CachedRouteTable ? deps.routeTable.cache : deps.routeTable,
         bucket: env.BUCKET,
         assets: env.ASSETS,
+        ...(deps.views ? { seen: seenIn(deps.views, ctx) } : {}),
         ...(deps.servers instanceof CloudflareSiteServers
           ? {
               servers: {

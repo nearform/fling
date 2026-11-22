@@ -56,6 +56,7 @@ import {
   VersionFilesSchema,
   WhySiteSchema,
 } from '@fling/shared'
+import { SiteMetricsSchema } from '@fling/shared/metrics'
 import { type Context, Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { meOf } from '../admin.ts'
@@ -77,6 +78,7 @@ import { pull } from '../pull.ts'
 import * as servers from '../servers/api.ts'
 import * as sites from '../sites.ts'
 import type { AppEnv } from '../types.ts'
+import { siteMetrics } from '../views.ts'
 import { adminRoutes } from './admin.ts'
 
 export const apiRoutes = new Hono<AppEnv>()
@@ -431,6 +433,14 @@ apiRoutes.delete('/sites/:name/paths/:folder', async c => {
   const folder = pathParam(c.req.param('folder')) as string
   await paths.deletePathOf(c.get('deps'), c.get('user'), c.req.param('name'), folder)
   return c.body(null, 204)
+})
+
+// --- metrics (the `metrics` capability): views and pushes per day, week and month ---
+
+apiRoutes.get('/sites/:name/metrics', async c => {
+  const metrics = await siteMetrics(c.get('deps'), c.get('user'), c.req.param('name'))
+  c.header('Cache-Control', 'private, no-store')
+  return c.json(SiteMetricsSchema.parse(metrics))
 })
 
 // --- thumbnails (the `thumbnails` capability): a PNG of the home page, the body itself ---

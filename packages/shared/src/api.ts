@@ -509,6 +509,8 @@ export const AdminSiteSchema = z.object({
   thumbnail: ThumbnailStampSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  /** when a view of it was last counted (the `metrics` capability); absent: never */
+  lastViewAt: z.string().optional(),
 })
 export type AdminSite = z.infer<typeof AdminSiteSchema>
 export const AdminSiteListSchema = z.object({

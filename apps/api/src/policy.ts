@@ -207,6 +207,7 @@ export const ACTIONS = [
   'site.archive',
   'site.delete',
   'site.thumbnail',
+  'site.metrics.read',
   'share.read',
   'share.create',
   'share.revoke',
@@ -247,6 +248,8 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   // owners, publishers and viewers, or anyone with the share link.
   'site.view': (role, access) => access === 'public' || role === 'share' || signedIn(role, access),
   'site.read': onTheSite,
+  // A site's views and pushes (views.ts): what its owners and publishers see, never its viewers.
+  'site.metrics.read': onTheSite,
   'version.list': onTheSite,
   'version.read': onTheSite,
   'site.pull': signedIn,
@@ -539,6 +542,7 @@ export const INSTANCE_ACTIONS = [
   'admin.invitations.manage',
   'admin.routes.read',
   'admin.routes.write',
+  'admin.usage.read',
   'account.site.create',
   'account.group.create',
   'account.groups.read',
@@ -573,6 +577,7 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.invitations.read': isAdminRole,
   'admin.invitations.manage': role => role === 'admin',
   'admin.routes.read': isAdminRole,
+  'admin.usage.read': isAdminRole,
   // Choosing the format rewrites every site's routes: a browser session's admin only.
   'admin.routes.write': role => role === 'admin',
   'account.site.create': notGuest,

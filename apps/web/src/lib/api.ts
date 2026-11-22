@@ -93,6 +93,12 @@ import {
   type Visibility,
   WhySiteSchema,
 } from '@fling/shared'
+import {
+  type InstanceUsage,
+  InstanceUsageSchema,
+  type SiteMetrics,
+  SiteMetricsSchema,
+} from '@fling/shared/metrics'
 
 export type ApiKey = ReturnType<typeof ApiKeySchema.parse>
 
@@ -312,6 +318,9 @@ export const api = {
     request(`${site(name)}/secrets/${encodeURIComponent(secret)}`, DeleteSiteSecretResponseSchema, {
       method: 'DELETE',
     }),
+  /** A site's views and pushes per day, week and month (owners, publishers, admins). */
+  siteMetrics: (name: string): Promise<SiteMetrics> =>
+    request(`${site(name)}/metrics`, SiteMetricsSchema),
   /** The site server's log since `since` (an ISO time, or `15m`, `1h`, `2d`), oldest first. */
   async siteLogs(name: string, since = '1h'): Promise<ServerLogLine[]> {
     const { lines } = await request(
@@ -474,6 +483,8 @@ export const api = {
   /** Admins: the route table's format, its rewrite, and how full the store is. */
   adminRouteTable: (): Promise<AdminRouteTable> =>
     request('/api/admin/route-table', AdminRouteTableSchema),
+  /** Admins, on an instance with metrics: every site's views and pushes, and the last lap's tally. */
+  adminUsage: (): Promise<InstanceUsage> => request('/api/admin/usage', InstanceUsageSchema),
   /** Admins, in a browser session: choose the route format and start the rewrite into it. */
   setRouteFormat: (format: RouteFormat): Promise<AdminRouteTable> =>
     request('/api/admin/route-table', AdminRouteTableSchema, { method: 'POST', body: { format } }),

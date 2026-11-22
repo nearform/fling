@@ -132,6 +132,34 @@ export interface RouteFormatRecord {
   rewrite: { after: string | null; sites: number; finishedAt?: string }
 }
 
+/** What maintenance's sweep tallies of the sites' use in a lap (views.ts `tallySite`). */
+export type UsageTally = import('@fling/shared/metrics').UsageTally
+
+/** What a site's counts are added up as (views.ts): views and pushes. */
+export interface SiteCounts {
+  views: number
+  pushes: number
+}
+
+/**
+ * One bucket of a site's counts (`SITE#<id>/METRIC#<D|W|M>#<bucket>`): a UTC day (`2026-11-22`),
+ * ISO week (`2026-W47`) or month (`2026-11`). Each expires on its own (views.ts).
+ */
+export interface SiteMetricRecord extends SiteCounts {
+  size: 'D' | 'W' | 'M'
+  bucket: string
+}
+
+/**
+ * When a site was last viewed and pushed (`SITE#<id>/ACTIVITY`), and when its first count was
+ * stored. Apart from the site record, so a count never changes the site's revision.
+ */
+export interface SiteActivityRecord {
+  since: string
+  lastViewAt?: string
+  lastPushAt?: string
+}
+
 /** How far maintenance's sweep of the site directory has gone (`MAINTAIN/CURSOR`). */
 export interface MaintenanceCursorRecord {
   /** the last site name swept; null at the start of a lap */
@@ -140,6 +168,10 @@ export interface MaintenanceCursorRecord {
   lapStartedAt: string
   /** the last lap finished: how long it took and when (Admin → Routes); absent before the first */
   lastLap?: { lapMs: number; finishedAt: string }
+  /** what the lap under way has found of the sites' use so far (views.ts `tallySite`) */
+  tally?: UsageTally
+  /** the tally of the last lap finished (Admin → Usage); absent before the first */
+  lastUsage?: UsageTally & { lapStartedAt: string; finishedAt: string }
 }
 
 /**
@@ -472,6 +504,11 @@ export interface VersionRecord {
   prunedAt?: string
   /** its Markdown files have rendered pages (`.rendered/<path>.html`), which the edge serves */
   markdown?: true
+  /**
+   * Its pages count views: every HTML page it serves has a copy with the view beacon
+   * (`.counted/<path>`, rendering.ts), and the pages rendered for it carry the beacon too
+   */
+  counted?: true
   /**
    * Its home page, for a site with Paths (paths.ts): `block`, its root index.html has a Paths
    * block to fill in; `none`, it has no home page, so the default one lists the Paths. Absent: its
@@ -821,6 +858,32 @@ export interface Store extends NotificationStore {
   deleteMaintenance(due: MaintenanceDueRecord): Promise<void>
   getMaintenanceCursor(): Promise<MaintenanceCursorRecord | null>
   getRouteFormat(): Promise<RouteFormatRecord | null>
+  // --- site metrics (views.ts) ---
+  /**
+   * Add `counts` to the site's day, week and month buckets of `at` (each created with its expiry
+   * when absent, by atomic adds, so concurrent writers are safe), and move its last view and last
+   * push to `at` for the counts that are not 0.
+   */
+  addSiteCounts(
+    siteId: string,
+    at: Date,
+    counts: Partial<SiteCounts>,
+    expiry: Record<SiteMetricRecord['size'], string>
+  ): Promise<void>
+  /** Every bucket the site has that has not expired, and its activity (null: never counted). */
+  getSiteMetrics(
+    siteId: string
+  ): Promise<{ buckets: SiteMetricRecord[]; activity: SiteActivityRecord | null }>
+  /** The site's activity alone (null: never counted). */
+  getSiteActivity(siteId: string): Promise<SiteActivityRecord | null>
+  /** Add `counts` to the instance's own buckets of `at` (every site's together), as addSiteCounts. */
+  addInstanceCounts(
+    at: Date,
+    counts: Partial<SiteCounts>,
+    expiry: Record<SiteMetricRecord['size'], string>
+  ): Promise<void>
+  /** Every bucket of the instance's that has not expired. */
+  getInstanceMetrics(): Promise<SiteMetricRecord[]>
   /**
    * Write the route format. With `ifSetAt`, only while the stored one is that choice (its
    * `setAt`; null: none stored), so a rewrite's progress never undoes a newer choice; returns

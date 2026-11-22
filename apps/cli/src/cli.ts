@@ -13,6 +13,7 @@ import {
   SITE_LIST_PAGE_MAX,
   SITE_SORTS,
 } from '@fling/shared'
+import { METRIC_DAYS, METRIC_MONTHS } from '@fling/shared/metrics'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import chalk from 'chalk'
 import { Command, InvalidArgumentError, Option } from 'commander'
@@ -59,6 +60,7 @@ import {
   runRoles,
   runRollback,
   runShare,
+  runStats,
   runVersions,
   runVisibility,
 } from './commands/sites.ts'
@@ -356,6 +358,13 @@ program
   .helpGroup('Sites:')
   .description('show a site')
   .action(action((ctx, name: string) => runInfo(ctx, name)))
+program
+  .command('stats <name>')
+  .helpGroup('Sites:')
+  .description(
+    `a site's views and pushes over the last ${METRIC_DAYS} days and ${METRIC_MONTHS} months, and when it was last viewed and pushed (counts only)`
+  )
+  .action(action((ctx, name: string) => runStats(ctx, name)))
 program
   .command('versions <name>')
   .helpGroup('Sites:')

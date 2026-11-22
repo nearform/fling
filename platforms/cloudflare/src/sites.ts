@@ -10,6 +10,9 @@
  * through the core's shell (`runInvoke`: the server's request headers, its Cache-Control, the
  * request line) to the version's isolate (servers/runtime.ts), in the run the route value names
  * (`t`). With no SiteServers (SERVERS off) it answers as a missing page.
+ *
+ * A view a page's beacon reports (SITE_SEEN_PATH) is handed to `seen`: the Worker counts it in the
+ * isolate's ViewCounter and flushes after the response, at most every FLUSH_INTERVAL_MS.
  */
 import type { R2Bucket, R2Object, R2ObjectBody } from '@cloudflare/workers-types'
 import type { RouteTable } from '@fling/api/route-table'
@@ -40,6 +43,8 @@ export interface SitesOptions {
   assets: Bindings['ASSETS']
   /** runs site servers (SERVERS on), with their logs and the clock the request lines take */
   servers?: { runtime: CloudflareSiteServers; logs: ServerLogs; clock: Clock }
+  /** a view a page's beacon reported (absent: views are not counted) */
+  seen?(siteId: string): void
   now?: () => number
   /** how long a site pass lasts (default: the routing decision's, 5 minutes) */
   passTtlSeconds?: number
@@ -118,6 +123,7 @@ export function handleSiteRequest(request: Request, opts: SitesOptions): Promise
     ...(opts.servers
       ? { invoke: (req, decision) => invoke(req, opts.servers as never, decision) }
       : {}),
+    ...(opts.seen ? { seen: opts.seen } : {}),
     now: opts.now,
     passTtlSeconds: opts.passTtlSeconds,
   })

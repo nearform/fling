@@ -5,7 +5,7 @@ order: 40
 summary: Share the work on a site. Owners can do everything; publishers publish and roll back.
 requires: [siteRoles]
 sources: [packages/shared/src/site-roles.ts, apps/api/src/policy.ts, apps/api/src/publication.ts, apps/api/src/invitations.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteTeam.tsx, apps/web/src/components/site/RoleLists.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 A site can have several people working on it. **Owners** have every right over it. **Publishers**
@@ -19,7 +19,8 @@ then removing yourself.
 |---|---|---|
 | Publish new versions | Yes | Yes |
 | Roll back to an earlier version | Yes | Yes |
-| See the site's versions and files | Yes | Yes |
+| See the site's versions and files | Yes | Yes |<!-- requires: metrics -->
+| See its [metrics](/guide/publish/metrics) | Yes | Yes |<!-- /requires -->
 | Change who can open it, and the share link | Yes | No |
 | Change its settings (such as the single-page app setting) | Yes | No |
 | Change its owners and publishers | Yes | No |

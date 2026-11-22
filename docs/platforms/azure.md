@@ -188,6 +188,11 @@ files, after a publish or an access change. The route honours the origin's heade
 overrides caching), and the deploy purges only the app's domain: nothing on the sites hosts is
 held for longer than a minute.
 
+**View counts.** A page's beacon posts to `/_fling-seen` on the site's host. The Node host counts it
+in the process's `ViewCounter`. It writes the counts after a view, at most every 10 seconds, and on
+a 60-second timer for a site that has gone quiet. It writes once more when the host closes (the
+Container App's SIGTERM).
+
 ## 4. Domains and TLS
 
 - Front Door Standard has two custom domains, the hostname and `*.<sites domain>`, each with a

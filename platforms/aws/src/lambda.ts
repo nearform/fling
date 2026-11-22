@@ -11,6 +11,11 @@
  *
  * The hourly `{"fling":"maintain"}` also sweeps site servers (`sweepServers`) when they are on.
  *
+ * Views pages' beacons report reach the core's SITE_SEEN_PATH route through the sites
+ * distribution (infra/edge.tf) and are counted in the instance's ViewCounter (@fling/api/views),
+ * written after a view at most every FLUSH_INTERVAL_MS. The notify and maintain ticks write what
+ * the instance that runs them still holds.
+ *
  * One non-HTTP event: `{"fling":"migrate"}` runs the pending data migrations (deploy.yml invokes it
  * after updating the code; see @fling/api/migrations) until shortly before the invocation's
  * timeout and returns the runner's report; invoke again until `done`. Optional `only: ["NNNN"]`
@@ -39,7 +44,7 @@ import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda'
 import { handle } from 'hono/aws-lambda'
 import { buildAwsDeps } from './deps.ts'
 import { handleLiveEvent, isLiveEvent, type LiveEvent } from './live.ts'
-import { loadSecretsFromSsm } from './secrets.ts'
+import { loadFromSsm } from './secrets.ts'
 import type { AwsSiteServers } from './servers/site-servers.ts'
 import { DynamoTable } from './table/dynamo.ts'
 
@@ -68,13 +73,16 @@ const info = (msg: string, fields: Record<string, unknown>) =>
 
 async function init() {
   const start = Date.now()
-  const env = runtimeEnv()
-  const base = loadBaseConfig(env)
-  const secrets = base.ssmPrefix ? await loadSecretsFromSsm(base.ssmPrefix) : secretsFromEnv(env)
+  const runtime = runtimeEnv()
+  const base = loadBaseConfig(runtime)
+  const ssm = base.ssmPrefix ? await loadFromSsm(base.ssmPrefix) : null
+  const secrets = ssm ? ssm.secrets : secretsFromEnv(runtime)
   const secretsMs = Date.now() - start
   const config: Config = { ...base, secrets }
+  // The function's own environment wins over a setting from SSM.
+  const env = { ...ssm?.settings, ...runtime }
   const { deps, live, servers } = buildAwsDeps(config, { env })
-  const http = handle(createApp(deps))
+  const http = handle(createApp(deps, { viewsFromEdge: true }))
   info('cold start', { secretsMs, appMs: Date.now() - start - secretsMs })
   return { http, deps, live, servers, siteHmacKey: secrets.siteHmacKey }
 }
@@ -184,6 +192,7 @@ export const handler = async (
       deadline: Date.now() + notifyBudget(context.getRemainingTimeInMillis()),
     })
     console.log(JSON.stringify({ level: 'info', msg: 'notify drain', ...result }))
+    await deps.views?.flush()
     return result
   }
   if (isMaintain(event)) {
@@ -197,6 +206,7 @@ export const handler = async (
     })
     console.log(JSON.stringify({ level: 'info', msg: 'maintenance', ...result }))
     if (servers) await sweepServers(deps, servers)
+    await deps.views?.flush()
     return result
   }
   if (isLiveEvent(event)) return live ? handleLiveEvent(event, deps, live) : { statusCode: 404 }

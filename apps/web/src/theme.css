@@ -1185,6 +1185,43 @@
     gap: var(--space-4);
   }
 
+  /* The Metrics panel: its figures in as many columns as fit, the day chart below them. */
+  .site-metrics {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  .site-metrics-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: var(--space-3) var(--space-4);
+    margin: 0;
+  }
+
+  .site-metrics-stats dd {
+    margin: 0;
+  }
+
+  .site-metrics-chart {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+  }
+
+  .site-metrics-chart svg {
+    display: block;
+    inline-size: 100%;
+    block-size: 3rem;
+  }
+
+  .site-metrics-chart rect {
+    fill: var(--color-primary);
+  }
+
+  .site-metrics-chart rect[data-empty] {
+    fill: var(--border-subtle);
+  }
+
   .site-preview {
     position: relative;
     display: grid;

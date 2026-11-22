@@ -1,6 +1,6 @@
 /**
  * Site management: ls, info, versions, rollback, share, visibility, access, owners, publishers,
- * archive/unarchive, rm. `versions`, `files`, `rollback`, `owners` and `publishers` take `--path`
+ * archive/unarchive, rm, stats. `versions`, `files`, `rollback`, `owners` and `publishers` take `--path`
  * to act on one of the site's Paths instead (commands/paths.ts).
  */
 import {
@@ -55,8 +55,10 @@ import {
   siteRolesEnabled,
   versionFiles,
 } from '../sites.ts'
+import { getSiteMetrics, metricsEnabled, sparkline } from '../stats.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 import { pathFolder, pathsClient } from './paths.ts'
+import { ago } from './servers.ts'
 
 /** `ls` and `ls --shared`: `limit` asks for one page, after `after` (a page's cursor). */
 export interface ListOptions {
@@ -211,6 +213,40 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
       '',
       chalk.dim(
         `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
+      ),
+    ].join('\n')
+  )
+}
+
+/** `fling stats`: a site's views and pushes, counts only. */
+export async function runStats(ctx: CommandContext, name: string): Promise<void> {
+  const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'metrics')
+  if (metricsEnabled(instance) === false) {
+    throw new CliError(`${instance?.name ?? 'This Fling'} has no site metrics`, {
+      hint: 'Ask its operator to update it.',
+    })
+  }
+  const instanceName = instance?.name ?? 'this Fling'
+  const m = await getSiteMetrics(requireClient(ctx), name, instanceName)
+  const totals = (key: 'views' | 'pushes') =>
+    `${m.totals.days[key]} in ${m.days.length} days · ${m.totals.months[key]} in ${m.months.length} months`
+  const daily = (key: 'views' | 'pushes') =>
+    `${sparkline(m.days.map(d => d[key]))}  ${chalk.dim(`${m.days[0]?.day} → ${m.days.at(-1)?.day}`)}`
+  const when = (iso: string | null) => (iso ? `${ago(iso)} (${formatDate(iso)})` : 'never')
+  ctx.out.data(m, () =>
+    [
+      row('Site', m.name),
+      ...(m.viewCounts ? [row('Views', totals('views')), row('Views/day', daily('views'))] : []),
+      row('Pushes', totals('pushes')),
+      row('Pushes/day', daily('pushes')),
+      ...(m.viewCounts ? [row('Last viewed', when(m.lastViewAt))] : []),
+      row('Last pushed', when(m.lastPushAt)),
+      row('Since', m.since ? formatDate(m.since) : 'nothing counted yet'),
+      '',
+      chalk.dim(
+        m.viewCounts
+          ? 'Counts only: nothing is recorded about who viewed. Days are UTC; today is so far.'
+          : `${instanceName} doesn't count views, so these are pushes only. Days are UTC.`
       ),
     ].join('\n')
   )

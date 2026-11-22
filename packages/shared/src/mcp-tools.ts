@@ -43,6 +43,7 @@ import {
   privateAudience,
 } from './instance.ts'
 import { MAX_FILES, MAX_PATH_FOLDER_LENGTH } from './limits.ts'
+import { METRIC_DAYS, METRIC_MONTHS, type SiteMetrics } from './metrics.ts'
 import { CellChangeSchema } from './notifications.ts'
 import { PATHS_OPTIONS, PATHS_PLACEHOLDERS } from './paths-index.ts'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from './paths-templates.ts'
@@ -661,6 +662,52 @@ const confirmPublicServer = z
   .describe(
     `Only after the user agreed: publish a server on a public site, where anyone can call its ${SERVER_PREFIX}* and use its secrets. Omit until a publish answers public_server`
   )
+
+// --- metrics (the `metrics` capability) ----------------------------------------------------------
+
+/** An ISO time as the metrics text writes it: `2026-11-22 09:41 UTC`. */
+const metricTime = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`
+
+const counted = (n: number, one: string, many: string) =>
+  `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`
+
+/**
+ * The text of fling_stats (both servers): totals over the days and the months, when the site was
+ * last viewed and pushed, and a count per day, oldest first. Counts only: there is nobody to name.
+ * `instanceName`: the Fling, for the line saying it doesn't count views.
+ */
+export function describeSiteMetrics(m: SiteMetrics, instanceName = 'this Fling'): string {
+  const views = m.viewCounts
+  const both = (c: { views: number; pushes: number }) => {
+    const pushes = counted(c.pushes, 'push', 'pushes')
+    return views ? `${counted(c.views, 'view', 'views')}, ${pushes}` : pushes
+  }
+  const lines = [
+    `${m.name}, last ${METRIC_DAYS} days: ${both(m.totals.days)}. Last ${METRIC_MONTHS} months: ${both(m.totals.months)}.`,
+  ]
+  const last = [
+    ...(views ? [`last viewed ${m.lastViewAt ? metricTime(m.lastViewAt) : 'never'}`] : []),
+    `last pushed ${m.lastPushAt ? metricTime(m.lastPushAt) : 'never'}`,
+  ].join('; ')
+  lines.push(`${last.charAt(0).toUpperCase()}${last.slice(1)}.`)
+  if (m.since === null) lines.push('Nothing counted yet.')
+  else lines.push(`Counted since ${m.since.slice(0, 10)}: nothing before that is known.`)
+  const first = m.days[0]?.day
+  const today = m.days[m.days.length - 1]?.day
+  if (first && today) {
+    const perDay = m.days.map(d => (views ? `${d.views}/${d.pushes}` : `${d.pushes}`)).join(' ')
+    lines.push(
+      `${views ? 'Views/pushes' : 'Pushes'} per UTC day, ${first} to ${today} (today last, so far): ${perDay}`
+    )
+  }
+  if (!views) {
+    lines.push(
+      `${instanceName} doesn't count views (whoever runs it turned view counts off), so these are pushes only.`
+    )
+  }
+  lines.push('These are counts only: nothing is recorded about who viewed a site.')
+  return lines.join('\n')
+}
 
 // --- tools --------------------------------------------------------------------------------------
 
@@ -1440,6 +1487,19 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 
+    stats: tool({
+      name: 'fling_stats',
+      title: 'Site metrics',
+      description:
+        `How a site is doing: its views (page loads) and pushes (versions going live) over the last ${METRIC_DAYS} ` +
+        `days and ${METRIC_MONTHS} months, when it was last viewed and last pushed, and a count per day. Counts only: ` +
+        'Fling never records who viewed, so answer "who is using it" with numbers, never people. For the ' +
+        "site's owners and publishers. Use it when the user asks how a site is doing, whether anyone has looked at it, " +
+        'or how often it changes.',
+      inputSchema: { name: siteName },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
     rollback: tool({
       name: 'fling_rollback',
       title: 'Roll back',
@@ -1497,7 +1557,8 @@ export const mcpRemoteInstructions = (
       : 'Always give the user the URL that comes back. ') +
       'Use fling_list / fling_info to find existing sites, fling_rollback ' +
       'to restore a version, fling_archive rather than fling_delete unless the user insists. Use fling_files to see ' +
-      'exactly which files a site has (e.g. when the user reports a 404).',
+      'exactly which files a site has (e.g. when the user reports a 404), and fling_stats when the user asks how a ' +
+      'site is doing (counts only: nobody who viewed is ever known).',
     ...(opts.comments ? [COMMENTS_NOTE(w, { forms: opts.forms })] : []),
     ...(opts.comments && opts.forms ? [FORMS_NOTE(w)] : []),
     ...(opts.notifications ? [NOTIFICATIONS_NOTE(w)] : []),

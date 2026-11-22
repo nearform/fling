@@ -4,7 +4,7 @@ part: publish
 order: 10
 summary: Fling a folder, a page or a zip and get its address back.
 sources: [apps/web/src/lib/arrival.ts, apps/cli/src/commands/deploy.ts, apps/cli/src/deploy.ts, apps/cli/src/inputs.ts, apps/cli/src/cli.ts, apps/api/src/publication.ts, packages/shared/src/mcp-tools.ts]
-verified: 79489687d
+verified: 1f60f9d
 ---
 
 Publishing (flinging) puts your files online at `https://<name>.{{instance:sites}}`. Fling the same

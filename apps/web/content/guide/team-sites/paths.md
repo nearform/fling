@@ -5,7 +5,7 @@ order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
 sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: c4b1441
+verified: 1f60f9d
 ---
 
 A team site holds many pieces of work in one place: a plan per ticket, a report per week. Each
@@ -103,6 +103,9 @@ Click a Path's folder to open its own page. There you can:
   {{fact:max-folder}} characters.
 - A Path's title is the title of its home page.
 - The site's home page can list its Paths: see [The Paths block](/guide/team-sites/paths-block).
+<!-- requires: metrics -->
+- A Path has no metrics of its own: it counts in the site's [metrics](/guide/publish/metrics).
+<!-- /requires -->
 <!-- requires: forms -->
 - [Forms](/guide/feedback/forms) belong to the whole site, not to a Path. Publish them with the
   site's own pages.

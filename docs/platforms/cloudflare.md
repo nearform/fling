@@ -55,6 +55,12 @@ Every response carries the decision's headers (`X-Robots-Tag: noindex`, `Referre
 hosts, `X-Fling-Version`), because the Worker sees the response, where a viewer-request function
 cannot. Static Assets have `run_worker_first`, so a site's host never reaches the UI's assets.
 
+**View counts.** A page's beacon posts to `/_fling-seen` on the site's host, which the decision
+makes an invoke with no server. The Worker counts it in the isolate's `ViewCounter`, which is built
+once with the deps, so views batch across the isolate's requests. After the response
+(`ctx.waitUntil`) it writes them, at most every 10 seconds. Views an isolate still holds when it is
+evicted are lost.
+
 ## 4. Domains and TLS
 
 - The app host is a **Worker Custom Domain**. The first deploy creates its DNS record and

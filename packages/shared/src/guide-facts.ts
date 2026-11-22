@@ -19,6 +19,7 @@ import {
 } from './limits.ts'
 import { MAX_MARKDOWN_BYTES, MAX_RENDERED_MARKDOWN } from './markdown.ts'
 import { MCP_PUBLISH_MAX_BYTES } from './mcp-tools.ts'
+import { METRIC_DAYS, METRIC_MONTHS, METRIC_WEEKS } from './metrics.ts'
 import { MAIL_TESTS_PER_HOUR } from './notifications.ts'
 import { EDGE_SERVER_READ_TIMEOUT_SECONDS, SITE_PASS_TTL_SECONDS } from './route-keys.ts'
 import { SITE_NAME_MAX } from './site-labels.ts'
@@ -59,6 +60,10 @@ export const PINNED_GUIDE_FACTS = {
   'server-body-max': '10 MB',
   /** requests a second to one site's server, unless the instance says otherwise (`SERVER_RPS`) */
   'server-rps': '100',
+  /** the most HTML pages a version can have and still count views (`MAX_COUNTED_PAGES`) */
+  'counted-pages-max': '2,000',
+  /** the largest HTML page a version can have and still count views (`MAX_COUNTED_BYTES`) */
+  'counted-page-max-size': '5 MB',
 } as const
 
 export const GUIDE_FACTS: Readonly<Record<string, string>> = {
@@ -98,5 +103,8 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'server-log-days': `${SERVER_LOG_DAYS} days`,
   'server-probe-timeout': `${SERVER_PROBE_TIMEOUT_MS / 1000} seconds`,
   'server-timeout-ceiling': `${EDGE_SERVER_READ_TIMEOUT_SECONDS} seconds`,
+  'metric-days': `${METRIC_DAYS} days`,
+  'metric-weeks': `${METRIC_WEEKS} weeks`,
+  'metric-months': `${METRIC_MONTHS} months`,
   ...PINNED_GUIDE_FACTS,
 }

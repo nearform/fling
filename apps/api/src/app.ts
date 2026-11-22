@@ -1,5 +1,11 @@
 /** Builds the Hono app from injected deps — no AWS here, so tests run on memory/fs fakes. */
-import { INSTANCE_METADATA_MAX_AGE, INSTANCE_METADATA_PATH, MAX_FILE_BYTES } from '@fling/shared'
+import {
+  INSTANCE_METADATA_MAX_AGE,
+  INSTANCE_METADATA_PATH,
+  MAX_FILE_BYTES,
+  SERVER_SITE_HEADER,
+  SITE_SEEN_PATH,
+} from '@fling/shared'
 import { Hono } from 'hono'
 import { FS_DOWNLOAD_ROUTE, FS_UPLOAD_ROUTE, FsBlobs } from './blobs/fs.ts'
 import { keyFromPath } from './blobs/signed-url.ts'
@@ -20,7 +26,16 @@ import { notificationRoutes } from './routes/notifications.ts'
 import { oauthRoutes } from './routes/oauth.ts'
 import type { AppEnv, Deps } from './types.ts'
 
-export function createApp(deps: Deps) {
+export interface AppOptions {
+  /**
+   * Take the views the site router sends on (POST SITE_SEEN_PATH naming the site in
+   * SERVER_SITE_HEADER): only for a platform whose sites distribution sends them to this app, and
+   * only behind the origin check (platforms/aws). Everywhere else the sites host counts them.
+   */
+  viewsFromEdge?: boolean
+}
+
+export function createApp(deps: Deps, opts: AppOptions = {}) {
   const app = new Hono<AppEnv>()
   app.onError(errorHandler)
   app.notFound(notFoundHandler)
@@ -34,6 +49,20 @@ export function createApp(deps: Deps) {
   app.get('/healthz', c => c.json({ ok: true }))
 
   app.use('*', originVerify)
+  // A view a page's beacon reported, sent on by the site router (platforms/aws: the sites
+  // distribution's SITE_SEEN_PATH behaviour) after its access checks, naming the site in
+  // SERVER_SITE_HEADER. Only behind the origin check, so only the router can name a site.
+  if (opts.viewsFromEdge && deps.views && deps.config.secrets.originVerifySecret) {
+    const views = deps.views
+    app.post(SITE_SEEN_PATH, async c => {
+      const siteId = (c.req.header(SERVER_SITE_HEADER) ?? '').split('/')[0]
+      if (siteId) {
+        views.count(siteId)
+        await views.flushDue()
+      }
+      return c.body(null, 204, { 'cache-control': 'no-store' })
+    })
+  }
   // Public and the same for everyone: cacheable, and readable cross-origin (the sites' 404 page
   // brands itself from it).
   app.get(INSTANCE_METADATA_PATH, c => {

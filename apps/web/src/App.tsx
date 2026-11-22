@@ -18,11 +18,13 @@ import {
 } from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
 import { ADMIN_MAIL_PATH, NOTIFICATION_SETTINGS_PATH } from './lib/notifications'
+import { ADMIN_USAGE_PATH } from './lib/usage'
 import AdminAudit from './pages/AdminAudit'
 import AdminInvitations from './pages/AdminInvitations'
 import AdminMail from './pages/AdminMail'
 import AdminRoutes from './pages/AdminRoutes'
 import AdminSettings from './pages/AdminSettings'
+import AdminUsage from './pages/AdminUsage'
 import AdminUsers from './pages/AdminUsers'
 import ApiKeys from './pages/ApiKeys'
 import Authorize from './pages/Authorize'
@@ -129,6 +131,7 @@ export default function App() {
                 <Route path="admin/users" element={<AdminUsers />} />
                 <Route path={ADMIN_INVITATIONS_PATH.slice(1)} element={<AdminInvitations />} />
                 <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
+                <Route path={ADMIN_USAGE_PATH.slice(1)} element={<AdminUsage />} />
                 <Route path={ADMIN_AUDIT_PATH.slice(1)} element={<AdminAudit />} />
                 <Route path={ADMIN_ROUTES_PATH.slice(1)} element={<AdminRoutes />} />
                 <Route path={ADMIN_SETTINGS_PATH.slice(1)} element={<AdminSettings />} />

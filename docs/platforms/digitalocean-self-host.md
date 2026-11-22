@@ -55,6 +55,11 @@ that is neither the app's nor a site's, so App Platform's, Docker's and Kubernet
 it at the container's address. Spaces' CDN stays off: it can't make the routing decision, and the
 bucket is private.
 
+**View counts.** A page's beacon posts to `/_fling-seen` on the site's host. The Node host counts it
+in the process's `ViewCounter`. It writes the counts after a view, at most every 10 seconds, and on
+a 60-second timer for a site that has gone quiet. It writes once more when the host closes (SIGTERM
+or SIGINT).
+
 ## 4. Domains and TLS
 
 - **DigitalOcean:** the app host and `*.<sites domain>` are App Platform domains, the sites one a

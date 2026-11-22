@@ -7,6 +7,7 @@
 import { createHmac } from 'node:crypto'
 import { MAX_PATHS_PER_SITE } from '@fling/shared'
 import { routeSiteRequest } from '@fling/shared/site-routing'
+import { withViewBeacon } from '@fling/shared/view-beacon'
 import { describe, expect, it } from 'vitest'
 import type { Principal } from '../src/policy.ts'
 import { publishBytes } from '../src/publication.ts'
@@ -178,7 +179,7 @@ describe('Paths', () => {
       { principal, path: 'PAY-3' }
     )
     expect(done.status).toBe('live')
-    expect(await get(env, 'team', '/PAY-3/')).toBe('<h1>inline</h1>')
+    expect(await get(env, 'team', '/PAY-3/')).toBe(withViewBeacon('<h1>inline</h1>'))
   })
 })
 

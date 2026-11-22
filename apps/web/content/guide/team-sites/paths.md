@@ -5,7 +5,7 @@ order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
 sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: 0669f1e87
+verified: bd7a6b7
 ---
 
 A team site holds many pieces of work in one place: a plan per ticket, a report per week. Each

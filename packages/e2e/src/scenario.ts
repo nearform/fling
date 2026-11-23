@@ -3166,6 +3166,19 @@ async function adminStep(ctx: {
   await listed({ key: admin.apiKey })
   await allSites({ key: admin.apiKey })
   await settings({ key: admin.apiKey })
+  // Admin → Usage: every site's counts, and view counting's switch where views are counted. Only
+  // read here: the switch reaches every site, so a smoke run never sets it; a key may not anyway.
+  const usage = await call({ key: admin.apiKey }, 'GET', '/api/admin/usage')
+  check(usage.status === 200, `admin usage: ${usage.status}`)
+  const usageBody = (await usage.json()) as { viewCounts: boolean; counting?: { on: unknown } }
+  check(
+    !usageBody.viewCounts || typeof usageBody.counting?.on === 'boolean',
+    `admin usage's view counting: ${JSON.stringify(usageBody.counting)}`
+  )
+  const switchByKey = await call({ key: admin.apiKey }, 'PUT', '/api/admin/usage/view-counting', {
+    on: usageBody.counting?.on ?? true,
+  })
+  check(switchByKey.status === 404, `view counting set with an API key: ${switchByKey.status}`)
   const viaKey = await call({ key: admin.apiKey }, 'POST', '/api/admin/impersonate', {
     email: owner,
   })
@@ -3186,7 +3199,7 @@ async function adminStep(ctx: {
   }
   if (!admin.cookie) {
     step(
-      `admin (API key): lists users (${owner} included), every site a page at a time (${name} by its name and by its owner) and the settings (secrets by name only)${othersSite ? `; reads ${name} but may not change it` : ''}; may not impersonate with a key`
+      `admin (API key): lists users (${owner} included), every site a page at a time (${name} by its name and by its owner) the settings (secrets by name only) and Admin → Usage (view counting read, not set with a key)${othersSite ? `; reads ${name} but may not change it` : ''}; may not impersonate with a key`
     )
     return
   }

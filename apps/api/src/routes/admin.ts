@@ -23,7 +23,7 @@ import {
   MeSchema,
   RouteFormatRequestSchema,
 } from '@fling/shared'
-import { InstanceUsageSchema } from '@fling/shared/metrics'
+import { InstanceUsageSchema, ViewCountingRequestSchema } from '@fling/shared/metrics'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import * as admin from '../admin.ts'
@@ -34,7 +34,7 @@ import { jsonBody } from '../lib/validate.ts'
 import { routeTableStatus, setRouteFormat } from '../route-format.ts'
 import * as servers from '../servers/api.ts'
 import type { AppEnv } from '../types.ts'
-import { instanceUsage } from '../views.ts'
+import { instanceUsage, setViewCounting } from '../views.ts'
 
 export const adminRoutes = new Hono<AppEnv>()
 
@@ -114,6 +114,13 @@ adminRoutes.post('/route-table', async c => {
 adminRoutes.get('/usage', async c =>
   c.json(InstanceUsageSchema.parse(await instanceUsage(c.get('deps'), principalOf(c))))
 )
+
+adminRoutes.put('/usage/view-counting', async c => {
+  const p = principalOf(c)
+  admin.ensure(p, 'admin.usage.write')
+  const { on } = await jsonBody(c, ViewCountingRequestSchema)
+  return c.json(InstanceUsageSchema.parse(await setViewCounting(c.get('deps'), p, on)))
+})
 
 adminRoutes.get('/settings', c =>
   c.json(AdminSettingsSchema.parse(admin.settings(c.get('deps'), principalOf(c))))

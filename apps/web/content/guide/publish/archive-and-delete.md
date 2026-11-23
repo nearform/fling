@@ -4,7 +4,7 @@ part: publish
 order: 70
 summary: Take a site offline and keep it, or remove it for good.
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteDangerZone.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/site-tabs.ts]
-verified: 1f60f9d
+verified: ee10036
 ---
 
 When a site has done its job, you can take it away in two ways.

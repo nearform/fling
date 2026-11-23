@@ -5,7 +5,7 @@ order: 60
 summary: Every publish is kept as a version; put an earlier one back in an instant.
 requires: [rollback]
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteVersions.tsx, apps/web/src/components/site/PathVersions.tsx, apps/web/src/lib/site-tabs.ts]
-verified: 1f60f9d
+verified: ee10036
 ---
 
 Each time you publish new files, Fling keeps them as a version and serves the newest. The earlier

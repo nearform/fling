@@ -117,6 +117,8 @@
  *                                                        has gone (after, lapStartedAt)
  *   ROUTES                 FORMAT                        the route table's format an admin chose,
  *                                                        and the rewrite into it (route-format.ts)
+ *   VIEWS                  COUNTING                      view counting on or off, and its rollout
+ *                                                        to every live site (views.ts)
  *
  * An invitation and its directory copy are written together, each write conditioned on the
  * `updatedAt` read (or on there being none), so racing invites of one address store one.
@@ -332,6 +334,7 @@ import {
   type User,
   type UserSummary,
   type VersionRecord,
+  type ViewCountingRecord,
 } from './types.ts'
 
 const userPk = (email: string) => `USER#${email}`
@@ -437,6 +440,7 @@ const key = {
   }),
   maintenanceCursor: () => ({ pk: 'MAINTAIN', sk: 'CURSOR' }),
   routeFormat: () => ({ pk: 'ROUTES', sk: 'FORMAT' }),
+  viewCounting: () => ({ pk: 'VIEWS', sk: 'COUNTING' }),
 }
 
 /** The outbox's partition for a minute. */
@@ -2238,6 +2242,22 @@ export class Records implements Store {
           ? ifAbsent
           : fieldEquals('setAt', ifSetAt)
     return unless(this.table.put(encode('routeformat', key.routeFormat(), record), cond))
+  }
+
+  async getViewCounting() {
+    const k = key.viewCounting()
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? decode<ViewCountingRecord>('viewcounting', item) : null
+  }
+
+  async putViewCounting(record: ViewCountingRecord, ifSetAt?: string | null) {
+    const cond =
+      ifSetAt === undefined
+        ? undefined
+        : ifSetAt === null
+          ? ifAbsent
+          : fieldEquals('setAt', ifSetAt)
+    return unless(this.table.put(encode('viewcounting', key.viewCounting(), record), cond))
   }
 
   async pageSites(opts: { after?: string | null; limit: number; prefix?: string }) {

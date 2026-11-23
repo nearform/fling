@@ -553,10 +553,12 @@ export interface Config {
    */
   invites: boolean
   /**
-   * Sites' view counts (`SITE_VIEW_COUNTS`, default on): versions that go live get copies of their
-   * pages with the view beacon, and the views it reports are counted (views.ts). Off, no new
-   * copies are made, route writes stop serving the ones there are, and nothing is counted.
-   * Pushes are counted either way. Advertised as the `viewCounts` capability.
+   * Whether the instance may count sites' views (`SITE_VIEW_COUNTS`, default on). On, an admin
+   * turns view counting on or off for every site (Admin → Usage, views.ts): on, live versions'
+   * pages are served from copies with the view beacon and the views it reports are counted. Off,
+   * the operator's hard off: no new copies are made, route writes stop serving the ones there are,
+   * nothing is counted, and the admins' switch is gone. Pushes are counted either way. Advertised
+   * as the `viewCounts` capability.
    */
   viewCounts: boolean
   /** New outside addresses one person may invite a day (`INVITES_PER_DAY`, default 20). */

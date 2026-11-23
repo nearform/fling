@@ -18,6 +18,7 @@ import {
   pulseCount,
   pulsePoints,
   pulseSummary,
+  rolloutText,
   showsLastViewed,
   showsUsageAdmin,
   smoothArea,
@@ -220,5 +221,19 @@ describe('Admin → Usage', () => {
     expect(
       isQuiet(usage({ totals: { days: { views: 0, pushes: 0 }, months: { views: 0, pushes: 1 } } }))
     ).toBe(false)
+  })
+})
+
+describe('the view counting switch', () => {
+  it("says how far maintenance's rollout has gone, and when it is done", () => {
+    expect(rolloutText({ on: true })).toBeNull()
+    expect(rolloutText({ on: true, rollout: { sites: 3 } })).toMatch(/adding .*3 sites done/)
+    expect(rolloutText({ on: false, rollout: { sites: 1 } })).toMatch(/taking .*off.*1 site done/)
+    expect(
+      rolloutText({ on: true, rollout: { sites: 40, finishedAt: '2026-11-23T00:00:00Z' } })
+    ).toMatch(/^Every live site counts views/)
+    expect(
+      rolloutText({ on: false, rollout: { sites: 40, finishedAt: '2026-11-23T00:00:00Z' } })
+    ).toMatch(/^No site counts views/)
   })
 })

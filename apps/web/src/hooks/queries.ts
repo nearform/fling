@@ -663,6 +663,15 @@ export function useSetRouteFormat() {
   })
 }
 
+/** Admins: turn view counting on or off; the page shows the rollout from the answer. */
+export function useSetViewCounting() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.setViewCounting,
+    onSuccess: data => queryClient.setQueryData(queryKeys.adminUsage, data),
+  })
+}
+
 /** Admins: send a test email. The page shows the result; the remaining count refetches. */
 export function useSendTestMail() {
   const queryClient = useQueryClient()

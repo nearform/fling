@@ -67,6 +67,8 @@ export type AuditAction =
   | 'viewer.resolved'
   /** an admin chose the route table's format (`target`: the format) */
   | 'routes.format'
+  /** an admin turned view counting on or off (`target`: `on` or `off`) */
+  | 'usage.view_counting'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -130,6 +132,18 @@ export interface RouteFormatRecord {
   setAt: string
   /** how far the rewrite has gone: the last site name done, how many so far, when it finished */
   rewrite: { after: string | null; sites: number; finishedAt?: string }
+}
+
+/**
+ * View counting, as an admin set it (`VIEWS/COUNTING`, views.ts): on or off, and maintenance's
+ * rollout of it to every live site. Absent: on, with every live site still to do.
+ */
+export interface ViewCountingRecord {
+  on: boolean
+  /** absent: Fling itself, for the sites live before view counting existed */
+  setBy?: string
+  setAt: string
+  rollout: { after: string | null; sites: number; finishedAt?: string }
 }
 
 /** What maintenance's sweep tallies of the sites' use in a lap (views.ts `tallySite`). */
@@ -505,10 +519,12 @@ export interface VersionRecord {
   /** its Markdown files have rendered pages (`.rendered/<path>.html`), which the edge serves */
   markdown?: true
   /**
-   * Its pages count views: every HTML page it serves has a copy with the view beacon
-   * (`.counted/<path>`, rendering.ts), and the pages rendered for it carry the beacon too
+   * Its pages count views: `true`, every HTML page it serves has a copy with the view beacon
+   * (`.counted/<path>`, rendering.ts), served while view counting is on; `false`, it can't
+   * (too many pages, or one too big), so view counting's rollout doesn't try again. Absent: never
+   * tried (published while view counting was off, or before it existed).
    */
-  counted?: true
+  counted?: boolean
   /**
    * Its home page, for a site with Paths (paths.ts): `block`, its root index.html has a Paths
    * block to fill in; `none`, it has no home page, so the default one lists the Paths. Absent: its
@@ -890,6 +906,10 @@ export interface Store extends NotificationStore {
    * whether it was written.
    */
   putRouteFormat(record: RouteFormatRecord, ifSetAt?: string | null): Promise<boolean>
+  /** View counting as an admin set it (`VIEWS/COUNTING`); null: never set. */
+  getViewCounting(): Promise<ViewCountingRecord | null>
+  /** Store it; with `ifSetAt`, only over that setting (null: only where none is stored). */
+  putViewCounting(record: ViewCountingRecord, ifSetAt?: string | null): Promise<boolean>
   putMaintenanceCursor(cursor: MaintenanceCursorRecord): Promise<void>
   /**
    * The site directory (every site on the instance, for admins and maintenance) a page at a time,

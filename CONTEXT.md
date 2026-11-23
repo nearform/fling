@@ -247,6 +247,13 @@ views in a **ViewCounter** (memory, written in batches). Not counted: prerenderi
 page framed by its own site (the review shell, previews), SPA navigations. `SITE_VIEW_COUNTS=off`
 stops it; the `viewCounts` capability.
 
+**View counting** — an admin's switch for every site (Admin → Usage; `VIEWS/COUNTING`,
+`setViewCounting` in `apps/api/src/views.ts`), within what `SITE_VIEW_COUNTS` allows: on, live
+versions are served from their counted copies and views are counted; off, the pages as published
+and nothing counted, the counts so far kept. Maintenance's **rollout** (`rolloutViewCounting`)
+applies a change to every live site without a new version, and the first time, adds the copies to
+the sites live before view counting existed.
+
 **Thumbnail** — a small PNG of a site's home page (at most 480 × 300 and 200 KB), kept beside its
 files (`thumbnailKey`, `apps/api/src/blobs/types.ts`) and recorded on the site as the version it was
 taken of and when (`SiteRecord.thumbnail`; listings carry when, as `thumbnailAt`). Browsers take

@@ -25,7 +25,7 @@ import { Records } from './store/records.ts'
 import type { Store } from './store/types.ts'
 import { MemoryTable } from './table/memory.ts'
 import { type Deps, systemClock } from './types.ts'
-import { ViewCounter } from './views.ts'
+import { FLUSH_INTERVAL_MS, ViewCounter, viewCountingOn } from './views.ts'
 
 export interface Adapters {
   store?: Store
@@ -86,7 +86,13 @@ export function buildDeps(
     ...(mailer ? { mailer } : {}),
     ...(servers ? { servers } : {}),
     ...(serverLogs ? { serverLogs } : {}),
-    ...(config.viewCounts ? { views: new ViewCounter(store, systemClock) } : {}),
+    ...(config.viewCounts
+      ? {
+          views: new ViewCounter(store, systemClock, FLUSH_INTERVAL_MS, () =>
+            viewCountingOn({ config, store })
+          ),
+        }
+      : {}),
     clock: systemClock,
   }
 }

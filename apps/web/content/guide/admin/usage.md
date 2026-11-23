@@ -6,7 +6,7 @@ summary: How much every site is viewed and pushed to, which sites are busy, and 
 audience: admin
 requires: [metrics]
 sources: [apps/web/src/pages/AdminUsage.tsx, apps/web/src/components/usage/**, apps/web/src/lib/usage.ts, apps/web/src/components/AdminSiteCard.tsx, apps/api/src/routes/admin.ts, apps/api/src/views.ts, apps/api/src/maintenance.ts, packages/shared/src/metrics.ts]
-verified: 1f60f9d
+verified: ee10036
 ---
 
 The **Usage** page shows how much {{instance:name}} is used: every site's
@@ -66,6 +66,25 @@ themselves is tallied by maintenance as it goes round every site, so it is as fr
 full lap: the page says **As of** when that lap finished. How long a lap takes is on
 [Routes](/guide/admin/routes).
 
+## Turn view counting on or off
+<!-- requires: viewCounts -->
+**View counting**, at the bottom of the page, says whether the sites' pages count views. It is on
+unless an admin has turned it off.
+
+- **Turn off for every site** takes the small script that reports a view off every site's pages
+  and stops counting. The views counted so far stay, on this page and on each site's page, and
+  pushes are still counted.
+- **Turn on for every site** puts it back on every live site. Sites don't need publishing again,
+  and their owners see no new version.
+
+Either way, maintenance goes round every site to apply the change, and the section says how far
+it has got. It is in the audit log as who turned view counting on or off. Only an admin signed in
+to the web app can use the switch: an API key can't.
+
+A page someone already has open can still report a view after counting is turned off. It isn't
+counted.
+<!-- /requires -->
+
 ## In All sites
 
 <!-- requires: viewCounts -->
@@ -80,7 +99,8 @@ opened, or **—** if it never has. Point at it for the date and time.
 | **Maintenance hasn't been round every site yet** | Its first lap isn't over. | Wait: the site numbers appear when it ends. |
 | **Some sites are missing from these numbers** | The last lap began before tallying did. | Wait for the next lap, which counts every site. |
 | **The site tallies come from maintenance's sweep … which is off** | Whoever runs {{instance:name}} has turned the sweep off with `MAINTENANCE_SWEEP_ENABLED`. | Ask them to turn it on. The totals and charts work without it. |
-| **{{instance:name}} doesn't count views** | View counts are off (`SITE_VIEW_COUNTS`). | The page shows pushes only. Ask whoever runs {{instance:name}} to turn view counts on. |
+| **{{instance:name}} doesn't count views** | Whoever runs {{instance:name}} has turned view counts off (`SITE_VIEW_COUNTS`), which also removes the switch. | The page shows pushes only. Ask them to turn view counts on. |
+| **View counting is off** | An admin turned it off with the switch. | The views shown are those counted before. Turn it on again to count new ones. |
 | **All quiet so far** | Nothing has been viewed or pushed in the last {{fact:metric-months}}. | Nothing: the charts fill in as sites are used. |
 
 ## Good to know

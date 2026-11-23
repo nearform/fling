@@ -244,9 +244,11 @@ export async function runStats(ctx: CommandContext, name: string): Promise<void>
       row('Since', m.since ? formatDate(m.since) : 'nothing counted yet'),
       '',
       chalk.dim(
-        m.viewCounts
-          ? 'Counts only: nothing is recorded about who viewed. Days are UTC; today is so far.'
-          : `${instanceName} doesn't count views, so these are pushes only. Days are UTC.`
+        !m.viewCounts
+          ? `${instanceName} doesn't count views, so these are pushes only. Days are UTC.`
+          : m.counting === false
+            ? `View counting is off on ${instanceName}: these are the views counted before. Days are UTC.`
+            : 'Counts only: nothing is recorded about who viewed. Days are UTC; today is so far.'
       ),
     ].join('\n')
   )

@@ -704,6 +704,10 @@ export function describeSiteMetrics(m: SiteMetrics, instanceName = 'this Fling')
     lines.push(
       `${instanceName} doesn't count views (whoever runs it turned view counts off), so these are pushes only.`
     )
+  } else if (m.counting === false) {
+    lines.push(
+      `View counting is off on ${instanceName} (an admin turned it off): the views are those counted before, and no more are counted.`
+    )
   }
   lines.push('These are counts only: nothing is recorded about who viewed a site.')
   return lines.join('\n')

@@ -17,6 +17,9 @@
  *   sites' use as it goes (views.ts `tallySite`: how many were viewed lately, the most viewed and
  *   the longest unused), kept on the cursor and, at the end of a lap, as the last lap's for
  *   Admin → Usage. Runs that overlap may both tally a page; the tally is a guide, not a ledger.
+ * - **Rollouts** that reach every site, a page of the directory at a time, before the sweep: the
+ *   route format an admin chose (route-format.ts `rewriteRoutes`) and view counting turned on or
+ *   off (views.ts `rolloutViewCounting`).
  *
  * Every run is safe to repeat and to overlap another: claims are conditional writes, and work
  * found done costs only its reads.
@@ -57,7 +60,7 @@ import { serverSite, serverVersion } from './servers/index.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
-import { emptyTally, tallySite } from './views.ts'
+import { emptyTally, rolloutViewCounting, tallySite } from './views.ts'
 
 /** How long a marked version or a replaced home page waits before it is deleted. */
 export const GRACE_MS = 60 * 60 * 1000
@@ -95,6 +98,8 @@ export interface MaintainResult {
   revocations: number
   /** sites whose routes were rewritten into the chosen format (route-format.ts) */
   routes: number
+  /** sites view counting was rolled out to (views.ts `rolloutViewCounting`) */
+  viewCounting: number
   /** stopped at the deadline with work left (queued, or the sweep's lap unfinished) */
   partial: boolean
   /** the sweep reached the end of the directory, a lap that began then (ISO) */
@@ -114,6 +119,7 @@ export async function maintain(
     homes: 0,
     revocations: 0,
     routes: 0,
+    viewCounting: 0,
     partial: false,
   }
   const started = Date.now()
@@ -141,6 +147,13 @@ export async function maintain(
     result.routes = await rewriteRoutes(deps, opts.deadline)
   } catch (err) {
     console.warn(JSON.stringify({ level: 'warn', msg: 'route rewrite failed', err: String(err) }))
+  }
+  try {
+    result.viewCounting = await rolloutViewCounting(deps, opts.deadline)
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: 'warn', msg: 'view counting rollout failed', err: String(err) })
+    )
   }
   if (sweep && !(await sweepDirectory(deps, opts.deadline, done, result))) result.partial = true
   await logRouteTableUsage(deps)

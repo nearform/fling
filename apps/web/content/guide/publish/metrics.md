@@ -5,7 +5,7 @@ order: 65
 summary: A site's views and pushes by day, week and month. Counts only, never who.
 requires: [metrics]
 sources: [packages/shared/src/metrics.ts, packages/shared/src/view-beacon.ts, apps/api/src/views.ts, apps/api/src/rendering.ts, apps/api/src/policy.ts, apps/cli/src/stats.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteMetrics.tsx, apps/web/src/lib/metrics.ts, packages/shared/src/mcp-tools.ts]
-verified: 1f60f9d6a
+verified: ee10036
 ---
 
 {{instance:name}} counts how often each site changes and, <!-- requires: viewCounts -->how often
@@ -80,5 +80,6 @@ page it was.
 - Views are written every few seconds, not the moment they happen: a view can take a little while
   to show.
 - Deleting a site deletes its metrics. Archiving keeps them.
-- Whoever runs {{instance:name}} can turn view counts off with its `SITE_VIEW_COUNTS` setting.
-  Pushes are counted either way.
+- An admin can turn view counting off for every site, from Admin → Usage. The views counted
+  before stay on this page, which says counting is off. Whoever runs {{instance:name}} can also
+  turn view counts off with its `SITE_VIEW_COUNTS` setting. Pushes are counted either way.

@@ -25,6 +25,7 @@ const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'site.server_published': 'published a site server on',
   'viewer.resolved': 'resolved a viewer id on',
   'routes.format': 'chose the route table format',
+  'usage.view_counting': 'turned view counting',
 }
 
 /** What an admin did to someone else's site (a policy action), as a verb for its name. */

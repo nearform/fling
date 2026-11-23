@@ -5,7 +5,7 @@
  * lap of the site directory.
  */
 import type { InstanceMetadata, Me } from '@fling/shared'
-import type { InstanceUsage, UsageTally } from '@fling/shared/metrics'
+import type { InstanceUsage, UsageTally, ViewCounting } from '@fling/shared/metrics'
 import { showsAdmin } from './admin'
 import { countLabel } from './metrics'
 
@@ -308,3 +308,21 @@ export function lapNotice(u: Pick<InstanceUsage, 'sweep' | 'lap'>): {
 /** Whether nothing has happened yet: no views, no pushes, in 12 months. */
 export const isQuiet = (u: Pick<InstanceUsage, 'totals'>) =>
   u.totals.months.views === 0 && u.totals.months.pushes === 0
+
+/**
+ * What the View counting section says of maintenance's rollout of the switch to every site: under
+ * way, with how many done, or finished (null: nothing to say, as on an instance that never set it).
+ */
+export function rolloutText(c: ViewCounting): string | null {
+  const r = c.rollout
+  if (!r) return null
+  const sites = `${r.sites.toLocaleString()} ${r.sites === 1 ? 'site' : 'sites'}`
+  if (r.finishedAt) {
+    return c.on
+      ? `Every live site counts views (maintenance went through ${sites}).`
+      : `No site counts views (maintenance went through ${sites}).`
+  }
+  return c.on
+    ? `Maintenance is adding view counting to every live site, without publishing them again: ${sites} done so far.`
+    : `Maintenance is taking view counting off every live site: ${sites} done so far.`
+}

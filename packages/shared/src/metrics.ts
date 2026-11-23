@@ -25,6 +25,12 @@ export const SiteMetricsSchema = z.object({
    * always 0 and only pushes are counted.
    */
   viewCounts: z.boolean(),
+  /**
+   * Whether views are being counted now: an admin can turn view counting off (Admin → Usage),
+   * which keeps the views counted so far. Absent from releases before the switch: read as
+   * `viewCounts`.
+   */
+  counting: z.boolean().optional(),
   /** when the site's first count was stored (its metrics go back no further); null: none yet */
   since: z.string().nullable(),
   lastViewAt: z.string().nullable(),
@@ -117,9 +123,34 @@ export const UsageTallySchema = z.object({
 })
 export type UsageTally = z.infer<typeof UsageTallySchema>
 
+/**
+ * View counting, the switch on Admin → Usage (`PUT /api/admin/usage/view-counting`): on, every
+ * live site's pages carry the view beacon and views are counted; off, none do and nothing is
+ * counted, while the views counted so far stay. Maintenance applies a change to every site
+ * already live, a batch a run (`rollout`), without a new version: on, it adds the counted copies
+ * to the live versions that lack them. `setBy` is absent when Fling itself started the rollout
+ * (the sites live before view counting existed).
+ */
+export const ViewCountingSchema = z.object({
+  on: z.boolean(),
+  setBy: z.string().optional(),
+  setAt: z.string().optional(),
+  /** how far maintenance has gone applying it: the last site done, how many, when it finished */
+  rollout: z
+    .object({ sites: z.number().int().nonnegative(), finishedAt: z.string().optional() })
+    .optional(),
+})
+export type ViewCounting = z.infer<typeof ViewCountingSchema>
+
+/** `PUT /api/admin/usage/view-counting`: turn view counting on or off. */
+export const ViewCountingRequestSchema = z.object({ on: z.boolean() })
+
 /** `GET /api/admin/usage`: every site's views and pushes together, and the last lap's tally. */
 export const InstanceUsageSchema = z.object({
+  /** whether this instance can count views (SITE_VIEW_COUNTS, the `viewCounts` capability) */
   viewCounts: z.boolean(),
+  /** the switch, where the instance can count views; absent where it can't */
+  counting: ViewCountingSchema.optional(),
   /** whether maintenance sweeps the site directory (MAINTENANCE_SWEEP_ENABLED): without it, no lap */
   sweep: z.boolean(),
   days: z.array(z.object({ day: z.string(), ...Counts })),

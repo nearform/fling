@@ -475,7 +475,8 @@ describe('the revocation list', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const result = await maintain({ ...env.deps, store: failing })
     expect(result.revocations).toBe(0)
-    expect(listed).toBe(1)
+    // The directory was read: the sweep (and view counting's rollout) ran after the failure.
+    expect(listed).toBeGreaterThan(0)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('revocation sweep failed'))
     warn.mockRestore()
   })

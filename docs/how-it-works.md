@@ -143,7 +143,10 @@ the page as published. The review page and previews don't count, nor do pages be
 a single-page app's navigations, or pages whose Content-Security-Policy blocks inline scripts.
 Owners, publishers and admins see the counts per day, week and month, with when the site was last
 viewed and last pushed: on its page in the web UI, with `fling stats`, or `fling_stats` over MCP.
-An instance can turn view counting off (`SITE_VIEW_COUNTS=off`); pushes are counted either way.
+An admin turns view counting on or off for every site in Admin → Usage; maintenance then adds or
+removes the beacon on every live site without publishing it again, and turning it off keeps the
+views counted so far. Whoever runs the instance can turn it off altogether
+(`SITE_VIEW_COUNTS=off`), which removes the switch. Pushes are counted either way.
 The `metrics` and `viewCounts` capabilities tell clients.
 
 ## Live review

@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Admins turn view counting on or off for every site.** Admin → Usage has a **View counting** switch. Off takes the view beacon off every site's pages and counts nothing more, keeping the views counted so far (site pages, `fling stats` and `fling_stats` say counting is off); on puts it back. Maintenance applies the change to every live site, a batch a run, without publishing anything again: owners see no new version, and no push is counted. The page shows how far it has got, and the audit log records who turned it on or off. Only an admin in a browser session can use it (`PUT /api/admin/usage/view-counting`, `admin.usage.write`). Upgrade note: the first maintenance run after upgrading adds view counting to every site published before 0.18.0, the same way, so they count views without being published again. `SITE_VIEW_COUNTS=off` stays the operator's hard off, and removes the switch.
+
 ## 0.18.0 (2026-11-22)
 
 - **Admin → Usage shows how every site is used.** A new admin page: every site's views and pushes together over 28 days and 12 months (a daily chart with the busiest day, a calendar of the 28 days, a bar a month), how many live sites were viewed in the last 7, 28 and 90 days and how many never have been, the 20 most viewed over 28 days, and the live sites unused longest ("Gathering dust"). The site figures come from maintenance's last lap of every site, so they are as fresh as that lap, and the page says when it finished. All sites shows when each site was last viewed. `GET /api/admin/usage` answers the same.

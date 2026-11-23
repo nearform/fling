@@ -5,7 +5,7 @@ order: 20
 summary: A secret link that opens a private site to anyone who has it, without signing in.
 requires: [shareLinks]
 sources: [apps/api/src/sites.ts, apps/api/src/policy.ts, packages/shared/src/hosts.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteAccess.tsx, packages/shared/src/mcp-tools.ts]
-verified: 1f60f9d
+verified: ee10036
 ---
 
 A share link opens a private site to anyone who has the link, without signing in. Use one for a

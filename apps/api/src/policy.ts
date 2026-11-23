@@ -543,6 +543,7 @@ export const INSTANCE_ACTIONS = [
   'admin.routes.read',
   'admin.routes.write',
   'admin.usage.read',
+  'admin.usage.write',
   'account.site.create',
   'account.group.create',
   'account.groups.read',
@@ -580,6 +581,8 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.usage.read': isAdminRole,
   // Choosing the format rewrites every site's routes: a browser session's admin only.
   'admin.routes.write': role => role === 'admin',
+  // Turning view counting on or off reaches every site: a browser session's admin only.
+  'admin.usage.write': role => role === 'admin',
   'account.site.create': notGuest,
   'account.group.create': notGuest,
   'account.groups.read': notGuest,

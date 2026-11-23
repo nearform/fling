@@ -20,7 +20,7 @@ import {
   Pulse,
 } from '../components/usage/UsageCharts'
 import { useInstance } from '../hooks/instance'
-import { useAdminUsage, useMe } from '../hooks/queries'
+import { useAdminUsage, useMe, useSetViewCounting } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
 import { fullDate, timeAgo } from '../lib/format'
 import {
@@ -30,6 +30,7 @@ import {
   lapNotice,
   monthLabel,
   pulseCount,
+  rolloutText,
   showsUsageAdmin,
 } from '../lib/usage'
 
@@ -135,6 +136,12 @@ function Activity({ usage, fling }: { usage: InstanceUsage; fling: string }) {
         )}
         <Total label="Pushes" days={usage.totals.days.pushes} months={usage.totals.months.pushes} />
       </dl>
+      {usage.counting?.on === false && (
+        <p className="text-sm text-secondary">
+          View counting is off: these are the views counted before it was turned off. Pushes are
+          still counted.
+        </p>
+      )}
       {!usage.viewCounts && (
         <p className="text-sm text-secondary">
           {fling} doesn’t count views, so this is pushes: each time a version went live.
@@ -218,6 +225,61 @@ function Sites({ usage, fling }: { usage: InstanceUsage; fling: string }) {
   )
 }
 
+/**
+ * The switch: view counting on or off for every site. Turning it off keeps the views counted so
+ * far; either way maintenance applies it to every live site, which the section follows.
+ */
+function ViewCountingSwitch({ usage, fling }: { usage: InstanceUsage; fling: string }) {
+  const set = useSetViewCounting()
+  const c = usage.counting
+  if (!c) return null
+  const progress = rolloutText(c)
+  const next = !c.on
+  const confirm = next
+    ? `Turn view counting on? Every live site's pages get the view beacon, without being published again, and views are counted from then on.`
+    : `Turn view counting off? The view beacon comes off every site and no more views are counted. The views counted so far stay, and pushes are still counted.`
+  return (
+    <Section id="view-counting" title="View counting" aside="Whether the sites' pages count views">
+      <div className="space-y-3">
+        <p>
+          <strong>{c.on ? 'On' : 'Off'}</strong>
+          {c.setBy && c.setAt && (
+            <span className="text-secondary">
+              {' '}
+              (turned {c.on ? 'on' : 'off'} by {c.setBy},{' '}
+              <time dateTime={c.setAt} title={fullDate(c.setAt)}>
+                {timeAgo(c.setAt)}
+              </time>
+              )
+            </span>
+          )}
+        </p>
+        {progress && (
+          <p className="text-secondary" role="status">
+            {progress}
+          </p>
+        )}
+        <p className="text-secondary">
+          {c.on
+            ? `Each page carries a small script that tells the site, once per page load, that it was viewed. Turning it off takes the script off every site on ${fling}; the views counted so far stay.`
+            : `Turning it on adds the script to every live site, without publishing them again. The views counted before it was turned off are still shown.`}
+        </p>
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={set.isPending}
+          onClick={() => {
+            if (window.confirm(confirm)) set.mutate(next)
+          }}
+        >
+          {next ? 'Turn on for every site' : 'Turn off for every site'}
+        </button>
+        {set.isError && <p className="text-error">{errorMessage(set.error)}</p>}
+      </div>
+    </Section>
+  )
+}
+
 export default function AdminUsage() {
   const { data: me } = useMe()
   const instance = useInstance()
@@ -264,6 +326,7 @@ export default function AdminUsage() {
         <div className="usage-page">
           <Activity usage={usage.data} fling={fling} />
           <Sites usage={usage.data} fling={fling} />
+          <ViewCountingSwitch usage={usage.data} fling={fling} />
         </div>
       )}
     </div>

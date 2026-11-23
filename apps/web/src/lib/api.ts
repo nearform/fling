@@ -485,6 +485,9 @@ export const api = {
     request('/api/admin/route-table', AdminRouteTableSchema),
   /** Admins, on an instance with metrics: every site's views and pushes, and the last lap's tally. */
   adminUsage: (): Promise<InstanceUsage> => request('/api/admin/usage', InstanceUsageSchema),
+  /** Admins, in a browser session: turn view counting on or off, rolled out to every site. */
+  setViewCounting: (on: boolean): Promise<InstanceUsage> =>
+    request('/api/admin/usage/view-counting', InstanceUsageSchema, { method: 'PUT', body: { on } }),
   /** Admins, in a browser session: choose the route format and start the rewrite into it. */
   setRouteFormat: (format: RouteFormat): Promise<AdminRouteTable> =>
     request('/api/admin/route-table', AdminRouteTableSchema, { method: 'POST', body: { format } }),

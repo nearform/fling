@@ -13,6 +13,14 @@
  *   timer (the Node host). Counts not yet written when a runtime is frozen or stopped are lost:
  *   at most an interval's worth.
  *
+ * **View counting** is an admin's switch (Admin → Usage, `setViewCounting`), within what the
+ * instance allows (SITE_VIEW_COUNTS): on, every live version's pages are served from their counted
+ * copies and views are counted; off, the pages are served as published and nothing is counted,
+ * while the counts so far stay. It is read on every route write and every flush, never cached.
+ * Maintenance rolls a change out to every site already live, a batch a run, without a new
+ * version (`rolloutViewCounting`); its first run does the same for the sites live before view
+ * counting existed, so they count views without being published again.
+ *
  * Each count goes to all three of its buckets with an atomic add (Store.addSiteCounts), and each
  * bucket expires on its own (BUCKET_KEEP_MS), so there is no roll-up job: a read takes days,
  * weeks and months each from buckets of its own size. A view or push never touches the site
@@ -29,19 +37,27 @@ import {
   type SiteMetrics,
   USAGE_LIST_LENGTH,
   type UsageTally,
+  type ViewCounting,
   weekStartOf,
 } from '@fling/shared/metrics'
 import { ensure } from './admin.ts'
+import { audit } from './audit.ts'
+import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
+import { badRequest } from './lib/errors.ts'
+import { pathRef, refreshHome, syncPathRoute } from './paths.ts'
 import type { Principal } from './policy.ts'
-import { requireSite } from './sites.ts'
+import { renderVersion } from './rendering.ts'
+import { requireSite, type StoredManifest, syncRouteTable } from './sites.ts'
 import type {
   SiteCounts,
   SiteMetricRecord,
   SiteRecord,
+  SiteRef,
   Store,
   User,
   VersionRecord,
+  ViewCountingRecord,
 } from './store/types.ts'
 import type { Clock, Deps } from './types.ts'
 
@@ -68,13 +84,19 @@ export function bucketExpiry(at: Date): Record<SiteMetricRecord['size'], string>
   }
 }
 
+/** Whether views are counted now: the instance allows it and view counting is on. */
+export async function viewCountingOn(deps: Pick<Deps, 'config' | 'store'>): Promise<boolean> {
+  if (!deps.config.viewCounts) return false
+  return (await deps.store.getViewCounting())?.on ?? true
+}
+
 /**
  * Whether the edge serves a version's copies with the view beacon (route value `c`): it has them,
- * and the instance counts views. So turning SITE_VIEW_COUNTS off stops serving them at each
- * site's next route write.
+ * and views are counted now.
  */
-export const countsViews = (deps: Deps, version: Pick<VersionRecord, 'counted'> | null) =>
-  deps.config.viewCounts && version?.counted === true
+export async function countsViews(deps: Deps, version: Pick<VersionRecord, 'counted'> | null) {
+  return version?.counted === true && (await viewCountingOn(deps))
+}
 
 /** Store `counts` for a site, now. */
 function addCounts(store: Store, clock: Clock, siteId: string, counts: Partial<SiteCounts>) {
@@ -117,7 +139,9 @@ export class ViewCounter {
   constructor(
     private store: Store,
     private clock: Clock,
-    private intervalMs = FLUSH_INTERVAL_MS
+    private intervalMs = FLUSH_INTERVAL_MS,
+    /** whether views are counted now (`viewCountingOn`): off, a flush drops what it holds */
+    private counting: () => Promise<boolean> = async () => true
   ) {
     // A new runtime writes its first views at once; from then on at most once an interval.
     this.lastFlush = Number.NEGATIVE_INFINITY
@@ -151,6 +175,8 @@ export class ViewCounter {
     this.pending = new Map()
     this.lastFlush = this.clock.now().getTime()
     this.flushing = (async () => {
+      // Pages served before view counting went off may still report a view: they aren't counted.
+      if (!(await this.counting().catch(() => true))) return
       let written = 0
       await mapLimit([...batch], FLUSH_CONCURRENCY, async ([siteId, views]) => {
         try {
@@ -183,6 +209,7 @@ export async function siteMetrics(deps: Deps, user: User, name: string): Promise
   return {
     name: site.name,
     viewCounts: deps.config.viewCounts,
+    counting: await viewCountingOn(deps),
     since: activity?.since ?? null,
     lastViewAt: activity?.lastViewAt ?? null,
     lastPushAt: activity?.lastPushAt ?? null,
@@ -219,6 +246,9 @@ export async function instanceUsage(deps: Deps, p: Principal): Promise<InstanceU
   ])
   return {
     viewCounts: deps.config.viewCounts,
+    ...(deps.config.viewCounts
+      ? { counting: viewCounting(await deps.store.getViewCounting()) }
+      : {}),
     sweep: deps.config.maintenanceSweep,
     ...series(buckets, deps.clock.now()),
     lap: cursor?.lastUsage ?? null,
@@ -276,4 +306,142 @@ export async function tallySite(deps: Deps, tally: UsageTally, site: SiteRecord)
   tally.idle = keepFirst(tally.idle, { name: site.name, lastActiveAt }, (a, b) =>
     a.lastActiveAt < b.lastActiveAt ? -1 : a.lastActiveAt > b.lastActiveAt ? 1 : 0
   )
+}
+
+/** What Admin → Usage shows of view counting, from its record (none: on, not rolled out yet). */
+function viewCounting(record: ViewCountingRecord | null): ViewCounting {
+  if (!record) return { on: true, rollout: { sites: 0 } }
+  return {
+    on: record.on,
+    ...(record.setBy ? { setBy: record.setBy } : {}),
+    setAt: record.setAt,
+    rollout: {
+      sites: record.rollout.sites,
+      ...(record.rollout.finishedAt ? { finishedAt: record.rollout.finishedAt } : {}),
+    },
+  }
+}
+
+/**
+ * Turn view counting on or off (Admin → Usage), and start maintenance's rollout of it to every
+ * live site. Setting what is already set starts the rollout again.
+ */
+export async function setViewCounting(deps: Deps, p: Principal, on: boolean) {
+  ensure(p, 'admin.usage.write')
+  if (!deps.config.viewCounts) {
+    throw badRequest('This Fling doesn’t count views (SITE_VIEW_COUNTS is off)', 'view_counts_off')
+  }
+  await deps.store.putViewCounting({
+    on,
+    setBy: p.email,
+    setAt: deps.clock.now().toISOString(),
+    rollout: { after: null, sites: 0 },
+  })
+  await audit(deps, { action: 'usage.view_counting', actor: p.email, target: on ? 'on' : 'off' })
+  return instanceUsage(deps, p)
+}
+
+/** Directory entries read a query of the rollout. */
+const ROLLOUT_PAGE = 50
+
+/**
+ * Bring a live version's pages in line with view counting, without a new version. On: one never
+ * counted gets its counted copies (and is marked counted, or as one that can't be); one with
+ * Markdown has its pages rendered again with the beacon. Off: one with Markdown has its pages
+ * rendered again without it. The copies stay, so turning counting back on needs no copying.
+ */
+async function applyToVersion(
+  deps: Deps,
+  ref: SiteRef,
+  storageId: string,
+  versionId: string,
+  on: boolean
+) {
+  const version = await deps.store.getVersion(ref, versionId)
+  if (version?.status !== 'complete') return
+  const untried = version.counted === undefined
+  if (!(version.markdown || (on && untried))) return
+  const manifest = await deps.blobs.getJson<StoredManifest>(manifestKey(storageId, versionId))
+  if (!manifest) return
+  const rendered = await renderVersion(deps, storageId, versionId, manifest.files, {
+    counting: on,
+  })
+  if (on && untried) await deps.store.putVersion(ref, { ...version, counted: !!rendered.counted })
+}
+
+/** Apply view counting as it is now to a site, its Paths and their routes. */
+async function applyToSite(deps: Deps, site: SiteRecord, on: boolean) {
+  // Archived ones too, so unarchiving one serves it as view counting is then.
+  if (site.currentVersionId) {
+    await applyToVersion(deps, site, site.id, site.currentVersionId, on)
+  }
+  const paths = await deps.store.listPaths(site.id)
+  for (const path of paths) {
+    if (path.currentVersionId) {
+      await applyToVersion(deps, pathRef(site, path), path.id, path.currentVersionId, on)
+    }
+  }
+  await syncRouteTable(deps, site)
+  for (const path of paths) await syncPathRoute(deps, site, path)
+  if (site.paths) await refreshHome(deps, site)
+}
+
+/**
+ * Maintenance's part: apply view counting to the next sites in the directory, until the deadline
+ * or the end; returns how many it did. With none set, it starts with it on, for the sites live
+ * before view counting existed. Each page's progress is kept only while the setting is the one it
+ * began under, so a newer one starts its own rollout.
+ */
+export async function rolloutViewCounting(deps: Deps, deadline: number | undefined) {
+  if (!deps.config.viewCounts) return 0
+  let record = await deps.store.getViewCounting()
+  if (!record) {
+    const first: ViewCountingRecord = {
+      on: true,
+      setAt: deps.clock.now().toISOString(),
+      rollout: { after: null, sites: 0 },
+    }
+    if (!(await deps.store.putViewCounting(first, null))) return 0
+    record = first
+  }
+  if (record.rollout.finishedAt) return 0
+  let done = 0
+  for (;;) {
+    const page = await deps.store.pageSites({ after: record.rollout.after, limit: ROLLOUT_PAGE })
+    let after = record.rollout.after
+    let sites = record.rollout.sites
+    let stopped = false
+    for (const entry of page.sites) {
+      if (deadline !== undefined && Date.now() > deadline) {
+        stopped = true
+        break
+      }
+      const site = await deps.store.findSite(entry.name)
+      if (site) {
+        try {
+          await applyToSite(deps, site, record.on)
+        } catch (err) {
+          warn('view counting not applied', { site: site.name, error: String(err) })
+        }
+        sites++
+        done++
+      }
+      after = entry.name
+    }
+    const finished = !stopped && !page.more
+    const next: ViewCountingRecord = {
+      ...record,
+      rollout: {
+        after,
+        sites,
+        ...(finished ? { finishedAt: deps.clock.now().toISOString() } : {}),
+      },
+    }
+    if (!(await deps.store.putViewCounting(next, record.setAt))) return done
+    if (finished) {
+      console.log(JSON.stringify({ level: 'info', msg: 'view counting rolled out', ...next }))
+    }
+    if (finished || stopped) return done
+    record = next
+  }
 }

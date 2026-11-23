@@ -52,6 +52,12 @@ export function SiteMetrics({ name }: { name: string }) {
             <When label="Last pushed" at={m.lastPushAt} />
           </dl>
           <DayChart metrics={m} />
+          {m.viewCounts && m.counting === false && (
+            <p className="text-xs text-secondary">
+              View counting is off on {instance?.name ?? 'this Fling'}: these are the views counted
+              before it was turned off.
+            </p>
+          )}
           {m.since && (
             <p className="text-xs text-muted">
               Counted since <span title={fullDate(m.since)}>{utcDate(m.since)}</span>

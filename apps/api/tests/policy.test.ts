@@ -260,6 +260,7 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.routes.read': 'at',
   'admin.usage.read': 'at',
   'admin.routes.write': 'a',
+  'admin.usage.write': 'a',
   'admin.invitations.manage': 'a',
   'account.site.create': 'atiu',
   'account.group.create': 'atiu',

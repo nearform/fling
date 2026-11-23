@@ -11,13 +11,14 @@
  *     they are.
  *   - The home page of a site with Paths (paths.ts): whether its root index.html has a Paths block
  *     to fill in, or there is no home page at all (`VersionRecord.home`), and its title.
- *   - View counts (SITE_VIEW_COUNTS on, views.ts): every HTML page the version serves (its `.html`
+ *   - View counts (view counting on, views.ts): every HTML page the version serves (its `.html`
  *     and `.htm` files, and the Markdown home pages written in a folder's index.html) gets a copy
  *     with the view beacon at `.counted/<path>` (COUNTED_DIR), served in its place while the route
  *     says `c`, and the rendered Markdown pages carry the beacon themselves. All or nothing:
  *     the edge serves a copy for every page or for none, so a version with more than
  *     MAX_COUNTED_PAGES pages, or one bigger than MAX_COUNTED_BYTES, or a copy that fails to
- *     write, leaves the version uncounted (`VersionRecord.counted` unset).
+ *     write, leaves the version uncounted (`VersionRecord.counted` unset). View counting's rollout
+ *     renders a live version again, with or without the beacon, when an admin turns it on or off.
  *
  * Rendering never fails a publish: a file that can't be rendered is served as it is.
  */
@@ -29,6 +30,7 @@ import { withViewBeacon } from '@fling/shared/view-beacon'
 import { mapLimit } from './lib/concurrency.ts'
 import type { VersionRecord } from './store/types.ts'
 import type { Deps } from './types.ts'
+import { viewCountingOn } from './views.ts'
 
 const RENDER_CONCURRENCY = 8
 /** Home pages are read whole to find a Paths block and a title; bigger ones are left alone. */
@@ -64,13 +66,15 @@ export async function renderVersion(
   deps: Deps,
   storageId: string,
   versionId: string,
-  files: readonly ManifestFile[]
+  files: readonly ManifestFile[],
+  /** whether its pages count views: view counting as it is now, unless given */
+  opts: { counting?: boolean } = {}
 ): Promise<Pick<VersionRecord, 'markdown' | 'home' | 'title' | 'counted'>> {
   const key = (path: string) => siteObjectKey(storageId, versionId, path)
   const homes = markdownHomePages(files.map(f => f.path))
   const pages = files.filter(f => isHtmlPath(f.path) && !`/${f.path}`.startsWith(FLING_DIR))
   const counting =
-    deps.config.viewCounts &&
+    (opts.counting ?? (await viewCountingOn(deps))) &&
     pages.length <= MAX_COUNTED_PAGES &&
     pages.every(f => f.size <= MAX_COUNTED_BYTES)
   let rootTitle = ''

@@ -71,6 +71,14 @@ describe('fling stats', () => {
     expect(shown).toMatch(/nothing is recorded about who viewed/)
   })
 
+  it('says when an admin has turned view counting off, and still shows the views counted', async () => {
+    const m = mockFetch(metricsRoute({ ...metrics(), counting: false }))
+    const { ctx, out } = await testContext({ store: await storeWith(METRICS_ON), fetch: m.fetch })
+    await runStats(ctx, 'my-app')
+    expect(out.content()).toMatch(/Views:\s+8 in 28 days/)
+    expect(out.content()).toMatch(/View counting is off/)
+  })
+
   it('leaves views out where the Fling does not count them', async () => {
     const m = mockFetch(metricsRoute(metrics(false)))
     const { ctx, out } = await testContext({ store: await storeWith(METRICS_ON), fetch: m.fetch })

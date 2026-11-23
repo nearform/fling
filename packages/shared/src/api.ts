@@ -650,6 +650,7 @@ export const AuditEntrySchema = z.object({
     'site.server_published',
     'viewer.resolved',
     'routes.format',
+    'usage.view_counting',
   ]),
   actor: z.string(),
   /** the person, or for site.change and site.open the site's name */

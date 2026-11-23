@@ -312,7 +312,7 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
     ...(site.paths ? { p: 1 as const } : {}),
     ...(site.paths && site.home ? { i: site.home } : {}),
     ...(version?.markdown ? { m: 1 as const } : {}),
-    ...(countsViews(deps, version) ? { c: 1 as const } : {}),
+    ...((await countsViews(deps, version)) ? { c: 1 as const } : {}),
     ...(version?.server
       ? {
           f: 1 as const,

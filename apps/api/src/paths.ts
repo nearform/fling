@@ -115,7 +115,7 @@ export async function syncPathRoute(deps: Deps, site: SiteRecord, path: PathReco
     id: path.id,
     v: path.currentVersionId,
     ...(version?.markdown ? { m: 1 as const } : {}),
-    ...(countsViews(deps, version) ? { c: 1 as const } : {}),
+    ...((await countsViews(deps, version)) ? { c: 1 as const } : {}),
   }
   await deps.routeTable.put(key, encodePathValue(value, await routeFormat(deps)))
 }
@@ -151,7 +151,9 @@ export async function refreshHome(deps: Deps, site: SiteRecord) {
     if (version?.home) {
       const rendered = renderPathsIndex(html, paths, { siteName: site.name })
       // A version whose pages count views counts its home page too.
-      const page = version.counted ? { ...rendered, html: withViewBeacon(rendered.html) } : rendered
+      const page = (await countsViews(deps, version))
+        ? { ...rendered, html: withViewBeacon(rendered.html) }
+        : rendered
       home = createHash('sha256')
         .update(page.html)
         .update('\0')

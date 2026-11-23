@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.19.0 (2026-11-23)
+
 - **Admins turn view counting on or off for every site.** Admin → Usage has a **View counting** switch. Off takes the view beacon off every site's pages and counts nothing more, keeping the views counted so far (site pages, `fling stats` and `fling_stats` say counting is off); on puts it back. Maintenance applies the change to every live site, a batch a run, without publishing anything again: owners see no new version, and no push is counted. The page shows how far it has got, and the audit log records who turned it on or off. Only an admin in a browser session can use it (`PUT /api/admin/usage/view-counting`, `admin.usage.write`). Upgrade note: the first maintenance run after upgrading adds view counting to every site published before 0.18.0, the same way, so they count views without being published again. `SITE_VIEW_COUNTS=off` stays the operator's hard off, and removes the switch.
 
 ## 0.18.0 (2026-11-22)

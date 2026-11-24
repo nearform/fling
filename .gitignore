@@ -21,3 +21,4 @@ platforms/cloudflare/deploy-config.json
 platforms/node/deploy/compose/fling.env
 # Its laptop front, which `*.local` would hide.
 !platforms/node/deploy/compose/caddy/Caddyfile.local
+.cfld.json

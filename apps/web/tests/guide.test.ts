@@ -23,6 +23,7 @@ import { searchGuide } from '../src/guide/search'
 const everything: GuideContext = {
   instance: {
     origin: 'https://fling.example.test',
+    host: 'fling.example.test',
     name: 'Fling',
     mcp: 'https://fling.example.test/mcp',
     install: 'npm install -g fling-cli',

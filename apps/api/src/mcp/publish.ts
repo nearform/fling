@@ -30,7 +30,7 @@
  * means nothing here).
  * `confirmPublicServer` is the publisher's yes to a server on a public site.
  */
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import {
   type AccessLevel,
   checkFormsConfig,
@@ -54,7 +54,17 @@ import {
   type Site,
   type Visibility,
 } from '@fling/shared'
+import {
+  ARCHIVE_PART_BYTES,
+  archiveUploadPath,
+  sandboxAllowAdvice,
+  sandboxUploadGuideUrl,
+  sandboxUploadHost,
+  sandboxUploadScript,
+} from '@fling/shared/sandbox-upload'
+import { readZipSite, ZipError } from '@fling/shared/zip'
 import { uploadPrefix } from '../blobs/types.ts'
+import { bodyUpTo } from '../lib/body.ts'
 import { mapLimit } from '../lib/concurrency.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import { newId } from '../lib/ids.ts'
@@ -379,6 +389,135 @@ export async function beginUpload(
   return upload
 }
 
+// --- sandbox uploads (@fling/shared/sandbox-upload) ---------------------------------------------
+//
+// An upload's zip, PUT by the script Claude runs in its sandbox to a URL fling_upload_begin signed:
+// parts at `uploads/<id>/archive/<n>` (never a file's part key: those are hex) and how many there
+// are at `uploads/<id>/archive/count`. The URL is the whole authorisation to store parts, so it
+// names the upload and its expiry only; publishing stays fling_upload_finish's, as the user.
+
+/** Enough parts for the largest deploy, as a zip that didn't compress at all. */
+export const MAX_ARCHIVE_PARTS = Math.ceil(MAX_DEPLOY_BYTES / ARCHIVE_PART_BYTES) + 1
+
+const archivePartKey = (uploadId: string, part: number) =>
+  `${uploadPrefix(uploadId)}archive/${part}`
+const archiveCountKey = (uploadId: string) => `${uploadPrefix(uploadId)}archive/count`
+
+// Keeps the MAC apart from anything else signed with the session secret.
+const archiveMac = (secret: string, uploadId: string, exp: number) =>
+  createHmac('sha256', secret)
+    .update(`fling-archive-upload:${uploadId}\n${exp}`)
+    .digest('base64url')
+
+/** How an upload's files come from a sandbox: the signed URL, the script around it, the host. */
+export interface ArchiveUpload {
+  url: string
+  script: string
+  /** the host the sandbox must reach (the app origin's) */
+  host: string
+  /** where in Claude that host is allowed, said to the user when the sandbox can't reach it */
+  allowAdvice: string
+}
+
+export function archiveUpload(deps: Deps, upload: UploadRecord): ArchiveUpload {
+  const exp = Math.floor(Date.parse(upload.expiresAt) / 1000)
+  const sig = archiveMac(deps.config.secrets.sessionSecret, upload.id, exp)
+  const url = `${deps.config.appOrigin}/api${archiveUploadPath(upload.id)}?exp=${exp}&sig=${sig}`
+  const host = sandboxUploadHost(url)
+  const advice = sandboxAllowAdvice(host, sandboxUploadGuideUrl(deps.config.appOrigin))
+  return { url, script: sandboxUploadScript(url), host, allowAdvice: advice }
+}
+
+/** What an archive PUT carries in its URL. */
+export interface ArchivePart {
+  uploadId: string
+  exp: string | undefined
+  sig: string | undefined
+  part: string | undefined
+  of: string | undefined
+}
+
+/**
+ * Store one part of an upload's zip. The signature is checked before any byte is read; then the
+ * upload must still be open and the part within `of`, and `of` within MAX_ARCHIVE_PARTS.
+ */
+export async function putArchivePart(deps: Deps, input: ArchivePart, request: Request) {
+  const exp = Number(input.exp)
+  const now = deps.clock.now().getTime()
+  const expected = Number.isFinite(exp)
+    ? Buffer.from(archiveMac(deps.config.secrets.sessionSecret, input.uploadId, exp))
+    : null
+  const given = Buffer.from(input.sig ?? '')
+  if (!expected || expected.length !== given.length || !timingSafeEqual(expected, given)) {
+    throw new ApiError(
+      403,
+      'forbidden',
+      'Bad signature: use the script fling_upload_begin returned'
+    )
+  }
+  if (exp * 1000 <= now) {
+    throw new ApiError(
+      403,
+      'expired',
+      'This upload has expired: start again with fling_upload_begin'
+    )
+  }
+  const upload = await deps.store.getUpload(input.uploadId)
+  if (!upload || Date.parse(upload.expiresAt) <= now) {
+    throw notFound('No open upload: start again with fling_upload_begin')
+  }
+  const part = Number(input.part)
+  const of = Number(input.of)
+  if (!Number.isInteger(of) || of < 1 || of > MAX_ARCHIVE_PARTS) {
+    throw badRequest(`\`of\` must be 1 to ${MAX_ARCHIVE_PARTS}`, 'bad_part')
+  }
+  if (!Number.isInteger(part) || part < 0 || part >= of) {
+    throw badRequest(`\`part\` must be 0 to ${of - 1}`, 'bad_part')
+  }
+  const body = await bodyUpTo(request, ARCHIVE_PART_BYTES)
+  if (!body) throw tooLarge(`A part is at most ${ARCHIVE_PART_BYTES / 1024 / 1024} MB`)
+  await deps.blobs.put(archivePartKey(upload.id, part), body, {
+    contentType: 'application/octet-stream',
+  })
+  await deps.blobs.putJson(archiveCountKey(upload.id), { of })
+  return { uploadId: upload.id, part, of }
+}
+
+/** The upload's zip read into its files, or null when no part was sent. */
+async function archiveFiles(
+  deps: Deps,
+  uploadId: string
+): Promise<{ files: InlineFile[]; skippedDotfiles: string[] } | null> {
+  const count = await deps.blobs.getJson<{ of: number }>(archiveCountKey(uploadId))
+  if (!count) return null
+  const parts: Uint8Array[] = []
+  let total = 0
+  for (let part = 0; part < count.of; part++) {
+    const bytes = await deps.blobs.get(archivePartKey(uploadId, part))
+    if (!bytes) {
+      throw new ApiError(
+        409,
+        'missing_part',
+        `Part ${part + 1} of ${count.of} of the upload is missing: run the upload script again`
+      )
+    }
+    total += bytes.byteLength
+    parts.push(bytes)
+  }
+  const zip = new Uint8Array(total)
+  let at = 0
+  for (const bytes of parts) {
+    zip.set(bytes, at)
+    at += bytes.byteLength
+  }
+  try {
+    return readZipSite(zip)
+  } catch (error) {
+    if (error instanceof ZipError) throw badRequest(error.message, 'invalid_zip')
+    throw error
+  }
+}
+
 async function requireUpload(deps: Deps, user: User, uploadId: string) {
   const upload = /^[a-z2-7]{1,64}$/.test(uploadId) ? await deps.store.getUpload(uploadId) : null
   if (
@@ -436,30 +575,42 @@ export async function finishUpload(
 ): Promise<PublishOutcome> {
   const upload = await requireUpload(deps, user, uploadId)
   const records = await deps.store.listUploadFiles(upload.id)
-  if (records.length === 0 && !upload.remove?.length) {
-    throw badRequest('Nothing uploaded yet: send files with fling_upload_file first', 'no_files')
+  const archive = await archiveFiles(deps, upload.id)
+  if (archive && records.length) {
+    throw badRequest(
+      'This upload has both a zip from the sandbox script and files sent with fling_upload_file: start again with one of them',
+      'mixed_upload'
+    )
+  }
+  if (!archive && records.length === 0 && !upload.remove?.length) {
+    throw badRequest(
+      'Nothing uploaded yet: run the script fling_upload_begin returned, or send files with fling_upload_file',
+      'no_files'
+    )
   }
   let total = 0
-  const files = await mapLimit(records, 8, async rec => {
-    const chunks: string[] = []
-    for (let part = 0; part < rec.parts; part++) {
-      const bytes = await deps.blobs.get(partKey(upload.id, rec.path, part))
-      if (!bytes) {
-        throw new ApiError(
-          409,
-          'missing_part',
-          `Part ${part + 1} of "${rec.path}" is missing; send the file again`
-        )
+  const files =
+    archive?.files ??
+    (await mapLimit(records, 8, async rec => {
+      const chunks: string[] = []
+      for (let part = 0; part < rec.parts; part++) {
+        const bytes = await deps.blobs.get(partKey(upload.id, rec.path, part))
+        if (!bytes) {
+          throw new ApiError(
+            409,
+            'missing_part',
+            `Part ${part + 1} of "${rec.path}" is missing; send the file again`
+          )
+        }
+        chunks.push(Buffer.from(bytes).toString('utf8'))
       }
-      chunks.push(Buffer.from(bytes).toString('utf8'))
-    }
-    const decoded = decodeContent(chunks.join(''), rec.encoding, rec.path)
-    total += decoded.byteLength
-    if (total > MAX_DEPLOY_BYTES) {
-      throw tooLarge(`The site is larger than ${MAX_DEPLOY_BYTES / 1024 / 1024} MB`)
-    }
-    return { path: rec.path, bytes: decoded }
-  })
+      const decoded = decodeContent(chunks.join(''), rec.encoding, rec.path)
+      total += decoded.byteLength
+      if (total > MAX_DEPLOY_BYTES) {
+        throw tooLarge(`The site is larger than ${MAX_DEPLOY_BYTES / 1024 / 1024} MB`)
+      }
+      return { path: rec.path, bytes: decoded }
+    }))
   const outcome = await publishFiles(deps, user, upload.name, files, {
     principal: opts.principal,
     path: upload.path,
@@ -471,6 +622,11 @@ export async function finishUpload(
     listHtml: opts.listHtml,
     ...(opts.confirmPublicServer ? { confirmPublicServer: true } : {}),
   })
+  if (outcome.kind === 'published' && archive?.skippedDotfiles.length) {
+    outcome.warnings.push(
+      `Left out of the zip (Fling never publishes dotfiles): ${archive.skippedDotfiles.join(', ')}`
+    )
+  }
   // Keep the staged upload when the user still has to decide about the index page.
   if (outcome.kind === 'published') {
     await deps.blobs.deletePrefix(uploadPrefix(upload.id))

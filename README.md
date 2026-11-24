@@ -48,6 +48,11 @@ Fling: <https://fling-tour.fling.labs.nearform.com/>
 - **Claude (Desktop, web, mobile)**: add the connector `https://<your Fling>/mcp` under
   Settings → Connectors, or install the Claude Desktop extension from the Get started page.
   [Watch the walkthrough](https://fling-tour.fling.labs.nearform.com/claude-app/).
+  For Claude to upload files it makes with code execution, rather than retype them, a Claude admin
+  adds your Fling's host to **Additional allowed domains** on claude.ai in a web browser:
+  **Organization settings → Capabilities → Code execution and file creation** (on a paid personal
+  plan, **Settings → Capabilities**). See
+  [Claude's sandbox](platforms/aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host).
 - **Claude Code**: `fling setup`, or `/plugin marketplace add nearform/fling`, then
   `/plugin install fling@fling`. [Watch the walkthrough](https://fling-tour.fling.labs.nearform.com/get-started/).
 
@@ -126,7 +131,9 @@ Terms are defined in [CONTEXT.md](CONTEXT.md), and what each release changed in
 
 To run your own Fling, pick a platform below and follow its guide. You need a domain you control
 (the app at e.g. `fling.yourcompany.com`, sites at `*.fling.yourcompany.com`) and an OpenID Connect
-sign-in such as Google, Microsoft Entra ID or Okta. Each cloud is a platform under `platforms/`,
+sign-in such as Google, Microsoft Entra ID or Okta. Once it is live, your Claude admin allows its host for Claude's code
+execution ([Claude's sandbox](platforms/aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host)), so
+Claude uploads the files it makes instead of typing them out. Each cloud is a platform under `platforms/`,
 with its own entry point, adapters, infrastructure and deploy guide. Pick one per instance:
 
 | Platform | Guide | Infrastructure |

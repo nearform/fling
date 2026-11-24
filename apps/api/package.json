@@ -67,6 +67,7 @@
     "@fling/edge": "workspace:*",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.2",
+    "fflate": "^0.8.3",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12"

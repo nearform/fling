@@ -157,6 +157,8 @@ export const GUIDE_REQUIRES_RE =
 export const GUIDE_INSTANCE_KEYS = [
   /** the instance's address: `https://fling.example.com` */
   'origin',
+  /** its host, without the scheme: `fling.example.com` (what a sandbox must be allowed to reach) */
+  'host',
   /** its name, as its brand says it */
   'name',
   /** the remote MCP connector's URL */

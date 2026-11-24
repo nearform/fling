@@ -563,6 +563,12 @@ The MCP tools:
   definition as the remote connector's tool; `path` publishes them as that Path of the site;
   `base` (a version from `fling_read_files`) sends only the files that changed, and `remove` names
   files to delete.
+- `fling_upload_begin` and `fling_upload_finish`: a sandbox upload, for files Claude made in its
+  cloud code-execution sandbox. Begin returns a script Claude runs there, which zips the files and
+  uploads them to a signed URL on the Fling's host; finish publishes them. Claude's sandbox must be
+  allowed to reach that host (see
+  [Claude's sandbox](../../platforms/aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host)). Cowork's
+  files need neither: `fling_deploy` maps its sandbox paths to the folders on this computer.
 - `fling_find_files`: recent `.html`/`.zip` files and folders with an `index.html` in those folders,
   newest first (last 14 days by default).
 - `fling_login`: opens the browser sign-in. If you haven't finished after about 30 seconds it returns

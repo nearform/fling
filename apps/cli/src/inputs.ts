@@ -26,10 +26,9 @@ import {
   isSecretPath,
   MAX_DEPLOY_BYTES,
   MAX_FILE_BYTES,
-  MAX_FILES,
   NEVER_PUBLISHED_NOTE,
 } from '@fling/shared'
-import { unzipSync } from 'fflate'
+import { readZipSite, ZipError, type ZipSite } from '@fling/shared/zip'
 import { CliError } from './errors.ts'
 import { SecretFilesError } from './manifest.ts'
 import { defaultSiteName, fitName } from './naming.ts'
@@ -135,126 +134,34 @@ export async function prepareInput(
 
 // ---- zip -----------------------------------------------------------------------------------
 
-const JUNK_FILES = new Set(['thumbs.db', 'desktop.ini'])
+export { unwrapSingleFolder, zipDotEntry, zipEntryPath } from '@fling/shared/zip'
 
 /**
- * The site path for a zip entry name, `null` to skip it (folders, `__MACOSX/`, dotfiles, OS junk),
- * or `'unsafe'` for names that would escape the folder (absolute, drive letters, `..`).
- */
-export function zipEntryPath(name: string): string | null | 'unsafe' {
-  const normalised = name.replace(/\\/g, '/')
-  if (normalised.includes('\0')) return 'unsafe'
-  if (normalised.startsWith('/') || /^[a-zA-Z]:/.test(normalised)) return 'unsafe'
-  const segments = normalised.split('/').filter(s => s !== '' && s !== '.')
-  if (segments.includes('..')) return 'unsafe'
-  if (normalised.endsWith('/') || segments.length === 0) return null
-  if (segments[0] === '__MACOSX') return null
-  if (segments.some(s => s.startsWith('.'))) return null
-  if (JUNK_FILES.has((segments.at(-1) ?? '').toLowerCase())) return null
-  return segments.join('/')
-}
-
-/** Drop a single top-level folder shared by every path (repeatedly: `a/b/index.html` → `index.html`). */
-export function unwrapSingleFolder(paths: string[]): string[] {
-  let current = paths
-  for (;;) {
-    const first = current[0]?.split('/')[0]
-    if (!first || !current.every(p => p.includes('/') && p.split('/')[0] === first)) return current
-    current = current.map(p => p.slice(first.length + 1))
-  }
-}
-
-/**
- * A dot entry in a zip worth telling the user about (`.env`, `site/.npmrc`, `.vscode/`), or null.
- * `.git/` and macOS junk (`.DS_Store`, `._*`, anything under `__MACOSX/`) are skipped silently.
- */
-export function zipDotEntry(name: string): string | null {
-  const segments = name
-    .replace(/\\/g, '/')
-    .split('/')
-    .filter(s => s !== '' && s !== '.')
-  if (segments[0] === '__MACOSX') return null
-  const i = segments.findIndex(s => s.startsWith('.'))
-  if (i === -1) return null
-  const seg = segments[i] as string
-  if (seg === '.DS_Store' || seg === '.git' || seg.startsWith('._')) return null
-  return i < segments.length - 1 ? `${segments.slice(0, i + 1).join('/')}/` : segments.join('/')
-}
-
-/**
- * Extract a zip into `dest` (see the module comment). Throws on unsafe names or over-limit sizes.
- * Dot entries that were left out are added to `skippedDotfiles` (once per file / dot-directory).
+ * Extract a zip into `dest` (the rules are `readZipSite`'s, @fling/shared/zip). Throws on unsafe
+ * names or over-limit sizes. Dot entries that were left out are added to `skippedDotfiles`.
  */
 export async function extractZip(
   data: Uint8Array,
   dest: string,
   skippedDotfiles: string[] = []
 ): Promise<string[]> {
-  const unsafe: string[] = []
-  let declared = 0
-  let count = 0
-  let entries: Record<string, Uint8Array>
+  let site: ZipSite
   try {
-    entries = unzipSync(data, {
-      filter: file => {
-        const path = zipEntryPath(file.name)
-        if (path === 'unsafe') {
-          unsafe.push(file.name)
-          return false
-        }
-        if (path === null) {
-          const dot = zipDotEntry(file.name)
-          if (dot && !skippedDotfiles.includes(dot)) skippedDotfiles.push(dot)
-          return false
-        }
-        count++
-        declared += file.originalSize
-        if (file.originalSize > MAX_FILE_BYTES)
-          throw new CliError(
-            `${path} in the zip is ${formatBytes(file.originalSize)}; the limit is ${formatBytes(MAX_FILE_BYTES)} per file`
-          )
-        if (declared > MAX_DEPLOY_BYTES)
-          throw new CliError(
-            `The zip expands to more than ${formatBytes(MAX_DEPLOY_BYTES)}, the limit per deploy`
-          )
-        if (count > MAX_FILES) throw new CliError(`The zip has more than ${MAX_FILES} files`)
-        return true
-      },
-    })
+    site = readZipSite(data)
   } catch (error) {
-    if (error instanceof CliError) throw error
-    throw new CliError(`Could not read the zip: ${(error as Error).message}`)
+    if (error instanceof ZipError) throw new CliError(error.message)
+    throw error
   }
-  if (unsafe.length)
-    throw new CliError(
-      `Refusing to extract the zip: it has paths that escape its folder (${unsafe.slice(0, 3).join(', ')})`
-    )
-
-  const names = Object.keys(entries)
-  const paths = new Map<string, string>()
-  const kept = names.map(n => zipEntryPath(n) as string)
-  const unwrapped = unwrapSingleFolder(kept)
-  names.forEach((n, i) => {
-    paths.set(n, unwrapped[i] as string)
-  })
-  if (names.length === 0) throw new CliError('The zip has no files to fling')
-
+  for (const dot of site.skippedDotfiles)
+    if (!skippedDotfiles.includes(dot)) skippedDotfiles.push(dot)
   const root = resolve(dest)
-  let total = 0
-  const written: string[] = []
-  for (const name of names) {
-    const content = entries[name] as Uint8Array
-    total += content.length
-    if (content.length > MAX_FILE_BYTES || total > MAX_DEPLOY_BYTES)
-      throw new CliError(`The zip expands to more than the limits allow`)
-    const rel = paths.get(name) as string
-    const target = resolve(root, ...rel.split('/'))
-    if (!target.startsWith(root + sep)) throw new CliError(`Unsafe path in the zip: ${name}`)
+  for (const { path, bytes } of site.files) {
+    const target = resolve(root, ...path.split('/'))
+    if (!target.startsWith(root + sep)) throw new CliError(`Unsafe path in the zip: ${path}`)
     await mkdir(join(target, '..'), { recursive: true })
-    await writeFile(target, content)
-    written.push(rel)
+    await writeFile(target, bytes)
   }
-  return written.sort()
+  return site.files.map(f => f.path)
 }
 
 // ---- wrapper page for other single files -------------------------------------------------

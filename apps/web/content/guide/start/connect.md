@@ -4,8 +4,8 @@ part: start
 order: 20
 summary: Add your Fling as a connector, so your assistant can publish what it makes for you.
 requires: [remoteMcp]
-sources: [apps/api/src/config.ts, apps/api/src/mcp/**, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
-verified: f57fbd7
+sources: [apps/api/src/config.ts, apps/api/src/mcp/**, packages/shared/src/sandbox-upload.ts, apps/api/src/oauth/**, packages/shared/src/mcp-tools.ts, apps/web/src/pages/GetStarted.tsx, apps/web/src/pages/ApiKeys.tsx, apps/web/src/pages/Authorize.tsx]
+verified: c82d9d4
 ---
 
 Connect {{instance:name}} to your assistant once, and it can publish the pages, reports and
@@ -48,6 +48,12 @@ Your assistant sends the files it made straight to {{instance:name}}: up to {{fa
 one go, and bigger sites in parts. It gives you back the site's address and, where your Fling has
 comments, a review link to share for feedback.
 
+<!-- requires: sandboxUpload -->
+When Claude makes the files with code execution, it uploads them from its sandbox rather than
+typing them out again. For that, Claude's settings must allow `{{instance:host}}` once: see [Let
+Claude upload its files](/guide/start/claude-uploads).
+<!-- /requires -->
+
 <!-- requires: servers -->
 Over the connector, an assistant can also publish a [site server](/guide/servers/what-is-a-site-server),
 as long as it has no npm packages: it starts from a small server and writes the routes into it.
@@ -60,6 +66,10 @@ Click **Revoke**, then **Disconnect**, to disconnect one: it is signed out at on
 
 ## When it goes wrong
 
+<!-- requires: sandboxUpload -->
+- **Claude says its sandbox can't reach {{instance:host}}.** Claude's settings don't allow the host
+  yet: see [Let Claude upload its files](/guide/start/claude-uploads), then tell Claude it's done.
+<!-- /requires -->
 - **The assistant can't reach your files.** A connector sees only what is in the conversation. To
   publish a file or folder on your computer, use the [Claude Desktop
   extension](/guide/start/claude-desktop), the [Claude Code plugin](/guide/start/claude-code) or

@@ -691,6 +691,14 @@ site's value), for a store with a size limit (CloudFront KeyValueStore: 5 MB). T
 route writes take it at once and maintenance rewrites every site's routes into it. Before a
 rollback to a release before 0.16.0, `json` and its rewrite finished.
 
+**Sandbox upload** — how files Claude made in its code-execution sandbox reach a Fling without
+passing through the conversation: `fling_upload_begin` returns a signed archive URL on the app host
+(`PUT /api/uploads/:id/archive?part=&of=`) and a Python script around it, which zips the files and
+PUTs the zip in parts; `fling_upload_finish`, as the user, unpacks it (`@fling/shared/zip`) and
+publishes it through publication. The URL stores parts only. Claude's sandbox reaches only the
+hosts Claude's settings allow, so the app's host must be one (`sandboxAllowAdvice`).
+`packages/shared/src/sandbox-upload.ts`, `apps/api/src/mcp/publish.ts`.
+
 **Upload binding** — what holds a presigned upload to the exact bytes the manifest names: the
 SHA-256 (`x-amz-checksum-sha256`) where the store checks one, the MD5 (`Content-MD5`, from the
 manifest's optional `md5`) where it checks only that. A store that checks neither, or an upload

@@ -13,7 +13,8 @@
     "build": "echo 'e2e: run from source'"
   },
   "dependencies": {
-    "@fling/shared": "workspace:*"
+    "@fling/shared": "workspace:*",
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

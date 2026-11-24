@@ -5,7 +5,7 @@ order: 20
 summary: Ask reviewers for labels, ratings, scores or a choice, and get their answers back as data.
 requires: [forms]
 sources: [packages/shared/src/forms.ts, packages/shared/src/forms-templates.ts, apps/api/src/forms.ts, apps/api/src/comments.ts, apps/cli/src/forms.ts, apps/cli/src/commands/forms.ts, apps/web/src/pages/Responses.tsx, apps/web/src/components/review/Forms.tsx, packages/shared/src/mcp-tools.ts]
-verified: f57fbd7
+verified: c82d9d4
 ---
 
 A form asks reviewers the same questions on each page: a verdict, a score from 1 to 5, A or B, a

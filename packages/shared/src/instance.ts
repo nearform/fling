@@ -189,6 +189,11 @@ export const CORE_CAPABILITIES = {
    * `fling stats`, `fling_stats`), for its owners, publishers and admins
    */
   metrics: true,
+  /**
+   * files Claude made in its code-execution sandbox upload from there (sandbox-upload.ts):
+   * fling_upload_begin returns a script that PUTs them, zipped, to a signed URL on the app host
+   */
+  sandboxUpload: true,
 } as const
 
 /**

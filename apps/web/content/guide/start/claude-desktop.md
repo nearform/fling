@@ -3,8 +3,8 @@ title: Claude Desktop
 part: start
 order: 30
 summary: Install the Fling extension, so Claude Desktop can fling files from your computer.
-sources: [apps/cli/mcpb/**, apps/cli/src/mcp.ts, apps/cli/src/mcp-entry.ts, apps/cli/src/locate.ts, apps/cli/src/commands/setup.ts, apps/web/src/pages/GetStarted.tsx]
-verified: f57fbd7
+sources: [packages/shared/src/sandbox-upload.ts, apps/cli/mcpb/**, apps/cli/src/mcp.ts, apps/cli/src/mcp-entry.ts, apps/cli/src/locate.ts, apps/cli/src/commands/setup.ts, apps/web/src/pages/GetStarted.tsx]
+verified: c82d9d4
 ---
 
 The Fling extension lets Claude Desktop publish files that are on your computer: a page you
@@ -40,8 +40,13 @@ Name the file, or describe it:
 
 Claude looks for a file you name, newest first, in the folder you are working in, your Downloads,
 your Desktop, `Documents/Claude` and the folders where Claude Desktop and Cowork save their output.
-It tells you where it found the file. Pages Claude writes in the conversation are published
-directly, without a file.
+It tells you where it found the file.
+
+Files Claude makes for you are published from where it saved them, never typed out again. In
+Cowork they are already on your computer, so the extension publishes them from there. In a chat
+with code execution they are in Claude's sandbox in the cloud, so Claude uploads them from the
+sandbox.<!-- requires: sandboxUpload --> For that, `{{instance:host}}` must be allowed once in
+Claude's settings: see [Let Claude upload its files](/guide/start/claude-uploads).<!-- /requires -->
 
 What you can fling:
 
@@ -55,6 +60,13 @@ Claude checks the name with you before it publishes: a file's name becomes the s
 
 ## When it goes wrong
 
+<!-- requires: sandboxUpload -->
+- **Claude says its sandbox can't reach {{instance:host}}.** The files are in Claude's sandbox,
+  and Claude's settings don't allow `{{instance:host}}` yet. Claude stops and publishes nothing.
+  Allow it on claude.ai in a web browser,
+  or on a Team or Enterprise plan ask an Owner: see [Let Claude upload its
+  files](/guide/start/claude-uploads). Then tell Claude "Done, try again".
+<!-- /requires -->
 - **Claude can't find the file.** Give its full path, or ask Claude which recent files it can see.
   If your downloads go somewhere other than `Downloads`, change the extension's **Downloads
   folder** setting in **Settings → Extensions**.

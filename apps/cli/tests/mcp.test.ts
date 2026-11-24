@@ -156,9 +156,18 @@ describe('MCP server', () => {
       ...Object.keys(mcpTools.publish.inputSchema),
       'server',
     ])
-    expect(publish?.description).not.toMatch(/fling_upload_begin/)
+    // Sandbox uploads, but no inline chunked upload: files on this computer go through fling_deploy.
+    expect(tools.map(t => t.name)).toEqual(
+      expect.arrayContaining(['fling_upload_begin', 'fling_upload_finish'])
+    )
+    expect(tools.map(t => t.name)).not.toContain('fling_upload_file')
+    expect(publish?.description).not.toMatch(/fling_upload_file/)
+    expect(tools.find(t => t.name === 'fling_upload_begin')?.description).not.toMatch(
+      /fling_upload_file/
+    )
     expect(tools.find(t => t.name === 'fling_list')?.description).toBe(mcpTools.list.description)
-    expect(client.getInstructions()).toMatch(/never pass file paths from your sandbox/i)
+    expect(client.getInstructions()).toMatch(/never re-send their contents/i)
+    expect(client.getInstructions()).toMatch(/fling_deploy with the path you wrote them to/)
     expect(client.getInstructions()).toMatch(/fling_login/)
   })
 

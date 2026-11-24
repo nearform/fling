@@ -7,9 +7,16 @@ Clone https://github.com/nearform/fling and follow platforms/gcp/DEPLOY.md
 to install Fling on my Google Cloud project at fling.yourdomain.com.
 Before you create or change anything, ask me for what you need
 (the project, the region, the DNS zone and the sign-in provider) and show me the plan.
+When it is live, tell me the host our Claude admin must allow for Claude's code execution
+(the guide's "Claude's sandbox" section).
 ```
 
 Or follow the steps below yourself.
+
+> **After it is live:** have your Claude admin add the Fling's host (for example
+> `fling.yourdomain.com`) to **Additional allowed domains** for Claude's code execution, on
+> claude.ai under **Organization settings → Capabilities**. Without it, Claude can't upload the
+> files it makes and stops to ask for it. See [Claude's sandbox](../aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host).
 
 How Fling works on Google Cloud, element by element:
 [docs/platforms/gcp.md](../../docs/platforms/gcp.md).
@@ -270,6 +277,15 @@ test. By hand:
 ```bash
 FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
 ```
+
+## Claude's sandbox: allow your Fling's host
+
+So that Claude can upload the files it makes with code execution rather than typing them out
+again, your Claude admin adds your Fling's host (the host of the app's address) to **Additional
+allowed domains**, on claude.ai in a web browser under **Organization settings → Capabilities →
+Code execution and file creation**. Only that host is needed. See
+[Claude's sandbox](../aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host) in the AWS guide for
+the steps and how to check them.
 
 ## Rollback
 

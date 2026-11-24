@@ -22,10 +22,16 @@ describe('mcp tool catalogue', () => {
     }
   })
 
-  it('steers Claude away from sandbox paths and towards confirming names', () => {
-    expect(mcpTools.publish.description).toMatch(/never pass file paths from your sandbox/)
+  it('sends files Claude wrote up from its sandbox, never inline, and confirms names', () => {
+    for (const text of [mcpTools.publish.description, mcpRemoteInstructions(mcpWording())]) {
+      expect(text).toMatch(/fling_upload_begin/)
+      expect(text).toMatch(/never re-send their contents/i)
+      expect(text).toMatch(/never pass sandbox (file )?paths/)
+      expect(text).toMatch(/turn(s|ing) code execution on/)
+    }
+    expect(mcpTools.uploadBegin.description).toMatch(/FLING_UPLOAD_BLOCKED/)
+    expect(mcpTools.uploadBegin.description).toMatch(/allowAdvice/)
     expect(mcpTools.publish.description).toMatch(/confirm it with them/)
-    expect(mcpRemoteInstructions(mcpWording())).toMatch(/fling_publish/)
   })
 
   it('renders descriptions from the instance, and stays generic without one', () => {

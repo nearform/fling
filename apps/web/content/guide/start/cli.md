@@ -4,7 +4,7 @@ part: start
 order: 50
 summary: Install the fling command, sign in, and keep it up to date.
 sources: [apps/cli/src/cli.ts, apps/cli/src/commands/setup.ts, apps/cli/src/commands/auth.ts, apps/cli/src/commands/doctor.ts, apps/cli/src/doctor.ts, apps/cli/src/update-check.ts, apps/cli/src/config.ts, apps/cli/package.json, apps/web/src/pages/GetStarted.tsx]
-verified: f57fbd7
+verified: c82d9d4
 ---
 
 The `fling` command publishes from a terminal: a build folder, a page, a zip. It suits scripts,

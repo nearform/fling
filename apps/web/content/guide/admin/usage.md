@@ -6,7 +6,7 @@ summary: How much every site is viewed and pushed to, which sites are busy, and 
 audience: admin
 requires: [metrics]
 sources: [apps/web/src/pages/AdminUsage.tsx, apps/web/src/components/usage/**, apps/web/src/lib/usage.ts, apps/web/src/components/AdminSiteCard.tsx, apps/api/src/routes/admin.ts, apps/api/src/views.ts, apps/api/src/maintenance.ts, packages/shared/src/metrics.ts]
-verified: f57fbd7
+verified: c82d9d4
 ---
 
 The **Usage** page shows how much {{instance:name}} is used: every site's

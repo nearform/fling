@@ -53,6 +53,10 @@ import {
   UpdateGroupRequestSchema,
   UpdatePathRequestSchema,
   UpdateSiteRequestSchema,
+  UploadBeginRequestSchema,
+  UploadBeginResponseSchema,
+  UploadFinishRequestSchema,
+  UploadFinishResponseSchema,
   VersionFilesSchema,
   WhySiteSchema,
 } from '@fling/shared'
@@ -68,6 +72,7 @@ import { ApiError, badRequest, forbidden, notFound } from '../lib/errors.ts'
 import type { PageRequest } from '../lib/site-page.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { issueLiveTicket } from '../live.ts'
+import { archiveUpload, beginUpload, finishUpload, putArchivePart } from '../mcp/publish.ts'
 import type { Acting } from '../notifications/notify.ts'
 import * as notifications from '../notifications/settings.ts'
 import { decide, requestInfo } from '../oauth/flow.ts'
@@ -105,6 +110,23 @@ apiRoutes.use('/sites/:name/arrival', async (c, next) => {
   c.header('Vary', 'Origin')
   c.header('Cache-Control', 'no-store')
   await next()
+})
+// A sandbox upload's zip, PUT in parts by the script fling_upload_begin returned
+// (sandbox-upload.ts). The signed URL is the whole authorisation, so no session: storing parts
+// publishes nothing, and fling_upload_finish, as the user, is what publishes them.
+apiRoutes.put('/uploads/:id/archive', async c => {
+  const res = await putArchivePart(
+    c.get('deps'),
+    {
+      uploadId: c.req.param('id'),
+      exp: c.req.query('exp'),
+      sig: c.req.query('sig'),
+      part: c.req.query('part'),
+      of: c.req.query('of'),
+    },
+    c.req.raw
+  )
+  return c.json(res, 200, { 'cache-control': 'no-store' })
 })
 apiRoutes.use('*', requireAuth)
 
@@ -353,6 +375,31 @@ apiRoutes.post('/sites/:name/deploys/:versionId/finalize', async c => {
     acting(c)
   )
   return c.json(FinalizeResponseSchema.parse(res))
+})
+
+apiRoutes.post('/sites/:name/uploads', async c => {
+  const req = await jsonBody(c, UploadBeginRequestSchema)
+  const deps = c.get('deps')
+  const upload = await beginUpload(deps, c.get('user'), c.req.param('name'), req)
+  return c.json(
+    UploadBeginResponseSchema.parse({
+      uploadId: upload.id,
+      name: upload.name,
+      ...(upload.path === undefined ? {} : { path: upload.path }),
+      expiresAt: upload.expiresAt,
+      ...archiveUpload(deps, upload),
+    })
+  )
+})
+
+apiRoutes.post('/uploads/:id/finish', async c => {
+  const req = await jsonBody(c, UploadFinishRequestSchema)
+  const outcome = await finishUpload(c.get('deps'), c.get('user'), c.req.param('id'), {
+    principal: principalOf(c),
+    listHtml: req.listHtml,
+    ...(req.confirmPublicServer ? { confirmPublicServer: true } : {}),
+  })
+  return c.json(UploadFinishResponseSchema.parse(outcome))
 })
 
 apiRoutes.post('/sites/:name/current', async c => {

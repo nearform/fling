@@ -5,7 +5,7 @@ order: 28
 summary: See how full the route table is, choose the format its entries are written in, and how long maintenance takes to go round every site.
 audience: admin
 sources: [apps/web/src/pages/AdminRoutes.tsx, apps/web/src/lib/headroom.ts, apps/api/src/route-format.ts, apps/api/src/maintenance.ts]
-verified: ee10036
+verified: c82d9d4
 ---
 
 Every site's address finds its files through the **route table**, which the edge reads on every

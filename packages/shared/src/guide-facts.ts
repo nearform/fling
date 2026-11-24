@@ -18,7 +18,7 @@ import {
   MAX_PATHS_PER_SITE,
 } from './limits.ts'
 import { MAX_MARKDOWN_BYTES, MAX_RENDERED_MARKDOWN } from './markdown.ts'
-import { MCP_PUBLISH_MAX_BYTES } from './mcp-tools.ts'
+import { MCP_PUBLISH_MAX_BYTES, MCP_UPLOAD_TTL_SECONDS } from './mcp-tools.ts'
 import { METRIC_DAYS, METRIC_MONTHS, METRIC_WEEKS } from './metrics.ts'
 import { MAIL_TESTS_PER_HOUR } from './notifications.ts'
 import { EDGE_SERVER_READ_TIMEOUT_SECONDS, SITE_PASS_TTL_SECONDS } from './route-keys.ts'
@@ -72,6 +72,8 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'max-files': count(MAX_FILES),
   'max-path': `${count(MAX_PATH_BYTES)} bytes`,
   'max-inline': mb(MCP_PUBLISH_MAX_BYTES),
+  /** how long an upload (fling_upload_begin) stays open */
+  'upload-window': `${MCP_UPLOAD_TTL_SECONDS / 60} minutes`,
   'max-paths': count(MAX_PATHS_PER_SITE),
   /**
    * the live Paths a site may have: the code's default here; the web app puts the instance's own

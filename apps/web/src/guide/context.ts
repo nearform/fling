@@ -26,6 +26,7 @@ export function guideContextFor(
   return {
     instance: {
       origin: appOrigin,
+      host: new URL(appOrigin).host,
       name: instance?.name ?? DEFAULT_INSTANCE_NAME,
       mcp: `${appOrigin}/mcp`,
       install: instance?.installCommand ?? DEFAULT_INSTALL_COMMAND,

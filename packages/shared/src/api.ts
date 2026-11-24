@@ -387,6 +387,61 @@ export const FinalizeResponseSchema = z.object({
   hints: z.array(PublishHintSchema).optional(),
 })
 
+/**
+ * POST /api/sites/:name/uploads → UploadBeginResponseSchema: a sandbox upload (sandbox-upload.ts),
+ * for the local MCP server's fling_upload_begin. The fields are a deploy's; the name is checked
+ * first (400 `invalid_name`, 409 `name_taken` with suggestions).
+ */
+export const UploadBeginRequestSchema = z.object({
+  path: PublishPathSchema.optional(),
+  base: z.string().min(1).max(100).optional(),
+  remove: z.array(z.string().min(1).max(MAX_STORED_PATH_LENGTH)).max(MAX_FILES).optional(),
+  spa: z.boolean().optional(),
+  access: AccessLevelSchema.optional(),
+  audience: AudienceInputSchema.optional(),
+})
+
+export const UploadBeginResponseSchema = z.object({
+  uploadId: z.string(),
+  name: z.string(),
+  path: z.string().optional(),
+  expiresAt: z.string(),
+  /** the command Claude runs in its sandbox (`<path>` replaced) */
+  script: z.string(),
+  /** the host the sandbox must reach */
+  host: z.string(),
+  /** where in Claude the host is allowed */
+  allowAdvice: z.string(),
+})
+
+/** POST /api/uploads/:id/finish  { listHtml?, confirmPublicServer? } → UploadFinishResponseSchema */
+export const UploadFinishRequestSchema = z.object({
+  listHtml: z.boolean().optional(),
+  confirmPublicServer: z.boolean().optional(),
+})
+
+export const UploadFinishResponseSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('needs_decision'),
+    htmlPages: z.array(z.string()),
+    fileCount: z.number(),
+  }),
+  z.object({
+    kind: z.literal('published'),
+    status: z.enum(['live', 'unchanged', 'repointed']),
+    versionId: z.string(),
+    site: SiteSchema,
+    first: z.boolean().optional(),
+    fileCount: z.number(),
+    totalBytes: z.number(),
+    generatedIndex: z.boolean(),
+    warnings: z.array(z.string()),
+    path: z.string().optional(),
+    hints: z.array(PublishHintSchema).optional(),
+  }),
+])
+export type UploadFinishResponse = z.infer<typeof UploadFinishResponseSchema>
+
 /** POST /api/sites/:name/current  { versionId } */
 export const RollbackRequestSchema = z.object({ versionId: z.string() })
 

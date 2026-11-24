@@ -29,6 +29,7 @@ import {
   describeSharedSite,
   describeSiteAccess,
   describeSiteMetrics,
+  describeUploadBegun,
   describeVersionFiles,
   editAudienceInput,
   editRoleInput,
@@ -84,6 +85,7 @@ import type { User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
 import { siteMetrics, yourSitesMetrics } from '../views.ts'
 import {
+  archiveUpload,
   beginUpload,
   decodeContent,
   type Encoding,
@@ -591,11 +593,17 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       remove: args.remove,
       ...accessOf(args),
     })
+    const sandbox = archiveUpload(deps, upload)
     return {
-      text:
-        `Upload ${upload.id} started for "${upload.name}"${upload.path ? `, into /${upload.path}/` : ''}. Send each file with fling_upload_file ` +
-        `(uploadId "${upload.id}"), then call fling_upload_finish. Expires at ${upload.expiresAt}.`,
-      data: { uploadId: upload.id, name: upload.name, expiresAt: upload.expiresAt },
+      text: describeUploadBegun(upload, sandbox),
+      data: {
+        uploadId: upload.id,
+        name: upload.name,
+        expiresAt: upload.expiresAt,
+        script: sandbox.script,
+        host: sandbox.host,
+        allowAdvice: sandbox.allowAdvice,
+      },
     }
   })
 

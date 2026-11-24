@@ -4,7 +4,7 @@ part: run
 order: 10
 summary: What an instance is, on AWS, Cloudflare, Google Cloud, Azure, DigitalOcean or your own machines, and how its name, sign-in and brand are set.
 sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, platforms/gcp/DEPLOY.md, platforms/azure/DEPLOY.md, platforms/digitalocean/DEPLOY.md, platforms/node/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
-verified: ee10036
+verified: c82d9d4
 ---
 
 Fling is open source. Anyone can run their own, on their own cloud account or machines, under their own
@@ -86,6 +86,14 @@ file or a Kubernetes Secret.
 
 Once it runs, its admins can see every value it runs with at **Admin → Settings** in the web
 app. Changing one is a deploy.
+
+<!-- requires: sandboxUpload -->
+One setting lives in Claude, not in Fling. For Claude to upload the files it makes with code
+execution, rather than type them out again in the chat, Claude's settings must allow your Fling's
+host, `{{instance:host}}` here. On a Team or Enterprise plan, an Owner adds it once, for everyone,
+on claude.ai under **Organization settings → Capabilities**. [Let Claude upload its
+files](/guide/start/claude-uploads) has the steps people follow.
+<!-- /requires -->
 
 ## The deploy guides
 

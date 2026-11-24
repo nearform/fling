@@ -80,6 +80,7 @@ import {
   RELEASE_HEADER,
 } from '@fling/shared'
 import { VIEW_BEACON } from '@fling/shared/view-beacon'
+import { zipSync } from 'fflate'
 import { REPO, runCli, runCliOutcome } from './cli.ts'
 import { cookiePairs, type Session } from './sign-in.ts'
 
@@ -415,6 +416,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
   const name = `e2e-${nonce}`
   const raceName = `e2e-${nonce}-race`
   const mcpName = `e2e-${nonce}-mcp`
+  const sandboxName = `e2e-${nonce}-sandbox`
   const mineName = `e2e-${nonce}-mine`
   const work = mkdtempSync(join(tmpdir(), 'fling-e2e-'))
   const fling = (...args: string[]) =>
@@ -1056,6 +1058,62 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       `view ${mcpUrl}: ${viaMcp.status}`
     )
     step(`MCP publish → ${mcpUrl}`)
+
+    // Sandbox upload: what Claude's code-execution sandbox does with the script fling_upload_begin
+    // returns (the zip, PUT in parts to the signed URL), then finish as the user.
+    if (meta.capabilities.sandboxUpload) {
+      const begun = await api('POST', `/api/sites/${sandboxName}/uploads`, { access: 'public' })
+      check(
+        begun.status === 200,
+        `sandbox upload begin: ${begun.status} ${await begun.clone().text()}`
+      )
+      const { uploadId, script, host } = (await begun.json()) as {
+        uploadId: string
+        script: string
+        host: string
+      }
+      const archiveUrl = script.match(/^URL = "(.*)"$/m)?.[1]
+      check(
+        archiveUrl && new URL(archiveUrl).host === host && new URL(archiveUrl).origin === appOrigin,
+        `sandbox upload URL ${archiveUrl} is not on ${appOrigin}`
+      )
+      const zip = zipSync({
+        'site/index.html': new TextEncoder().encode(page('sandbox', `sandbox ${nonce}`)),
+      })
+      const half = Math.ceil(zip.length / 2)
+      for (const [n, part] of [zip.slice(0, half), zip.slice(half)].entries()) {
+        const put = await fetch(`${archiveUrl}&part=${n}&of=2`, {
+          method: 'PUT',
+          body: part as Uint8Array<ArrayBuffer>,
+          headers: { 'content-type': 'application/zip' },
+        })
+        check(put.status === 200, `sandbox upload part ${n}: ${put.status}`)
+      }
+      const unsigned = await fetch(`${appOrigin}/api/uploads/${uploadId}/archive?part=0&of=1`, {
+        method: 'PUT',
+        body: zip as Uint8Array<ArrayBuffer>,
+      })
+      check(unsigned.status === 403, `an unsigned archive part: ${unsigned.status}, expected 403`)
+      const finished = await api('POST', `/api/uploads/${uploadId}/finish`, {})
+      made.push(sandboxName)
+      check(
+        finished.status === 200,
+        `sandbox upload finish: ${finished.status} ${await finished.clone().text()}`
+      )
+      const done = (await finished.json()) as { kind: string; site?: { url: string } }
+      check(
+        done.kind === 'published' && done.site,
+        `sandbox upload finish: ${JSON.stringify(done)}`
+      )
+      const viaSandbox = await get(done.site.url)
+      check(
+        viaSandbox.status === 200 && viaSandbox.text.includes(`sandbox ${nonce}`),
+        `view ${done.site.url}: ${viaSandbox.status}`
+      )
+      step(`sandbox upload: a zip in 2 signed parts on ${host}, published → ${done.site.url}`)
+    } else {
+      step('sandbox upload: not on this instance (skipped)')
+    }
   } finally {
     for (const site of made) {
       await fling('rm', site, '--yes').catch(err => log(`  ! could not remove ${site}: ${err}`))

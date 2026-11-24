@@ -1,14 +1,27 @@
 /**
  * Find what the user means by a path. An existing path (absolute, `~/…` or relative to the working
- * directory) is used as is. Anything else — a bare file name ("Pitch Deck.html"), a path that only
- * exists inside Claude's sandbox (`/mnt/user-data/outputs/x.html`, `/sessions/…/outputs/x.html`) —
- * is looked up by name, newest first, in the places people and Claude Desktop put files:
+ * directory) is used as is.
+ *
+ * A Cowork sandbox path is mapped to the host folder it mirrors. Sessions live in the session store
+ * (macOS `~/Library/Application Support/Claude/local-agent-mode-sessions`, Windows
+ * `%APPDATA%\Claude\local-agent-mode-sessions`) as `<store>/<org>/<group>/local_<id>.json`, next to
+ * a `local_<id>/` folder holding `outputs/`. The JSON names the session's VM (`vmProcessName`) and
+ * the host folders the user connected (`userSelectedFolders`). Inside the VM,
+ * `/sessions/<vm>/mnt/outputs/<rel>` is `local_<id>/outputs/<rel>` and
+ * `/sessions/<vm>/mnt/<folder>/<rel>` is `<rel>` in the connected folder named `<folder>` (a
+ * best-effort match on the folder's base name). The mapped path must stay inside that folder: `..`
+ * is refused and symlinks are resolved before the check.
+ *
+ * Anything else — a bare file name ("Pitch Deck.html"), a sandbox path that does not map
+ * (`/mnt/user-data/outputs/x.html`, an unknown VM) — is looked up by name, newest first, in the
+ * places people and Claude Desktop put files:
  *
  *   the working directory (unless it is `/` or home), Downloads (FLING_DOWNLOADS_DIR or the
  *   platform default; XDG user-dirs on Linux), Desktop, ~/Documents/Claude, ~/Claude, and the
- *   `outputs` folders of Claude Desktop / Cowork sessions
- *   (macOS `~/Library/Application Support/Claude/local-agent-mode-sessions`,
- *   Windows `%APPDATA%\Claude\local-agent-mode-sessions`).
+ *   `outputs` folders of the session store.
+ *
+ * A sandbox path found nowhere throws `SandboxPathError`: the file is in Claude's cloud sandbox,
+ * not on this computer.
  *
  * The walk is bounded (depth per root, an entry budget and a time budget) and skips dot-folders,
  * node_modules and __MACOSX. Pure apart from the injectable filesystem: tests pass a fake one and
@@ -95,6 +108,11 @@ const SESSIONS_DEPTH = 4
 const OUTPUTS_DEPTH = 4
 /** Sandbox / VM path prefixes Claude uses for its own files: never real paths on this computer. */
 const SANDBOX_PATH_RE = /^\/(mnt\/user-data|mnt\/data|sessions|home\/claude|tmp\/outputs)(\/|$)/
+/** `/sessions/<vm>/mnt/<folder>/<rel>`: a Cowork VM's view of an outputs or connected folder. */
+const SESSION_MOUNT_RE = /^\/sessions\/([^/]+)\/mnt\/([^/]+)(?:\/(.*))?$/
+const SESSION_FILE_RE = /^local_.+\.json$/
+const OUTPUTS_LABEL = 'Claude Desktop outputs'
+const CONNECTED_LABEL = 'Claude Desktop connected folder'
 
 export const nodeFs: LocateFs = {
   async stat(path) {
@@ -207,12 +225,7 @@ export async function searchRoots(opts: LocateOptions): Promise<SearchRoot[]> {
             'Claude'
           )
         : p.join(env.XDG_CONFIG_HOME || p.join(home, '.config'), 'Claude')
-  add(
-    'Claude Desktop outputs',
-    p.join(claudeConfig, 'local-agent-mode-sessions'),
-    SESSIONS_DEPTH,
-    true
-  )
+  add(OUTPUTS_LABEL, p.join(claudeConfig, 'local-agent-mode-sessions'), SESSIONS_DEPTH, true)
 
   // Same folder through a symlink (macOS /var → /private/var…): keep the first.
   if (!fs.realpath) return roots
@@ -341,9 +354,113 @@ function normaliseInput(raw: string, opts: LocateOptions): string {
   return expandHome(input, opts.home, opts.platform)
 }
 
+interface SessionRecord {
+  /** `<store>/<org>/<group>/local_<id>`, the folder next to the JSON. */
+  dir: string
+  userSelectedFolders: string[]
+  lastActivityAt: number
+}
+
+/** The session whose VM is `vm`, newest first when several claim it; null when none does. */
+async function findSession(
+  vm: string,
+  store: string,
+  opts: LocateOptions
+): Promise<SessionRecord | null> {
+  const fs = opts.fs ?? nodeFs
+  const p = pathFor(opts.platform)
+  let best: SessionRecord | null = null
+  const dirsOf = async (dir: string) =>
+    (await fs.readdir(dir)).filter(e => e.isDirectory && !e.name.startsWith('.'))
+  for (const org of await dirsOf(store)) {
+    for (const group of await dirsOf(p.join(store, org.name))) {
+      const groupDir = p.join(store, org.name, group.name)
+      for (const e of await fs.readdir(groupDir)) {
+        if (!e.isFile || !SESSION_FILE_RE.test(e.name)) continue
+        const text = await fs.readText(p.join(groupDir, e.name))
+        if (!text) continue
+        let json: unknown
+        try {
+          json = JSON.parse(text)
+        } catch {
+          continue
+        }
+        if (!json || typeof json !== 'object') continue
+        const record = json as Record<string, unknown>
+        if (record.vmProcessName !== vm) continue
+        const folders = Array.isArray(record.userSelectedFolders)
+          ? record.userSelectedFolders.filter((f): f is string => typeof f === 'string' && !!f)
+          : []
+        const activity = Number(record.lastActivityAt) || 0
+        if (best && best.lastActivityAt >= activity) continue
+        best = {
+          dir: p.join(groupDir, e.name.slice(0, -'.json'.length)),
+          userSelectedFolders: folders,
+          lastActivityAt: activity,
+        }
+      }
+    }
+  }
+  return best
+}
+
+/** `child` is `base` or inside it, after resolving symlinks when the filesystem can. */
+async function staysInside(base: string, child: string, opts: LocateOptions): Promise<boolean> {
+  const fs = opts.fs ?? nodeFs
+  const p = pathFor(opts.platform)
+  const real = async (x: string) => (fs.realpath ? await fs.realpath(x) : x)
+  const realBase = await real(base)
+  const realChild = await real(child)
+  if (!realBase || !realChild) return false
+  const fold = (x: string) => (opts.platform === 'win32' ? x.toLowerCase() : x)
+  const b = fold(p.normalize(realBase)).replace(/[\\/]+$/, '')
+  const c = fold(p.normalize(realChild))
+  return c === b || c.startsWith(b + p.sep)
+}
+
+/**
+ * Map `/sessions/<vm>/mnt/<folder>/<rel>` to the host folder it mirrors (see the module comment).
+ * Null when the input is not such a path or the mapping finds nothing on this computer.
+ */
+async function resolveSessionMount(
+  input: string,
+  roots: SearchRoot[],
+  opts: LocateOptions
+): Promise<Resolved | null> {
+  const match = SESSION_MOUNT_RE.exec(input.replace(/\\/g, '/'))
+  if (!match) return null
+  const [, vm, folder, rest = ''] = match as unknown as [string, string, string, string?]
+  const segments = rest.split('/').filter(s => s !== '' && s !== '.')
+  if (segments.includes('..') || folder === '..' || folder === '.') return null
+  const store = roots.find(r => r.sessions)
+  if (!store) return null
+  const session = await findSession(vm, store.path, opts)
+  if (!session) return null
+
+  const fs = opts.fs ?? nodeFs
+  const p = pathFor(opts.platform)
+  const same = (a: string, b: string) =>
+    opts.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+  const base =
+    folder === 'outputs'
+      ? p.join(session.dir, 'outputs')
+      : session.userSelectedFolders.find(f => same(p.basename(p.resolve(f)), folder))
+  if (!base) return null
+  const target = segments.length ? p.join(base, ...segments) : p.normalize(base)
+  const s = await fs.stat(target)
+  if (!s || !(s.isFile || s.isDirectory)) return null
+  if (!(await staysInside(base, target, opts))) return null
+  return {
+    path: target,
+    foundIn: folder === 'outputs' ? OUTPUTS_LABEL : CONNECTED_LABEL,
+    isDirectory: s.isDirectory,
+    alternatives: [],
+  }
+}
+
 /**
  * Resolve user input to a file or folder on this computer (see the module comment). Throws a
- * CliError listing where it looked when nothing matches.
+ * CliError listing where it looked when nothing matches (a `SandboxPathError` for a sandbox path).
  */
 export async function resolveInput(input: string, opts: LocateOptions): Promise<Resolved> {
   const fs = opts.fs ?? nodeFs
@@ -365,6 +482,8 @@ export async function resolveInput(input: string, opts: LocateOptions): Promise<
   const wanted = splitSegments(given)
   const name = wanted.at(-1)
   const roots = await searchRoots(opts)
+  const mapped = await resolveSessionMount(given, roots, opts)
+  if (mapped) return mapped
   if (!name) throw notFound(input, roots)
 
   const found: (Candidate & { score: number; mtimeMs: number; isDirectory: boolean })[] = []
@@ -400,12 +519,27 @@ export async function resolveInput(input: string, opts: LocateOptions): Promise<
   }
 }
 
+/**
+ * A path inside Claude's cloud sandbox that is not on this computer: the caller uploads it from
+ * the sandbox (fling_upload_begin) instead.
+ */
+export class SandboxPathError extends CliError {
+  readonly code = 'sandbox_path'
+  constructor(message: string, hint: string) {
+    super(message, { hint })
+    this.name = 'SandboxPathError'
+  }
+}
+
 function notFound(input: string, roots: SearchRoot[]): CliError {
   const where = roots.map(r => `${r.label} (${r.path})`).join(', ')
-  const sandbox = looksLikeSandboxPath(input)
-    ? ' That looks like a path inside Claude’s sandbox, which this computer cannot see: publish the content inline with fling_publish, or save/download the file to this computer first.'
-    : ''
-  return new CliError(`Could not find "${input}". Looked for it by name in: ${where}.${sandbox}`, {
+  const message = `Could not find "${input}". Looked for it by name in: ${where}.`
+  if (looksLikeSandboxPath(input))
+    return new SandboxPathError(
+      `${message} That path is in Claude’s cloud sandbox, not on this computer.`,
+      'Upload it from the sandbox: call fling_upload_begin and run the script it returns there.'
+    )
+  return new CliError(message, {
     hint: 'Pass the full path, or save the file to your Downloads folder and use just its name.',
   })
 }

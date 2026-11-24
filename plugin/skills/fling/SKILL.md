@@ -126,9 +126,21 @@ Notes:
   working folder, Downloads, Desktop, `~/Documents/Claude`, `~/Claude` and Claude Desktop/Cowork
   output folders. The result says where it was found. `fling_find_files { query? }` lists recent
   candidates.
-- **Never pass paths from your own sandbox** (`/mnt/user-data/outputs/…`, `/sessions/…`), and never
-  curl or upload from it. That machine can't reach Fling. Publish what you wrote with
-  `fling_publish`. For a file the user downloaded, use its name with `fling_deploy`.
+- **Never re-send files you wrote.** Content you wrote to files goes up as files, never as tool
+  arguments:
+  - Call `fling_deploy` with the path you wrote them to, even a sandbox path
+    (`/sessions/<vm>/mnt/outputs/…`). In Cowork the file is on this computer and is published from
+    disk.
+  - If it says the file is in your cloud sandbox, call `fling_upload_begin`, run the `script` it
+    returns in your sandbox (replace `<path>`), then `fling_upload_finish`.
+  - If the script prints `FLING_UPLOAD_BLOCKED`, stop: don't publish, and never change, shrink or
+    redraw the content. Tell the user to allow the host, with what `allowAdvice` says (which host,
+    and where), and to tell you once it is allowed; then run the same script again. Publish inline
+    with `fling_publish` only if the user asks you to.
+  - Without code execution, `fling_publish` inline. For a big site (more than a few files, or about
+    50 KB), first suggest turning code execution on, and say why: inline means re-typing every
+    file, which is slow, costly and can corrupt it.
+  - For a file the user downloaded, use its name with `fling_deploy`.
 - **Claude Desktop (including Cowork)** gets these tools from the Fling extension. Download it from
   the Get started page of any of the user's Flings (`https://<their Fling>/downloads/fling.mcpb`),
   then double-click it, drag it into Claude, or go to Settings → Extensions → Advanced settings →

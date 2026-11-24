@@ -50,6 +50,11 @@ import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from './paths-templ
 import { MCP_READ_MAX_BYTES } from './read-files.ts'
 import { SERVER_BUNDLE, SERVER_PREFIX } from './route-keys.ts'
 import {
+  INLINE_LARGE,
+  SANDBOX_UPLOAD_OUTCOMES as OUT,
+  SANDBOX_BLOCKED_NOTE,
+} from './sandbox-upload.ts'
+import {
   OWNER_EMAILS_MAX,
   PUBLISHER_EMAILS_MAX,
   PUBLISHER_GROUPS_MAX,
@@ -198,9 +203,14 @@ const NAME_REQUIRED =
   'and confirm it with them first (fling_check_name tells you whether it is free). If the name is taken by someone ' +
   'else the call fails with free suggestions — offer those to the user and retry with the one they pick.'
 
-const INLINE_ONLY =
-  'If you created the content in this conversation, pass it directly — never pass file paths from your ' +
-  'sandbox (this server cannot read them) and never try to curl/upload from your sandbox.'
+/** Files Claude made in its sandbox go up from the sandbox, never through the conversation. */
+const SANDBOX_FIRST =
+  'Files you wrote with code execution (in your sandbox) go up from there: call fling_upload_begin, run the ' +
+  '`script` it returns in your sandbox, then fling_upload_finish. Never re-send their contents here, and never ' +
+  'pass sandbox paths (this server cannot read them). Without code execution (no shell tool), pass the content ' +
+  `inline; if it is large (${INLINE_LARGE}), first suggest the user turns code execution on and say why: ` +
+  'inline means re-typing every file, which is slow, costly and can corrupt it, while with code execution the ' +
+  'files upload directly.'
 
 /** Shown to Claude wherever files are sent (no override exists, so don't let it look for one). */
 export const NEVER_PUBLISHED =
@@ -900,7 +910,7 @@ export function mcpToolsFor(w: McpWording) {
       description:
         'Publish a static site to Fling in one call and get back its URL. Pass every file of the site inline in ' +
         `\`files\` (whole site, up to ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB decoded in total; bigger sites: ` +
-        `fling_upload_begin / fling_upload_file / fling_upload_finish). ${INLINE_ONLY} ${ENCODING} ` +
+        `fling_upload_begin / fling_upload_file / fling_upload_finish). ${SANDBOX_FIRST} ${ENCODING} ` +
         'Publishing replaces the whole site with exactly these files (it is not a patch: include unchanged files too), ' +
         `unless \`path\` or \`base\` is given; publishing identical content again is a no-op. ${PATH_PUBLISH_NOTE} ` +
         `${PULL_NOTE} ` +
@@ -947,11 +957,16 @@ export function mcpToolsFor(w: McpWording) {
 
     uploadBegin: tool({
       name: 'fling_upload_begin',
-      title: 'Start a chunked upload',
+      title: 'Start an upload',
       description:
-        `Start publishing a site too big for one fling_publish call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, ` +
-        'or large binary files). Returns an `uploadId`; then send each file with fling_upload_file and finish with ' +
-        `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ${INLINE_ONLY} ` +
+        'Start publishing files without sending them through this conversation. Returns an `uploadId`, and a ' +
+        '`script` for your code-execution sandbox: replace `<path>` in it with the folder (or the one file) to ' +
+        'publish and run it there. It zips the files and uploads them straight to Fling, then prints one line: ' +
+        `\`${OUT.uploaded} …\` → call fling_upload_finish; \`${OUT.blocked} <host>: …\` → your sandbox may not ` +
+        `reach that host: ${SANDBOX_BLOCKED_NOTE} \`${OUT.failed} …\` → say what it printed. ` +
+        'Without a sandbox, send the files with fling_upload_file instead, for a site too big for one fling_publish ' +
+        `call (over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB, or large binary files). Finish with ` +
+        `fling_upload_finish within ${MCP_UPLOAD_TTL_SECONDS / 60} minutes. ` +
         `${NAME_REQUIRED} ${VISIBILITY} ${PATH_PUBLISH_NOTE} With \`base\` (from fling_read_files), send only ` +
         'the files you changed or added, and `remove` the ones to delete: every other file of the site is kept.',
       inputSchema: {
@@ -996,7 +1011,7 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_upload_finish',
       title: 'Finish a chunked upload',
       description:
-        'Publish everything sent with fling_upload_file as the new version of the site and return its URL. The site ' +
+        'Publish everything uploaded (by the sandbox script or with fling_upload_file) as the new version of the site and return its URL. The site ' +
         `becomes exactly the uploaded files (with \`path\`, that Path does; with \`base\`, plus the rest of that version). ${LIST_HTML} The upload stays open, so just call fling_upload_finish ` +
         'again with `listHtml`. The result includes `warnings`.',
       inputSchema: {
@@ -1553,9 +1568,13 @@ export const mcpRemoteInstructions = (
 ) =>
   [
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}.`,
-    'To publish content you created in this conversation (an HTML page, a report, a small app): call fling_publish with ' +
-      'every file inline (text as utf8, binary as base64). This server cannot read files in your sandbox and your sandbox ' +
-      'cannot reach Fling, so never pass sandbox file paths and never curl or upload from the sandbox. Make the site ' +
+    'To publish content you created in this conversation (an HTML page, a report, a small app): if you wrote it to ' +
+      'files with code execution, upload them from your sandbox (fling_upload_begin, run the `script` it returns, ' +
+      'fling_upload_finish) and never re-send their contents. If the script says your sandbox cannot reach Fling: ' +
+      `${SANDBOX_BLOCKED_NOTE} Without code execution, call fling_publish ` +
+      `with every file inline (text as utf8, binary as base64); if the content is large (${INLINE_LARGE}), first ` +
+      'suggest turning code execution on, and say why: inline means re-typing every file, which is slow, costly and ' +
+      'can corrupt it. This server cannot read your sandbox, so never pass sandbox file paths. Make the site ' +
       'self-contained: an index.html at the root, relative links between files.',
     'Every site needs a name. If the user did not give one, propose a short descriptive name and confirm it before ' +
       'publishing (fling_check_name shows whether it is free). Names are global and first come, first served; when a ' +
@@ -1567,8 +1586,8 @@ export const mcpRemoteInstructions = (
       '(`listHtml: false`, the root URL will 404), then retry.',
     PULL_NOTE,
     NEVER_PUBLISHED,
-    `For sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, fling_upload_file (repeat, ` +
-      '`append` for big files) and fling_upload_finish.',
+    `Without code execution, for sites over ${MCP_PUBLISH_MAX_BYTES / 1024 / 1024} MB use fling_upload_begin, ` +
+      'fling_upload_file (repeat, `append` for big files) and fling_upload_finish.',
     (opts.comments
       ? 'Always give the user the links that come back: the review link first, as the one to share for feedback, then the site URL. '
       : 'Always give the user the URL that comes back. ') +

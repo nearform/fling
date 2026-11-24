@@ -6,6 +6,7 @@ import {
   type LocateFs,
   type LocateOptions,
   resolveInput,
+  SandboxPathError,
   searchRoots,
 } from '../src/locate.ts'
 import { captureError } from './helpers.ts'
@@ -154,7 +155,9 @@ describe('resolveInput', () => {
     expect(e.message).toMatch(/Could not find "\/mnt\/user-data\/outputs\/nope\.html"/)
     expect(e.message).toMatch(/Downloads \(\/Users\/me\/Downloads\)/)
     expect(e.message).toMatch(/Claude Desktop outputs/)
-    expect(e.message).toMatch(/sandbox.*fling_publish/)
+    expect(e.message).toMatch(/Claude’s cloud sandbox, not on this computer/)
+    expect((e as SandboxPathError).hint).toMatch(/fling_upload_begin/)
+    expect(e).toBeInstanceOf(SandboxPathError)
   })
 
   it('skips node_modules and dot-folders', async () => {
@@ -228,6 +231,144 @@ describe('resolveInput', () => {
     ])
     const env = await searchRoots({ ...opts, env: { XDG_DOWNLOAD_DIR: '/data/dl' } })
     expect(env[1]?.path).toBe('/data/dl')
+  })
+})
+
+describe('resolveInput: Cowork sandbox paths', () => {
+  const store = '/Users/me/Library/Application Support/Claude/local-agent-mode-sessions'
+  const session = `${store}/org/group/local_1`
+  const sessionJson = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      vmProcessName: 'blissful-festive-wright',
+      userSelectedFolders: ['/Users/me/Projects/site'],
+      lastActivityAt: 2,
+      systemPrompt: 'long',
+      ...extra,
+    })
+  const files = {
+    [`${session}.json`]: 1,
+    [`${session}/outputs/report.html`]: 3,
+    [`${session}/outputs/site/index.html`]: 3,
+    [`${store}/org/group/local_2.json`]: 1,
+    [`${store}/org/group/local_2/outputs/report.html`]: 1,
+    '/Users/me/Projects/site/docs/index.html': 1,
+    '/Users/me/Downloads/report.html': 0,
+  }
+  const texts = {
+    [`${session}.json`]: sessionJson(),
+    [`${store}/org/group/local_2.json`]: sessionJson({
+      vmProcessName: 'other-vm',
+      userSelectedFolders: [],
+    }),
+  }
+  const opts = (fs = fakeFs(files, 'darwin', texts)) => mac({}, { fs })
+
+  it('maps an outputs file to its session folder, with no alternatives', async () => {
+    expect(
+      await resolveInput('/sessions/blissful-festive-wright/mnt/outputs/report.html', opts())
+    ).toEqual({
+      path: `${session}/outputs/report.html`,
+      foundIn: 'Claude Desktop outputs',
+      isDirectory: false,
+      alternatives: [],
+    })
+  })
+
+  it('maps an outputs folder', async () => {
+    expect(
+      await resolveInput('/sessions/blissful-festive-wright/mnt/outputs/site/', opts())
+    ).toMatchObject({ path: `${session}/outputs/site`, isDirectory: true, alternatives: [] })
+  })
+
+  it('maps a connected folder by its base name', async () => {
+    expect(
+      await resolveInput('/sessions/blissful-festive-wright/mnt/site/docs', opts())
+    ).toMatchObject({
+      path: '/Users/me/Projects/site/docs',
+      foundIn: 'Claude Desktop connected folder',
+      isDirectory: true,
+    })
+  })
+
+  it('refuses .. and symlinks that leave the folder', async () => {
+    const e = await captureError(
+      resolveInput('/sessions/blissful-festive-wright/mnt/outputs/../../local_1.json', opts())
+    )
+    expect(e).toBeInstanceOf(SandboxPathError)
+    const leak = '/Users/me/Projects/site/leak.html'
+    const base = fakeFs({ ...files, [leak]: 1 }, 'darwin', texts)
+    const linked: LocateFs = {
+      ...base,
+      async realpath(path) {
+        return path === leak ? '/Users/me/.ssh/id_rsa' : path
+      },
+    }
+    expect(
+      await captureError(
+        resolveInput('/sessions/blissful-festive-wright/mnt/site/leak.html', opts(linked))
+      )
+    ).toBeInstanceOf(SandboxPathError)
+  })
+
+  it('an unknown VM or a missing file falls back to the lookup by name', async () => {
+    // By name: every report.html, newest first among those whose parent is `outputs`.
+    const byName = await resolveInput('/sessions/unknown-vm/mnt/outputs/report.html', opts())
+    expect(byName.path).toBe(`${store}/org/group/local_2/outputs/report.html`)
+    expect(byName.alternatives.map(a => a.path)).toContain('/Users/me/Downloads/report.html')
+    const e = await captureError(
+      resolveInput('/sessions/blissful-festive-wright/mnt/outputs/nope.html', opts())
+    )
+    expect(e).toBeInstanceOf(SandboxPathError)
+    expect(e.message).toMatch(/Could not find .*not on this computer/)
+    expect((e as SandboxPathError).hint).toMatch(/fling_upload_begin/)
+  })
+
+  it('tolerates unreadable and malformed session files', async () => {
+    const broken = fakeFs(files, 'darwin', {
+      [`${session}.json`]: '{not json',
+      [`${store}/org/group/local_2.json`]: 'null',
+    })
+    const r = await resolveInput(
+      '/sessions/blissful-festive-wright/mnt/outputs/report.html',
+      opts(broken)
+    )
+    expect(r.path).toBe(`${store}/org/group/local_2/outputs/report.html`)
+    expect(r.alternatives).not.toHaveLength(0)
+  })
+
+  it('maps on Windows', async () => {
+    const winStore = 'C:\\Users\\me\\AppData\\Roaming\\Claude\\local-agent-mode-sessions'
+    const winSession = `${winStore}\\org\\group\\local_1`
+    const winOpts: LocateOptions = {
+      cwd: 'C:\\',
+      home: 'C:\\Users\\me',
+      platform: 'win32',
+      env: { USERPROFILE: 'C:\\Users\\me', APPDATA: 'C:\\Users\\me\\AppData\\Roaming' },
+      fs: fakeFs(
+        {
+          [`${winSession}.json`]: 1,
+          [`${winSession}\\outputs\\report.html`]: 1,
+          'D:\\Work\\Site\\index.html': 1,
+        },
+        'win32',
+        {
+          [`${winSession}.json`]: sessionJson({ userSelectedFolders: ['D:\\Work\\Site'] }),
+        }
+      ),
+      now: () => NOW,
+    }
+    expect(
+      await resolveInput('/sessions/blissful-festive-wright/mnt/outputs/report.html', winOpts)
+    ).toMatchObject({
+      path: `${winSession}\\outputs\\report.html`,
+      foundIn: 'Claude Desktop outputs',
+    })
+    expect(
+      await resolveInput('/sessions/blissful-festive-wright/mnt/site/index.html', winOpts)
+    ).toMatchObject({
+      path: 'D:\\Work\\Site\\index.html',
+      foundIn: 'Claude Desktop connected folder',
+    })
   })
 })
 

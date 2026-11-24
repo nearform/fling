@@ -53,6 +53,7 @@ import {
   describeSharedSite,
   describeSiteAccess,
   describeSiteMetrics,
+  describeUploadBegun,
   describeVersionFiles,
   encodeForAgent,
   FORMS_FILE,
@@ -63,6 +64,7 @@ import {
   formsSummaryLines,
   formsTemplate,
   GUIDE_NOTE,
+  INLINE_LARGE,
   type InstanceMetadata,
   isPathsLimitError,
   isSecretPath,
@@ -87,12 +89,15 @@ import {
   privateAudience,
   responsesPageUrl,
   reviewUrl,
+  SANDBOX_BLOCKED_NOTE,
   SERVER_BUNDLE,
   SERVER_CONFIG_FILE,
   SERVER_TEMPLATE,
   SERVER_TEMPLATE_CONFIG,
   SERVERS_NOTE,
   shareForFeedback,
+  UploadBeginResponseSchema,
+  UploadFinishResponseSchema,
 } from '@fling/shared'
 import { checkPathsIndex } from '@fling/shared/paths-index'
 import { pathsTemplate } from '@fling/shared/paths-templates'
@@ -266,8 +271,11 @@ export const mcpLocalInstructions = (
     `${w.name} publishes static sites (HTML/CSS/JS, images, documents) at ${w.sitesPattern}. This server runs on the user's computer.`,
     ...(opts.newerRelease ? [mcpUpdateNote(opts.newerRelease)] : []),
     ...[serversInstructions(opts.servers ?? [])].filter(p => p !== undefined),
-    'Content you created in this conversation (an HTML page, a report, a small app): call fling_publish with every file inline (text as utf8, binary as base64). ' +
-      'Never pass file paths from your sandbox (e.g. /mnt/user-data/outputs/…, /sessions/…) — this computer cannot see them — and never curl or upload from the sandbox.',
+    'Content you created in this conversation (an HTML page, a report, a small app) that you wrote to files: never re-send their contents. ' +
+      'Call fling_deploy with the path you wrote them to, even a sandbox path (/sessions/…/mnt/outputs/…): when Claude runs on this computer (Cowork) the file is here and is published from disk. ' +
+      'If fling_deploy says the file is in your cloud sandbox, not on this computer, upload it from the sandbox: fling_upload_begin, run the `script` it returns there, then fling_upload_finish. ' +
+      `If that script says your sandbox can't reach the Fling: ${SANDBOX_BLOCKED_NOTE} ` +
+      `Content that is not in a file (no code execution): fling_publish with every file inline (text as utf8, binary as base64); if it is large (${INLINE_LARGE}), first suggest turning code execution on, and say why: inline means re-typing every file, which is slow, costly and can corrupt it.`,
     'A file or folder the user has on this computer (a downloaded .html, a .zip, a build folder): call fling_deploy with its path, or just its file name (e.g. "Pitch Deck.html") — ' +
       'it is looked up in Downloads, Desktop, Documents/Claude and Claude Desktop output folders. Use fling_find_files to see recent candidates when unsure which file the user means.',
     'To change a site that is already published, start from what is live: fling_pull downloads its files into a folder on this computer; edit them there, then fling_deploy that folder publishes on the version pulled, sending only what changed. ' +
@@ -829,8 +837,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
         'a .zip of a site (extracted; a single top-level folder is unwrapped), or any other single file (.pdf, .svg, .png…, ' +
         'served next to a generated page that shows it). `path` can be absolute, relative to the working directory, or just ' +
         'a file name ("Pitch Deck.html"): names are looked up, newest first, in Downloads, Desktop, Documents/Claude and ' +
-        'Claude Desktop output folders, and the result says where the file was found. Never pass paths from your own ' +
-        'sandbox (/mnt/user-data/…, /sessions/…): for content you created, use fling_publish. ' +
+        'Claude Desktop output folders, and the result says where the file was found. A Claude sandbox path ' +
+        '(/sessions/<vm>/mnt/outputs/…) is mapped to the session folder on this computer when Claude runs here ' +
+        '(Cowork); when the file is in a cloud sandbox instead, it says so: upload it from the sandbox with ' +
+        'fling_upload_begin. ' +
         'Without `name`, a name is generated: from the file name for files ("Pitch Deck (1).html" → pitch-deck), from the ' +
         'project and folder for folders (~/work/rocketpod/docs → rocketpod-docs). Site names are one global namespace, first ' +
         'come first served — confirm the name with the user first (fling_check_name with `path` shows the generated one). ' +
@@ -1166,6 +1176,118 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
           })
         } finally {
           await rm(tmp, { recursive: true, force: true })
+        }
+      })
+  )
+
+  // A sandbox upload (sandbox-upload.ts in @fling/shared): files Claude made in its own sandbox go
+  // up from there, zipped, to a URL the Fling signs; nothing passes through this computer. Only
+  // the sandbox route: this server has no fling_upload_file, files on this computer go through
+  // fling_deploy.
+  const beginDef = mcpTools.uploadBegin
+  server.registerTool(
+    beginDef.name,
+    serverTool(
+      beginDef,
+      beginDef.description.replace(
+        /Without a sandbox, send the files with fling_upload_file instead[^.]*\. /,
+        'Files on this computer go through fling_deploy instead. '
+      )
+    ),
+    args =>
+      run(beginDef.name, args.server, async t => {
+        if ((await t.instance())?.capabilities.sandboxUpload !== true) {
+          throw new CliError(
+            `${t.url} has no sandbox uploads yet (it runs an older Fling): publish with fling_publish instead`
+          )
+        }
+        if (args.access) await requireAccessLevels(t)
+        const access = args.access ?? (args.public ? 'public' : undefined)
+        const begun = await t.client.request(
+          'POST',
+          `/api/sites/${encodeURIComponent(args.name)}/uploads`,
+          {
+            schema: UploadBeginResponseSchema,
+            body: {
+              ...(args.path === undefined ? {} : { path: args.path }),
+              ...(args.base === undefined ? {} : { base: args.base, remove: args.remove }),
+              ...(args.spa === undefined ? {} : { spa: args.spa }),
+              ...(access ? { access } : {}),
+              ...(access && needsAudience(access)
+                ? { audience: { emails: args.emails ?? [], groups: args.groups ?? [] } }
+                : {}),
+            },
+          }
+        )
+        return {
+          summary: describeUploadBegun(
+            { id: begun.uploadId, name: begun.name, path: begun.path, expiresAt: begun.expiresAt },
+            begun,
+            { fileTool: false }
+          ),
+          data: begun,
+        }
+      })
+  )
+
+  const finishDef = mcpTools.uploadFinish
+  server.registerTool(
+    finishDef.name,
+    serverTool(
+      finishDef,
+      finishDef.description.replace(
+        ' (by the sandbox script or with fling_upload_file)',
+        ' by the sandbox script'
+      )
+    ),
+    args =>
+      run(finishDef.name, args.server, async t => {
+        const outcome = await t.client.request(
+          'POST',
+          `/api/uploads/${encodeURIComponent(args.uploadId)}/finish`,
+          {
+            schema: UploadFinishResponseSchema,
+            body: {
+              ...(args.listHtml === undefined ? {} : { listHtml: args.listHtml }),
+              ...(args.confirmPublicServer ? { confirmPublicServer: true } : {}),
+            },
+          }
+        )
+        if (outcome.kind === 'needs_decision') {
+          const n = outcome.htmlPages.length
+          return {
+            summary:
+              `Not published yet: the upload has no index.html but ${n === 1 ? '1 HTML page' : `${n} HTML pages`}. ` +
+              'Ask the user whether to generate an index.html listing them (`listHtml: true`) or to publish without ' +
+              'one (`listHtml: false`, the root URL will 404), then call fling_upload_finish again with `listHtml`.',
+            data: {
+              status: 'needs_decision',
+              htmlPages: outcome.htmlPages.slice(0, 20),
+              fileCount: outcome.fileCount,
+            },
+          }
+        }
+        const instance = await t.instance()
+        const review =
+          instance && commentsEnabled(instance)
+            ? reviewUrl(instance.appOrigin, outcome.site.name)
+            : undefined
+        const warnings = outcome.warnings.map(w => `\n${w}`).join('')
+        const where = outcome.path === undefined ? '' : ` to the Path /${outcome.path}/`
+        return {
+          summary:
+            `Published ${outcome.fileCount} files${where} (${formatBytes(outcome.totalBytes)}): ${outcome.site.url}` +
+            `${review ? `\nReview link (share this for feedback): ${review}` : ''}${warnings}` +
+            `${describePublishHints(outcome.hints)}${onFling(t.url, instance)}`,
+          data: {
+            status: outcome.status,
+            name: outcome.site.name,
+            url: outcome.site.url,
+            ...(review ? { reviewUrl: review } : {}),
+            fileCount: outcome.fileCount,
+            totalBytes: outcome.totalBytes,
+            warnings: outcome.warnings,
+          },
         }
       })
   )

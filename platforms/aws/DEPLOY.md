@@ -7,9 +7,16 @@ Clone https://github.com/nearform/fling and follow platforms/aws/DEPLOY.md
 to install Fling on my AWS account at fling.yourdomain.com.
 Before you create or change anything, ask me for what you need
 (the AWS region, the domain and its DNS, and the sign-in provider) and show me the plan.
+When it is live, tell me the host our Claude admin must allow for Claude's code execution
+(the guide's "Claude's sandbox" section).
 ```
 
 Or follow the steps below yourself.
+
+> **After it is live:** have your Claude admin add the Fling's host (for example
+> `fling.yourdomain.com`) to **Additional allowed domains** for Claude's code execution, on
+> claude.ai under **Organization settings → Capabilities**. Without it, Claude can't upload the
+> files it makes and stops to ask for it. See [Claude's sandbox](#claudes-sandbox-allow-your-flings-host).
 
 How Fling works on AWS, element by element: [docs/platforms/aws.md](../../docs/platforms/aws.md).
 
@@ -785,6 +792,32 @@ time range and run it:
 The function logs in the Text format, so each JSON line follows Lambda's own prefix: the queries
 match the message as text and parse the numbers out of it. **Admin → Routes** shows the last lap's
 length and when it finished.
+
+## Claude's sandbox: allow your Fling's host
+
+Claude's code execution runs in a sandbox whose network goes through a proxy, and the proxy only
+lets through the hosts Claude's settings allow. Until your Fling's host is on that list, Claude
+can't upload the files it made there: it stops and tells the user which host to allow, and types
+every file out again in the chat only if asked, which is slow, costly and can break a big site. Once the host is allowed, `fling_upload_begin`
+gives Claude a script that zips the files and uploads them to a signed URL on your Fling's own
+host, so allow the host of `APP_ORIGIN` (for example `fling.example.com`) and nothing else. On
+AWS that means no S3 host either: the upload goes through the API, in parts under Lambda's request
+limit.
+
+Whoever administers Claude for your organisation sets this once, on claude.ai in a web browser:
+
+1. Open **Organization settings → Capabilities** (an Owner, on a Team or Enterprise plan). On a
+   paid individual plan, it's **Settings → Capabilities**. The Free plan allows only package
+   managers.
+2. Under **Code execution and file creation**, turn on **Allow network egress**.
+3. Add your Fling's host, for example `fling.example.com`, to **Additional allowed domains**.
+
+The change applies at once, in open chats too. To check it from a chat with code execution, ask Claude to run
+`curl -sS -D - -o /dev/null https://<your Fling's host>/.well-known/fling`. An `HTTP/2 200` means
+the host is allowed. An `X-Proxy-Error` header, or `CONNECT tunnel failed, response 403`, means it
+isn't yet. Users see the same steps in the Guide (**Let Claude upload its files**, at
+`/guide/start/claude-uploads` on your Fling), with your Fling's host filled in, and Claude links
+them there when it can't reach the host.
 
 ## Rollback
 

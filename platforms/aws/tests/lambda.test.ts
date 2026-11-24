@@ -1,7 +1,7 @@
 /**
  * The Lambda's migrate event against DynamoDB Local (skipped without it, see services.ts): what
  * deploy.yml invokes after updating the code. The notify tick's time budget, and the edge key
- * sync each cold start runs beside its first request.
+ * sync each cold start runs beside its first request, which waits for it before answering.
  */
 
 import { DRAIN_BUDGET_MS } from '@fling/api/notifications'
@@ -91,5 +91,37 @@ describe('syncEdgeKey', () => {
     expect(await routes.get(SITE_HMAC_KVS_KEY)).toBe('k2')
     expect(put).toHaveBeenCalledTimes(2)
     expect(log).toHaveBeenCalledWith(expect.stringContaining('"msg":"edge key","changed":false'))
+  })
+})
+
+describe('the handler', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllEnvs()
+  })
+
+  it('answers only once the edge key sync it started has finished', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.stubEnv('APP_ENV', 'development')
+    vi.stubEnv('APP_ORIGIN', 'https://app.example.test')
+    vi.stubEnv('SESSION_SECRET', 's'.repeat(32))
+    vi.stubEnv('SITE_HMAC_KEY', 'h'.repeat(32))
+    let release = () => {}
+    const held = new Promise<undefined>(r => {
+      release = () => r(undefined)
+    })
+    const get = vi.spyOn(MemoryRouteTable.prototype, 'get').mockReturnValueOnce(held)
+    const live = { requestContext: { connectionId: 'c1', eventType: 'DISCONNECT' } }
+
+    let answered = false
+    const answer = handler(live as never, context(60_000)).then(r => {
+      answered = true
+      return r
+    })
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith(SITE_HMAC_KVS_KEY))
+    await new Promise(r => setTimeout(r, 50))
+    expect(answered).toBe(false)
+    release()
+    expect(await answer).toBeDefined()
   })
 })

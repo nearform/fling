@@ -105,7 +105,8 @@ resource "aws_cloudwatch_metric_alarm" "route_table_full" {
 # maintenance takes to go round every site, how full the route table is, and how often a
 # KeyValueStore write lost the race for its ETag (platforms/aws/src/route-table/cloudfront.ts).
 # The function logs in the Text format, so each JSON line follows Lambda's prefix: the queries
-# match the message as text, as the metric filter does, and parse the numbers out of it.
+# match the message as text, as the metric filter does, and parse the numbers out of it. A parsed
+# field can't share a name with a column the stats line makes (Logs Insights refuses the query).
 # -----------------------------------------------------------------------------
 
 resource "aws_cloudwatch_query_definition" "maintenance_lap" {
@@ -115,7 +116,8 @@ resource "aws_cloudwatch_query_definition" "maintenance_lap" {
     fields @timestamp
     | filter @message like /"msg":"maintenance lap"/
     | parse @message /"lapMs":(?<lapMs>\d+)/
-    | stats count() as laps, avg(lapMs) as avgLapMs, max(lapMs) as maxLapMs by bin(1d)
+    | parse @message /"workMs":(?<workMs>\d+),"runs":(?<runs>\d+),"sites":(?<lapSites>\d+)/
+    | stats count() as laps, avg(lapMs) as avgLapMs, max(lapMs) as maxLapMs, avg(workMs) as avgWorkMs, max(workMs) as maxWorkMs, max(runs) as maxRuns, max(lapSites) as sites by bin(1d)
   EOT
 }
 
@@ -125,8 +127,8 @@ resource "aws_cloudwatch_query_definition" "route_table_usage" {
   query_string    = <<-EOT
     fields @timestamp
     | filter @message like /"msg":"route table (usage|nearly full)"/
-    | parse @message /"bytes":(?<bytes>\d+),"limitBytes":(?<limitBytes>\d+),"percent":(?<percent>[\d.]+)/
-    | stats max(bytes) as maxBytes, max(limitBytes) as limitBytes, max(percent) as maxPercent by bin(1h)
+    | parse @message /"bytes":(?<bytes>\d+),"limitBytes":(?<limit>\d+),"percent":(?<percent>[\d.]+)/
+    | stats max(bytes) as maxBytes, max(limit) as limitBytes, max(percent) as maxPercent by bin(1h)
   EOT
 }
 

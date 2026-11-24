@@ -186,6 +186,21 @@ export const handler = async (
     edgeKeySynced = undefined
     console.warn(JSON.stringify({ level: 'warn', msg: 'edge key sync failed', err: String(err) }))
   })
+  // The sync runs beside the invocation that started it and ends before it does: Lambda freezes
+  // the environment once a response is sent, and a request left in flight then resumes at the next
+  // invocation, minutes later, past its signature's five minutes.
+  try {
+    return await dispatch(event, context, { http, deps, live, servers })
+  } finally {
+    await edgeKeySynced
+  }
+}
+
+async function dispatch(
+  event: LambdaEvent | MaintainEvent | NotifyEvent | LiveEvent,
+  context: LambdaContext,
+  { http, deps, live, servers }: Omit<Awaited<ReturnType<typeof init>>, 'siteHmacKey'>
+) {
   if (isNotify(event)) {
     await edgeKeySynced
     const result: DrainResult = await drain(deps, {

@@ -181,6 +181,12 @@ describe('retention', () => {
     expect((await maintain(env.deps)).homes).toBe(1)
     expect(await env.blobs.get(key)).toBeNull()
     expect(await env.blobs.get(`sites/${site?.id}/_rendered/${site?.home}.html`)).not.toBeNull()
+    // Taken off the list, so later visits have nothing to delete; the site isn't touched.
+    const after = await env.store.findSite('team')
+    expect(after?.homeOld).toBeUndefined()
+    expect(after?.updatedAt).toBe(site?.updatedAt)
+    env.advance(GRACE_MS)
+    expect((await maintain(env.deps)).homes).toBe(0)
   })
 })
 

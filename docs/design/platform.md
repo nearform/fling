@@ -95,8 +95,12 @@ Each element uses the same headings:
 
 - **Port:** `Table` (`apps/api/src/table/types.ts`).
 - **Semantics:**
-  - Methods: `get`, `query(pk, {skPrefix, limit, cursor, reverse})`, `scan` (migrations only),
-    `put`, `update(set/add)`, `delete` and `transact`.
+  - Methods: `get`, `getMany(keys)`, `query(pk, {skPrefix, limit, cursor, reverse})`, `scan`
+    (migrations only), `put`, `update(set/add)`, `delete` and `transact`.
+  - **`getMany`** answers any number of keys, across partitions, in their order (null where
+    there is no live item), in as few round trips as the backend allows: a batch get, or a
+    statement a batch of keys. A read of many known items (the Sites list's metrics) costs about
+    what one does.
   - **Strong consistency.** Of N concurrent `ifAbsent` puts, conditional deletes or transactions,
     exactly one wins.
   - **Conditions** on put, update and delete: `ifAbsent`, `ifExists`,

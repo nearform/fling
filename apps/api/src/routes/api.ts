@@ -257,7 +257,11 @@ apiRoutes.get('/why', async c => c.json(WhySiteSchema.parse(await sites.whySite(
 
 apiRoutes.get('/sites', async c => {
   const archived = ['1', 'true'].includes(c.req.query('archived') ?? '')
-  const list = await sites.listSites(c.get('deps'), c.get('user'), archived, pageRequest(c))
+  const metrics = ['1', 'true'].includes(c.req.query('metrics') ?? '')
+  const list = await sites.listSites(c.get('deps'), c.get('user'), archived, pageRequest(c), {
+    metrics,
+  })
+  if (metrics) c.header('Cache-Control', 'private, no-store')
   return c.json(SiteListSchema.parse(list))
 })
 

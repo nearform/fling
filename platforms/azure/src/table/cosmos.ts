@@ -22,6 +22,11 @@
  *   beyond the longest `ttl` Cosmos DB takes gets none: the item stays until it is written again.
  *   Purges lag, so a dead item is also invisible to every read and condition here.
  *
+ * Reads: `get` is a point read. `getMany` sends one bulk Read per distinct storable key
+ * (`executeBulkOperations`), which the SDK packs into requests of up to 100 operations per
+ * partition key range, so with one partition N keys cost about N/100 round trips at a point
+ * read's RU each; a missing item is that operation's 404, not a failure of the rest.
+ *
  * Writes: every write (put, update, delete, transact) reads the items it touches, checks its
  * conditions on them in JS, and commits one transactional batch whose operations are bound to
  * what it read: a Replace or Delete with the read document's ETag (`ifMatch`), a Create where
@@ -206,6 +211,33 @@ export class CosmosTable implements Table {
   async get(pk: string, sk: string) {
     if (!storable({ pk, sk })) return null
     return this.live(await this.read({ pk, sk }))
+  }
+
+  async getMany(keys: readonly Key[]) {
+    const unique = new Map<string, Key>()
+    for (const k of keys) if (storable(k)) unique.set(`${k.pk}\0${k.sk}`, k)
+    const docs = new Map<string, Doc>()
+    if (unique.size > 0) {
+      const results = await this.container.items.executeBulkOperations(
+        [...unique.values()].map(k => ({
+          operationType: 'Read' as const,
+          id: idOf(k),
+          partitionKey: PARTITION,
+        }))
+      )
+      for (const [i, k] of [...unique.values()].entries()) {
+        const result = results[i]
+        if (result?.error) {
+          if (statusOf(result.error) === 404) continue
+          throw result.error
+        }
+        const doc = result?.response?.resourceBody as Doc | undefined
+        // A hash collision would be another key's document; never treat it as this one.
+        if (doc && doc.pk === k.pk && doc.sk === k.sk) docs.set(`${k.pk}\0${k.sk}`, doc)
+      }
+    }
+    const now = this.now()
+    return keys.map(k => this.live(docs.get(`${k.pk}\0${k.sk}`), now))
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

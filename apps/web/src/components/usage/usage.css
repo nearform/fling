@@ -1,17 +1,23 @@
 /* Admin → Usage (UsageCharts.tsx, pages/AdminUsage.tsx). Drawn like the rest of the app: a
    heading above a plain panel. Colour is the brand's two: views are its primary, pushes its
    highlight, and the rings and bars run from one to the other (the brand gradient); the rest is
-   the theme's text and border tokens, so the charts follow the instance's brand and light and
+   the theme's text and border tokens. The Sites page's strip (MySitesStats.tsx) is the same
+   pulse, dense, in a panel that folds away, so the charts follow the instance's brand and light and
    dark. Motion is opt-in:
    lines draw, rings fill and bars grow only under `prefers-reduced-motion: no-preference`;
    without it everything is simply there. */
 
-.usage-page {
+.usage-page,
+.usage-strip,
+.site-metrics {
   --usage-ease: cubic-bezier(0.23, 1, 0.32, 1);
   --usage-primary: var(--color-primary);
   --usage-highlight: var(--highlight);
   --usage-blend: color-mix(in oklch, var(--usage-primary), var(--usage-highlight));
   --usage-track: var(--border-subtle);
+}
+
+.usage-page {
   display: grid;
   gap: 2rem; /* the space-y-8 between the other admin pages' sections */
 }
@@ -606,4 +612,137 @@
   .usage-pulse-tip {
     transition: inset-inline-start 120ms var(--usage-ease), inset-block-start 120ms var(--usage-ease);
   }
+}
+
+/* The Sites page's strip: a toggle row, then the totals beside a short, wide pulse. */
+.usage-strip {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.usage-strip-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  inline-size: fit-content;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.usage-strip-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 4px;
+}
+
+.usage-strip-chevron {
+  align-self: center;
+  color: var(--text-secondary);
+  transition: rotate 150ms var(--usage-ease);
+}
+
+.usage-strip-toggle[aria-expanded="true"] .usage-strip-chevron {
+  rotate: 90deg;
+}
+
+.usage-strip-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+}
+
+.usage-strip-glance {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 0 auto;
+}
+
+.usage-strip-body {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.usage-strip-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) 2rem;
+  margin: 0;
+}
+
+.usage-strip-stats dd {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usage-strip-chevron {
+    transition: none;
+  }
+}
+
+/* A site's trend in the Sites list (SiteSpark.tsx), the same size as the Activity row's. */
+.site-spark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.site-spark[data-tall] > .tabular-nums {
+  font-size: 0.75rem;
+  min-inline-size: 4ch;
+}
+
+/* On a card, a line of its own: the trend takes the card's width, the total at the end. */
+.site-spark[data-block] {
+  display: flex;
+  font-size: 0.75rem;
+}
+
+.site-spark[data-block] svg {
+  flex: 1 1 auto;
+  inline-size: auto;
+}
+
+
+/* DayTrend.tsx: a smooth line with its area faded beneath, coloured by how busy it was against
+   the busiest shown (--level, 0–1): a faint primary for a quiet site, the brand highlight for the
+   busiest. */
+.day-trend {
+  --trend: color-mix(in oklch, var(--highlight) calc(var(--level, 1) * 100%), var(--color-primary));
+  /* One size wherever it is (the Activity row, a list row): a list row's buttons' height. */
+  display: block;
+  flex: none;
+  inline-size: 9rem;
+  block-size: 1.75rem;
+  overflow: visible;
+}
+
+.day-trend-line {
+  fill: none;
+  stroke: var(--trend);
+  stroke-width: 1.5;
+  stroke-opacity: calc(0.45 + var(--level, 1) * 0.55);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.day-trend-fade-top {
+  stop-color: var(--trend);
+  stop-opacity: calc(0.1 + var(--level, 1) * 0.25);
+}
+
+.day-trend-fade-bottom {
+  stop-color: var(--trend);
+  stop-opacity: 0;
+}
+
+.day-trend-today {
+  fill: var(--trend);
+}
+
+.day-trend[data-quiet] .day-trend-line {
+  stroke: var(--border-strong);
 }

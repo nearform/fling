@@ -50,6 +50,28 @@ export const SiteMetricsSchema = z.object({
 })
 export type SiteMetrics = z.infer<typeof SiteMetricsSchema>
 
+/** The most of someone's sites their metrics add up (the ones updated last): MY_METRICS_SITES. */
+export const MY_METRICS_SITES = 200
+
+/**
+ * `GET /api/sites?metrics=1`'s `metrics`: the caller's live sites (those they own or publish, the
+ * Active list) added up, as one site's metrics are, with `since` the earliest and the last view
+ * and push the latest of any. At most MY_METRICS_SITES of them, the ones updated last: `sites` of
+ * `of`. Each of those sites carries its own days in the list (`SiteDaysSchema`).
+ */
+export const SitesMetricsSchema = SiteMetricsSchema.omit({ name: true }).extend({
+  sites: z.number().int(),
+  of: z.number().int(),
+})
+export type SitesMetrics = z.infer<typeof SitesMetricsSchema>
+
+/** A listed site's views and pushes a day, over the days of its list's `metrics`, oldest first. */
+export const SiteDaysSchema = z.object({
+  views: z.array(z.number()),
+  pushes: z.array(z.number()),
+})
+export type SiteDays = z.infer<typeof SiteDaysSchema>
+
 const DAY_MS = 86_400_000
 
 /** The UTC day of `at`: `YYYY-MM-DD`. */

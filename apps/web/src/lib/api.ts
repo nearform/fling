@@ -77,9 +77,9 @@ import {
   type SharedSite,
   SharedSiteListSchema,
   type SignInLinkRequest,
-  type Site,
   type SiteDetail,
   SiteDetailSchema,
+  type SiteList,
   SiteListSchema,
   type SitePath,
   SitePathSchema,
@@ -229,10 +229,9 @@ export const api = {
       throw error
     }
   },
-  async listSites(archived: boolean): Promise<Site[]> {
-    const { sites } = await request(`/api/sites${archived ? '?archived=1' : ''}`, SiteListSchema)
-    return sites
-  },
+  /** With `metrics`, live sites carry their days and the list them all added up. */
+  listSites: (archived: boolean, metrics = false): Promise<SiteList> =>
+    request(`/api/sites${archived ? '?archived=1' : metrics ? '?metrics=1' : ''}`, SiteListSchema),
   /** The restricted sites others have shared with the caller (`audiences` capability). */
   async listShared(): Promise<SharedSite[]> {
     const { sites } = await request('/api/shared', SharedSiteListSchema)
@@ -319,6 +318,7 @@ export const api = {
       method: 'DELETE',
     }),
   /** A site's views and pushes per day, week and month (owners, publishers, admins). */
+  /** The caller's live sites' metrics added up (the Sites page's strip). */
   siteMetrics: (name: string): Promise<SiteMetrics> =>
     request(`${site(name)}/metrics`, SiteMetricsSchema),
   /** The site server's log since `since` (an ISO time, or `15m`, `1h`, `2d`), oldest first. */

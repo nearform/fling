@@ -14,6 +14,7 @@
 import type { RouteFormat } from '@fling/shared'
 import { ensure } from './admin.ts'
 import { audit } from './audit.ts'
+import { MAINTAIN_BUDGET_MS, MAINTAIN_EVERY_MS } from './maintenance.ts'
 import { syncPathRoute } from './paths.ts'
 import type { Principal } from './policy.ts'
 import { syncRouteTable } from './sites.ts'
@@ -31,7 +32,8 @@ export async function routeFormat(deps: Deps): Promise<RouteFormat> {
 /**
  * What Admin → Routes shows of the route table: its format, the rewrite, how full it is, and
  * maintenance's last lap of the site directory (null before it has finished one): how long every
- * site waits for a sweep.
+ * site waits for a sweep and how much of a run the sweep took, so the page can say how much room
+ * is left.
  */
 export async function routeTableStatus(deps: Deps, p: Principal) {
   ensure(p, 'admin.routes.read')
@@ -43,6 +45,7 @@ export async function routeTableStatus(deps: Deps, p: Principal) {
     ...(record ? { setBy: record.setBy, setAt: record.setAt, rewrite: record.rewrite } : {}),
     usage,
     lastLap: cursor?.lastLap ?? null,
+    maintenance: { everyMs: MAINTAIN_EVERY_MS, budgetMs: MAINTAIN_BUDGET_MS },
   }
 }
 

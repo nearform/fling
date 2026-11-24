@@ -199,6 +199,7 @@ async function sweepDirectory(
   result: MaintainResult
 ): Promise<boolean> {
   const now = deps.clock.now().toISOString()
+  const started = Date.now()
   const cursor = (await deps.store.getMaintenanceCursor()) ?? { after: null, lapStartedAt: now }
   let after = cursor.after
   let finished = false
@@ -237,20 +238,38 @@ async function sweepDirectory(
       }
     }
   } finally {
+    // The sweep's own time, run by run: how much of a run a lap takes (Admin → Routes' headroom).
+    const workMs = (cursor.workMs ?? 0) + (Date.now() - started)
+    const runs = (cursor.runs ?? 0) + 1
     if (finished) {
       result.lapStartedAt = cursor.lapStartedAt
       const lapMs = Date.parse(now) - Date.parse(cursor.lapStartedAt)
-      console.log(JSON.stringify({ level: 'info', msg: 'maintenance lap', lapMs }))
+      console.log(
+        JSON.stringify({
+          level: 'info',
+          msg: 'maintenance lap',
+          lapMs,
+          workMs,
+          runs,
+          sites: tally.sites,
+        })
+      )
       await deps.store.putMaintenanceCursor({
         after: null,
         lapStartedAt: now,
-        lastLap: { lapMs, finishedAt: now },
+        // A lap begun before the sweep was timed has only part of its time: not a measure.
+        lastLap:
+          cursor.after === null || cursor.workMs !== undefined
+            ? { lapMs, finishedAt: now, workMs, runs, sites: tally.sites }
+            : { lapMs, finishedAt: now },
         lastUsage: { ...tally, lapStartedAt: cursor.lapStartedAt, finishedAt: now },
       })
     } else {
       await deps.store.putMaintenanceCursor({
         after,
         lapStartedAt: cursor.lapStartedAt,
+        workMs,
+        runs,
         ...(cursor.lastLap ? { lastLap: cursor.lastLap } : {}),
         ...(cursor.lastUsage ? { lastUsage: cursor.lastUsage } : {}),
         tally,

@@ -82,7 +82,7 @@ import type { StoredManifest } from '../sites.ts'
 import * as sites from '../sites.ts'
 import type { User } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { siteMetrics } from '../views.ts'
+import { siteMetrics, yourSitesMetrics } from '../views.ts'
 import {
   beginUpload,
   decodeContent,
@@ -797,7 +797,10 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
 
   if (instanceMetadata(deps.config).capabilities.metrics === true) {
     registerSiteTool(mcpTools.stats, async args => {
-      const metrics = await siteMetrics(deps, user, args.name)
+      const metrics =
+        args.name === undefined
+          ? await yourSitesMetrics(deps, user)
+          : await siteMetrics(deps, user, args.name)
       return { text: describeSiteMetrics(metrics, deps.config.instanceName), data: metrics }
     })
   }

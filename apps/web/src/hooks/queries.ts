@@ -22,7 +22,8 @@ import { showToast } from '../lib/toast'
 export const queryKeys = {
   me: ['me'] as const,
   whySite: ['why'] as const,
-  sites: (archived: boolean) => ['sites', archived ? 'archived' : 'active'] as const,
+  sites: (archived: boolean, metrics = false) =>
+    ['sites', archived ? 'archived' : metrics ? 'active+metrics' : 'active'] as const,
   allSites: ['sites'] as const,
   shared: ['sites', 'shared'] as const,
   site: (name: string) => ['site', name] as const,
@@ -72,13 +73,22 @@ export function useWhySite() {
 }
 
 /** The caller's own sites; `enabled` false for a guest, who owns none. */
-export function useSites(archived: boolean, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.sites(archived),
-    queryFn: () => api.listSites(archived),
-    enabled,
-  })
+export function useSites(archived: boolean, enabled = true, metrics = false) {
+  return useQuery({ ...siteList(archived, metrics), enabled, select: l => l.sites })
 }
+
+/**
+ * The caller's live sites with their metrics (`?metrics=1`): each one's days and them all added
+ * up, in the one answer `useSites(false, …, true)` shares.
+ */
+export function useSitesMetrics(enabled: boolean) {
+  return useQuery({ ...siteList(false, true), enabled, select: l => l.metrics ?? null })
+}
+
+const siteList = (archived: boolean, metrics: boolean) => ({
+  queryKey: queryKeys.sites(archived, metrics && !archived),
+  queryFn: () => api.listSites(archived, metrics && !archived),
+})
 
 /** The sites shared with the caller; fetched once the Shared tab is offered. */
 export function useSharedSites(enabled: boolean) {
@@ -319,6 +329,7 @@ export function useSecretActions(name: string) {
 }
 
 /** A site's metrics (the `metrics` capability), for its owners, publishers and admins. */
+
 export function useSiteMetrics(name: string, enabled: boolean) {
   return useQuery({
     queryKey: queryKeys.metrics(name),

@@ -70,19 +70,33 @@ export function CountUp({ value, ms = 900 }: { value: number; ms?: number }) {
   )
 }
 
-const W = 600
-const CHART_H = 150
+const WIDE_W = 600
+const WIDE_CHART_H = 150
+const DENSE_W = 1200
+const DENSE_CHART_H = 56
 const TOP = 16
-const SPARK_Y = TOP + CHART_H + 14
-const H = SPARK_Y + 10
 
 /**
- * The last 28 days across every site: views (or pushes, where views aren't counted) as a smooth
+ * The last 28 days across every site (or someone's, `dense`): views (or pushes, where views aren't counted) as a smooth
  * area, the busiest day flagged, pushes as sparks along the bottom. Pointer or arrow keys pick a
  * day; its readout floats over it.
  */
-export function Pulse({ usage }: { usage: InstanceUsage }) {
+export function Pulse({
+  usage,
+  dense = false,
+  across,
+}: {
+  usage: Pick<InstanceUsage, 'days' | 'viewCounts'>
+  /** a short, wide strip (the Sites page's), with the same readout */
+  dense?: boolean
+  /** whose sites, for screen readers: every site unless said */
+  across?: string
+}) {
   const id = useId()
+  const W = dense ? DENSE_W : WIDE_W
+  const CHART_H = dense ? DENSE_CHART_H : WIDE_CHART_H
+  const SPARK_Y = TOP + CHART_H + 14
+  const H = SPARK_Y + 10
   const key = pulseCount(usage)
   const days = usage.days
   const points = pulsePoints(
@@ -122,10 +136,10 @@ export function Pulse({ usage }: { usage: InstanceUsage }) {
   const shown = picked ?? peak
   const day = shown === null ? undefined : days[shown]
   const point = shown === null ? undefined : points[shown]
-  const summary = pulseSummary(usage)
+  const summary = pulseSummary(usage, across)
 
   return (
-    <figure className="usage-pulse">
+    <figure className="usage-pulse" data-dense={dense ? '' : undefined}>
       <div
         ref={plot}
         className="usage-pulse-plot"

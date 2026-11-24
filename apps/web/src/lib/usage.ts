@@ -10,6 +10,15 @@ import { showsAdmin } from './admin'
 import { countLabel } from './metrics'
 
 /** Admin → Usage. */
+/**
+ * Whether the Sites page shows your sites' activity and each site's sparkline (and asks for them):
+ * only where the instance counts views. Turned off by its operator (SITE_VIEW_COUNTS=off), there
+ * are no views to show, so neither appears and nothing is read.
+ */
+export const activityShown = (
+  instance: Pick<InstanceMetadata, 'capabilities'> | null | undefined
+) => instance?.capabilities.metrics === true && instance.capabilities.viewCounts === true
+
 export const ADMIN_USAGE_PATH = '/admin/usage'
 
 /** Whether Admin offers Usage: admins, on an instance with metrics. */
@@ -143,14 +152,17 @@ export function dayReadout(d: InstanceUsage['days'][number], viewCounts: boolean
 }
 
 /** The pulse in words, for screen readers: its range, its total and its busiest day. */
-export function pulseSummary(u: Pick<InstanceUsage, 'days' | 'viewCounts'>): string {
+export function pulseSummary(
+  u: Pick<InstanceUsage, 'days' | 'viewCounts'>,
+  across = 'every site'
+): string {
   const key = pulseCount(u)
   const first = u.days[0]
   const last = u.days.at(-1)
   if (!first || !last) return ''
   const total = u.days.reduce((n, d) => n + d[key], 0)
   const pushes = u.days.reduce((n, d) => n + d.pushes, 0)
-  const range = `${key === 'views' ? 'Views' : 'Pushes'} per day across every site, ${dayLabel(first.day)} to ${dayLabel(last.day)}: ${countLabel(total, key)}`
+  const range = `${key === 'views' ? 'Views' : 'Pushes'} per day across ${across}, ${dayLabel(first.day)} to ${dayLabel(last.day)}: ${countLabel(total, key)}`
   const peak = peakIndex(u.days, key)
   const busiest = peak === null ? undefined : u.days[peak]
   const most = busiest

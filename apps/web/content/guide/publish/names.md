@@ -4,7 +4,7 @@ part: publish
 order: 20
 summary: How names work, who gets one, and what to do when yours is taken.
 sources: [packages/shared/src/site-labels.ts, packages/shared/src/hosts.ts, apps/cli/src/naming.ts, apps/api/src/sites.ts, apps/cli/src/commands/deploy.ts]
-verified: ee10036
+verified: f57fbd7
 ---
 
 A site's name is its address: `my-app` is served at `{{instance:site:my-app}}`. Names are shared by

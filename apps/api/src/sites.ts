@@ -93,6 +93,7 @@ import {
   WHY_SITE_NAME,
   type WhySite,
 } from '@fling/shared'
+import type { SitesMetrics } from '@fling/shared/metrics'
 import {
   PASS_HANDOFF_TTL_SECONDS,
   signDenyHandoff,
@@ -151,7 +152,7 @@ import {
   type User,
 } from './store/types.ts'
 import type { Deps } from './types.ts'
-import { countPush, countsViews } from './views.ts'
+import { countPush, countsViews, listedMetrics } from './views.ts'
 
 /** A root index.html bigger than this can't be a generated listing page; don't read it. */
 const MAX_LISTING_BYTES = 1024 * 1024
@@ -863,15 +864,25 @@ export async function listSites(
   deps: Deps,
   user: User,
   archived: boolean,
-  page: PageRequest = {}
-): Promise<{ sites: Site[]; cursor?: string | null }> {
+  page: PageRequest = {},
+  opts: { metrics?: boolean } = {}
+): Promise<{ sites: Site[]; cursor?: string | null; metrics?: SitesMetrics }> {
   const groups = await listingGroups(deps, user.email)
   const actor: Actor = { ...userActor(user), groups }
   const sites = (await roleSites(deps, user, groups)).filter(
     s => s.archived === archived && (archived || s.currentVersionId !== null)
   )
   const listed = pageOfSites(sites, page)
-  return { ...listed, sites: listed.sites.map(s => toSite(deps, actor, s)) }
+  // Live sites only: read with the list, in one batch.
+  const counted = opts.metrics && !archived ? await listedMetrics(deps, actor, sites) : undefined
+  return {
+    ...listed,
+    sites: listed.sites.map(s => {
+      const days = counted?.days.get(s.id)
+      return { ...toSite(deps, actor, s), ...(days ? { days } : {}) }
+    }),
+    ...(counted ? { metrics: counted.metrics } : {}),
+  }
 }
 
 /** Above this many groups, listing someone's sites logs `many groups` (each is a query). */

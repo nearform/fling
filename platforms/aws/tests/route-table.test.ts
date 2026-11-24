@@ -21,7 +21,7 @@ function stubStore(failures: Error[]) {
   const client = {
     send: async (command: unknown) => {
       if (command instanceof DescribeKeyValueStoreCommand) {
-        return { ETag: etag, TotalSizeInBytes: 1_234_567 }
+        return { ETag: etag, TotalSizeInBytes: 1_234_567, ItemCount: 4_321 }
       }
       if (command instanceof PutKeyCommand) {
         puts.push(command.input.IfMatch ?? '')
@@ -65,6 +65,7 @@ describe('CloudFrontRouteTable', () => {
     expect(await new CloudFrontRouteTable('arn:kvs', client).usage()).toEqual({
       bytes: 1_234_567,
       limitBytes: KVS_LIMIT_BYTES,
+      items: 4_321,
     })
   })
 })

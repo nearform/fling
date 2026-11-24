@@ -5,6 +5,7 @@ import { FormsConfigSchema } from './forms.ts'
 import { ROUTE_FORMATS } from './kvs.ts'
 import { MAX_FILES, MAX_STORED_PATH_LENGTH } from './limits.ts'
 import { DeployManifestSchema } from './manifest.ts'
+import { SiteDaysSchema, SitesMetricsSchema } from './metrics.ts'
 import { PublishPathSchema } from './publish-path.ts'
 import {
   OwnersInputSchema,
@@ -65,6 +66,11 @@ export const SiteSchema = z.object({
    * the review page says so. Servers without the capability omit it
    */
   hasServer: z.boolean().optional(),
+  /**
+   * its views and pushes a day (`GET /api/sites?metrics=1`, live sites, where the instance has
+   * metrics): one of the sites its list's `metrics` adds up
+   */
+  days: SiteDaysSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -117,15 +123,19 @@ export const SiteDetailSchema = SiteWithAudienceSchema.extend({
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 
 /**
- * GET /api/sites?archived=&sort=&limit=&cursor= — the caller's sites, in `sort` order. With
- * `limit`, one page of at most that many (`SITE_LIST_PAGE_MAX`) and the cursor for the next; without
- * it, every one (and no cursor).
+ * GET /api/sites?archived=&sort=&limit=&cursor=&metrics= — the caller's sites, in `sort` order.
+ * With `limit`, one page of at most that many (`SITE_LIST_PAGE_MAX`) and the cursor for the next;
+ * without it, every one (and no cursor). With `metrics=1` (live sites, the `metrics` capability),
+ * each site's days and them all added up, read together (views.ts `listedMetrics`).
  */
 export const SiteListSchema = z.object({
   sites: z.array(SiteSchema),
   /** pass back as `cursor` for the next page; null or absent: no more */
   cursor: z.string().nullable().optional(),
+  /** with `?metrics=1`, live sites, where the instance has metrics: them all added up */
+  metrics: SitesMetricsSchema.optional(),
 })
+export type SiteList = z.infer<typeof SiteListSchema>
 
 /**
  * One of a site's Paths (`paths` capability; paths.ts in the API): a top-level folder with its own
@@ -577,8 +587,26 @@ export const AdminRouteTableSchema = z.object({
       finishedAt: z.string().optional(),
     })
     .optional(),
-  usage: z.object({ bytes: z.number(), limitBytes: z.number() }).nullable(),
-  lastLap: z.object({ lapMs: z.number(), finishedAt: z.string() }).nullable(),
+  /** how full the route store is; `items`, its routes, where the store counts them */
+  usage: z
+    .object({ bytes: z.number(), limitBytes: z.number(), items: z.number().optional() })
+    .nullable(),
+  /**
+   * maintenance's last lap of the site directory: how long from the lap before's end, when, and
+   * (laps finished since it was measured) how long the sweep worked at it, over how many runs,
+   * for how many sites
+   */
+  lastLap: z
+    .object({
+      lapMs: z.number(),
+      finishedAt: z.string(),
+      workMs: z.number().optional(),
+      runs: z.number().int().optional(),
+      sites: z.number().int().optional(),
+    })
+    .nullable(),
+  /** how often maintenance runs, and how long one run works at most */
+  maintenance: z.object({ everyMs: z.number(), budgetMs: z.number() }),
 })
 export type AdminRouteTable = z.infer<typeof AdminRouteTableSchema>
 export const RouteFormatRequestSchema = z.object({ format: z.enum(ROUTE_FORMATS) })

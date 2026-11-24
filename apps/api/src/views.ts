@@ -33,8 +33,11 @@ import {
   METRIC_DAYS,
   METRIC_MONTHS,
   METRIC_WEEKS,
+  MY_METRICS_SITES,
   metricRanges,
+  type SiteDays,
   type SiteMetrics,
+  type SitesMetrics,
   USAGE_LIST_LENGTH,
   type UsageTally,
   type ViewCounting,
@@ -46,9 +49,9 @@ import { manifestKey } from './blobs/types.ts'
 import { mapLimit } from './lib/concurrency.ts'
 import { badRequest } from './lib/errors.ts'
 import { pathRef, refreshHome, syncPathRoute } from './paths.ts'
-import type { Principal } from './policy.ts'
+import { type Actor, can, type Principal } from './policy.ts'
 import { renderVersion } from './rendering.ts'
-import { requireSite, type StoredManifest, syncRouteTable } from './sites.ts'
+import { listSites, requireSite, type StoredManifest, syncRouteTable } from './sites.ts'
 import type {
   SiteCounts,
   SiteMetricRecord,
@@ -235,6 +238,71 @@ function series(buckets: readonly SiteMetricRecord[], now: Date) {
   const weeks = ranges.weeks.map(w => ({ ...w, ...counts('W', w.week) }))
   const months = ranges.months.map(month => ({ month, ...counts('M', month) }))
   return { days, weeks, months, totals: { days: sum(days), months: sum(months) } }
+}
+
+/**
+ * The Sites list's metrics (`GET /api/sites?metrics=1`, sites.ts `listSites`): of `live`, the
+ * caller's live sites, the MY_METRICS_SITES updated last that they may read the metrics of
+ * (`site.metrics.read`: they own or publish them), each one's days and them all added up. One
+ * batch read (`Store.getSitesMetrics`), whatever the number of sites. Also `fling stats` and
+ * `fling_stats` without a name.
+ */
+export async function listedMetrics(
+  deps: Deps,
+  actor: Actor,
+  live: readonly SiteRecord[]
+): Promise<{ metrics: SitesMetrics; days: Map<string, SiteDays> }> {
+  const readable = live
+    .filter(s => can(actor, 'site.metrics.read', s))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const read = readable.slice(0, MY_METRICS_SITES)
+  const now = deps.clock.now()
+  const each = await deps.store.getSitesMetrics(
+    read.map(s => s.id),
+    now
+  )
+  const added = new Map<string, SiteMetricRecord>()
+  const days = new Map<string, SiteDays>()
+  let since: string | null = null
+  let lastViewAt: string | null = null
+  let lastPushAt: string | null = null
+  const earliest = (a: string | null, b?: string) => (b && (!a || b < a) ? b : a)
+  const latest = (a: string | null, b?: string) => (b && (!a || b > a) ? b : a)
+  each.forEach(({ buckets, activity }, i) => {
+    const site = read[i]
+    if (site) {
+      const own = series(buckets, now).days
+      days.set(site.id, { views: own.map(d => d.views), pushes: own.map(d => d.pushes) })
+    }
+    for (const b of buckets) {
+      const k = `${b.size}#${b.bucket}`
+      const t = added.get(k)
+      added.set(k, t ? { ...t, views: t.views + b.views, pushes: t.pushes + b.pushes } : { ...b })
+    }
+    since = earliest(since, activity?.since)
+    lastViewAt = latest(lastViewAt, activity?.lastViewAt)
+    lastPushAt = latest(lastPushAt, activity?.lastPushAt)
+  })
+  return {
+    metrics: {
+      viewCounts: deps.config.viewCounts,
+      counting: await viewCountingOn(deps),
+      sites: read.length,
+      of: readable.length,
+      since,
+      lastViewAt,
+      lastPushAt,
+      ...series([...added.values()], now),
+    },
+    days,
+  }
+}
+
+/** The caller's live sites added up (`fling_stats` without a name): the Sites list's metrics. */
+export async function yourSitesMetrics(deps: Deps, user: User): Promise<SitesMetrics> {
+  const { metrics } = await listSites(deps, user, false, {}, { metrics: true })
+  if (!metrics) throw badRequest('This Fling has no site metrics', 'no_metrics')
+  return metrics
 }
 
 /** Admin → Usage: every site's views and pushes together, and the sweep's last lap's tally. */

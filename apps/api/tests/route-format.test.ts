@@ -5,7 +5,7 @@
  */
 import { pathKvsKey, shareKvsKey, siteKvsKey } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
-import { maintain } from '../src/maintenance.ts'
+import { MAINTAIN_BUDGET_MS, MAINTAIN_EVERY_MS, maintain } from '../src/maintenance.ts'
 import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
 import { SESSION } from './oauth-helpers.ts'
 
@@ -51,7 +51,12 @@ describe('the route table format', () => {
   it('is json until an admin chooses; new writes take the choice at once', async () => {
     const { env, boss, alice } = await world()
     const before = await json(await browser(env, boss.session, 'GET', '/api/admin/route-table'))
-    expect(before).toEqual({ format: 'json', usage: null, lastLap: null })
+    expect(before).toEqual({
+      format: 'json',
+      usage: null,
+      lastLap: null,
+      maintenance: { everyMs: MAINTAIN_EVERY_MS, budgetMs: MAINTAIN_BUDGET_MS },
+    })
     await deploy(env, alice.key, 'early')
     expect(value(env, siteKvsKey('early')).startsWith('{')).toBe(true)
 
@@ -90,6 +95,9 @@ describe('the route table format', () => {
       expect(status.lastLap).toMatchObject({
         lapMs: expect.any(Number),
         finishedAt: expect.any(String),
+        workMs: expect.any(Number),
+        runs: 1,
+        sites: 1,
       })
       if (format === 'compact') {
         expect(value(env, keys[0] as string).startsWith('~')).toBe(true)

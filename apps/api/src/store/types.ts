@@ -180,8 +180,15 @@ export interface MaintenanceCursorRecord {
   after: string | null
   /** when the lap under way began: a lap's length is how long every site waits for a sweep */
   lapStartedAt: string
-  /** the last lap finished: how long it took and when (Admin → Routes); absent before the first */
-  lastLap?: { lapMs: number; finishedAt: string }
+  /** how long the sweep has worked at the lap under way, over how many runs (Admin → Routes) */
+  workMs?: number
+  runs?: number
+  /**
+   * the last lap finished (Admin → Routes): how long from the lap before's end and when; how long
+   * the sweep worked at it, over how many runs, for how many sites (absent on laps before these
+   * were measured); absent before the first
+   */
+  lastLap?: { lapMs: number; finishedAt: string; workMs?: number; runs?: number; sites?: number }
   /** what the lap under way has found of the sites' use so far (views.ts `tallySite`) */
   tally?: UsageTally
   /** the tally of the last lap finished (Admin → Usage); absent before the first */
@@ -890,6 +897,14 @@ export interface Store extends NotificationStore {
   getSiteMetrics(
     siteId: string
   ): Promise<{ buckets: SiteMetricRecord[]; activity: SiteActivityRecord | null }>
+  /**
+   * Many sites' metrics in one read (`Table.getMany`): for each of `siteIds`, in order, the buckets
+   * a read at `now` shows (`metricRanges`: the days, weeks and months) that exist, and its activity.
+   */
+  getSitesMetrics(
+    siteIds: readonly string[],
+    now: Date
+  ): Promise<{ buckets: SiteMetricRecord[]; activity: SiteActivityRecord | null }[]>
   /** The site's activity alone (null: never counted). */
   getSiteActivity(siteId: string): Promise<SiteActivityRecord | null>
   /** Add `counts` to the instance's own buckets of `at` (every site's together), as addSiteCounts. */

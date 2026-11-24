@@ -14,6 +14,9 @@
  * false, so the whole batch is rolled back: that is how `transact` writes all or nothing, and why a
  * single put/update/delete can't race between its check and its write (D1 runs one batch at a
  * time). Field conditions compare `json_type` too, so `1`, `'1'` and `true` stay distinct.
+ *
+ * Many keys: `getMany` reads `GET_MANY_CHUNK` distinct keys a statement (D1 binds at most 100
+ * parameters: two a key plus the clock) and sends every statement in one `batch()`, one round trip.
  */
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types'
 import {
@@ -24,6 +27,7 @@ import {
   decodeCursor,
   encodeCursor,
   holdsWhenAbsent,
+  type Key,
   type Page,
   type Patch,
   type QueryOptions,
@@ -41,6 +45,9 @@ import {
 const CONDITION_FAILED = 'fling: condition failed'
 
 type Row = { pk?: string; sk: string; data: string; expires_at?: number | null }
+
+/** Keys a `getMany` statement reads: 2 × 49 + 1 parameters, under D1's 100. */
+const GET_MANY_CHUNK = 49
 
 const expiryOf = (expiresAt: unknown) =>
   typeof expiresAt === 'string' ? Date.parse(expiresAt) : null
@@ -141,6 +148,40 @@ export class D1Table implements Table {
       .bind(pk, sk, this.now())
       .first<Row>()
     return row ? fromRow(pk, row) : null
+  }
+
+  async getMany(keys: readonly Key[]) {
+    const id = (k: Key) => JSON.stringify([k.pk, k.sk])
+    const wanted = new Map<string, Key>()
+    for (const k of keys) if (storable(k)) wanted.set(id(k), k)
+    const distinct = [...wanted.values()]
+    const found = new Map<string, TableItem>()
+    if (distinct.length) {
+      const now = this.now()
+      const statements: D1PreparedStatement[] = []
+      for (let i = 0; i < distinct.length; i += GET_MANY_CHUNK) {
+        const chunk = distinct.slice(i, i + GET_MANY_CHUNK)
+        statements.push(
+          this.db
+            .prepare(
+              'SELECT pk, sk, data FROM items WHERE (pk, sk) IN ' +
+                `(VALUES ${chunk.map(() => '(?, ?)').join(', ')}) ` +
+                'AND (expires_at IS NULL OR expires_at > ?)'
+            )
+            .bind(...chunk.flatMap(k => [k.pk, k.sk]), now)
+        )
+      }
+      for (const { results } of await this.db.batch<Row>(statements)) {
+        for (const row of results) {
+          const pk = row.pk as string
+          found.set(id({ pk, sk: row.sk }), fromRow(pk, row))
+        }
+      }
+    }
+    return keys.map(k => {
+      const item = found.get(id(k))
+      return item ? structuredClone(item) : null
+    })
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

@@ -21,6 +21,9 @@
  * well under it: MAX_PATH_BYTES), and a query on a longer pk or prefix finds nothing, as no item
  * can have one.
  *
+ * `getMany` reads its distinct keys with `getAll`, a few hundred document refs a call, the calls
+ * concurrent.
+ *
  * Writes that depend on what is there (every condition, `update`, a `delete` that returns the old
  * item, `transact`) run in a Firestore transaction: reads take locks, conflicting transactions are
  * retried by the client, and a false condition aborts with `ConditionFailed` (carrying the op's
@@ -41,6 +44,7 @@ import {
   encodeCursor,
   holdsWhenAbsent,
   isExpired,
+  type Key,
   type Page,
   type Patch,
   type QueryOptions,
@@ -65,6 +69,9 @@ import {
 
 /** The collection the items are in, unless the caller names another. */
 export const DEFAULT_COLLECTION = 'items'
+
+/** The most document refs `getMany` reads in one `getAll` call; chunks run concurrently. */
+const GET_ALL_CHUNK = 300
 
 /** How often the client retries a transaction that lost to a concurrent one. */
 const MAX_ATTEMPTS = 50
@@ -188,6 +195,27 @@ export class FirestoreTable implements Table {
   async get(pk: string, sk: string) {
     if (!storable({ pk, sk })) return null
     return this.live(await this.ref(pk, sk).get())
+  }
+
+  /** One `getAll` per chunk of distinct storable keys; unstorable keys are null unread. */
+  async getMany(keys: readonly Key[]) {
+    const ids = keys.map(k => (storable(k) ? docId(k.pk, k.sk) : null))
+    const unique = new Map<string, Key>()
+    keys.forEach((k, i) => {
+      const id = ids[i]
+      if (id !== null && id !== undefined && !unique.has(id)) unique.set(id, k)
+    })
+    const refs = [...unique.values()].map(k => this.ref(k.pk, k.sk))
+    const chunks: DocumentReference[][] = []
+    for (let i = 0; i < refs.length; i += GET_ALL_CHUNK) {
+      chunks.push(refs.slice(i, i + GET_ALL_CHUNK))
+    }
+    const snaps = (await Promise.all(chunks.map(c => this.db.getAll(...c)))).flat()
+    const found = new Map(snaps.map(snap => [snap.id, this.live(snap)]))
+    return ids.map(id => {
+      const item = id === null ? null : (found.get(id) ?? null)
+      return item ? { ...item } : null
+    })
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

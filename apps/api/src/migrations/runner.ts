@@ -138,6 +138,9 @@ class DryRunTable implements Table {
   get(pk: string, sk: string) {
     return this.inner.get(pk, sk)
   }
+  getMany(keys: Parameters<Table['getMany']>[0]) {
+    return this.inner.getMany(keys)
+  }
   query(pk: string, opts?: Parameters<Table['query']>[1]) {
     return this.inner.query(pk, opts)
   }

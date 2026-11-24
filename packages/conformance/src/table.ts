@@ -141,6 +141,61 @@ export function tableConformance(name: string, factory: () => Table | Promise<Ta
       })
     })
 
+    describe('getMany', () => {
+      it('answers each key in order, across partitions, null where there is no live item', async () => {
+        const { table, pk } = await setup()
+        const other = `${pk}#2`
+        await table.put({ pk, sk: 'A', n: 1 })
+        await table.put({ pk: other, sk: 'B', n: 2 })
+        await table.put({ pk, sk: 'gone', n: 3, expiresAt: PAST })
+        await table.put({ pk, sk: 'later', n: 4, expiresAt: FUTURE })
+        const got = await table.getMany([
+          { pk: other, sk: 'B' },
+          { pk, sk: 'missing' },
+          { pk, sk: 'A' },
+          { pk, sk: 'gone' },
+          { pk, sk: 'later' },
+          { pk, sk: 'A' },
+          { pk, sk: 'bad\u0000key' },
+          { pk, sk: 'lone\ud800' },
+        ])
+        expect(got.map(i => (i ? i.n : null))).toEqual([2, null, 1, null, 4, 1, null, null])
+        expect(got[0]).toEqual({ pk: other, sk: 'B', n: 2 })
+        expect(await table.getMany([])).toEqual([])
+      })
+
+      it('reads more keys than any backend takes at once', async () => {
+        const { table, pk } = await setup()
+        const parts = [pk, `${pk}#2`, `${pk}#3`]
+        for (const p of parts) {
+          for (let i = 0; i < 90; i += 3) {
+            await table.put({ pk: p, sk: `S#${String(i).padStart(3, '0')}`, i })
+          }
+        }
+        // 270 keys over three partitions, a third of them present: past DynamoDB's 100 a batch
+        // and D1's 100 bound parameters a statement.
+        const keys = parts.flatMap(p =>
+          Array.from({ length: 90 }, (_, i) => ({ pk: p, sk: `S#${String(i).padStart(3, '0')}` }))
+        )
+        const got = await table.getMany(keys)
+        expect(got).toHaveLength(270)
+        got.forEach((item, n) => {
+          const i = n % 90
+          expect(item ? item.i : null).toBe(i % 3 === 0 ? i : null)
+          if (item) expect(item.pk).toBe(keys[n]?.pk)
+        })
+      })
+
+      it('returns copies: changing one changes nothing stored', async () => {
+        const { table, pk } = await setup()
+        await table.put({ pk, sk: 'A', list: [1] })
+        const [first] = await table.getMany([{ pk, sk: 'A' }])
+        expect(first).not.toBeNull()
+        ;(first?.list as number[] | undefined)?.push(2)
+        expect((await table.get(pk, 'A'))?.list).toEqual([1])
+      })
+    })
+
     describe('query', () => {
       it('returns the partition in UTF-8 byte order of sk (not UTF-16 or locale order)', async () => {
         const { table, pk } = await setup()

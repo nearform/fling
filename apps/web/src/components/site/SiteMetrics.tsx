@@ -1,20 +1,18 @@
 /**
  * The site page's Metrics panel (`metrics` capability), for the site's owners, publishers and
  * admins (`site.metrics.read`): its views and pushes over the last 28 days and 12 months, when it
- * was last viewed and last pushed, and a bar a day for the 28 days. Views only where the instance
- * counts them (`viewCounts`); without, the panel shows pushes and says views aren't counted.
- * Counts only: nothing about who viewed exists to show.
+ * was last viewed and last pushed, and the days as the Sites page's Activity draws them (`Pulse`,
+ * dense: a line you can read day by day, pushes marked beneath), so the two read alike. Views only
+ * where the instance counts them (`viewCounts`); without, the panel shows pushes and says views
+ * aren't counted. Counts only: nothing about who viewed exists to show.
  */
-import {
-  METRIC_DAYS,
-  METRIC_MONTHS,
-  type SiteMetrics as SiteMetricsData,
-} from '@fling/shared/metrics'
+import { METRIC_DAYS, METRIC_MONTHS } from '@fling/shared/metrics'
 import { useInstance } from '../../hooks/instance'
 import { useSiteMetrics } from '../../hooks/queries'
 import { errorMessage } from '../../lib/api'
 import { fullDate, timeAgo, utcDate } from '../../lib/format'
-import { chartedCount, chartSummary, countLabel, metricBars } from '../../lib/metrics'
+import { Pulse } from '../usage/UsageCharts'
+import '../usage/usage.css'
 import { SiteSection } from './SiteSection'
 
 export function SiteMetrics({ name }: { name: string }) {
@@ -51,7 +49,7 @@ export function SiteMetrics({ name }: { name: string }) {
             {m.viewCounts && <When label="Last viewed" at={m.lastViewAt} />}
             <When label="Last pushed" at={m.lastPushAt} />
           </dl>
-          <DayChart metrics={m} />
+          <Pulse usage={m} dense across="this site" />
           {m.viewCounts && m.counting === false && (
             <p className="text-xs text-secondary">
               View counting is off on {instance?.name ?? 'this Fling'}: these are the views counted
@@ -72,10 +70,10 @@ export function SiteMetrics({ name }: { name: string }) {
 function Stat({ label, days, months }: { label: string; days: number; months: number }) {
   return (
     <div>
-      <dt className="text-sm text-secondary">{label}</dt>
+      <dt className="text-xs text-secondary">{label}</dt>
       <dd>
-        <span className="text-xl font-medium tabular-nums">{days.toLocaleString()}</span>
-        <span className="text-sm text-secondary"> in {METRIC_DAYS} days</span>
+        <span className="text-lg font-semibold tabular-nums">{days.toLocaleString()}</span>
+        <span className="text-xs text-secondary"> in {METRIC_DAYS} days</span>
         <span className="block text-xs text-muted tabular-nums">
           {months.toLocaleString()} in {METRIC_MONTHS} months
         </span>
@@ -87,7 +85,7 @@ function Stat({ label, days, months }: { label: string; days: number; months: nu
 function When({ label, at }: { label: string; at: string | null }) {
   return (
     <div>
-      <dt className="text-sm text-secondary">{label}</dt>
+      <dt className="text-xs text-secondary">{label}</dt>
       <dd className="text-sm">
         {at ? (
           <span title={fullDate(at)}>{timeAgo(at)}</span>
@@ -96,44 +94,5 @@ function When({ label, at }: { label: string; at: string | null }) {
         )}
       </dd>
     </div>
-  )
-}
-
-/** A bar a day, oldest first; each bar's title says its day and count. */
-function DayChart({ metrics }: { metrics: SiteMetricsData }) {
-  const key = chartedCount(metrics)
-  const bars = metricBars(metrics, key)
-  const height = 40
-  return (
-    <figure className="site-metrics-chart">
-      <svg
-        viewBox={`0 0 ${bars.length * 4} ${height}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={chartSummary(bars, key)}
-      >
-        {bars.map((b, i) => {
-          // An empty day still shows, as a sliver on the baseline.
-          const h = Math.max(1, b.ratio * height)
-          return (
-            <rect
-              key={b.day}
-              x={i * 4 + 0.5}
-              y={height - h}
-              width={3}
-              height={h}
-              data-empty={b.count === 0 ? '' : undefined}
-            >
-              <title>{`${b.day}: ${countLabel(b.count, key)}`}</title>
-            </rect>
-          )
-        })}
-      </svg>
-      <figcaption className="flex justify-between text-xs text-muted tabular-nums">
-        <span>{bars[0]?.day}</span>
-        <span>{key === 'views' ? 'Views' : 'Pushes'} per day</span>
-        <span>Today</span>
-      </figcaption>
-    </figure>
   )
 }

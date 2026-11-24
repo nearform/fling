@@ -5,10 +5,15 @@
  * also filtered out of reads here and treated as absent by conditions (comparing the ISO
  * `expiresAt` strings, which sort chronologically).
  *
+ * `getMany` is BatchGetItem: up to 100 distinct keys a request (DynamoDB refuses a key twice in
+ * one), the batches sent together, and the keys DynamoDB leaves unprocessed (throttling, or a
+ * response past 16 MB) asked for again after a short backoff.
+ *
  * This is the layout the DynamoDB store has always written, so existing items read as-is.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
+  BatchGetCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
@@ -27,6 +32,7 @@ import {
   encodeCursor,
   holdsWhenAbsent,
   isExpired,
+  type Key,
   type Page,
   type Patch,
   type QueryOptions,
@@ -92,6 +98,16 @@ class Expr {
     }
   }
 }
+
+/** Most keys one BatchGetItem takes. */
+const BATCH_GET_MAX = 100
+
+/** Rounds in a row that may leave keys unprocessed before `getMany` gives up. */
+const BATCH_GET_ATTEMPTS = 8
+
+/** Full-jitter exponential backoff before retry number `attempt` (from 0). */
+const backoff = (attempt: number) =>
+  new Promise(r => setTimeout(r, 20 * 2 ** attempt * Math.random()))
 
 const isNamed = (err: unknown, name: string) => err instanceof Error && err.name === name
 
@@ -163,6 +179,52 @@ export class DynamoTable implements Table {
       new GetCommand({ TableName: this.table, Key: { PK: pk, SK: sk }, ConsistentRead: true })
     )
     return res.Item && !isExpired(res.Item, this.now()) ? fromAttrs(res.Item) : null
+  }
+
+  async getMany(keys: readonly Key[]) {
+    const id = (k: Key) => JSON.stringify([k.pk, k.sk])
+    const unique = new Map<string, Key>()
+    for (const k of keys) if (storable(k)) unique.set(id(k), k)
+    const batches: Key[][] = []
+    const all = [...unique.values()]
+    for (let i = 0; i < all.length; i += BATCH_GET_MAX)
+      batches.push(all.slice(i, i + BATCH_GET_MAX))
+    const found = new Map<string, TableItem>()
+    await Promise.all(
+      batches.map(async batch => {
+        let pending: Attrs[] = batch.map(k => ({ PK: k.pk, SK: k.sk }))
+        for (let attempt = 0; ; ) {
+          const res = await this.doc.send(
+            new BatchGetCommand({
+              RequestItems: { [this.table]: { Keys: pending, ConsistentRead: true } },
+            })
+          )
+          const now = this.now()
+          for (const item of res.Responses?.[this.table] ?? []) {
+            if (!isExpired(item, now)) found.set(id({ pk: item.PK, sk: item.SK }), fromAttrs(item))
+          }
+          const left = res.UnprocessedKeys?.[this.table]?.Keys ?? []
+          if (left.length === 0) return
+          // Only rounds that got nothing through count towards giving up: a response cut at
+          // 16 MB still makes progress.
+          attempt = left.length < pending.length ? 0 : attempt + 1
+          if (attempt >= BATCH_GET_ATTEMPTS) {
+            throw new Error(`BatchGetItem left ${left.length} keys unprocessed`)
+          }
+          await backoff(attempt)
+          pending = left
+        }
+      })
+    )
+    // A key asked for twice gets its own copy each time.
+    const given = new Set<string>()
+    return keys.map(k => {
+      const item = found.get(id(k))
+      if (!item) return null
+      if (given.has(id(k))) return structuredClone(item)
+      given.add(id(k))
+      return item
+    })
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

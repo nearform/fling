@@ -43,7 +43,7 @@ import {
   privateAudience,
 } from './instance.ts'
 import { MAX_FILES, MAX_PATH_FOLDER_LENGTH } from './limits.ts'
-import { METRIC_DAYS, METRIC_MONTHS, type SiteMetrics } from './metrics.ts'
+import { METRIC_DAYS, METRIC_MONTHS, type SiteMetrics, type SitesMetrics } from './metrics.ts'
 import { CellChangeSchema } from './notifications.ts'
 import { PATHS_OPTIONS, PATHS_PLACEHOLDERS } from './paths-index.ts'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from './paths-templates.ts'
@@ -672,18 +672,26 @@ const counted = (n: number, one: string, many: string) =>
   `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`
 
 /**
- * The text of fling_stats (both servers): totals over the days and the months, when the site was
- * last viewed and pushed, and a count per day, oldest first. Counts only: there is nobody to name.
- * `instanceName`: the Fling, for the line saying it doesn't count views.
+ * The text of fling_stats (both servers): totals over the days and the months, when the site (or,
+ * without a name, the caller's live sites together) was last viewed and pushed, and a count per
+ * day, oldest first. Counts only: there is nobody to name. `instanceName`: the Fling, for the line
+ * saying it doesn't count views.
  */
-export function describeSiteMetrics(m: SiteMetrics, instanceName = 'this Fling'): string {
+export function describeSiteMetrics(
+  m: SiteMetrics | SitesMetrics,
+  instanceName = 'this Fling'
+): string {
   const views = m.viewCounts
   const both = (c: { views: number; pushes: number }) => {
     const pushes = counted(c.pushes, 'push', 'pushes')
     return views ? `${counted(c.views, 'view', 'views')}, ${pushes}` : pushes
   }
+  const subject =
+    'name' in m
+      ? m.name
+      : `Your ${counted(m.sites, 'live site', 'live sites')} together${m.sites < m.of ? ` (the ${m.sites} updated last, of ${m.of})` : ''}`
   const lines = [
-    `${m.name}, last ${METRIC_DAYS} days: ${both(m.totals.days)}. Last ${METRIC_MONTHS} months: ${both(m.totals.months)}.`,
+    `${subject}, last ${METRIC_DAYS} days: ${both(m.totals.days)}. Last ${METRIC_MONTHS} months: ${both(m.totals.months)}.`,
   ]
   const last = [
     ...(views ? [`last viewed ${m.lastViewAt ? metricTime(m.lastViewAt) : 'never'}`] : []),
@@ -1499,8 +1507,13 @@ export function mcpToolsFor(w: McpWording) {
         `days and ${METRIC_MONTHS} months, when it was last viewed and last pushed, and a count per day. Counts only: ` +
         'Fling never records who viewed, so answer "who is using it" with numbers, never people. For the ' +
         "site's owners and publishers. Use it when the user asks how a site is doing, whether anyone has looked at it, " +
-        'or how often it changes.',
-      inputSchema: { name: siteName },
+        'or how often it changes. Without `name`, every live site the user owns or publishes, added up: how their ' +
+        'sites are doing overall.',
+      inputSchema: {
+        name: siteName
+          .optional()
+          .describe('Site name, e.g. "q3-report"; leave out for all your live sites together'),
+      },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 

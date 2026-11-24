@@ -227,7 +227,9 @@ month, with when it was last viewed and last pushed (`packages/shared/src/metric
 (`SITE#<id>/METRIC#<D|W|M>#<bucket>`), and each bucket expires on its own, so nothing rolls them
 up; `SITE#<id>/ACTIVITY` holds the last view, last push and the first count (`since`). Owners,
 publishers and admins read them (`site.metrics.read`: `GET /api/sites/:name/metrics`,
-`fling stats`, `fling_stats`, the site page). The `metrics` capability.
+`fling stats`, `fling_stats`, the site page). The Sites list reads its live sites' metrics with it,
+in one batch (`GET /api/sites?metrics=1`, `listedMetrics`, `Store.getSitesMetrics`). The `metrics`
+capability.
 
 **Usage** — Admin → Usage (`instanceUsage`, `apps/api/src/views.ts`; `GET /api/admin/usage`):
 every site's views and pushes added together as they are counted (`METRICS/<D|W|M>#<bucket>`, one
@@ -676,7 +678,7 @@ expires after 30 days (`SUPPRESSION_MS`, `apps/api/src/notifications/drain.ts`).
 **Core** — `apps/api`: the API with no cloud SDK in it (a lint rule bans `@aws-sdk/*`,
 `cloudflare:*` and `@cloudflare/*` there and in `packages/shared`). It talks to storage through three
 ports:
-**Table** (keyed items: get, prefix query, conditional put/update/delete, transactions, expiry),
+**Table** (keyed items: get, many gets at once, prefix query, conditional put/update/delete, transactions, expiry),
 **Blobs** (site files and manifests, including upload URLs bound to the file's digest) and
 **RouteTable** (the keys the edge routes site hosts by; `usage()` where the store has a size
 limit).

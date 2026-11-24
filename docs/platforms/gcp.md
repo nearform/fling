@@ -60,7 +60,7 @@ Cloudflare Worker.
 - **Consistency and transactions:** reads are strongly consistent. The database runs with
   pessimistic concurrency, so a transaction's reads take locks; the client retries a transaction
   that lost a conflict (up to 50 times). Transactions span documents, well above `TRANSACT_MAX`
-  (25).
+  (25). `getMany` reads its keys with `getAll`, 300 documents a call, the calls at once.
 - **Conditions:** each condition is a read inside the transaction (`ifAbsent`, `ifExists`,
   `fieldEquals`) before its write, and `ConditionFailed` carries the op index. `update` (with
   `add`) is a read and a write in one transaction, so concurrent adds all count.

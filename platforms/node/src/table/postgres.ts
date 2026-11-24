@@ -6,6 +6,9 @@
  * byte order `compareSk` defines. A prefix is `sk >= prefix AND starts_with(sk, prefix)`: the
  * first bound lets the primary key's index start at the prefix.
  *
+ * Reads: `get` reads one key; `getMany` reads any number in one statement, the keys passed as two
+ * text[] parameters that `unnest` pairs up.
+ *
  * Writes: every write is one READ COMMITTED transaction that first takes a transaction-scoped
  * advisory lock on each key it writes (a 64-bit hash of pk and sk, taken in ascending order so two
  * writers never wait on each other), then reads the live items at those keys, checks the
@@ -24,7 +27,8 @@
  *
  * SQL: Drizzle's query builder writes every statement it can, with values as parameters. The `sql`
  * template (whose values are parameters too) writes the rest: the advisory lock, `starts_with`, a
- * `::jsonb` cast and the purge's `(pk, sk) IN (…)`. tests/sql-guard.test.ts keeps it that way.
+ * `::jsonb` cast, the purge's `(pk, sk) IN (…)` and getMany's `(pk, sk) IN (… unnest(…))`.
+ * tests/sql-guard.test.ts keeps it that way.
  *
  * Strings: jsonb holds neither NUL nor a lone surrogate, which the other backends store. A string
  * (value or field name) holding one is stored as `{"~fling~esc": "s", "u": [its UTF-16 code
@@ -298,6 +302,38 @@ export class PostgresTable implements Table {
       .from(this.items)
       .where(and(this.at({ pk, sk }), this.live()))
     return row ? fromRow(row) : null
+  }
+
+  /**
+   * One statement for any number of keys: the distinct storable ones go as two text[] parameters
+   * (`sql.param`, so Drizzle doesn't spread them into a parameter each) that `unnest` pairs up.
+   */
+  async getMany(keys: readonly Key[]) {
+    const wanted = [...new Map(keys.filter(k => storable(k)).map(k => [keyOf(k), k])).values()]
+    if (wanted.length === 0) return keys.map(() => null)
+    const { pk, sk } = this.items
+    const pks = sql.param(wanted.map(k => k.pk))
+    const sks = sql.param(wanted.map(k => k.sk))
+    const rows = await this.database.db
+      .select(this.columns())
+      .from(this.items)
+      .where(
+        and(
+          sql`(${pk}, ${sk}) IN (SELECT * FROM unnest(${pks}::text[], ${sks}::text[]))`,
+          this.live()
+        )
+      )
+    const found = new Map(rows.map(r => [keyOf(r), fromRow(r)]))
+    const given = new Set<string>()
+    // A repeated key gets a copy of its own, so changing one answer changes no other.
+    return keys.map(k => {
+      const id = keyOf(k)
+      const item = found.get(id)
+      if (!item) return null
+      if (given.has(id)) return structuredClone(item)
+      given.add(id)
+      return item
+    })
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

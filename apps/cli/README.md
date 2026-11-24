@@ -261,7 +261,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling ls --shared [--sort …]` | the restricted sites others have shared with you: owner, and how (your address or a group) |
 | `fling ls … --limit <n> [--after <cursor>]` | one page of at most n sites, in the same order, then the command for the next page (`--after` the cursor it prints); without `--limit`, every site |
 | `fling info <name>` / `fling versions <name> [--path <folder>]` | details and version history, with who published each version; `--path`: a Path's own versions |
-| `fling stats <name>` | how a site is doing: views (page loads, where the Fling counts them) and pushes (versions going live) over the last 28 days and 12 months, last viewed and last pushed, and a bar a UTC day; counts only, never who. For its owners and publishers; `--json` for every day, week and month |
+| `fling stats [name]` | how a site is doing (without a name, all your live sites together): views (page loads, where the Fling counts them) and pushes (versions going live) over the last 28 days and 12 months, last viewed and last pushed, and a bar a UTC day; counts only, never who. For its owners and publishers; `--json` for every day, week and month |
 | `fling pull <name> [dir] [--path <folder>] [--version-id <id>] [--force]` | download a site's files to change them; `fling deploy <dir>` publishes on the version pulled |
 | `fling files <name> [versionId] [--path <folder>]` | the files in the live version (or an earlier one), or a Path's |
 | `fling rollback <name> <versionId> [--path <folder>]` | serve an earlier version (of the site, or of one Path) |
@@ -576,7 +576,7 @@ The MCP tools:
   and `fling_paths_template` and `fling_paths_check` (a starter home page with a Paths block, and
   its check), which need no Fling. `fling_info`, `fling_files` and `fling_rollback` take `path` to
   act on one Path.
-- `fling_stats` (a site's views and pushes, counts only) where a Fling has metrics.
+- `fling_stats` (a site's views and pushes, or without a name your live sites', counts only) where a Fling has metrics.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
   `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms

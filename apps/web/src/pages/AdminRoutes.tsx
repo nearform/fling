@@ -3,23 +3,33 @@
  * table, which the edge reads to find each site's files. How full the store is where it has a
  * size limit, and the format the API writes, which an admin chooses here (route-format.ts), with
  * maintenance's rewrite of every site's routes into it, and how long maintenance's last lap of
- * every site took.
+ * every site took. Each says how much room is left at today's pace (lib/headroom.ts): how many
+ * more routes fit, and how many more sites one run's sweep gets through.
  */
 import type { AdminRouteTable, RouteFormat } from '@fling/shared'
 import { PageHeader } from '../components/PageHeader'
 import { useAdminRouteTable, useMe, useSetRouteFormat } from '../hooks/queries'
 import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
+import {
+  compactFits,
+  lapRoom,
+  roughly,
+  routeRoom,
+  share,
+  shortDuration,
+  size,
+} from '../lib/headroom'
 
 const FORMAT_NAMES: Record<RouteFormat, string> = { json: 'JSON', compact: 'Compact' }
 
 /** From this share of its limit the store is nearly full (maintenance logs it; AWS alarms). */
 const NEARLY_FULL = 0.7
 
-const megabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(2)} MB`
 const when = (iso: string) => new Date(iso).toLocaleString()
 
-function Usage({ usage }: { usage: AdminRouteTable['usage'] }) {
+function Usage({ data }: { data: AdminRouteTable }) {
+  const usage = data.usage
   if (!usage) {
     return (
       <p className="text-secondary">
@@ -27,19 +37,33 @@ function Usage({ usage }: { usage: AdminRouteTable['usage'] }) {
       </p>
     )
   }
-  const share = usage.bytes / usage.limitBytes
+  const full = usage.bytes / usage.limitBytes
+  const room = routeRoom(usage)
   return (
     <div className="space-y-2">
       <p>
-        <strong>{megabytes(usage.bytes)}</strong> of {megabytes(usage.limitBytes)} used (
-        {Math.round(share * 100)}%)
+        <strong>{size(usage.bytes)}</strong> of {size(usage.limitBytes)} used (
+        {share(usage.bytes, usage.limitBytes)})
       </p>
       <progress
-        className={`progress w-full ${share >= NEARLY_FULL ? 'progress-warning' : ''}`}
+        className={`progress w-full ${full >= NEARLY_FULL ? 'progress-warning' : ''}`}
         value={usage.bytes}
         max={usage.limitBytes}
       />
-      {share >= NEARLY_FULL && (
+      {room && (
+        <p>
+          Its {room.routes.toLocaleString()} routes take about {size(room.perRoute)} each, so
+          there's room for about <strong>{roughly(room.room)} more</strong>
+          {compactFits(data.format) && full < NEARLY_FULL && (
+            <>, and about three times that in Compact</>
+          )}
+          .
+        </p>
+      )}
+      <p className="text-secondary">
+        Each live site has a route, as does each live Path and share link.
+      </p>
+      {full >= NEARLY_FULL && (
         <p className="text-warning">
           Nearly full. Switching to Compact makes room; archiving sites nobody uses frees theirs.
         </p>
@@ -57,21 +81,53 @@ function duration(ms: number) {
   return hours < 48 ? `${hours} hours` : `${Math.round(hours / 2.4) / 10} days`
 }
 
-function Lap({ lastLap }: { lastLap: AdminRouteTable['lastLap'] }) {
+function Lap({ data }: { data: AdminRouteTable }) {
+  const { lastLap, maintenance } = data
+  const every = duration(maintenance.everyMs)
   if (!lastLap) {
     return (
       <p className="text-secondary">
-        Maintenance hasn't finished a lap of every site yet. It runs every 15 minutes and goes on
-        from where it stopped.
+        Maintenance hasn't finished a lap of every site yet. It runs every {every} and goes on from
+        where it stopped.
       </p>
     )
   }
+  const room = lapRoom(lastLap, maintenance)
+  const sites = (n: number) => `${n.toLocaleString()} site${n === 1 ? '' : 's'}`
   return (
     <div className="space-y-2">
-      <p>
-        The last lap took <strong>{duration(lastLap.lapMs)}</strong>, finished{' '}
-        {when(lastLap.finishedAt)}.
-      </p>
+      {room ? (
+        room.runs === 1 ? (
+          <p>
+            The last lap went through all {sites(room.sites)} in{' '}
+            <strong>{shortDuration(room.workMs)}</strong>, in one run, finished{' '}
+            {when(lastLap.finishedAt)}. Maintenance runs every {every}, so no site waits longer than
+            that for its sweep.
+          </p>
+        ) : (
+          <p>
+            The last lap took <strong>{room.runs} runs</strong> to go through all{' '}
+            {sites(room.sites)} ({shortDuration(room.workMs)} of work), finished{' '}
+            {when(lastLap.finishedAt)}: a site waits up to {duration(lastLap.lapMs)} for its sweep.
+          </p>
+        )
+      ) : (
+        <p>
+          The last lap took <strong>{duration(lastLap.lapMs)}</strong>, finished{' '}
+          {when(lastLap.finishedAt)}.
+        </p>
+      )}
+      {room && (
+        <p>
+          A run works for up to {duration(maintenance.budgetMs)}: at this pace one run gets through
+          about <strong>{roughly(room.perRun)} sites</strong>
+          {room.perRun > room.sites ? (
+            <>, so a lap stays within one run until there are about that many.</>
+          ) : (
+            <>. Beyond that, each extra run adds {every} to a site's wait.</>
+          )}
+        </p>
+      )}
       <p className="text-secondary">
         Every site is maintained at least once a lap: a lap's length is how long a site waits for
         what nothing queued, such as a change of version retention.
@@ -166,7 +222,7 @@ export default function AdminRoutes() {
           <section id="usage" className="space-y-3">
             <h2 className="text-base font-semibold">Usage</h2>
             <div className="surface-panel text-sm">
-              <Usage usage={routes.data.usage} />
+              <Usage data={routes.data} />
             </div>
           </section>
           <section id="format" className="space-y-3">
@@ -178,7 +234,7 @@ export default function AdminRoutes() {
           <section id="maintenance" className="space-y-3">
             <h2 className="text-base font-semibold">Maintenance</h2>
             <div className="surface-panel text-sm">
-              <Lap lastLap={routes.data.lastLap} />
+              <Lap data={routes.data} />
             </div>
           </section>
         </>

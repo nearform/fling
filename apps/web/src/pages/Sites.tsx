@@ -11,6 +11,10 @@
  * `?owner=<email>` (Admin → Users links it) narrows it to the sites that address owns or publishes,
  * shown as a chip that clears it. Each is an `AdminSiteCard` (the listing only).
  *
+ * Where the instance counts views (`metrics` and `viewCounts`), Active opens with your live sites' views and pushes together
+ * (`MySitesStats`), folded or not as you left it, and each site has a sparkline of its 28 days
+ * from the same answer (`SiteSpark`).
+ *
  * With the `thumbnails` capability every tab shows each site's thumbnail, and the header's
  * List / Grid switch lays them out as rows or as thumbnail-led cards in as many columns as the
  * width holds; the choice is kept per browser. The lists use the page's whole width.
@@ -36,8 +40,9 @@ import { SharedSiteCard } from '../components/SharedSiteCard'
 import { SiteCard } from '../components/SiteCard'
 import { SiteSearch } from '../components/SiteSearch'
 import { SitesLayoutToggle } from '../components/SitesLayoutToggle'
+import { MySitesStats } from '../components/site/MySitesStats'
 import { useInstance } from '../hooks/instance'
-import { useAdminSites, useMe, useSharedSites, useSites } from '../hooks/queries'
+import { useAdminSites, useMe, useSharedSites, useSites, useSitesMetrics } from '../hooks/queries'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { useLocalStoragePreference } from '../hooks/useLocalStoragePreference'
 import { showsAdmin } from '../lib/admin'
@@ -51,6 +56,7 @@ import {
   sitesLayoutOf,
   sitesViewOf,
 } from '../lib/sites'
+import { activityShown } from '../lib/usage'
 import { QuickStart } from './GetStarted'
 
 /** "Good morning" by the reader's local clock. */
@@ -335,10 +341,19 @@ export default function Sites() {
   )
   const sort = chooseSiteSort(params.get('sort'), savedSort)
   const thumbnails = useInstance()?.capabilities.thumbnails === true
+  // Only where views are counted (SITE_VIEW_COUNTS): without, neither is shown nor asked for.
+  const stats = activityShown(useInstance())
   const [savedLayout, setLayout] = useLocalStoragePreference<string>('sitesLayout', 'list')
   const layout = sitesLayoutOf(savedLayout, thumbnails)
-  const active = useSites(false, !guest)
-  const list = useSites(archived, !guest)
+  // Live sites come with their days and them all added up (the strip), in the one answer.
+  const active = useSites(false, !guest, stats)
+  const metrics = useSitesMetrics(stats && !guest)
+  // The busiest day of any of them: every site's line is coloured against it.
+  const sparkScale = useMemo(
+    () => Math.max(0, ...(active.data ?? []).flatMap(s => s.days?.views ?? [])),
+    [active.data]
+  )
+  const list = useSites(archived, !guest, stats)
   const sharedList = useSharedSites(sharing)
   const shown = useMemo(
     () => sortSites(filterSites(list.data ?? [], query), sort),
@@ -397,6 +412,10 @@ export default function Sites() {
         {...(thumbnails && { layout })}
         onLayoutChange={setLayout}
       />
+
+      {!guest && !archived && !shared && !all && stats && (active.data?.length ?? 0) > 0 && (
+        <MySitesStats metrics={metrics} />
+      )}
 
       {!guest && (
         <div role="tablist" className="tabs tabs-border" aria-label="Which sites">
@@ -498,11 +517,18 @@ export default function Sites() {
         <NoMatch query={query} label={archived ? 'archived ' : ''} onClear={() => setQuery('')} />
       ) : (
         <SiteItems layout={layout}>
-          {shown.map(site => (
-            <li key={site.name}>
-              <SiteCard site={site} layout={layout} />
-            </li>
-          ))}
+          {shown.map(site => {
+            const counts = site.days?.views
+            return (
+              <li key={site.name}>
+                <SiteCard
+                  site={site}
+                  layout={layout}
+                  {...(counts ? { spark: { views: counts, scale: sparkScale } } : {})}
+                />
+              </li>
+            )
+          })}
         </SiteItems>
       )}
     </div>

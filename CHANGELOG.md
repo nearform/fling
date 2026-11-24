@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.20.0 (2026-11-24)
+
 - **Your sites, together.** The Sites page opens with **Activity**: the views and pushes of every live site you own or publish, added up. Folded, as it starts, it is one row: a small line of the 28 days and their totals; open, it adds the 12 months and a line you can read day by day, and it stays as you left it. Each site in the list has a small line of its views over the 28 days, with their total, coloured against the busiest of your sites so the busy ones stand out. Only where the Fling counts views: with `SITE_VIEW_COUNTS=off` neither appears and nothing is asked for. They come with the list itself (`GET /api/sites?metrics=1`: each live site's days and them all added up, for up to the 200 updated last), read in one batch however many sites there are; `fling stats` and `fling_stats` without a site's name show the same totals. The storage port gains `getMany`, a read of many known items at once, on every platform.
 - **Admin → Routes says how much room is left.** Usage shows the store's size in a unit that reads (4.0 KB rather than 0.00 MB) and, on AWS, what a route takes on average and about how many more fit. Maintenance shows the last lap's sites, how long the sweep worked at them and over how many runs, and about how many sites one run gets through at that pace.
 

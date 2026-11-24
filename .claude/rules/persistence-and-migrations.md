@@ -15,7 +15,8 @@ paths:
 
 ## The Table port (`apps/api/src/table/types.ts`)
 
-- The operations are get, query by partition with an sk prefix (in sk byte order), put, update,
+- The operations are get, getMany (many known keys, across partitions, in as few round trips as
+  the backend allows), query by partition with an sk prefix (in sk byte order), put, update,
   delete, and transact (at most 25 operations, all or nothing). Conditions are `ifAbsent`,
   `ifExists` and `fieldEquals`. A failed condition throws `ConditionFailed`. An item with an
   `expiresAt` in the past counts as absent.

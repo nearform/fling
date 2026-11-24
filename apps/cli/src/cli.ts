@@ -359,12 +359,12 @@ program
   .description('show a site')
   .action(action((ctx, name: string) => runInfo(ctx, name)))
 program
-  .command('stats <name>')
+  .command('stats [name]')
   .helpGroup('Sites:')
   .description(
-    `a site's views and pushes over the last ${METRIC_DAYS} days and ${METRIC_MONTHS} months, and when it was last viewed and pushed (counts only)`
+    `a site's views and pushes over the last ${METRIC_DAYS} days and ${METRIC_MONTHS} months, and when it was last viewed and pushed (counts only); without a name, all your live sites together`
   )
-  .action(action((ctx, name: string) => runStats(ctx, name)))
+  .action(action((ctx, name: string | undefined) => runStats(ctx, name)))
 program
   .command('versions <name>')
   .helpGroup('Sites:')

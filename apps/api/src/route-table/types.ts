@@ -19,4 +19,6 @@ export interface RouteTable {
 export interface RouteTableUsage {
   bytes: number
   limitBytes: number
+  /** the routes in it, where the store counts them: what one takes, on average, is bytes / items */
+  items?: number
 }

@@ -4,7 +4,8 @@
  * passes `tableConformance` in @fling/conformance.
  *
  * A table is a set of items addressed by a partition key `pk` and a sort key `sk`. Access is by
- * key only: one item by (pk, sk), or the items of one pk whose sk starts with a prefix. There are
+ * key only: one item by (pk, sk), many known items at once (`getMany`), or the items of one pk
+ * whose sk starts with a prefix. There are
  * no secondary indexes; a second access path is an explicit index item written in the same
  * `transact` as the item it points at.
  *
@@ -138,6 +139,13 @@ export type TransactOp = { put: TableItem; cond?: Condition } | { delete: Key; c
 export interface Table {
   /** The live item, or null. */
   get(pk: string, sk: string): Promise<TableItem | null>
+  /**
+   * The live items at `keys`, in their order: null where there is none, as `get` answers (a key
+   * that can't be stored included). Keys may span partitions and repeat; any number of them. As
+   * few round trips as the backend allows (a batch get, a statement per batch of keys), so a read
+   * of many known items costs about what one does. No snapshot across keys is promised.
+   */
+  getMany(keys: readonly Key[]): Promise<(TableItem | null)[]>
   /** Live items of one pk in sk byte order (see above), optionally one page at a time. */
   query(pk: string, opts?: QueryOptions): Promise<Page>
   /**

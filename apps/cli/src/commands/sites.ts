@@ -55,7 +55,7 @@ import {
   siteRolesEnabled,
   versionFiles,
 } from '../sites.ts'
-import { getSiteMetrics, metricsEnabled, sparkline } from '../stats.ts'
+import { getSiteMetrics, getYourSitesMetrics, metricsEnabled, sparkline } from '../stats.ts'
 import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 import { pathFolder, pathsClient } from './paths.ts'
 import { ago } from './servers.ts'
@@ -218,8 +218,8 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
   )
 }
 
-/** `fling stats`: a site's views and pushes, counts only. */
-export async function runStats(ctx: CommandContext, name: string): Promise<void> {
+/** `fling stats [name]`: a site's views and pushes, or without a name your live sites', counts only. */
+export async function runStats(ctx: CommandContext, name?: string): Promise<void> {
   const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'metrics')
   if (metricsEnabled(instance) === false) {
     throw new CliError(`${instance?.name ?? 'This Fling'} has no site metrics`, {
@@ -227,7 +227,11 @@ export async function runStats(ctx: CommandContext, name: string): Promise<void>
     })
   }
   const instanceName = instance?.name ?? 'this Fling'
-  const m = await getSiteMetrics(requireClient(ctx), name, instanceName)
+  const client = requireClient(ctx)
+  const m =
+    name === undefined
+      ? await getYourSitesMetrics(client, instanceName)
+      : await getSiteMetrics(client, name, instanceName)
   const totals = (key: 'views' | 'pushes') =>
     `${m.totals.days[key]} in ${m.days.length} days · ${m.totals.months[key]} in ${m.months.length} months`
   const daily = (key: 'views' | 'pushes') =>
@@ -235,7 +239,14 @@ export async function runStats(ctx: CommandContext, name: string): Promise<void>
   const when = (iso: string | null) => (iso ? `${ago(iso)} (${formatDate(iso)})` : 'never')
   ctx.out.data(m, () =>
     [
-      row('Site', m.name),
+      'name' in m
+        ? row('Site', m.name)
+        : row(
+            'Sites',
+            m.sites < m.of
+              ? `your ${m.sites} live sites updated last, of ${m.of}`
+              : `your ${m.sites} live site${m.sites === 1 ? '' : 's'} together`
+          ),
       ...(m.viewCounts ? [row('Views', totals('views')), row('Views/day', daily('views'))] : []),
       row('Pushes', totals('pushes')),
       row('Pushes/day', daily('pushes')),

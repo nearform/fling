@@ -8,7 +8,9 @@
  * badges as icons beside it, and the links as icon buttons (their names in tooltips). Either way
  * the whole of it opens the site page, where everything else is managed: the name is the link,
  * stretched over it, and the buttons sit above it. Archived sites are offline, so their URL is
- * plain text and they can't be reviewed.
+ * plain text and they can't be reviewed. Where the Sites page has its last 28 days, a small trend
+ * of them sits just before the links in a row (as tall as they are, on wide screens), and on a line of
+ * its own on a card.
  */
 import type { Site } from '@fling/shared'
 import { ChevronRightIcon } from '@heroicons/react/24/outline'
@@ -19,8 +21,21 @@ import { CardLink } from './CardLink'
 import { ReviewButton, ViewSiteButton } from './SiteButtons'
 import { SiteThumbnail } from './SiteThumbnail'
 import { SiteBadges } from './site/badges'
+import { SiteSpark } from './site/SiteSpark'
 
-export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: SitesLayout }) {
+export function SiteCard({
+  site,
+  layout = 'list',
+  spark,
+}: {
+  site: Site
+  layout?: SitesLayout
+  /**
+   * its views a day over the last 28 days, where the Sites page has them, and the busiest day of
+   * any site listed, which colours them (`SiteSpark`)
+   */
+  spark?: { views: readonly number[]; scale: number }
+}) {
   const instance = useInstance()
   // Review mode: the instance has comments, and the site is being served.
   const reviewable = instance?.capabilities.comments === true && !site.archived
@@ -71,6 +86,7 @@ export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: Sites
               <SiteBadges site={site} compact />
             </span>
           </div>
+          {spark && <SiteSpark views={spark.views} scale={spark.scale} block />}
           <div className="site-tile-links">{links}</div>
         </div>
       </article>
@@ -81,8 +97,8 @@ export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: Sites
     <article
       className={`surface-panel relative grid items-center gap-x-4 gap-y-1.5 px-4 py-2 transition-colors hover:border-[var(--border-control)] ${
         thumbs
-          ? "grid-cols-[4.5rem_minmax(0,1fr)] [grid-template-areas:'thumb_name'_'thumb_badges'_'links_links'] md:grid-cols-[4.5rem_minmax(10rem,1fr)_auto_minmax(max-content,14rem)] md:[grid-template-areas:'thumb_name_links_badges']"
-          : "grid-cols-[minmax(0,1fr)] [grid-template-areas:'name'_'badges'_'links'] md:grid-cols-[minmax(10rem,1fr)_auto_minmax(max-content,14rem)] md:[grid-template-areas:'name_links_badges']"
+          ? "grid-cols-[4.5rem_minmax(0,1fr)] [grid-template-areas:'thumb_name'_'thumb_badges'_'links_links'] md:grid-cols-[4.5rem_minmax(10rem,1fr)_auto_auto_minmax(max-content,14rem)] md:[grid-template-areas:'thumb_name_spark_links_badges']"
+          : "grid-cols-[minmax(0,1fr)] [grid-template-areas:'name'_'badges'_'links'] md:grid-cols-[minmax(10rem,1fr)_auto_auto_minmax(max-content,14rem)] md:[grid-template-areas:'name_spark_links_badges']"
       }`}
     >
       {thumbs && (
@@ -96,6 +112,13 @@ export function SiteCard({ site, layout = 'list' }: { site: Site; layout?: Sites
         {name}
         {updated}
       </div>
+
+      {/* Its 28 days, right before the links, as tall as they are (wide screens only) */}
+      {spark && (
+        <div className="flex items-center [grid-area:spark] max-md:hidden">
+          <SiteSpark views={spark.views} scale={spark.scale} tall />
+        </div>
+      )}
 
       {/* The links to share, above the stretched row link */}
       <div className="relative z-10 flex min-w-0 items-center gap-x-2 [grid-area:links]">

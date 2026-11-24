@@ -4,7 +4,7 @@ part: publish
 order: 65
 summary: A site's views and pushes by day, week and month. Counts only, never who.
 requires: [metrics]
-sources: [packages/shared/src/metrics.ts, packages/shared/src/view-beacon.ts, apps/api/src/views.ts, apps/api/src/rendering.ts, apps/api/src/policy.ts, apps/cli/src/stats.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteMetrics.tsx, apps/web/src/lib/metrics.ts, packages/shared/src/mcp-tools.ts]
+sources: [packages/shared/src/metrics.ts, packages/shared/src/view-beacon.ts, apps/api/src/views.ts, apps/api/src/rendering.ts, apps/api/src/policy.ts, apps/cli/src/stats.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteMetrics.tsx, apps/web/src/components/site/MySitesStats.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/metrics.ts, packages/shared/src/mcp-tools.ts]
 verified: ee10036
 ---
 
@@ -29,8 +29,10 @@ site was last viewed and last pushed. Days are UTC days, and today's count is to
 - "How is my-app doing?"
 - "Has anyone looked at q3-report this week?"
 - "How often has my-app changed this month?"
+- "How are my sites doing overall?"
 
-The assistant reads them with `fling_stats`. Asked who is using a site, it answers with the
+The assistant reads them with `fling_stats`; without a site's name, it adds up every live site you
+own or publish. Asked who is using a site, it answers with the
 numbers: there is nobody to name.
 
 ## On the command line
@@ -38,13 +40,27 @@ numbers: there is nobody to name.
 ```sh
 fling stats my-app          # totals, last viewed and pushed, and a bar a day
 fling stats my-app --json   # every day, week and month, as data
+fling stats                 # all your live sites together
 ```
 
 ## In the web app
 
 Open the site from **Sites**. Below **Overview**, **Metrics** shows the totals for the last
 {{fact:metric-days}} and {{fact:metric-months}}, when the site was last viewed and last pushed,
-and a bar for each of the last {{fact:metric-days}}. Point at a bar to see its day and count.
+and a line of the last {{fact:metric-days}}, drawn as **Activity** draws it. Point at the line, or
+use the arrow keys, to read a day's count.
+
+<!-- requires: viewCounts -->
+**Sites** opens with **Activity**: the views and pushes of every live site you own or publish,
+added up. Folded, as it starts, it is one row: a small line of the last {{fact:metric-days}} and
+their totals. Choose **Activity** to open it for the full counts and a line you can point at to
+read a day; it stays open or folded as you left it, in that browser. Each of your sites in the
+list has its own small line of its views over the {{fact:metric-days}}, with their total: just
+before its links in a list, on a line of its own on a card. Its colour says how busy the site was
+against the busiest of your sites, from faint for a quiet one to bright for the busiest, so the
+sites people use most stand out. With a great many
+sites, Activity adds up the ones updated last, and says so.
+<!-- /requires -->
 
 <!-- requires: viewCounts -->
 ## What counts as a view

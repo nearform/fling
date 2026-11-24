@@ -294,3 +294,50 @@ describe('Admin → Usage', () => {
     expect(byName.quiet.lastViewAt).toBeUndefined()
   })
 })
+
+describe('the Sites list with its metrics', () => {
+  it('adds up the live sites you own or publish, with each one’s days, read in one batch', async () => {
+    const env = setup()
+    const alice = await createUser(env)
+    const bob = await createUser(env, 'bob@example.test')
+    await deploy(env, alice.key, 'mine-a', pages)
+    env.advance(3_600_000)
+    await deploy(env, alice.key, 'mine-b', [file('index.html', '<p>b</p>')])
+    await deploy(env, alice.key, 'mine-gone', [file('index.html', '<p>gone</p>')])
+    expect((await api(env, alice.key, 'POST', '/api/sites/mine-gone/archive')).status).toBe(200)
+    await deploy(env, bob.key, 'bobs', [file('index.html', '<p>bob</p>')])
+    const ids = await Promise.all(['mine-a', 'mine-b', 'bobs'].map(n => env.store.findSite(n)))
+    const views = new ViewCounter(env.store, env.deps.clock)
+    views.count(ids[0]!.id, 2)
+    views.count(ids[1]!.id, 3)
+    views.count(ids[2]!.id, 7)
+    await views.flush()
+
+    const getMany = vi.spyOn(env.table, 'getMany')
+    const query = vi.spyOn(env.table, 'query')
+    const res = await api(env, alice.key, 'GET', '/api/sites?metrics=1')
+    expect(res.status).toBe(200)
+    const list = await json(res)
+    // One batch read for every site's metrics, and no query of any site's buckets.
+    expect(getMany).toHaveBeenCalledTimes(1)
+    expect(query.mock.calls.filter(([pk]) => String(pk).startsWith('SITE#'))).toEqual([])
+    expect(list.metrics).toMatchObject({ sites: 2, of: 2, viewCounts: true, counting: true })
+    expect(list.metrics.totals.days).toEqual({ views: 5, pushes: 2 })
+    expect(list.metrics.since).toBe('2026-01-01T00:00:00.000Z')
+    expect(list.metrics.lastPushAt).toBe('2026-01-01T01:00:00.000Z')
+    // Each listed site carries its own days, today last.
+    const days = Object.fromEntries(
+      list.sites.map((s: { name: string; days: { views: number[] } }) => [s.name, s.days.views])
+    )
+    expect(Object.keys(days).sort()).toEqual(['mine-a', 'mine-b'])
+    expect(days['mine-b'].at(-1)).toBe(3)
+    expect(days['mine-b']).toHaveLength(list.metrics.days.length)
+
+    // Without asking, or for archived sites, the list carries none.
+    const plain = await json(await api(env, alice.key, 'GET', '/api/sites'))
+    expect(plain.metrics).toBeUndefined()
+    expect(plain.sites[0].days).toBeUndefined()
+    const archived = await json(await api(env, alice.key, 'GET', '/api/sites?archived=1&metrics=1'))
+    expect(archived.metrics).toBeUndefined()
+  })
+})

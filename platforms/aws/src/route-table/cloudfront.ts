@@ -73,7 +73,11 @@ export class CloudFrontRouteTable implements RouteTable {
   async usage(): Promise<RouteTableUsage> {
     const res = await this.client.send(new DescribeKeyValueStoreCommand({ KvsARN: this.arn }))
     if (res.ETag) this.etag = res.ETag
-    return { bytes: res.TotalSizeInBytes ?? 0, limitBytes: KVS_LIMIT_BYTES }
+    return {
+      bytes: res.TotalSizeInBytes ?? 0,
+      limitBytes: KVS_LIMIT_BYTES,
+      ...(res.ItemCount === undefined ? {} : { items: res.ItemCount }),
+    }
   }
 
   async get(key: string) {

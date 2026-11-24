@@ -12,6 +12,7 @@ import {
   encodeCursor,
   holdsWhenAbsent,
   isExpired,
+  type Key,
   type Page,
   type Patch,
   type QueryOptions,
@@ -77,6 +78,13 @@ export class MemoryTable implements Table {
   async get(pk: string, sk: string) {
     const item = this.live(pk, sk)
     return item ? clone(item) : null
+  }
+
+  async getMany(keys: readonly Key[]) {
+    return keys.map(k => {
+      const item = this.live(k.pk, k.sk)
+      return item ? clone(item) : null
+    })
   }
 
   async query(pk: string, opts: QueryOptions = {}): Promise<Page> {

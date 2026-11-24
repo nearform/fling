@@ -71,6 +71,21 @@ describe('fling stats', () => {
     expect(shown).toMatch(/nothing is recorded about who viewed/)
   })
 
+  it('without a name, adds up your live sites', async () => {
+    const { name: _name, ...rest } = metrics()
+    const m = mockFetch({
+      'GET /api/sites': url =>
+        url.searchParams.get('metrics') === '1'
+          ? jsonResponse({ sites: [], metrics: { ...rest, sites: 3, of: 3 } })
+          : jsonResponse({ sites: [] }),
+    })
+    const { ctx, out } = await testContext({ store: await storeWith(METRICS_ON), fetch: m.fetch })
+    await runStats(ctx)
+    const shown = out.content()
+    expect(shown).toMatch(/Sites:\s+your 3 live sites together/)
+    expect(shown).toMatch(/Views:\s+8 in 28 days/)
+  })
+
   it('says when an admin has turned view counting off, and still shows the views counted', async () => {
     const m = mockFetch(metricsRoute({ ...metrics(), counting: false }))
     const { ctx, out } = await testContext({ store: await storeWith(METRICS_ON), fetch: m.fetch })

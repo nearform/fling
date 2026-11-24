@@ -4,7 +4,7 @@ part: start
 order: 30
 summary: Install the Fling extension, so Claude Desktop can fling files from your computer.
 sources: [apps/cli/mcpb/**, apps/cli/src/mcp.ts, apps/cli/src/mcp-entry.ts, apps/cli/src/locate.ts, apps/cli/src/commands/setup.ts, apps/web/src/pages/GetStarted.tsx]
-verified: 1f60f9d
+verified: f57fbd7
 ---
 
 The Fling extension lets Claude Desktop publish files that are on your computer: a page you

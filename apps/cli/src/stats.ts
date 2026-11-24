@@ -2,10 +2,11 @@
  * A site's metrics from the CLI and the local MCP (the `metrics` capability): `fling stats` and
  * `fling_stats`. Counts only (views and pushes per day, week and month, last viewed, last pushed),
  * read from `GET /api/sites/:name/metrics`, which answers a site's owners, publishers and admins
- * and 404s for anyone else, as for a missing site.
+ * and 404s for anyone else, as for a missing site; without a name, the caller's live sites added
+ * up (`GET /api/sites?metrics=1`'s `metrics`).
  */
-import type { InstanceMetadata } from '@fling/shared'
-import { type SiteMetrics, SiteMetricsSchema } from '@fling/shared/metrics'
+import { type InstanceMetadata, SiteListSchema } from '@fling/shared'
+import { type SiteMetrics, SiteMetricsSchema, type SitesMetrics } from '@fling/shared/metrics'
 import { type ApiClient, CliApiError } from './api.ts'
 import { CliError } from './errors.ts'
 
@@ -38,6 +39,25 @@ export async function getSiteMetrics(
     }
     throw error
   }
+}
+
+/**
+ * The caller's live sites together: the metrics of their list (`GET /api/sites?metrics=1`). A list
+ * without them is a Fling from before it.
+ */
+export async function getYourSitesMetrics(
+  client: ApiClient,
+  instanceName = 'this Fling'
+): Promise<SitesMetrics> {
+  const { metrics } = await client.request('GET', '/api/sites?metrics=1', {
+    schema: SiteListSchema,
+  })
+  if (!metrics) {
+    throw new CliError(`${instanceName} can't add up your sites' metrics yet`, {
+      hint: 'Name a site (`fling stats <name>`), or ask its operator to update it.',
+    })
+  }
+  return metrics
 }
 
 const BARS = '▁▂▃▄▅▆▇█'

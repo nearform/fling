@@ -55,6 +55,9 @@ services' locations are in `platforms/azure/src/settings.ts` (`COSMOS_ENDPOINT`,
     PostgreSQL Flexible Server; the data moves with the migrations runner's scan.
   - Throughput is capped at 10,000 RU/s.
   - A transactional batch carries at most 100 operations and 2 MB, above `TRANSACT_MAX` (25).
+- **Many reads:** the SDK has no `readMany` here, so `getMany` sends a bulk Read per key
+  (`executeBulkOperations`), which the SDK packs 100 to a request; a missing item is that
+  operation's 404 alone.
 - **Layout:** each item is a document with these fields:
   - `id`: the hex SHA-256 of `pk` and `sk` (an id may not hold `/`, `\`, `?` or `#`, and hex
     sorts the same under any collation, which the scan's paging relies on);

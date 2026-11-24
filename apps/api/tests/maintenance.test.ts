@@ -233,6 +233,22 @@ describe('the queue and the sweep', () => {
     })
   })
 
+  it("times the sweep's work at a lap, over the runs it takes", async () => {
+    const env = setup()
+    const alice = await createUser(env, ALICE)
+    for (const name of ['time-a', 'time-b', 'time-c']) {
+      await deploy(env, alice.key, name, [file('index.html', name)])
+    }
+    await maintain(env.deps)
+    // A run out of time sweeps nothing but is one of the lap's runs.
+    await maintain(env.deps, { deadline: Date.now() - 1 })
+    expect(await env.store.getMaintenanceCursor()).toMatchObject({ runs: 1 })
+    await maintain(env.deps)
+    const cursor = await env.store.getMaintenanceCursor()
+    expect(cursor?.lastLap).toMatchObject({ runs: 2, sites: 3, workMs: expect.any(Number) })
+    expect(cursor).not.toHaveProperty('runs')
+  })
+
   it('stops at the deadline and keeps its place', async () => {
     const env = setup()
     const alice = await createUser(env, ALICE)

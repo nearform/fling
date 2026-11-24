@@ -257,7 +257,7 @@
  * records (they can be large); they live in blobs.
  */
 import { type ChannelId, knownCells, type NotificationPreferences } from '@fling/shared'
-import { dayOf, monthOf, weekOf } from '@fling/shared/metrics'
+import { dayOf, metricRanges, monthOf, weekOf } from '@fling/shared/metrics'
 import { mapLimit } from '../lib/concurrency.ts'
 import { newId, newSortableId } from '../lib/ids.ts'
 import {
@@ -2208,6 +2208,36 @@ export class Records implements Store {
       buckets: await this.listBuckets(sitePk(siteId), 'METRIC#'),
       activity: await this.getSiteActivity(siteId),
     }
+  }
+
+  async getSitesMetrics(siteIds: readonly string[], now: Date) {
+    const { days, weeks, months } = metricRanges(now)
+    const shown: (readonly [SiteMetricRecord['size'], string])[] = [
+      ...days.map(d => ['D', d] as const),
+      ...weeks.map(w => ['W', w.week] as const),
+      ...months.map(m => ['M', m] as const),
+    ]
+    const each = shown.length + 1
+    const items = await this.table.getMany(
+      siteIds.flatMap(id => [
+        ...shown.map(([size, bucket]) => key.siteMetric(id, size, bucket)),
+        key.siteActivity(id),
+      ])
+    )
+    return siteIds.map((_, i) => {
+      const mine = items.slice(i * each, (i + 1) * each)
+      const activity = mine[shown.length]
+      return {
+        buckets: mine
+          .slice(0, shown.length)
+          .filter(item => item !== null && item !== undefined)
+          .map(item => {
+            const b = decode<SiteMetricRecord>('sitemetric', item)
+            return { ...b, views: Number(b.views), pushes: Number(b.pushes) }
+          }),
+        activity: activity ? decode<SiteActivityRecord>('siteactivity', activity) : null,
+      }
+    })
   }
 
   async getSiteActivity(siteId: string) {

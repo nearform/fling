@@ -212,7 +212,7 @@ import {
   versionFiles,
   whoami,
 } from './sites.ts'
-import { getSiteMetrics, metricsEnabled } from './stats.ts'
+import { getSiteMetrics, getYourSitesMetrics, metricsEnabled } from './stats.ts'
 import { mcpUpdateNote, newerRelease } from './update-check.ts'
 import { silentLogger } from './utils/logger.ts'
 import { formatBytes } from './utils/output.ts'
@@ -1725,7 +1725,10 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
             `${instance?.name ?? 'This Fling'} (${serverLabel(target.url)}) has no site metrics`
           )
         }
-        const metrics = await getSiteMetrics(target.client, args.name, instance?.name)
+        const metrics =
+          args.name === undefined
+            ? await getYourSitesMetrics(target.client, instance?.name)
+            : await getSiteMetrics(target.client, args.name, instance?.name)
         return {
           summary: `${describeSiteMetrics(metrics, instance?.name)}${onFling(target.url, instance)}`,
           data: metrics,

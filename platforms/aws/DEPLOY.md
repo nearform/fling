@@ -778,7 +778,7 @@ time range and run it:
 
 | Query | What it shows | From the log line |
 |---|---|---|
-| `maintenance-lap` | How many laps of every site maintenance finished each day, and their average and longest length in ms. A lap's length is how long a site waits for what nothing queued; it grows with the number of sites. | `maintenance lap` (`lapMs`) |
+| `maintenance-lap` | How many laps of every site maintenance finished each day: their average and longest length in ms, how long the sweep worked at them (`workMs`), over how many runs, and how many sites a lap went through. A lap's length is how long a site waits for what nothing queued; while one run gets round every site it is the schedule's 15 minutes, and the work and the runs are what grow with the number of sites. | `maintenance lap` (`lapMs`, `workMs`, `runs`, `sites`) |
 | `route-table-usage` | The KeyValueStore's size each hour: bytes, the 5 MB limit and the percentage. From 70% the line is `route table nearly full`, which also raises `RouteTableFull`. | `route table usage`, `route table nearly full` (`bytes`, `limitBytes`, `percent`) |
 | `kvs-write-retried` | Each hour, how many KeyValueStore writes had to retry because another write changed the store's ETag first, and the most attempts one took. Many an hour means publishes are colliding. | `kvs write retried` (`attempts`) |
 

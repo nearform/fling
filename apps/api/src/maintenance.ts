@@ -45,7 +45,7 @@
  * one's staged files are its uploads, kept until it is finalized or swept.
  *
  * Rendered home pages (paths.ts `refreshHome`): each one a site replaced (`homeOld`) is deleted
- * GRACE_MS after it was replaced (`sweepHomes`).
+ * GRACE_MS after it was replaced and taken off the list (`sweepHomes`).
  *
  * The revocation list (revocations.ts): due entries are taken off first, so a run that stops at its
  * deadline among the sites has still swept them; one that fails is logged and the rest runs. Every
@@ -53,10 +53,12 @@
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
 import { formsKey, manifestKey, stagedPrefix, UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
+import { ApiError } from './lib/errors.ts'
 import { pathRef } from './paths.ts'
 import { sweepRevocations } from './revocations.ts'
 import { rewriteRoutes } from './route-format.ts'
 import { serverSite, serverVersion } from './servers/index.ts'
+import { writeSite } from './sites.ts'
 import type { SiteRecord, SiteRef, VersionRecord } from './store/types.ts'
 import { ConditionFailed } from './table/types.ts'
 import type { Deps } from './types.ts'
@@ -66,8 +68,6 @@ import { emptyTally, rolloutViewCounting, tallySite } from './views.ts'
 export const GRACE_MS = 60 * 60 * 1000
 /** A pending version older than this is a deploy nobody will finalize. */
 export const PENDING_TTL_MS = 24 * 60 * 60 * 1000
-/** Replaced home pages older than this are taken to be deleted already (`sweepHomes`). */
-const HOME_WINDOW_MS = 2 * 24 * 60 * 60 * 1000
 /**
  * After its upload URLs expire, how long a complete version's staging prefix is swept for. The
  * queue brings the site back as they expire; the window lets a run that is late still sweep it,
@@ -488,10 +488,10 @@ async function claim(deps: Deps, ref: SiteRef, v: VersionRecord): Promise<boolea
 }
 
 /**
- * Delete the rendered home pages the site replaced between GRACE_MS and HOME_WINDOW_MS ago. The
- * site's list (`homeOld`) is trimmed by refreshHome, never written here (a write of the whole
- * site could undo a change made meanwhile), so the window keeps a run from deleting the same
- * objects on every visit; one missed for longer than the window stays, a few small objects.
+ * Delete the rendered home pages the site replaced more than GRACE_MS ago, then take them off its
+ * list (`homeOld`), so the next visit has nothing to delete again. Only that list changes, on the
+ * site as it is when written (`writeSite`), so a change made meanwhile stands. When the write
+ * loses, the entries stay and the next visit deletes them again, which costs nothing.
  */
 async function sweepHomes(
   deps: Deps,
@@ -500,16 +500,39 @@ async function sweepHomes(
 ): Promise<number | undefined> {
   const now = deps.clock.now().getTime()
   let next: number | undefined
+  const done = new Set<string>()
   for (const h of site.homeOld ?? []) {
-    const age = now - Date.parse(h.at)
-    if (h.sha === site.home || age >= HOME_WINDOW_MS) continue
-    if (age < GRACE_MS) {
-      next = earliest(next, Date.parse(h.at) + GRACE_MS)
+    if (h.sha === site.home) {
+      done.add(h.sha)
+      continue
+    }
+    const at = Date.parse(h.at)
+    if (now - at < GRACE_MS) {
+      next = earliest(next, at + GRACE_MS)
       continue
     }
     await deps.blobs.delete(renderedObjectKey(site.id, h.sha, 'html'))
     await deps.blobs.delete(renderedObjectKey(site.id, h.sha, 'json'))
     result.homes++
+    done.add(h.sha)
+  }
+  if (done.size === 0) return next
+  try {
+    await writeSite(
+      deps,
+      site,
+      s => {
+        const kept = (s.homeOld ?? []).filter(h => !done.has(h.sha) || h.sha === s.home)
+        if (kept.length === (s.homeOld ?? []).length) return false
+        if (kept.length > 0) s.homeOld = kept
+        else delete s.homeOld
+        return true
+      },
+      { touch: false, routes: false }
+    )
+  } catch (err) {
+    // Deleted meanwhile: nothing left to trim.
+    if (!(err instanceof ApiError && err.status === 404)) throw err
   }
   return next
 }

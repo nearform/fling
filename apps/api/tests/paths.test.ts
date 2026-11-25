@@ -270,7 +270,7 @@ describe('the Path routes', () => {
   })
 
   it('deleting a Path removes its route and files; deleting the site removes every Path', async () => {
-    const { env, alice, bob } = await world()
+    const { env, alice, bob } = await world({ siteDelete: 'hard' })
     await deploy(env, bob.key, 'team', plan('PAY-1'), { path: 'PAY-1' })
     await deploy(env, bob.key, 'team', plan('PAY-2'), { path: 'PAY-2' })
     const site = await env.store.findSite('team')

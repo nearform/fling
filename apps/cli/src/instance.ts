@@ -109,3 +109,24 @@ export const releaseTracking = (
         onRelease: (release: string) => recordRelease(store, config.serverUrl as string, release),
       }
     : {}
+
+/**
+ * The instance for `config`, fetched now (and stored, for a remembered server); the stored copy
+ * when the fetch fails. For what must not be stale, such as whether a delete can be recovered: the
+ * operator may have changed `SITE_DELETE` since sign-in.
+ */
+export async function loadFreshInstance(
+  store: ConfigStore,
+  config: Pick<ResolvedConfig, 'serverUrl' | 'remembered' | 'instance'>,
+  fetch: FetchLike
+): Promise<InstanceMetadata | null> {
+  if (!config.serverUrl) return config.instance ?? null
+  try {
+    const instance = await fetchInstance(config.serverUrl, fetch)
+    if (config.remembered)
+      await store.putServer(config.serverUrl, { instance }, { makeCurrent: false })
+    return instance
+  } catch {
+    return loadInstance(store, config, fetch)
+  }
+}

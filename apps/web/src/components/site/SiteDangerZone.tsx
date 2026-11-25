@@ -1,9 +1,11 @@
 /**
- * Taking a site away: archive (offline, files and versions kept), unarchive, and delete for good,
- * which needs the name typed (`TypedDeleteModal`, which a Path's danger zone uses too). After a
- * delete the page has nothing left to show, so it goes back to the list it came from (`home`).
+ * Taking a site away: archive (offline, files and versions kept), unarchive, and delete, which
+ * needs the name typed (`TypedDeleteModal`, which a Path's danger zone uses too). A delete is one
+ * an admin can recover where the instance keeps deleted sites (`recoverableDeletes`), and for good
+ * where it doesn't; the wording is the shared `deleteConfirmText`. After a delete the page has
+ * nothing left to show, so it goes back to the list it came from (`home`).
  */
-import type { Site } from '@fling/shared'
+import { deleteConfirmText, recoverableDeletesOf, type Site } from '@fling/shared'
 import {
   ArchiveBoxArrowDownIcon,
   ArchiveBoxXMarkIcon,
@@ -11,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useInstance } from '../../hooks/instance'
 import { useSiteActions } from '../../hooks/queries'
 import { ConfirmModal } from '../ConfirmModal'
 import { Modal } from '../Modal'
@@ -18,6 +21,7 @@ import { SiteSection } from './SiteSection'
 
 export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string }) {
   const actions = useSiteActions(site.name)
+  const recoverable = recoverableDeletesOf(useInstance())
   const navigate = useNavigate()
   const [dialog, setDialog] = useState<'archive' | 'delete' | null>(null)
   const close = () => setDialog(null)
@@ -49,7 +53,9 @@ export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] pt-3">
         <p className="min-w-0 text-sm text-secondary">
-          Delete removes the site, every version and its share link, for good.
+          {recoverable
+            ? 'Delete takes the site down and frees its name. An admin can recover it.'
+            : 'Delete removes the site, every version and its share link, for good.'}
         </p>
         <button
           type="button"
@@ -73,6 +79,7 @@ export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string
       />
       <DeleteSiteModal
         name={site.name}
+        recoverable={recoverable}
         open={dialog === 'delete'}
         busy={actions.remove.isPending}
         onCancel={close}
@@ -87,9 +94,13 @@ export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string
   )
 }
 
-/** Delete a site for good: its name must be typed to confirm. */
-function DeleteSiteModal(props: {
+/** Delete a site: its name must be typed to confirm. */
+function DeleteSiteModal({
+  recoverable,
+  ...props
+}: {
   name: string
+  recoverable: boolean
   open: boolean
   busy: boolean
   onCancel: () => void
@@ -98,19 +109,21 @@ function DeleteSiteModal(props: {
   return (
     <TypedDeleteModal
       {...props}
-      title={`Delete ${props.name}?`}
+      recoverable={recoverable}
+      title="Delete site"
       label="Site name"
-      message="This removes the site, every version and its share link. The URL stops working and this cannot be undone. To keep the files, archive it instead."
+      message={`${deleteConfirmText(recoverable, props.name)} ${recoverable ? 'To take it offline and keep its name, archive it instead.' : 'To keep the files, archive it instead.'}`}
     />
   )
 }
 
-/** Delete for good, a site or one of its Paths: `name` must be typed to confirm. */
+/** Delete a site or one of its Paths: `name` must be typed to confirm. */
 export function TypedDeleteModal({
   name,
   title,
   message,
   label,
+  recoverable,
   open,
   busy,
   onCancel,
@@ -121,6 +134,8 @@ export function TypedDeleteModal({
   message: string
   /** the input's accessible name */
   label: string
+  /** an admin can recover it (`recoverableDeletes`); otherwise it is gone for good */
+  recoverable: boolean
   open: boolean
   busy: boolean
   onCancel: () => void
@@ -151,7 +166,13 @@ export function TypedDeleteModal({
             className="btn btn-sm btn-error"
             disabled={!matches || busy}
           >
-            {busy ? <span className="loading loading-spinner loading-xs" /> : 'Delete for good'}
+            {busy ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : recoverable ? (
+              'Delete'
+            ) : (
+              'Delete for good'
+            )}
           </button>
         </>
       }

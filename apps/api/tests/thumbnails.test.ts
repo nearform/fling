@@ -197,8 +197,8 @@ describe('GET /api/sites/:name/thumbnail', () => {
     })
   })
 
-  it('outlives archiving, and goes with the site when it is deleted', async () => {
-    const { env, alice, version } = await world()
+  it('outlives archiving, and goes with the site when it is deleted for good', async () => {
+    const { env, alice, version } = await world({ siteDelete: 'hard' })
     await put(env, alice.key, 'deck', version, png())
     const site = await env.store.findSite('deck')
     await api(env, alice.key, 'POST', '/api/sites/deck/archive')

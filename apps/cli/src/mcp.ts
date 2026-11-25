@@ -34,6 +34,7 @@ import {
   changesAudience,
   checkFormsConfig,
   commentThreads,
+  deletedText,
   describeAudience,
   describeComments,
   describeFormsSummary,
@@ -87,6 +88,7 @@ import {
   PullResponseSchema,
   pageOfFiles,
   privateAudience,
+  recoverableDeletesOf,
   responsesPageUrl,
   reviewUrl,
   SANDBOX_BLOCKED_NOTE,
@@ -117,6 +119,7 @@ import {
   systemLocateOptions,
 } from './config.ts'
 import type { OpenLike } from './context.ts'
+import { adminDeletedUrl, describeDeleted, listDeleted, restoreLine } from './deleted.ts'
 import { BaseChangedError, deploy, NameTakenError, resolveSiteName } from './deploy.ts'
 import { type DevServer, startDevServer } from './dev-server.ts'
 import {
@@ -129,7 +132,7 @@ import {
 import { CliError, EXIT_NOT_LOGGED_IN, NoServerError } from './errors.ts'
 import { formsEnabled, getForms, getResponses, planForms, submitResponse } from './forms.ts'
 import { defaultNameFor, prepareInput } from './inputs.ts'
-import { loadInstance, loadInstanceWith, releaseTracking } from './instance.ts'
+import { loadFreshInstance, loadInstance, loadInstanceWith, releaseTracking } from './instance.ts'
 import {
   FOUND_AS_GIVEN,
   findFiles,
@@ -1813,9 +1816,30 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   )
 
   server.registerTool(t.delete.name, serverTool(t.delete), args =>
-    run(t.delete.name, args.server, async ({ client, url }) => {
-      const result = await deleteSite(client, args.name)
-      return { summary: `${args.name} deleted from ${serverLabel(url)}`, data: result }
+    run(t.delete.name, args.server, async target => {
+      const instance = await loadFreshInstance(store, target.config, fetchImpl)
+      const recoverable = recoverableDeletesOf(instance)
+      const result = await deleteSite(target.client, args.name)
+      return {
+        summary: `${deletedText(recoverable, args.name)}${onFling(target.url, instance)}`,
+        data: { ...result, recoverable },
+      }
+    })
+  )
+
+  const adminDeleted = t.adminDeleted
+  server.registerTool(adminDeleted.name, serverTool(adminDeleted), args =>
+    run(adminDeleted.name, args.server, async target => {
+      const instance = await target.instance()
+      const deleted = await listDeleted(target.client, {
+        name: args.name,
+        instanceName: instance?.name,
+      })
+      const appOrigin = instance?.appOrigin ?? target.url
+      return {
+        summary: `${describeDeleted(deleted, instance, args.name)}\n${restoreLine(appOrigin)} (an admin's browser session; there is no tool for either)${onFling(target.url, instance)}`,
+        data: { deleted, restoreUrl: adminDeletedUrl(appOrigin) },
+      }
     })
   )
 

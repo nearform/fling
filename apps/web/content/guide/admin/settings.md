@@ -43,6 +43,7 @@ do day to day is elsewhere:
 | Help someone by seeing what they see | [Users](/guide/admin/users-and-invitations#impersonate-someone) |
 | Let someone from outside in, or take their access away, where invitations are on | [Invitations](/guide/admin/users-and-invitations) |
 | Change who can open a site, or delete it | The site's own page, as an admin |
+| Restore a deleted site or Path, or delete it for good | [Deleted sites](/guide/admin/deleted) |
 | See what admins did | [Audit](/guide/admin/audit) |
 | Make room in the route table, or choose its format | [Routes](/guide/admin/routes) |<!-- requires: viewCounts -->
 | Turn view counting on or off for every site | [Usage](/guide/admin/usage#turn-view-counting-on-or-off) |<!-- /requires -->

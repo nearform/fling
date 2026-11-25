@@ -87,7 +87,14 @@
       "description": "Take a site offline (or restore it), keeping its files"
     },
     { "name": "fling_rollback", "description": "Serve an earlier version of a site" },
-    { "name": "fling_delete", "description": "Permanently delete a site" },
+    {
+      "name": "fling_delete",
+      "description": "Delete a site (an admin can recover it where the Fling keeps deleted sites)"
+    },
+    {
+      "name": "fling_admin_deleted",
+      "description": "List deleted sites (admins), to restore or delete for good from Admin → Deleted"
+    },
     {
       "name": "fling_notifications",
       "description": "Show what a Fling emails you about"

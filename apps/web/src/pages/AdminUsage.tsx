@@ -4,11 +4,13 @@
  * days and 12 months, and what maintenance's last lap of the site directory tallied of the sites
  * themselves: how many are live, how many were viewed lately, the most viewed and the longest
  * unused. Counts only: nothing about who viewed exists to show. Where the instance doesn't count
- * views, the page shows pushes and says so.
+ * views, the page shows pushes and says so. A line counts the deleted sites still kept, linking to
+ * Admin → Deleted.
  */
 import '../components/usage/usage.css'
 import { type InstanceUsage, METRIC_DAYS, METRIC_MONTHS } from '@fling/shared/metrics'
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import {
   ActivityRings,
@@ -22,6 +24,7 @@ import {
 import { useInstance } from '../hooks/instance'
 import { useAdminUsage, useMe, useSetViewCounting } from '../hooks/queries'
 import { errorMessage } from '../lib/api'
+import { ADMIN_DELETED_PATH, deletedUsageText } from '../lib/deleted'
 import { fullDate, timeAgo } from '../lib/format'
 import {
   DUST_AFTER_DAYS,
@@ -225,6 +228,20 @@ function Sites({ usage, fling }: { usage: InstanceUsage; fling: string }) {
   )
 }
 
+/** How many deleted sites are kept, and about how much (a guide, like the view tally). */
+function Deleted({ usage }: { usage: InstanceUsage }) {
+  return (
+    <Section id="deleted" title="Deleted sites" aside="Kept until restored or deleted for good">
+      <p>
+        {deletedUsageText(usage.deleted)}{' '}
+        <Link className="link" to={ADMIN_DELETED_PATH}>
+          See, restore or delete them for good
+        </Link>
+      </p>
+    </Section>
+  )
+}
+
 /**
  * The switch: view counting on or off for every site. Turning it off keeps the views counted so
  * far; either way maintenance applies it to every live site, which the section follows.
@@ -326,6 +343,7 @@ export default function AdminUsage() {
         <div className="usage-page">
           <Activity usage={usage.data} fling={fling} />
           <Sites usage={usage.data} fling={fling} />
+          <Deleted usage={usage.data} />
           <ViewCountingSwitch usage={usage.data} fling={fling} />
         </div>
       )}

@@ -307,6 +307,26 @@ Cache-Control ends in `s-maxage=60`. Once the `Age` would pass 60, the next requ
 `REVALIDATED_HIT`) and the `Age` starts again. With a `fling_site` cookie the Cache-Control is
 `private` and `x-cache` says `PRIVATE_NOSTORE`.
 
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, a deleted site's files stay where they were, with a recovery
+file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a `deleted.json` in
+each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
+their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
+and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
+the same here, but for the late upload: on Azure every upload goes through the app's own route.
+
+The prefixes are in the `sites` container of the module's storage account (the one in the
+resource group: `az storage account list -g <resource group> --query "[].name" -o tsv`). Account
+keys are off, so sign in with a role that reads blobs (Storage Blob Data Reader) and pass
+`--auth-mode login`. In the portal, **Storage account → Containers → sites**, then
+`sites/<siteId>/`. From a shell:
+`az storage blob list --account-name <account> -c sites --prefix sites/<siteId>/ --auth-mode login -o table`
+lists one, `az storage blob download --account-name <account> -c sites -n sites/<siteId>/deleted.json --file deleted.json --auth-mode login`
+reads its recovery file, and
+`az storage blob download-batch --account-name <account> -s sites -d ./recovered --pattern "sites/<siteId>/<versionId>/*" --auth-mode login`
+downloads a version. The container's lifecycle rule touches only `uploads/`.
+
 ## Claude's sandbox: allow your Fling's host
 
 So that Claude can upload the files it makes with code execution rather than typing them out

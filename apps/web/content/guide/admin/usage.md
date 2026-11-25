@@ -5,8 +5,8 @@ order: 22
 summary: How much every site is viewed and pushed to, which sites are busy, and which have gone quiet.
 audience: admin
 requires: [metrics]
-sources: [apps/web/src/pages/AdminUsage.tsx, apps/web/src/components/usage/**, apps/web/src/lib/usage.ts, apps/web/src/components/AdminSiteCard.tsx, apps/api/src/routes/admin.ts, apps/api/src/views.ts, apps/api/src/maintenance.ts, packages/shared/src/metrics.ts]
-verified: c82d9d4
+sources: [apps/web/src/pages/AdminUsage.tsx, apps/web/src/components/usage/**, apps/web/src/lib/usage.ts, apps/web/src/components/AdminSiteCard.tsx, apps/api/src/routes/admin.ts, apps/api/src/views.ts, apps/api/src/maintenance.ts, packages/shared/src/metrics.ts, packages/shared/src/deletion.ts]
+verified: b4d7792
 ---
 
 The **Usage** page shows how much {{instance:name}} is used: every site's
@@ -58,6 +58,12 @@ compare each with the first. Choose a name to open its site page.
 The live sites unused for longest, a week or more, with how long it has been: since a view or a
 push, whichever was later, or since the site last changed if it has had neither. The longer a site
 has been left, the fainter its name. Choose a name to open its site page, where you can archive it.
+
+### Deleted sites
+
+How many deleted sites<!-- requires: paths --> and Paths deleted on their own<!-- /requires --> are kept,
+and about how much they take: a guide, from the sizes of their versions. **See and restore them**
+opens [Deleted sites](/guide/admin/deleted).
 
 ### Where the site numbers come from
 

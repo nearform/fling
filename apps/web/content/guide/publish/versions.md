@@ -72,6 +72,7 @@ A Path's own page has the same **Versions** section for that Path.
   version needs a secret that isn't set, the rollback is refused (`secrets_missing`): set it and
   roll back again. See [Site secrets](/guide/servers/secrets).
 <!-- /requires -->
-- Delete the site and its versions go with it. Archiving keeps them.
+- Delete the site and its versions go with it<!-- requires: recoverableDeletes -->, unless an admin
+  restores it<!-- /requires -->. Archiving keeps them.
 - Whoever runs {{instance:name}} can limit how many versions each site keeps; older ones beyond
   that are deleted. The one being served is always kept.

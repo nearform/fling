@@ -7,9 +7,12 @@ import {
   ACCESS_LABELS,
   type AccessLevel,
   changesAudience,
+  deleteConfirmText,
+  deletedText,
   describeAudience,
   describeRoles,
   privateAudience,
+  recoverableDeletesOf,
   type Site,
   type SiteDetail,
   type SiteSort,
@@ -24,7 +27,7 @@ import chalk from 'chalk'
 import { CliApiError } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
-import { loadInstanceWith } from '../instance.ts'
+import { loadFreshInstance, loadInstanceWith } from '../instance.ts'
 import { waitWithSpinner } from '../ready.ts'
 import {
   accessLevelsEnabled,
@@ -636,16 +639,20 @@ export async function runRemove(
   name: string,
   opts: { yes?: boolean }
 ): Promise<void> {
+  const client = requireClient(ctx)
+  const recoverable = recoverableDeletesOf(
+    await loadFreshInstance(ctx.store, ctx.config, ctx.fetch)
+  )
   if (!opts.yes) {
     if (!ctx.interactive) {
       throw new CliError(`Refusing to delete ${name} without confirmation`, {
         hint: 'Pass --yes to delete.',
       })
     }
-    const ok = await ctx.confirm(`Delete ${name} and every version of it? This cannot be undone.`)
+    const ok = await ctx.confirm(deleteConfirmText(recoverable, name))
     if (!ok) throw new CliError('Cancelled')
   }
-  const result = await deleteSite(requireClient(ctx), name)
-  ctx.log.success(`${name} deleted`)
-  if (ctx.json) ctx.out.data(result, () => '')
+  const result = await deleteSite(client, name)
+  ctx.log.success(deletedText(recoverable, name))
+  if (ctx.json) ctx.out.data({ ...result, recoverable }, () => '')
 }

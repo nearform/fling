@@ -295,7 +295,7 @@ describe('site operations', () => {
     expect(kvsSite()).toBeDefined()
   })
 
-  it('DELETE removes KVS keys, files, versions and the site', async () => {
+  it('DELETE removes KVS keys, versions and the site, and keeps the files', async () => {
     const live = await deployLive(v1)
     await api(env, key, 'POST', '/api/sites/hello/share')
     const siteId = kvsSite().id
@@ -303,7 +303,8 @@ describe('site operations', () => {
     const res = await api(env, key, 'DELETE', '/api/sites/hello')
     expect(res.status).toBe(204)
     expect(env.routeTable.data.size).toBe(0)
-    expect(await env.blobs.head(`sites/${siteId}/${live.versionId}/index.html`)).toBeNull()
+    // A soft delete (the default) keeps the files, for an admin to restore (deletion.test.ts).
+    expect(await env.blobs.head(`sites/${siteId}/${live.versionId}/index.html`)).not.toBeNull()
     expect((await api(env, key, 'GET', '/api/sites/hello')).status).toBe(404)
     // a fresh deploy starts over
     const again = await json(

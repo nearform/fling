@@ -40,6 +40,7 @@ import {
 import { type PathListing, renderPathsIndex } from '@fling/shared/paths-index'
 import { withViewBeacon } from '@fling/shared/view-beacon'
 import { manifestKey } from './blobs/types.ts'
+import { removeOwnPath, softDeletes } from './deletion.ts'
 import { ApiError, conflict, notFound } from './lib/errors.ts'
 import { GRACE_MS, queueMaintenance, reviveVersion } from './maintenance.ts'
 import { type Action, type Actor, can, pathPolicySite } from './policy.ts'
@@ -383,17 +384,23 @@ export async function updatePath(
   return toSitePath(deps, site, siteActor, path)
 }
 
-/** DELETE /api/sites/:name/paths/:folder: the Path, its versions and files (`site.delete` on it). */
+/**
+ * DELETE /api/sites/:name/paths/:folder: the Path (`site.delete` on it), soft or hard as the
+ * instance deletes (deletion.ts `removeOwnPath`).
+ */
 export async function deletePathOf(deps: Deps, user: User, name: string, folder: string) {
   const { site, path } = await requirePath(deps, user, name, folder, 'site.delete')
-  await removePath(deps, site, path)
+  await removeOwnPath(deps, user, site, path)
   await refreshHome(deps, site)
 }
 
-/** Take a Path off its site: its route key, files and records. */
+/**
+ * Take a Path off its site: its route key and records, and with `SITE_DELETE=hard` its files
+ * (a soft delete keeps them, deletion.ts). Its recovery file and record are the caller's.
+ */
 export async function removePath(deps: Deps, site: SiteRecord, path: PathRecord) {
   await deps.routeTable.delete(pathKvsKey(site.id, path.folder))
-  await deps.blobs.deletePrefix(sitePrefix(path.id))
+  if (!softDeletes(deps)) await deps.blobs.deletePrefix(sitePrefix(path.id))
   await deps.store.deletePath(site, path)
 }
 

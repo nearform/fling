@@ -23,6 +23,7 @@ import {
   commentThreads,
   reviewUrl,
 } from './comments.ts'
+import { ADMIN_DELETED_PATH } from './deletion.ts'
 import {
   FORMS_FILE,
   FORMS_TITLE_MAX,
@@ -125,7 +126,20 @@ export interface McpWording {
    * MAX_PATHS_PER_SITE); unset when the wording names no one instance.
    */
   pathsPerSite?: number
+  /**
+   * Whether an admin can recover what is deleted (the `recoverableDeletes` capability); unset when
+   * the wording names no one instance.
+   */
+  recoverableDeletes?: boolean
 }
+
+/** What a delete means on the instance, for the delete tool's description. */
+const deleteOutcome = (w: McpWording) =>
+  w.recoverableDeletes === undefined
+    ? 'Where the Fling keeps deleted sites (`recoverableDeletes`) an admin can recover it; elsewhere it cannot be undone.'
+    : w.recoverableDeletes
+      ? `${w.name} keeps deleted sites: an admin can recover it.`
+      : `${w.name} deletes for good: it cannot be undone.`
 
 const GENERIC_REVIEW = "the site's review page in the Fling web app (/review/<name>)"
 
@@ -154,6 +168,7 @@ export function mcpWording(
     defaultAccess: defaultAccessOf(instance),
     invites: instance.capabilities?.invites === true,
     pathsPerSite: pathsPerSiteOf(instance),
+    recoverableDeletes: instance.capabilities?.recoverableDeletes === true,
     ...(instanceGuideUrl(instance) ? { guide: instanceGuideUrl(instance) } : {}),
   }
 }
@@ -1240,13 +1255,31 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_delete',
       title: 'Delete a site',
       description:
-        'Permanently delete a site and every version of it, freeing its name. Cannot be undone — confirm with the user ' +
-        'first and pass `confirm: true`. Consider fling_archive instead.',
+        `Delete a site and every version of it: its link stops working and its name is freed. ${deleteOutcome(w)} ` +
+        'Tell the user which before you delete, confirm with them first and pass `confirm: true`. Consider ' +
+        'fling_archive instead.',
       inputSchema: {
         name: siteName,
         confirm: z.literal(true).describe('Must be true: the user has confirmed the deletion'),
       },
       annotations: { destructiveHint: true, openWorldHint: false },
+    }),
+
+    adminDeleted: tool({
+      name: 'fling_admin_deleted',
+      title: 'List deleted sites (admins)',
+      description:
+        "List the deleted sites and Paths an admin can recover, newest first: name (a Path's folder), owner, who " +
+        "deleted it and when, the size kept and a site's Paths. For admins only. An admin restores one, or deletes it for good, in " +
+        `their browser, at Admin → Deleted (${ADMIN_DELETED_PATH} of the ${w.name} web app, the link in the result); ` +
+        'no tool restores or deletes for good.',
+      inputSchema: {
+        name: z
+          .string()
+          .optional()
+          .describe("Only this site name's deletes and its Paths' (default: every deleted site)"),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 
     commentsList: tool({

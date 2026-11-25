@@ -6,7 +6,8 @@
  * - `fling paths <site>` lists them: folder, title, current version, updated, archived, and
  *   whether you can publish to it; then what a site's home page can do with them.
  * - `fling paths archive|unarchive <site> <folder>` takes one off the site or puts it back;
- *   `fling paths delete <site> <folder> [--yes]` deletes it with its versions.
+ *   `fling paths delete <site> <folder> [--yes]` deletes it with its versions, saying first
+ *   whether an admin can recover it (`recoverableDeletes`).
  * - `fling paths init [dir] [--template …] [--title …] [--force]` writes a starter home page
  *   (`index.html`, paths-templates.ts) with its Paths block in place.
  * - `fling paths check [dir|file]` checks a home page's Paths block (`checkPathsIndex`).
@@ -17,9 +18,12 @@
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import {
+  deleteConfirmText,
+  deletedText,
   MAX_PATH_FOLDER_LENGTH,
   normalizePathFolder,
   pathsPerSiteOf,
+  recoverableDeletesOf,
   type SitePath,
 } from '@fling/shared'
 import { checkPathsIndex, PATHS_OPTIONS, PATHS_PLACEHOLDERS } from '@fling/shared/paths-index'
@@ -33,7 +37,7 @@ import chalk from 'chalk'
 import type { ApiClient } from '../api.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
-import { loadInstanceWith } from '../instance.ts'
+import { loadFreshInstance, loadInstanceWith } from '../instance.ts'
 import { archivePath, deletePath, listPaths, pathsEnabled } from '../sites.ts'
 import { formatDate, renderTable } from '../utils/output.ts'
 
@@ -128,20 +132,21 @@ export async function runPathDelete(
 ): Promise<void> {
   const folder = pathFolder(raw)
   const client = await pathsClient(ctx)
+  const recoverable = recoverableDeletesOf(
+    await loadFreshInstance(ctx.store, ctx.config, ctx.fetch)
+  )
   if (!opts.yes) {
     if (!ctx.interactive) {
       throw new CliError(`Refusing to delete /${folder}/ of ${name} without confirmation`, {
         hint: 'Pass --yes to delete.',
       })
     }
-    const ok = await ctx.confirm(
-      `Delete /${folder}/ of ${name} and every version of it? This cannot be undone.`
-    )
+    const ok = await ctx.confirm(deleteConfirmText(recoverable, name, folder))
     if (!ok) throw new CliError('Cancelled')
   }
   const result = await deletePath(client, name, folder)
-  ctx.log.success(`/${folder}/ of ${name} deleted`)
-  if (ctx.json) ctx.out.data(result, () => '')
+  ctx.log.success(deletedText(recoverable, name, folder))
+  if (ctx.json) ctx.out.data({ ...result, recoverable }, () => '')
 }
 
 /** A path as typed from here: relative when inside the working directory, else absolute. */

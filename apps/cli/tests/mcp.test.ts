@@ -1078,7 +1078,68 @@ describe('MCP server', () => {
       arguments: { name: 'my-app', confirm: true },
     })
     expect(ok.isError).toBeFalsy()
-    expect(m.calls.map(c => c.method)).toEqual(['DELETE'])
+    expect(m.calls.filter(c => c.method === 'DELETE')).toHaveLength(1)
+    expect(text(ok)).toMatch(/^Deleted my-app for good\./)
+    expect(dataOf(ok)).toMatchObject({ name: 'my-app', deleted: true, recoverable: false })
+  })
+
+  it('fling_delete says an admin can recover the site when the Fling keeps deleted sites', async () => {
+    const store = await loggedInStore()
+    const instance = {
+      ...INSTANCE,
+      capabilities: { ...INSTANCE.capabilities, recoverableDeletes: true },
+    }
+    const m = mockFetch({
+      'GET /.well-known/fling': () => jsonResponse(instance),
+      'DELETE /api/sites/my-app': () => new Response(null, { status: 204 }),
+    })
+    const client = await connect(store, m.fetch)
+    const ok = await client.callTool({
+      name: 'fling_delete',
+      arguments: { name: 'my-app', confirm: true },
+    })
+    expect(text(ok)).toMatch(/^Deleted my-app\. An admin can recover it\./)
+    expect(dataOf(ok)).toMatchObject({ recoverable: true })
+  })
+
+  it('fling_admin_deleted lists deleted sites and links to Admin → Deleted to restore', async () => {
+    const store = await loggedInStore()
+    const deleted = [
+      {
+        kind: 'site',
+        siteId: 's_1',
+        name: 'pitch-deck',
+        owner: 'ada@example.test',
+        deletedBy: 'bob@example.test',
+        deletedAt: '2026-11-20T10:00:00.000Z',
+        bytes: 2048,
+        paths: [{ folder: 'PAY-1', pathId: 'p_1' }],
+      },
+    ]
+    const m = mockFetch({ 'GET /api/admin/deleted': () => jsonResponse({ deleted }) })
+    const client = await connect(store, m.fetch)
+    const r = await client.callTool({
+      name: 'fling_admin_deleted',
+      arguments: { name: 'pitch-deck' },
+    })
+    expect(r.isError).toBeFalsy()
+    expect(m.calls.at(-1)?.url.searchParams.get('name')).toBe('pitch-deck')
+    expect(text(r)).toMatch(/pitch-deck .*owner ada@example\.test, deleted by bob@example\.test/)
+    expect(text(r)).toContain(
+      `Restore or delete for good from Admin → Deleted: ${SERVER}/admin/deleted`
+    )
+    expect(dataOf(r)).toEqual({ deleted, restoreUrl: `${SERVER}/admin/deleted` })
+
+    const refused = await connect(
+      store,
+      mockFetch({
+        'GET /api/admin/deleted': () =>
+          jsonResponse({ error: { code: 'forbidden', message: 'Forbidden' } }, 403),
+      }).fetch
+    )
+    const no = await refused.callTool({ name: 'fling_admin_deleted', arguments: {} })
+    expect(no.isError).toBe(true)
+    expect(text(no)).toMatch(/Only an admin of Example Fling can list its deleted sites/)
   })
 })
 

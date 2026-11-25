@@ -10,6 +10,7 @@
  * bucket present (zero when nothing happened).
  */
 import { z } from 'zod'
+import { DeletedUsageSchema } from './deletion.ts'
 
 /** Days, weeks and months a site's metrics go back (the current one included). */
 export const METRIC_DAYS = 28
@@ -181,5 +182,7 @@ export const InstanceUsageSchema = z.object({
   totals: z.object({ days: z.object(Counts), months: z.object(Counts) }),
   /** the last lap's tally, with when it began and ended; null before the first lap ends */
   lap: UsageTallySchema.extend({ lapStartedAt: z.string(), finishedAt: z.string() }).nullable(),
+  /** the deleted sites still kept in the blob store, and their bytes (deletion.ts) */
+  deleted: DeletedUsageSchema,
 })
 export type InstanceUsage = z.infer<typeof InstanceUsageSchema>

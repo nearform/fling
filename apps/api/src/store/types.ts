@@ -69,6 +69,18 @@ export type AuditAction =
   | 'routes.format'
   /** an admin turned view counting on or off (`target`: `on` or `off`) */
   | 'usage.view_counting'
+  /** a site was deleted, by anyone (`target`: its name; `siteId`; `change`: `soft` or `hard`) */
+  | 'site.delete'
+  /** an admin restored a deleted site (`target`: the name it came back under; `siteId`) */
+  | 'site.restore'
+  /** a Path was deleted on its own (`target`: `<site>/<folder>`; `siteId`; `change`: `soft` or `hard`) */
+  | 'path.delete'
+  /** an admin restored a Path deleted on its own (`target`: `<site>/<folder>`; `siteId`) */
+  | 'path.restore'
+  /** an admin deleted a deleted site's files for good, its Paths' too (`target`: its name; `siteId`) */
+  | 'site.purge'
+  /** an admin deleted a deleted Path's files for good (`target`: `<site>/<folder>`; `siteId`) */
+  | 'path.purge'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -234,6 +246,8 @@ export interface AuditRecord {
   via?: InvitationVia
   /** invitation.create: what it lets them be */
   role?: InvitationRole
+  /** site.* and path.* deletes, restores and purges: the site's id (its files' prefix) */
+  siteId?: string
   expiresAt: string
 }
 
@@ -728,6 +742,50 @@ export interface UploadFileRecord {
   expiresAt: string
 }
 
+/**
+ * A deleted site, or a Path deleted on its own (`kind: 'path'`), kept for an admin to restore
+ * (deletion.ts): `DELETED/SITE#<siteId>` or `DELETED/PATH#<pathId>`, with copies to list them
+ * newest first (`DELETED/AT#<deletedAt>#<id>`) and by name (`DELETEDNAME#<name>/<deletedAt>#<id>`).
+ * Its files and their recovery file (`deleted.json`) are in the blob store; it has no expiry: it
+ * goes when the site is restored or an admin purges it.
+ */
+export interface DeletedSiteRecord {
+  kind: 'site' | 'path'
+  /** the site's id; for a Path, its site's */
+  siteId: string
+  /** the site's name when it was deleted (a Path's: its site's then) */
+  name: string
+  /** a Path's folder and storage id */
+  folder?: string
+  pathId?: string
+  /** the site's (or the Path's) first owner when it was deleted */
+  owner: string
+  deletedBy: string
+  deletedAt: string
+  /** the bytes its kept versions hold, from their records */
+  bytes: number
+  /** a site's Paths, deleted with it */
+  paths?: { folder: string; pathId: string }[]
+  /**
+   * A restore under way (set before it writes anything): the name it claims, who and when. A
+   * retry carries on under that name, and the records it finds are its own, not a delete left
+   * unfinished.
+   */
+  restoring?: { name: string; by: string; at: string }
+  /**
+   * A purge under way (set before it deletes anything): who and when. Never set beside
+   * `restoring`: each is marked only while the other isn't, so a purge and a restore never overlap.
+   */
+  purging?: { by: string; at: string }
+}
+
+/** What the deleted-site records add up to (`DELETED/TOTALS`): a guide, not a ledger. */
+export interface DeletedTotals {
+  sites: number
+  paths: number
+  bytes: number
+}
+
 export interface Store extends NotificationStore {
   getUser(email: string): Promise<User | null>
   /**
@@ -821,6 +879,48 @@ export interface Store extends NotificationStore {
    * and release its name claim (if the claim is its).
    */
   deleteSite(site: SiteRecord): Promise<void>
+  /**
+   * The site record by its id (`SITE#<id>/SITE`), whatever holds its name: null when there is
+   * none. For what knows only the id (a deleted Path's site); a name's site is `findSite`.
+   */
+  getSiteById(siteId: string): Promise<SiteRecord | null>
+  /**
+   * Whether any of the site's own records are left: its record, a version, a Path or a comment
+   * (an unfinished delete). Counts and live connections don't count.
+   */
+  hasSiteRecords(siteId: string): Promise<boolean>
+
+  // --- deleted sites (deletion.ts) ---
+  /**
+   * Record a deleted site or Path with its listing copies, in one transaction, and add it to the
+   * totals. False, with nothing written, when one with its id is recorded already (a retried
+   * delete keeps the first).
+   */
+  putDeletedSite(record: DeletedSiteRecord): Promise<boolean>
+  /** A deleted site by its id, or a Path deleted on its own by its storage id. */
+  getDeletedSite(kind: DeletedSiteRecord['kind'], id: string): Promise<DeletedSiteRecord | null>
+  /**
+   * Deleted sites and Paths, newest first, at most `limit`; with `name`, only those deleted under
+   * exactly that site name (its Paths' included).
+   */
+  listDeletedSites(opts: { name?: string; limit: number }): Promise<DeletedSiteRecord[]>
+  /** Mark a restore under way (`restoring`); false when the record is gone or being purged. */
+  markRestoring(
+    record: DeletedSiteRecord,
+    restoring: NonNullable<DeletedSiteRecord['restoring']>
+  ): Promise<boolean>
+  /**
+   * Mark a purge under way (`purging`); false when the record is gone or a restore is under way
+   * (`restoring`).
+   */
+  markPurging(
+    record: DeletedSiteRecord,
+    purging: NonNullable<DeletedSiteRecord['purging']>
+  ): Promise<boolean>
+  /** Forget a deleted site (restored or purged) with its copies, and take it off the totals. */
+  deleteDeletedSite(record: DeletedSiteRecord): Promise<boolean>
+  /** What the deleted-site records add up to (zeros before the first). */
+  deletedTotals(): Promise<DeletedTotals>
   /** The sites shared with `email` directly (its grants, with their listings), by site id. */
   listSiteGrants(email: string): Promise<SiteGrantRecord[]>
   /** Which of these addresses have signed in (have a `USERS/USER#<email>` index item). */

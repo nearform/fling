@@ -34,6 +34,13 @@ describe('request', () => {
     expect(error).toMatchObject({ status: 409, code: 'name_taken', message: 'That name is taken' })
   })
 
+  it("carries a taken name's suggestions, and none for other errors", async () => {
+    respond(409, { error: { code: 'name_taken', message: 'Taken', suggestions: ['a-cc', 3] } })
+    await expect(request('/api/x', MeSchema)).rejects.toMatchObject({ suggestions: ['a-cc'] })
+    respond(409, { error: { code: 'conflict', message: 'No' } })
+    await expect(request('/api/x', MeSchema)).rejects.toMatchObject({ suggestions: [] })
+  })
+
   it("carries a response's field errors, and none for other errors", async () => {
     const errors = [{ field: 'verdict', message: 'is required' }]
     respond(400, { error: { code: 'invalid_response', message: 'No', errors } })

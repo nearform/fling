@@ -4,8 +4,8 @@ part: team-sites
 order: 10
 summary: Publish a folder per ticket into one team site, each with its own versions and owners.
 requires: [paths]
-sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts]
-verified: c82d9d4
+sources: [apps/api/src/paths.ts, apps/api/src/publication.ts, packages/shared/src/publish-path.ts, packages/shared/src/limits.ts, apps/cli/src/commands/paths.ts, apps/web/src/pages/Path.tsx, apps/web/src/components/site/Path*.tsx, apps/web/src/components/site/SitePaths.tsx, packages/shared/src/mcp-tools.ts, apps/web/src/lib/site-tabs.ts, packages/shared/src/deletion.ts]
+verified: b4d7792
 ---
 
 A team site holds many pieces of work in one place: a plan per ticket, a report per week. Each
@@ -46,7 +46,7 @@ fling publishers payments-plans --path PAY-412 --add bob@example.com
 fling pull payments-plans ./plan --path PAY-412     # its files, to change and publish back
 fling paths archive payments-plans PAY-412          # take it off the site, keep its versions
 fling paths unarchive payments-plans PAY-412
-fling paths delete payments-plans PAY-412           # for good (asks first unless --yes)
+fling paths delete payments-plans PAY-412           # asks first unless --yes
 ```
 
 Name the folder after the ticket (`PAY-412`, `gh-1234`), not after a person.
@@ -61,8 +61,9 @@ Click a Path's folder to open its own page. There you can:
 
 - see its **Versions**, and **Restore** an earlier one;
 - change its **Owners and publishers**;
-- **Archive…** it (its address returns 404, its versions are kept) or **Delete…** it for good, in
-  the **Danger zone**.
+- **Archive…** it (its address returns 404, its versions are kept) or **Delete…** it, in the
+  **Danger zone**.<!-- requires: recoverableDeletes --> An admin can restore a deleted
+  Path.<!-- /requires -->
 
 ## Who can do what
 

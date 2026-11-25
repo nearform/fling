@@ -734,6 +734,12 @@ export const AuditEntrySchema = z.object({
     'viewer.resolved',
     'routes.format',
     'usage.view_counting',
+    'site.delete',
+    'site.restore',
+    'path.delete',
+    'path.restore',
+    'site.purge',
+    'path.purge',
   ]),
   actor: z.string(),
   /** the person, or for site.change and site.open the site's name */
@@ -748,6 +754,8 @@ export const AuditEntrySchema = z.object({
   role: InvitationRoleSchema.optional(),
   until: z.string().optional(),
   lapsed: z.boolean().optional(),
+  /** site.* and path.* deletes, restores and purges: the site's id (its files' prefix) */
+  siteId: z.string().optional(),
 })
 export type AuditEntry = z.infer<typeof AuditEntrySchema>
 export const AuditListSchema = z.object({ entries: z.array(AuditEntrySchema) })

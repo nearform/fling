@@ -186,7 +186,7 @@ Nothing in it is secret.
 | `D1_DATABASE_NAME`, `D1_DATABASE_ID` | The D1 database |
 | `R2_BUCKET` | The R2 bucket for site files |
 | `KV_NAMESPACE_ID` | The KV namespace for routes |
-| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION`, `MAINTENANCE_SWEEP_ENABLED`, `PATHS_PER_SITE_MAX` and `SITE_VIEW_COUNTS` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
+| `INSTANCE` | The instance's own values, as on AWS: `ALLOWED_EMAIL_DOMAINS` and/or `ALLOWED_EMAILS` (at least one), `ADMIN_EMAILS` (optional), `OIDC_*`, `INSTANCE_NAME`, `SITE_DEFAULT_ACCESS` (optional), `INVITES` and `INVITES_PER_DAY` (optional; `INVITES` on needs `MAIL`), `VERSION_RETENTION`, `MAINTENANCE_SWEEP_ENABLED`, `PATHS_PER_SITE_MAX`, `SITE_VIEW_COUNTS` and `SITE_DELETE` (optional), `BRAND_*`, … ([the table in the AWS guide](../aws/DEPLOY.md#instance-configuration)). They become the Worker's vars. Mail settings (`MAIL_*`, `SES_*`) are refused here: they go in `MAIL` |
 | `MAIL` | Optional: `{ "FROM": "fling@mail.fling.example.com", "FROM_NAME": "Example Fling", "REPLY_TO": "help@example.com" }`, email notifications through Email Service ([Email](#email)). `FROM` is required in it; `FROM_NAME` defaults to `INSTANCE_NAME`, `REPLY_TO` to none. Not in `INSTANCE`, because the binding needs `FROM` too. `setup.mjs` keeps it when rerun |
 
 The rendered config replaces the template's local-development vars wholesale: production gets
@@ -388,7 +388,8 @@ The deploy ends with the e2e scenario (`packages/e2e`) against the live instance
 with the CLI, view it, a trailing-slash redirect and the 404 page, a second version and a rollback,
 make it private (anonymous visitors are sent to sign in), a share link, four concurrent first
 deploys of one name (conditional writes: exactly one site), an MCP publish, then it removes the
-three sites it made (`e2e-<random>…`). With `MAIL`, the instance advertises the `email` capability
+three sites it made (`e2e-<random>…`). Where deletes are soft, those stay kept until an admin deletes them
+for good on Admin → Deleted ([Deleted sites](#deleted-sites)). With `MAIL`, the instance advertises the `email` capability
 and the test checks that the notification settings (`GET /api/me/notifications`) answer; it sends
 no email. What each person is sent is checked by the local e2e, which can drain the outbox at once
 (`POST /dev/notify/drain`, dev login only).
@@ -431,6 +432,23 @@ Someone the audience refuses gets the same cookie saying so, for 10 seconds, and
 at the address they asked for, so adding someone lets them in within 10 seconds. Taking someone
 out of an audience, or out of a group it names, shuts them out within 5 minutes (plus the KV delay
 above when it was the last person and the site opens to every member again).
+
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, a deleted site's files stay where they were, with a recovery
+file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a `deleted.json` in
+each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
+their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
+and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
+the same here.
+
+The prefixes are in the R2 bucket (`R2_BUCKET` in `CF_DEPLOY_CONFIG`). In the dashboard, **R2 →
+the bucket → Objects**, search by the prefix `sites/<siteId>/`. From a shell, one file:
+`wrangler r2 object get "$R2_BUCKET/sites/<siteId>/deleted.json" --remote --pipe`. For a whole
+version, use R2's S3-compatible API with an R2 API token (read on the bucket):
+`aws s3 cp --recursive --region auto --endpoint-url https://<account id>.r2.cloudflarestorage.com
+s3://$R2_BUCKET/sites/<siteId>/<versionId>/ ./recovered`. The bucket's lifecycle rule touches only
+`server-logs/`, never a kept prefix.
 
 ## Claude's sandbox: allow your Fling's host
 

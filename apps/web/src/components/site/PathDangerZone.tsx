@@ -1,10 +1,11 @@
 /**
  * Taking a Path away: archive (off the site, its URL 404s, its files and versions kept),
- * unarchive, and delete for good, which needs the folder typed. The rest of the site is
- * untouched either way. After a delete the Path page has nothing left to show, so it goes back
+ * unarchive, and delete, which needs the folder typed: one an admin can recover where the
+ * instance keeps deleted sites (`recoverableDeletes`), for good where it doesn't. The rest of the
+ * site is untouched either way. After a delete the Path page has nothing left to show, so it goes back
  * to the site's page.
  */
-import type { SitePath } from '@fling/shared'
+import { deleteConfirmText, recoverableDeletesOf, type SitePath } from '@fling/shared'
 import {
   ArchiveBoxArrowDownIcon,
   ArchiveBoxXMarkIcon,
@@ -12,6 +13,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useInstance } from '../../hooks/instance'
 import { usePathActions } from '../../hooks/queries'
 import { shownFolder } from '../../lib/paths'
 import { siteHref } from '../../lib/sites'
@@ -21,6 +23,7 @@ import { SiteSection } from './SiteSection'
 
 export function PathDangerZone({ name, path }: { name: string; path: SitePath }) {
   const actions = usePathActions(name, path.folder)
+  const recoverable = recoverableDeletesOf(useInstance())
   const navigate = useNavigate()
   const [dialog, setDialog] = useState<'archive' | 'delete' | null>(null)
   const close = () => setDialog(null)
@@ -53,7 +56,9 @@ export function PathDangerZone({ name, path }: { name: string; path: SitePath })
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border-subtle)] pt-3">
         <p className="min-w-0 text-sm text-secondary">
-          Delete removes {folder} and every version of it, for good.
+          {recoverable
+            ? `Delete takes ${folder} off the site. An admin can recover it.`
+            : `Delete removes ${folder} and every version of it, for good.`}
         </p>
         <button
           type="button"
@@ -77,9 +82,10 @@ export function PathDangerZone({ name, path }: { name: string; path: SitePath })
       />
       <TypedDeleteModal
         name={path.folder}
-        title={`Delete ${folder}?`}
+        title="Delete Path"
         label="Path folder"
-        message={`This removes ${folder} and every version of it from ${name}. Its URL stops working and this cannot be undone. To keep the files, archive it instead.`}
+        recoverable={recoverable}
+        message={`${deleteConfirmText(recoverable, name, path.folder)} The rest of ${name} stays as it is.${recoverable ? '' : ' To keep the files, archive it instead.'}`}
         open={dialog === 'delete'}
         busy={actions.remove.isPending}
         onCancel={close}

@@ -156,6 +156,12 @@ Each element uses the same headings:
   - A store whose presigned URLs bind no header at all signs the host's upload route for every
     file. Azure Blob Storage is one: a SAS signs only its URL, and Put Blob takes a body without
     the `Content-MD5` it was meant to carry (`AzureBlobs`, `platforms/azure/src/blobs/blob.ts`).
+  - **Nothing outside the core removes a site's files.** A soft delete (`SITE_DELETE=soft`, the
+    default; `apps/api/src/deletion.ts`) leaves `sites/<siteId>/` and its Paths' `sites/<pathId>/`
+    where they are, with a `deleted.json` beside them, until an admin restores or purges them. A
+    platform's lifecycle rules delete objects only under scratch prefixes (`uploads/`, server
+    logs), never under `sites/`; aborting unfinished multipart uploads bucket-wide is harmless. Soft delete, restore and purge are the core's alone, through `Blobs` as it is and the
+    `Store`'s deleted-site records (covered by `storeConformance`); a platform adds nothing.
 - **Conformance:** `blobsConformance`.
 - **Gates:** nothing.
 

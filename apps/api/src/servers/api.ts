@@ -19,6 +19,9 @@
  *   - the live version's server is reconfigured with the site's secrets as they now are and
  *     probed again (`live`); a failed probe is reported, not undone: the secret stays as set and
  *     that version keeps serving with it;
+ *   - a restored site's live version whose server waits for its secrets (deletion.ts) starts once
+ *     none it declares is unset (`startAwaiting`, as the one who made the change); until then, and
+ *     after any refusal, it keeps waiting and `/api/*` answers 503;
  *   - a change that leaves none of the waiting publish's declared secrets unset
  *     (`SiteServerState.awaiting`, publication.ts) publishes it, as finalizing it again would, by
  *     the one who made the change (`deployed`: live at its URL, or the publish's refusal); with
@@ -27,13 +30,15 @@
  *     takes its place. Any other refusal (the publisher may no longer publish servers, the
  *     instance is full) ends the wait.
  */
-import type {
-  DeleteSiteSecretResponse,
-  PutSiteSecretResponse,
-  SecretDeployedOutcome,
-  SecretLiveOutcome,
-  ServerLogLine,
-  SiteSecretsResponse,
+import {
+  type DeleteSiteSecretResponse,
+  type PutSiteSecretResponse,
+  type SecretDeployedOutcome,
+  type SecretLiveOutcome,
+  type ServerLogLine,
+  type SiteSecretsResponse,
+  siteLabel,
+  siteUrl,
 } from '@fling/shared'
 import { z } from 'zod'
 import { ensure } from '../admin.ts'
@@ -41,10 +46,27 @@ import type { ServerLimits } from '../config.ts'
 import { ApiError, badRequest, notFound } from '../lib/errors.ts'
 import type { Principal } from '../policy.ts'
 import { publish } from '../publication.ts'
-import { auditAdmin, changeSite, requireSite, requireSiteAs, writeSite } from '../sites.ts'
-import type { SiteRecord, User } from '../store/types.ts'
+import {
+  auditAdmin,
+  awaitsSecretsLive,
+  changeSite,
+  requireSite,
+  requireSiteAs,
+  writeSite,
+} from '../sites.ts'
+import type { ServerMark, SiteRecord, User, VersionRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import { limitsOf, probeServer, reconfigureLive, serverSite, serversOn } from './index.ts'
+import {
+  applyServer,
+  limitsOf,
+  noteLive,
+  principalOfUser,
+  probeServer,
+  reconfigureLive,
+  serverSite,
+  serversOn,
+  startServer,
+} from './index.ts'
 import { readLogs, resolveViewer, sinceOf } from './logs.ts'
 import { listSecrets, removeSecret, secretValues, setSecret } from './secrets.ts'
 
@@ -61,7 +83,8 @@ async function waitingFor(
   const awaiting = site.server?.awaiting
   if (!awaiting) return undefined
   const version = await deps.store.getVersion(site, awaiting.versionId)
-  if (version?.status !== 'pending' || !version.server) return undefined
+  if (!version?.server) return undefined
+  if (version.status !== 'pending' && !awaitsSecretsLive(site)) return undefined
   return { versionId: version.id, declared: version.server.secrets }
 }
 
@@ -105,7 +128,11 @@ async function deployAwaiting(
   const awaiting = site.server?.awaiting
   if (!awaiting) return {}
   const version = await deps.store.getVersion(site, awaiting.versionId)
-  if (version?.status !== 'pending' || !version.server) return {}
+  if (!version?.server) return {}
+  if (version.status === 'complete' && awaitsSecretsLive(site)) {
+    return startAwaiting(deps, user, site, version as VersionRecord & { server: ServerMark })
+  }
+  if (version.status !== 'pending') return {}
   const { missing } = await secretValues(deps, site.id, version.server.secrets)
   if (missing.length > 0) return { missing }
   try {
@@ -114,6 +141,50 @@ async function deployAwaiting(
   } catch (err) {
     if (!(err instanceof ApiError)) throw err
     if (!KEEPS_WAITING.has(err.code)) await stopWaiting(deps, site.name, version.id)
+    const logs = err.extra?.logs
+    return {
+      deployed: {
+        versionId: version.id,
+        error: err.code,
+        message: err.message,
+        ...(Array.isArray(logs) ? { logs: logs as string[] } : {}),
+      },
+    }
+  }
+}
+
+/**
+ * The live version's server, waiting to start (a restored site's, deletion.ts): once every secret
+ * it declares is set, it starts the usual way (`startServer`: activate, probe, go live) as `user`,
+ * and the site records where it is reached. Any refusal keeps it waiting, never running, so each
+ * later secret set or removed tries again; the static site serves throughout.
+ */
+export async function startAwaiting(
+  deps: Deps,
+  user: User,
+  site: SiteRecord,
+  version: VersionRecord & { server: ServerMark }
+): Promise<{ deployed?: SecretDeployedOutcome; missing?: string[] }> {
+  const { missing } = await secretValues(deps, site.id, version.server.secrets)
+  if (missing.length > 0) return { missing }
+  try {
+    const target = await startServer(deps, principalOfUser(user), site, version)
+    await writeSite(deps, site, s => {
+      if (s.currentVersionId !== version.id || s.server?.awaiting?.versionId !== version.id) {
+        return false
+      }
+      applyServer(s, version, target)
+      return true
+    })
+    await noteLive(deps, user.email, site, version)
+    // Started on an archived site, or one an admin stopped: it stays dark with it.
+    if (deps.servers && (site.archived || site.server?.stopped)) {
+      await deps.servers.setEnabled(serverSite(site), false)
+    }
+    const url = siteUrl(siteLabel(site.name), deps.config.sitesDomain, `${deps.config.siteScheme}:`)
+    return { deployed: { versionId: version.id, url } }
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err
     const logs = err.extra?.logs
     return {
       deployed: {

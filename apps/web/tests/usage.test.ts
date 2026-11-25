@@ -37,6 +37,7 @@ function usage(over: Partial<InstanceUsage> = {}, views: number[] = []): Instanc
     months: months.map(month => ({ month, views: 0, pushes: 0 })),
     totals: { days: { views: 0, pushes: 0 }, months: { views: 0, pushes: 0 } },
     lap: null,
+    deleted: { sites: 0, paths: 0, bytes: 0 },
     ...over,
   }
 }

@@ -308,9 +308,10 @@ export async function yourSitesMetrics(deps: Deps, user: User): Promise<SitesMet
 /** Admin → Usage: every site's views and pushes together, and the sweep's last lap's tally. */
 export async function instanceUsage(deps: Deps, p: Principal): Promise<InstanceUsage> {
   ensure(p, 'admin.usage.read')
-  const [buckets, cursor] = await Promise.all([
+  const [buckets, cursor, deleted] = await Promise.all([
     deps.store.getInstanceMetrics(),
     deps.store.getMaintenanceCursor(),
+    deps.store.deletedTotals(),
   ])
   return {
     viewCounts: deps.config.viewCounts,
@@ -320,6 +321,8 @@ export async function instanceUsage(deps: Deps, p: Principal): Promise<InstanceU
     sweep: deps.config.maintenanceSweep,
     ...series(buckets, deps.clock.now()),
     lap: cursor?.lastUsage ?? null,
+    // The deleted sites still kept (deletion.ts), from the deleted-site records' totals.
+    deleted,
   }
 }
 

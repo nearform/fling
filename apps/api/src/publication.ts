@@ -192,6 +192,7 @@ import {
   actorOn,
   applySettings,
   auditAdmin,
+  awaitsSecretsLive,
   changeSite,
   detectGeneratedIndex,
   initialAccess,
@@ -763,10 +764,16 @@ async function prepare(
   await store.putVersion(site, version)
   // A deploy nobody finalizes is maintenance's to delete, once it is stale.
   await queueMaintenance(deps, site, Date.parse(now) + PENDING_TTL_MS)
-  // A newer publish: the one that waited for secrets no longer goes live when they are set.
-  if (site.server?.awaiting && site.server.awaiting.versionId !== version.id) {
+  // A newer publish: the one that waited for secrets no longer goes live when they are set. A
+  // restored site's live version waiting to start its server keeps waiting until another goes live.
+  if (
+    site.server?.awaiting &&
+    site.server.awaiting.versionId !== version.id &&
+    !awaitsSecretsLive(site)
+  ) {
     await writeSite(deps, site, s => {
       if (!s.server?.awaiting || s.server.awaiting.versionId === version.id) return false
+      if (awaitsSecretsLive(s)) return false
       const { awaiting: _, ...rest } = s.server
       s.server = rest
       return true

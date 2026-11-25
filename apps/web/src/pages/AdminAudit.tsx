@@ -1,8 +1,8 @@
 /**
  * Admin → Audit (`/admin/audit`; admins only, the API answers 404 to anyone else): the
  * latest entries of the audit log (audit.ts), newest first: impersonations, invitations, admins'
- * changes to other people's sites and what they opened of restricted ones, and the route table
- * format chosen.
+ * changes to other people's sites and what they opened of restricted ones, the route table
+ * format chosen, and every site or Path deleted and restored.
  */
 import type { AuditEntry } from '@fling/shared'
 import { PageHeader } from '../components/PageHeader'
@@ -26,6 +26,12 @@ const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'viewer.resolved': 'resolved a viewer id on',
   'routes.format': 'chose the route table format',
   'usage.view_counting': 'turned view counting',
+  'site.delete': 'deleted',
+  'site.restore': 'restored',
+  'path.delete': 'deleted the Path',
+  'path.restore': 'restored the Path',
+  'site.purge': 'permanently deleted',
+  'path.purge': 'permanently deleted the Path',
 }
 
 /** What an admin did to someone else's site (a policy action), as a verb for its name. */

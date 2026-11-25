@@ -1,11 +1,14 @@
-import type {
-  AccessLevel,
-  CommentAnchor,
-  CreateCommentRequest,
-  CreateGroupRequest,
-  GroupDetail,
-  SiteRoleInput,
-  Visibility,
+import {
+  type AccessLevel,
+  type CommentAnchor,
+  type CreateCommentRequest,
+  type CreateGroupRequest,
+  type DeletedSite,
+  deletedText,
+  type GroupDetail,
+  recoverableDeletesOf,
+  type SiteRoleInput,
+  type Visibility,
 } from '@fling/shared'
 import {
   keepPreviousData,
@@ -18,6 +21,7 @@ import { ADMIN_USERS_PATH } from '../lib/admin'
 import { ApiError, api, errorMessage } from '../lib/api'
 import { LOGS_FOLLOW_MS, LOGS_SINCE } from '../lib/servers'
 import { showToast } from '../lib/toast'
+import { useInstance } from './instance'
 
 export const queryKeys = {
   me: ['me'] as const,
@@ -55,6 +59,8 @@ export const queryKeys = {
   adminSettings: ['admin', 'settings'] as const,
   adminRouteTable: ['admin', 'route-table'] as const,
   adminUsage: ['admin', 'usage'] as const,
+  adminDeleted: (name: string) => ['admin', 'deleted', name] as const,
+  allAdminDeleted: ['admin', 'deleted'] as const,
   // Under the site's key, so whatever refetches the site refetches these too.
   secrets: (name: string) => ['site', name, 'secrets'] as const,
   serverLogs: (name: string) => ['site', name, 'logs'] as const,
@@ -162,6 +168,7 @@ function usePathMutation<TVars, TResult>(
 
 export function usePathActions(name: string, folder: string) {
   const queryClient = useQueryClient()
+  const recoverable = recoverableDeletesOf(useInstance())
   const shown = `/${folder}/`
   return {
     /** The whole new owners or publishers; refusals are the caller's to show. */
@@ -188,7 +195,7 @@ export function usePathActions(name: string, folder: string) {
         queryClient.removeQueries({ queryKey: queryKeys.path(name, folder) })
         queryClient.invalidateQueries({ queryKey: queryKeys.site(name) })
         queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
-        showToast(`${shown} deleted`)
+        showToast(deletedText(recoverable, name, folder))
       },
       onError: error => showToast(errorMessage(error), 'error'),
     }),
@@ -246,6 +253,7 @@ export function useSaveThumbnail(name: string) {
 }
 
 export function useSiteActions(name: string) {
+  const recoverable = recoverableDeletesOf(useInstance())
   return {
     /** `confirmPublicServer`: retried once the publisher confirmed a public server. */
     setVisibility: useSiteMutation(
@@ -293,7 +301,7 @@ export function useSiteActions(name: string) {
     revokeShare: useSiteMutation(name, () => api.revokeShare(name), 'Share link revoked'),
     archive: useSiteMutation(name, () => api.archive(name), `${name} archived`),
     unarchive: useSiteMutation(name, () => api.unarchive(name), `${name} restored`),
-    remove: useSiteMutation(name, () => api.deleteSite(name), `${name} deleted`),
+    remove: useSiteMutation(name, () => api.deleteSite(name), deletedText(recoverable, name)),
     restoreVersion: useSiteMutation(
       name,
       (versionId: string) => api.setCurrentVersion(name, versionId),
@@ -662,6 +670,62 @@ export function useAdminUsage(enabled: boolean) {
     queryFn: api.adminUsage,
     retry: false,
     staleTime: 5 * 60_000,
+  })
+}
+
+/** Admins: the deleted sites and Paths still kept, or one site name's (`name`). */
+export function useAdminDeleted(name: string, enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.adminDeleted(name),
+    queryFn: () => api.adminDeleted(name),
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Admins, in a browser session: restore a deleted site or a Path deleted on its own. The page shows
+ * the result and the failure (a taken name comes with suggestions); both refresh the list, the
+ * sites, Usage's line and the audit log.
+ */
+export function useRestoreActions() {
+  const queryClient = useQueryClient()
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.allAdminDeleted })
+    queryClient.invalidateQueries({ queryKey: queryKeys.allSites })
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminSites })
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminUsage })
+    queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit })
+  }
+  return {
+    site: useMutation({
+      mutationFn: ({ siteId, name }: { siteId: string; name?: string }) =>
+        api.restoreSite(siteId, name),
+      onSuccess: refresh,
+    }),
+    path: useMutation({
+      mutationFn: ({ siteId, pathId }: { siteId: string; pathId: string }) =>
+        api.restorePath(siteId, pathId),
+      onSuccess: refresh,
+    }),
+  }
+}
+
+/**
+ * Admins, in a browser session: delete a deleted site (its Paths with it) or a Path deleted on its
+ * own for good. The page shows the failure; success refreshes the list, Usage's line and the audit
+ * log.
+ */
+export function usePurgeDeleted() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (d: Pick<DeletedSite, 'kind' | 'siteId' | 'pathId'>) =>
+      d.kind === 'path' && d.pathId ? api.purgePath(d.siteId, d.pathId) : api.purgeSite(d.siteId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.allAdminDeleted })
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminUsage })
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit })
+    },
   })
 }
 

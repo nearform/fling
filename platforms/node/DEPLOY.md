@@ -216,6 +216,24 @@ its secrets or each other, so keep `SERVERS` unset (the `servers` capability is 
 hide the feature). They need a sandboxed runtime (gVisor, Firecracker) that this platform does not
 yet provide.
 
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, a deleted site's files stay where they were, with a recovery
+file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a `deleted.json` in
+each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
+their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
+and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
+the same here.
+
+With Compose, the prefixes are in MinIO's bucket (`FLING_BUCKET`, default `fling-sites`); with
+another S3-compatible store, in the bucket `SITES_BUCKET` names. With MinIO's client, from the
+`minio-init` service or anywhere with an alias for it (`mc alias set local …` as root):
+`mc find local/fling-sites/sites --name deleted.json` finds every recovery file,
+`mc cat local/fling-sites/sites/<siteId>/deleted.json` reads one, and
+`mc cp --recursive local/fling-sites/sites/<siteId>/<versionId>/ ./recovered` downloads a
+version. With `STORAGE_DRIVER=fs` (one machine) they are directories under `FS_ROOT`
+(`<FS_ROOT>/sites/<siteId>/`). The bucket's lifecycle rule touches only `uploads/`.
+
 ## Claude's sandbox: allow your Fling's host
 
 So that Claude can upload the files it makes with code execution rather than typing them out

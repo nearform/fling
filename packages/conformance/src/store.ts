@@ -12,6 +12,7 @@ import {
   type ApiKeyRecord,
   type AuditRecord,
   type CommentRecord,
+  type DeletedSiteRecord,
   type GrantRecord,
   type GroupRecord,
   type LiveConnectionRecord,
@@ -165,6 +166,120 @@ const byteOrder = <T>(xs: T[], key: (x: T) => string) =>
 
 export function storeConformance(name: string, factory: () => Store | Promise<Store>) {
   describe(`Store conformance: ${name}`, () => {
+    describe('deleted sites', () => {
+      const deleted = (
+        name: string,
+        overrides: Partial<DeletedSiteRecord> = {}
+      ): DeletedSiteRecord => ({
+        kind: 'site',
+        siteId: uid(),
+        name,
+        owner: email(),
+        deletedBy: email(),
+        deletedAt: NOW,
+        bytes: 1000,
+        paths: [{ folder: 'PAY-1', pathId: uid() }],
+        ...overrides,
+      })
+
+      it('writes a record once, reads it by id, and lists one name exactly, newest first', async () => {
+        const store = await factory()
+        const name = siteName()
+        const first = deleted(name)
+        const second = deleted(name, { deletedAt: LATER })
+        // A name that starts with the other is another name.
+        const longer = deleted(`${name}-deck`)
+        expect(await store.putDeletedSite(first)).toBe(true)
+        expect(await store.putDeletedSite({ ...first, bytes: 5 })).toBe(false)
+        expect(await store.putDeletedSite(second)).toBe(true)
+        expect(await store.putDeletedSite(longer)).toBe(true)
+        expect(await store.getDeletedSite('site', first.siteId)).toEqual(first)
+        expect(await store.getDeletedSite('path', first.siteId)).toBeNull()
+        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([second, first])
+        expect(await store.listDeletedSites({ name: `${name}-deck`, limit: 10 })).toEqual([longer])
+        expect(await store.listDeletedSites({ name, limit: 1 })).toEqual([second])
+      })
+
+      it('lists every name newest first, a Path deleted on its own under its site', async () => {
+        const store = await factory()
+        const name = siteName()
+        // Far ahead of anything else in a shared table, so these are the newest.
+        const site1 = deleted(name, { deletedAt: '2098-01-01T00:00:00.000Z' })
+        const path: DeletedSiteRecord = {
+          kind: 'path',
+          siteId: uid(),
+          name,
+          folder: 'PAY-2',
+          pathId: uid(),
+          owner: email(),
+          deletedBy: email(),
+          deletedAt: '2098-01-02T00:00:00.000Z',
+          bytes: 10,
+        }
+        await store.putDeletedSite(site1)
+        await store.putDeletedSite(path)
+        expect(await store.getDeletedSite('path', path.pathId as string)).toEqual(path)
+        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([path, site1])
+        const all = await store.listDeletedSites({ limit: 100 })
+        const ours = all.filter(r => r.name === name)
+        expect(ours).toEqual([path, site1])
+        expect(all.indexOf(ours[0] as DeletedSiteRecord)).toBeLessThan(
+          all.indexOf(ours[1] as DeletedSiteRecord)
+        )
+        await store.deleteDeletedSite(site1)
+        await store.deleteDeletedSite(path)
+      })
+
+      it('marks a restore under way, forgets a record with its copies, and keeps the totals', async () => {
+        const store = await factory()
+        const name = siteName()
+        const before = await store.deletedTotals()
+        const record = deleted(name, { bytes: 4096 })
+        const path = deleted(name, { kind: 'path', pathId: uid(), folder: 'A', bytes: 5 })
+        await store.putDeletedSite(record)
+        await store.putDeletedSite(path)
+        await store.putDeletedSite(record)
+        const during = await store.deletedTotals()
+        // Other runs may share the table: what these add is all that is asserted.
+        expect(during.sites - before.sites).toBeGreaterThanOrEqual(1)
+        expect(during.paths - before.paths).toBeGreaterThanOrEqual(1)
+        expect(during.bytes - before.bytes).toBeGreaterThanOrEqual(4101)
+        const restoring = { name: `${name}-2`, by: email(), at: LATER }
+        expect(await store.markRestoring(record, restoring)).toBe(true)
+        expect(await store.getDeletedSite('site', record.siteId)).toEqual({ ...record, restoring })
+        expect(await store.deleteDeletedSite(record)).toBe(true)
+        expect(await store.deleteDeletedSite(record)).toBe(false)
+        expect(await store.markRestoring(record, restoring)).toBe(false)
+        expect(await store.getDeletedSite('site', record.siteId)).toBeNull()
+        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([path])
+        await store.deleteDeletedSite(path)
+        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([])
+      })
+
+      it('marks a purge or a restore under way, never both', async () => {
+        const store = await factory()
+        const purged = deleted(siteName())
+        const restored = deleted(siteName())
+        await store.putDeletedSite(purged)
+        await store.putDeletedSite(restored)
+        const purging = { by: email(), at: LATER }
+        const restoring = { name: siteName(), by: email(), at: LATER }
+        expect(await store.markPurging(purged, purging)).toBe(true)
+        expect(await store.markPurging(purged, purging)).toBe(true)
+        expect(await store.markRestoring(purged, restoring)).toBe(false)
+        expect(await store.getDeletedSite('site', purged.siteId)).toEqual({ ...purged, purging })
+        expect(await store.markRestoring(restored, restoring)).toBe(true)
+        expect(await store.markPurging(restored, purging)).toBe(false)
+        expect(await store.getDeletedSite('site', restored.siteId)).toEqual({
+          ...restored,
+          restoring,
+        })
+        await store.deleteDeletedSite(purged)
+        await store.deleteDeletedSite(restored)
+        expect(await store.markPurging(purged, purging)).toBe(false)
+      })
+    })
+
     describe('users', () => {
       it('creates a user with the preferred slug, then refreshes name/picture only', async () => {
         const store = await factory()
@@ -513,6 +628,36 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.listSites(e)).toEqual([])
         const other = site(email(), s.name)
         expect(await store.createSite(other)).toEqual(other)
+      })
+
+      it('getSiteById reads a site by its id; hasSiteRecords tells an unfinished delete from a finished one', async () => {
+        const store = await factory()
+        const s = site(email())
+        expect(await store.getSiteById(s.id)).toBeNull()
+        expect(await store.hasSiteRecords(s.id)).toBe(false)
+        await store.createSite(s)
+        expect(await store.getSiteById(s.id)).toEqual(s)
+        expect(await store.hasSiteRecords(s.id)).toBe(true)
+        await store.putVersion(s, version(s.id))
+        await store.deleteSite(s)
+        expect(await store.getSiteById(s.id)).toBeNull()
+        expect(await store.hasSiteRecords(s.id)).toBe(false)
+        // A version left behind (a delete that stopped part way) is a record of the site.
+        await store.putVersion(s, version(s.id))
+        expect(await store.hasSiteRecords(s.id)).toBe(true)
+        // Counts are not.
+        const other = site(email())
+        await store.addSiteCounts(
+          other.id,
+          new Date(NOW),
+          { views: 1 },
+          {
+            D: EXPIRES,
+            W: EXPIRES,
+            M: EXPIRES,
+          }
+        )
+        expect(await store.hasSiteRecords(other.id)).toBe(false)
       })
 
       it('putSite keeps role items in step with the owners and publishers; deleteSite removes them', async () => {

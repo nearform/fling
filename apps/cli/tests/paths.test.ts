@@ -255,12 +255,36 @@ describe('fling paths archive | unarchive | delete', () => {
       },
     })
     await runPathDelete(asked.ctx, 'team', 'PAY-1', {})
-    expect(questions[0]).toMatch(/Delete \/PAY-1\/ of team/)
+    expect(questions[0]).toBe(
+      "Delete PAY-1/ of team? Its pages stop being served. This can't be undone."
+    )
+    expect(asked.log.lines.join('\n')).toMatch(/Deleted PAY-1\/ of team for good/)
     expect(refused.bodies.map(b => b.method)).toEqual(['DELETE'])
 
     const yes = await fling()
     await runPathDelete(yes.ctx, 'team', 'PAY-1', { yes: true })
     expect(yes.bodies.map(b => b.method)).toEqual(['DELETE'])
+  })
+
+  it('says an admin can recover it on a Fling with recoverable deletes', async () => {
+    const questions: string[] = []
+    const { store, fetch } = await fling({ paths: true, recoverableDeletes: true })
+    const asked = await testContext({
+      store,
+      fetch,
+      interactive: true,
+      confirm: async q => {
+        questions.push(q)
+        return true
+      },
+    })
+    await runPathDelete(asked.ctx, 'team', 'PAY-1', {})
+    expect(questions[0]).toBe(
+      'Delete PAY-1/ of team? Its pages stop being served. An admin can recover it.'
+    )
+    expect(asked.log.lines.join('\n')).toMatch(
+      /Deleted PAY-1\/ of team\. An admin can recover it\./
+    )
   })
 })
 

@@ -83,7 +83,6 @@ import {
   siteKvsKey,
   siteLabel,
   siteObjectKey,
-  sitePrefix,
   siteUrl,
   slugify,
   type Thumbnail,
@@ -102,6 +101,7 @@ import {
 import { audit } from './audit.ts'
 import { admittedByConfig, asRequestUser } from './auth/standing.ts'
 import { manifestKey, thumbnailKey } from './blobs/types.ts'
+import { removeSite } from './deletion.ts'
 import {
   checkAddresses,
   checkMembers,
@@ -116,7 +116,7 @@ import { newShareToken } from './lib/ids.ts'
 import { type PageRequest, pageOfSites } from './lib/site-page.ts'
 import { queueMaintenance, reviveVersion } from './maintenance.ts'
 import { actingOf, notifyAudienceChange, notifyRoleChange } from './notifications/notify.ts'
-import { refreshHome, removePath } from './paths.ts'
+import { refreshHome } from './paths.ts'
 import {
   type Action,
   type Actor,
@@ -290,7 +290,8 @@ export async function rolesView(
  * gone. The value says whether the current version's Markdown has rendered pages (`m`: read from
  * the version), whether the site has live Paths (`p`) and its rendered home page (`i`; paths.ts),
  * and whether the version has a site server (`f`, with `t`, where it is reached, and `x` when an
- * admin stopped it or the instance runs no servers: `/api/*` then answers 503).
+ * admin stopped it, the instance runs no servers, or it waits to be started (a restored site's,
+ * `awaitsSecretsLive`): `/api/*` then answers 503).
  */
 export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken?: string) {
   const { routeTable } = deps
@@ -318,7 +319,9 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
       ? {
           f: 1 as const,
           ...(site.server?.target ? { t: site.server.target } : {}),
-          ...(site.server?.stopped || !serversOn(deps) ? { x: 1 as const } : {}),
+          ...(site.server?.stopped || !serversOn(deps) || awaitsSecretsLive(site)
+            ? { x: 1 as const }
+            : {}),
         }
       : {}),
   }
@@ -329,6 +332,13 @@ export async function syncRouteTable(deps: Deps, site: SiteRecord, oldShareToken
     await routeTable.put(shareKvsKey(site.shareToken), encodeShareValue(label, encoded, format))
   }
 }
+
+/**
+ * The current version's server is not running yet: the site was restored (deletion.ts) and its
+ * server waits for its secrets, or to start, as `server.awaiting` names that version.
+ */
+export const awaitsSecretsLive = (site: Pick<SiteRecord, 'server' | 'currentVersionId'>) =>
+  site.currentVersionId !== null && site.server?.awaiting?.versionId === site.currentVersionId
 
 const SUGGESTION_COUNT = 3
 const MAX_CANDIDATES = 48
@@ -441,7 +451,10 @@ export async function resolveSite(
     throw notFound(`No site named "${name}"`)
   }
   for (const action of actions) {
-    if (SITE_CHANGES.has(action)) await auditAdmin(deps, resolved, site, action)
+    // Every delete is audited, an admin's included, by deletion.ts.
+    if (SITE_CHANGES.has(action) && action !== 'site.delete') {
+      await auditAdmin(deps, resolved, site, action)
+    }
   }
   return { site, actor: resolved }
 }
@@ -1323,16 +1336,12 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
 }
 
 /**
- * Delete a site: its route-table keys, its Paths (paths.ts), files, versions, record and name claim. The site comes from
- * the name claim (requireSite → findSite), so the `site:<name>` key removed here is always this
- * site's; a stale record of another user's for the same name can never reach it.
+ * Delete a site (deletion.ts `removeSite`): soft by default, so an admin can restore it; hard with
+ * `SITE_DELETE=hard`. The site comes from the name claim (requireSite → findSite), so the
+ * `site:<name>` key removed is always this site's; a stale record of another user's for the same
+ * name can never reach it.
  */
 export async function deleteSite(deps: Deps, user: User, name: string) {
-  const site = await requireSite(deps, user, name, 'site.delete')
-  await deps.routeTable.delete(siteKvsKey(siteLabel(site.name)))
-  if (site.shareToken) await deps.routeTable.delete(shareKvsKey(site.shareToken))
-  for (const path of await deps.store.listPaths(site.id)) await removePath(deps, site, path)
-  if (site.server && deps.servers) await deps.servers.retire(serverSite(site))
-  await deps.blobs.deletePrefix(sitePrefix(site.id))
-  await deps.store.deleteSite(site)
+  const { site, actor } = await requireSiteAs(deps, user, name, 'site.delete')
+  await removeSite(deps, user, actor, site)
 }

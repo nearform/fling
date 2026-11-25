@@ -5,7 +5,7 @@ order: 25
 summary: Allow your Fling in Claude's settings once, so Claude publishes the files it makes without typing them out again.
 requires: [sandboxUpload]
 sources: [packages/shared/src/sandbox-upload.ts, packages/shared/src/mcp-tools.ts, apps/api/src/mcp/publish.ts, apps/cli/src/mcp.ts]
-verified: c82d9d4
+verified: 0ead0eb
 ---
 
 When Claude builds you a page, a report or a small site with code execution, the files are in

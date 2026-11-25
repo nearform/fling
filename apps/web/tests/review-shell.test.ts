@@ -1,8 +1,10 @@
 import { CommentAnchorSchema } from '@fling/shared'
+import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { describe, expect, it } from 'vitest'
 import {
   anchorFor,
   buildSelector,
+  countsView,
   framedPath,
   leavesSite,
   locateQuote,
@@ -245,5 +247,21 @@ describe('leavesSite', () => {
     expect(leavesSite('/next.html', origin)).toBe(false)
     expect(leavesSite(`${origin}/a`, origin)).toBe(false)
     expect(leavesSite('mailto:a@example.test', origin)).toBe(false)
+  })
+})
+
+describe('countsView', () => {
+  const beacon = [{ textContent: VIEW_BEACON.replace(/^<script>|<\/script>$/g, '') }]
+  it('counts a framed page that carries the beacon in review mode', () => {
+    expect(countsView(false, beacon)).toBe(true)
+  })
+
+  it('never counts in preview mode', () => {
+    expect(countsView(true, beacon)).toBe(false)
+  })
+
+  it('counts nothing for a page without the beacon (uncounted version, 404 page, a file)', () => {
+    expect(countsView(false, [])).toBe(false)
+    expect(countsView(false, [{ textContent: 'console.log(1)' }])).toBe(false)
   })
 })

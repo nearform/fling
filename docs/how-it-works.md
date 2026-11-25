@@ -139,8 +139,10 @@ going live: a publish, a rollback, or the same on one of its Paths. A view is a 
 HTML page a version serves has a copy with a small script, made when the version goes live and
 served in the page's place, that tells the site's own host once per load that the page was viewed
 (`/_fling-seen`, which passes the same access checks as the page). What `fling pull` downloads is
-the page as published. The review page and previews don't count, nor do pages being prerendered,
-a single-page app's navigations, or pages whose Content-Security-Policy blocks inline scripts.
+the page as published. A page framed by its own site doesn't report itself; on the review page
+the review shell, which frames the site, reports each page load in its frame for it, so a page
+reviewed counts once. The site page's preview doesn't count, nor do pages being prerendered, a
+single-page app's navigations, or pages whose Content-Security-Policy blocks inline scripts.
 Owners, publishers and admins see the counts per day, week and month, with when the site was last
 viewed and last pushed: on its page in the web UI, with `fling stats`, or `fling_stats` over MCP.
 An admin turns view counting on or off for every site in Admin → Usage; maintenance then adds or

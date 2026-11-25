@@ -4,7 +4,8 @@
  * commands, plain HTTP for the sites, the API and the remote MCP endpoint.
  *
  *   metadata → whoami → deploy v1 (`--access public`) → view → metrics (the push counted; with
- *   view counts, the page's beacon, a beacon counted as a view, a cross-origin one refused) →
+ *   view counts, the page's beacon, a beacon counted as a view, a cross-origin one refused, a
+ *   review-mode page load counted and a preview-mode one not) →
  *   robots.txt → the version served
  *   (`/_fling-version`) → 404 / trailing-slash → deploy v2 (keeps its access) → view, and the
  *   version served follows → versions (who published) → rollback to v1 → open to
@@ -85,6 +86,7 @@ import {
   RELEASE_HEADER,
   type RestoreResult,
 } from '@fling/shared'
+import { SITE_SEEN_PATH } from '@fling/shared/route-keys'
 import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { zipSync } from 'fflate'
 import { REPO, runCli, runCliOutcome } from './cli.ts'
@@ -234,6 +236,12 @@ async function eventually(
  * site's own host, is counted and read back from the site's metrics, while one from another
  * origin is refused. A runtime writes views at most every few seconds, so the read polls, posting
  * the beacon again each time round for a runtime that writes only after a view.
+ *
+ * Review mode, as a browser runs it: the review shell frames the page, whose own beacon skips in
+ * a frame of its own site, and the shell posts the view for it (the shell carries the post); the
+ * count goes up. A preview-mode load fetches the same shell and page and posts nothing, so every
+ * view counted is one of the posts made here: no page fetch counts, and a review-mode load counts
+ * once, not once for the shell and again for the page.
  */
 async function metricsChecks(o: {
   api: (method: string, path: string, body?: unknown) => Promise<Response>
@@ -273,18 +281,56 @@ async function metricsChecks(o: {
     crossed.status === 403 && crossedText.includes('cross_origin'),
     `cross-origin beacon: ${crossed.status} ${crossedText.slice(0, 200)}`
   )
-  const deadline = Date.now() + Math.max(30_000, o.propagationMs)
-  let views = 0
-  for (;;) {
-    const sent = await beacon(origin, 'same-origin')
+  let posts = 0
+  /** Load a page with `load` until the count is above `above`; the count then. */
+  const countedAbove = async (above: number, load: () => Promise<void>) => {
+    const deadline = Date.now() + Math.max(30_000, o.propagationMs)
+    let views = 0
+    for (;;) {
+      await load()
+      views = (await read()).totals.days.views
+      if (views > above || Date.now() > deadline) break
+      await sleep(2000)
+    }
+    return views
+  }
+  const post = async (headers: Record<string, string> = {}) => {
+    const sent = await fetch(`${origin}/_fling-seen`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { origin, 'sec-fetch-site': 'same-origin', ...headers },
+    })
     await sent.arrayBuffer()
     check(sent.status === 204, `beacon: ${sent.status}`)
-    views = (await read()).totals.days.views
-    if (views >= 1 || Date.now() > deadline) break
-    await sleep(2000)
+    posts++
   }
+  const views = await countedAbove(0, () => post())
   check(views >= 1, `views never counted: ${views}`)
   o.step(`metrics: a push for the publish; the page carries the beacon, ${views} view(s) counted`)
+
+  const shellUrl = (mode: string) => `${origin}/_fling/review.html?path=%2F${mode}`
+  const framed = { 'sec-fetch-dest': 'iframe', 'sec-fetch-site': 'same-origin' }
+  /** The shell and the page it frames, as a browser loads them. */
+  const loadFramed = async (mode: string) => {
+    const shell = await get(shellUrl(mode), { 'sec-fetch-dest': 'iframe' })
+    check(shell.status === 200, `review shell${mode}: ${shell.status}`)
+    check(shell.text.includes(SITE_SEEN_PATH), 'the review shell does not post views')
+    const page = await get(`${origin}/`, { ...framed, referer: shellUrl(mode) })
+    check(page.text.includes(VIEW_BEACON), `the framed page${mode} has no view beacon`)
+  }
+  // Preview mode: the shell posts nothing; review mode: one post per page load in the frame.
+  await loadFramed('&mode=preview')
+  const reviewed = await countedAbove(views, async () => {
+    await loadFramed('&mode=preview')
+    await loadFramed('')
+    await post({ referer: shellUrl(''), 'sec-fetch-dest': 'empty' })
+  })
+  check(reviewed > views, `a review-mode page load counted no view: ${reviewed}`)
+  check(
+    reviewed <= posts,
+    `${reviewed} views counted for ${posts} posts: a page load counted without its post`
+  )
+  o.step(`metrics: a review-mode page load counts a view (${reviewed}), a preview-mode one none`)
 }
 
 interface CliSite {

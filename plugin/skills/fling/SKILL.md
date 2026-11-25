@@ -463,8 +463,9 @@ up.
   Answer "who is using it" with the numbers and say so; never guess at people.
 - Only the site's owners and publishers (and admins) can read them; anyone else gets "no site".
 - Views come from the page itself as it loads, so a site counts views only for versions published
-  while the Fling counts them. Single-page-app navigations, previews in the Fling web app and the
-  review page, and pages whose Content-Security-Policy blocks inline scripts don't count. A Fling
+  while the Fling counts them. Pages loaded on the review page count, as opened directly.
+  Single-page-app navigations, the preview on a site's page in the Fling web app, and pages whose
+  Content-Security-Policy blocks inline scripts don't count. A Fling
   can turn view counts off: then the result says so and shows pushes only.
 - `since` is when the site's first count was stored: totals cover no further back than that.
 

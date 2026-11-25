@@ -21,7 +21,7 @@ import {
 import { COUNTED_DIR, MISSING_KEY, pathKvsKey, SITE_SEEN_PATH } from '../src/route-keys.ts'
 import { signSiteCookie } from '../src/site-cookie.ts'
 import { parseRoute, routeSiteRequest, type SiteRequest } from '../src/site-routing.ts'
-import { VIEW_BEACON, withViewBeacon } from '../src/view-beacon.ts'
+import { carriesViewBeacon, VIEW_BEACON, withViewBeacon } from '../src/view-beacon.ts'
 
 const KEY = 'k'.repeat(40)
 const NOW = 1_800_000_000
@@ -183,6 +183,23 @@ describe('withViewBeacon', () => {
   it('posts to the beacon path and nothing else', () => {
     expect(VIEW_BEACON).toContain(`sendBeacon("${SITE_SEEN_PATH}")`)
     expect(VIEW_BEACON).not.toMatch(/cookie|location\.href|referrer/)
+  })
+})
+
+describe('carriesViewBeacon', () => {
+  const script = (textContent: string | null) => ({ textContent })
+  it("finds the beacon among a page's scripts", () => {
+    const inner = VIEW_BEACON.replace(/^<script>|<\/script>$/g, '')
+    expect(carriesViewBeacon([script('let a = 1'), script(inner)])).toBe(true)
+  })
+
+  it('finds any script that posts to the beacon path', () => {
+    expect(carriesViewBeacon([script(`navigator.sendBeacon("${SITE_SEEN_PATH}",x)`)])).toBe(true)
+  })
+
+  it('is false for a page without one', () => {
+    expect(carriesViewBeacon([])).toBe(false)
+    expect(carriesViewBeacon([script(null), script('fetch("/api/x")')])).toBe(false)
   })
 })
 

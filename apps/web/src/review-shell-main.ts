@@ -16,10 +16,14 @@
  *   one tells the page;
  * - text the reviewer selects in the page, as an anchor with its quote (`textSelected`; the page
  *   decides whether it becomes the new comment's pin);
- * - this reviewer's pointer, as an anchor, and other reviewers' pointers, drawn like pins.
+ * - this reviewer's pointer, as an anchor, and other reviewers' pointers, drawn like pins;
+ * - a view, once for each load of the frame whose page carries the view beacon (`countsView`): the
+ *   page's own beacon does not post in a frame of its own site, so the shell posts SITE_SEEN_PATH
+ *   for it, the same request from the same host, through the same routing decision and access
+ *   checks. A navigation inside the frame is a new load and counts again; an SPA's is not.
  *
  * In preview mode (`?mode=preview`, `previewShellUrl`: the site page's live preview) it does none
- * of that: it frames the home page with its scrollbar hidden, keeps the frame on the site, and when
+ * of that, and counts no views: it frames the home page with its scrollbar hidden, keeps the frame on the site, and when
  * the page asks (`capture`, naming the site's current version) draws a thumbnail of it
  * (preview-capture.ts, loaded only then) and sends it back (`captured`, or `captureFailed`). It
  * only draws a page it knows to be of that version (lib/preview-version.ts): while the sites host
@@ -39,12 +43,14 @@ import {
   shellMessage,
 } from '@fling/shared/review-bridge'
 import { LIVE_CURSOR_INTERVAL_MS } from '@fling/shared/review-live'
+import { SITE_SEEN_PATH } from '@fling/shared/route-keys'
 import { notFoundAppOrigin } from './lib/app-origin'
 import { frameAt, type Loaded, loadAtVersion, servedVersion } from './lib/preview-version'
 import {
   anchorFor,
   type Box,
   buildSelector,
+  countsView,
   framedPath,
   leavesSite,
   locateQuote,
@@ -389,6 +395,11 @@ frame.addEventListener('load', () => {
   }
   attach(win)
   report()
+  if (countsView(preview, win.document.scripts)) {
+    try {
+      navigator.sendBeacon(SITE_SEEN_PATH)
+    } catch {}
+  }
 })
 
 // --- preview mode: a thumbnail ------------------------------------------------------------------

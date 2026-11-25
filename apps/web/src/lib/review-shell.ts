@@ -1,5 +1,6 @@
 /**
- * The review shell's geometry, with no DOM of its own: which path it may frame, how a spot or an
+ * The review shell's geometry and rules, with no DOM of its own: which path it may frame, which of
+ * its frame's loads count a view, how a spot or an
  * area on a page becomes an anchor (a selector for the element, the spot and size inside that
  * element, the document point and size, the scroll and viewport, selected text) and how an anchor
  * becomes a point and area on screen again. The shell (review-shell-main.ts) feeds it the frame's
@@ -7,6 +8,7 @@
  */
 import { ANCHOR_QUOTE_MAX, ANCHOR_SELECTOR_MAX, type CommentAnchor } from '@fling/shared/comments'
 import { REVIEW_SHELL } from '@fling/shared/route-keys'
+import { carriesViewBeacon } from '@fling/shared/view-beacon'
 
 /** The parts of an element a selector is built from. */
 export interface SelectorNode {
@@ -242,3 +244,13 @@ export function leavesSite(href: string, origin: string): boolean {
     return false
   }
 }
+
+/**
+ * Whether a load of a page in the frame counts a view: in review mode, a page that carries the view
+ * beacon, whose own beacon does not post in a frame of its own site (@fling/shared/view-beacon), so
+ * the shell posts for it; never in preview mode, the site page's preview tile.
+ */
+export const countsView = (
+  preview: boolean,
+  scripts: ArrayLike<{ textContent: string | null }>
+): boolean => !preview && carriesViewBeacon(scripts)

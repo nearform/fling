@@ -4,8 +4,8 @@ part: publish
 order: 65
 summary: A site's views and pushes by day, week and month. Counts only, never who.
 requires: [metrics]
-sources: [packages/shared/src/metrics.ts, packages/shared/src/view-beacon.ts, apps/api/src/views.ts, apps/api/src/rendering.ts, apps/api/src/policy.ts, apps/cli/src/stats.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteMetrics.tsx, apps/web/src/components/site/MySitesStats.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/metrics.ts, packages/shared/src/mcp-tools.ts]
-verified: 0ead0eb
+sources: [packages/shared/src/metrics.ts, packages/shared/src/view-beacon.ts, apps/web/src/lib/review-shell.ts, apps/api/src/views.ts, apps/api/src/rendering.ts, apps/api/src/policy.ts, apps/cli/src/stats.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteMetrics.tsx, apps/web/src/components/site/MySitesStats.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/metrics.ts, packages/shared/src/mcp-tools.ts]
+verified: 0a10243
 ---
 
 {{instance:name}} counts how often each site changes and, <!-- requires: viewCounts -->how often
@@ -70,8 +70,10 @@ A view is a page of the site loading in a browser. Each page carries a small scr
 page it was.
 
 - A page that a browser loads ahead of time counts only once it is shown.
-- The previews in the web app and the site's review page don't count, nor does a page shown in a
-  frame of its own site.
+- Each page that loads on the site's review page counts, as it would opened directly, and so does
+  each page you move to there.
+- The preview on the site's page in the web app doesn't count, nor does a page shown in a frame
+  of its own site.
 - A site embedded in another site's page counts.
 - A single-page app counts the first page it loads, not the pages you move to inside it.
 - A page whose Content-Security-Policy blocks inline scripts doesn't count.

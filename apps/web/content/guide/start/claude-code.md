@@ -4,7 +4,7 @@ part: start
 order: 40
 summary: Add the Fling plugin to Claude Code, so it can publish your builds and pages.
 sources: [plugin/**, .claude-plugin/**, apps/cli/src/claude.ts, apps/cli/src/commands/setup.ts, apps/cli/src/mcp.ts, apps/web/src/pages/GetStarted.tsx]
-verified: 0ead0eb
+verified: 0a10243
 ---
 
 The Fling plugin teaches Claude Code how to publish with {{instance:name}}: build the project,

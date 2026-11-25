@@ -280,8 +280,11 @@ script in a copy of each HTML page of a version (`.counted/<path>`, made at go-l
 `apps/api/src/rendering.ts`, `VersionRecord.counted`) that posts to `/_fling-seen`
 (`SITE_SEEN_PATH`) on the site's own host. The routing decision lets it through after the same
 access checks as a page and serves the copies while the route value says `c`. The platform counts
-views in a **ViewCounter** (memory, written in batches). Not counted: prerendering until shown, a
-page framed by its own site (the review shell, previews), SPA navigations. `SITE_VIEW_COUNTS=off`
+views in a **ViewCounter** (memory, written in batches). In review mode the review shell posts the
+view for each page load in its frame whose page carries the beacon (`countsView`,
+`apps/web/src/lib/review-shell.ts`), since a page framed by its own site doesn't post its own. Not
+counted: prerendering until shown, the preview (the shell in preview mode), any other page framed
+by its own site, SPA navigations. `SITE_VIEW_COUNTS=off`
 stops it; the `viewCounts` capability.
 
 **View counting** — an admin's switch for every site (Admin → Usage; `VIEWS/COUNTING`,

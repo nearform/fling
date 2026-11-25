@@ -86,6 +86,10 @@ const flagDefaultOn = z.preprocess(
   z.boolean()
 )
 
+/** A number of days, 0 to 3650 (ten years); `fallback` when blank. */
+const days = (fallback: number) =>
+  z.preprocess(blank, z.coerce.number().int().min(0).max(3650).default(fallback))
+
 const envSchema = z.object({
   APP_ENV: z.preprocess(blank, z.enum(['production', 'development']).default('development')),
   APP_ORIGIN: z.preprocess(blank, z.url().default('http://localhost:47101')),
@@ -183,6 +187,11 @@ const envSchema = z.object({
   ),
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
   VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
+  /** The archive policy (archive-policy.ts), in days: 0 is off, and off unless set. */
+  ARCHIVE_INACTIVE_DAYS: days(0),
+  ARCHIVE_WARN_DAYS: days(7),
+  DELETE_ARCHIVED_DAYS: days(0),
+  PURGE_DELETED_DAYS: days(0),
   /** Maintenance's sweep of every site, behind its queue: on unless `off` (or false/no/0). */
   MAINTENANCE_SWEEP_ENABLED: flagDefaultOn,
   /** Who may publish a site server: `off`, `admins`, `members` or `groups:<slug>,<slug>`. */
@@ -261,6 +270,10 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   SITE_VIEW_COUNTS: 'features',
   SITE_DELETE: 'features',
   VERSION_RETENTION: 'features',
+  ARCHIVE_INACTIVE_DAYS: 'features',
+  ARCHIVE_WARN_DAYS: 'features',
+  DELETE_ARCHIVED_DAYS: 'features',
+  PURGE_DELETED_DAYS: 'features',
   MAINTENANCE_SWEEP_ENABLED: 'features',
   SERVERS: 'features',
   SERVERS_EGRESS: 'features',
@@ -470,6 +483,55 @@ export interface ServerLimits {
 }
 
 /** Site servers (`SERVERS*`, `SERVER_*`). */
+/** The archive policy's settings, in days (0: off). See `Config.archivePolicy`. */
+export interface ArchivePolicyConfig {
+  inactiveDays: number
+  warnDays: number
+  deleteArchivedDays: number
+  purgeDeletedDays: number
+}
+
+/**
+ * The archive policy's settings, checked against each other: a warning must come before what it
+ * warns of, and only what the policy archived is deleted, so deleting needs archiving on.
+ */
+function archivePolicyConfig(e: {
+  ARCHIVE_INACTIVE_DAYS: number
+  ARCHIVE_WARN_DAYS: number
+  DELETE_ARCHIVED_DAYS: number
+  PURGE_DELETED_DAYS: number
+}): ArchivePolicyConfig {
+  const inactive = e.ARCHIVE_INACTIVE_DAYS
+  const warn = e.ARCHIVE_WARN_DAYS
+  const del = e.DELETE_ARCHIVED_DAYS
+  if (inactive > 0 && warn < 1) {
+    throw new Error(
+      'ARCHIVE_WARN_DAYS must be at least 1 when ARCHIVE_INACTIVE_DAYS is on: owners are always told before their site is archived'
+    )
+  }
+  if (inactive > 0 && warn >= inactive) {
+    throw new Error(
+      `ARCHIVE_WARN_DAYS (${warn}) must be less than ARCHIVE_INACTIVE_DAYS (${inactive}): the warning comes before the archive`
+    )
+  }
+  if (del > 0 && inactive === 0) {
+    throw new Error(
+      'DELETE_ARCHIVED_DAYS needs ARCHIVE_INACTIVE_DAYS: only sites the archive policy archived are deleted'
+    )
+  }
+  if (del > 0 && warn >= del) {
+    throw new Error(
+      `ARCHIVE_WARN_DAYS (${warn}) must be less than DELETE_ARCHIVED_DAYS (${del}): the warning comes before the delete`
+    )
+  }
+  return {
+    inactiveDays: inactive,
+    warnDays: warn,
+    deleteArchivedDays: del,
+    purgeDeletedDays: e.PURGE_DELETED_DAYS,
+  }
+}
+
 export interface ServersConfig {
   /** who may publish one (`SERVERS`, default off: the `servers` capability is off) */
   publish: ServersPublish
@@ -581,6 +643,14 @@ export interface Config {
    * (`VERSION_RETENTION`, default 0: every version kept); maintenance.ts deletes the rest.
    */
   versionRetention: number
+  /**
+   * The archive policy (archive-policy.ts), in days, each 0 when off: archive a site nobody has
+   * viewed or published for `inactiveDays` (`ARCHIVE_INACTIVE_DAYS`, the `archivePolicy`
+   * capability), telling its owners `warnDays` before (`ARCHIVE_WARN_DAYS`, default 7); delete one
+   * it archived `deleteArchivedDays` after (`DELETE_ARCHIVED_DAYS`); purge a deleted site's kept
+   * files `purgeDeletedDays` after its delete (`PURGE_DELETED_DAYS`).
+   */
+  archivePolicy: ArchivePolicyConfig
   /**
    * Whether maintenance also sweeps every site, a lap at a time, behind its queue
    * (`MAINTENANCE_SWEEP_ENABLED`, default on; maintenance.ts). Off, only queued sites are
@@ -707,6 +777,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     viewCounts: e.SITE_VIEW_COUNTS,
     siteDelete: e.SITE_DELETE,
     versionRetention: e.VERSION_RETENTION,
+    archivePolicy: archivePolicyConfig(e),
     maintenanceSweep: e.MAINTENANCE_SWEEP_ENABLED,
     servers: {
       publish: parseServersPublish(e.SERVERS),

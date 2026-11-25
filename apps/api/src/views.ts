@@ -90,8 +90,14 @@ export function bucketExpiry(at: Date): Record<SiteMetricRecord['size'], string>
 /** Whether views are counted now: the instance allows it and view counting is on. */
 export async function viewCountingOn(deps: Pick<Deps, 'config' | 'store'>): Promise<boolean> {
   if (!deps.config.viewCounts) return false
-  return (await deps.store.getViewCounting())?.on ?? true
+  return viewCountingIn(deps.config, await deps.store.getViewCounting())
 }
+
+/** `viewCountingOn`, from the switch's record already read. */
+export const viewCountingIn = (
+  config: Pick<Deps['config'], 'viewCounts'>,
+  record: ViewCountingRecord | null | undefined
+): boolean => config.viewCounts && (record?.on ?? true)
 
 /**
  * Whether the edge serves a version's copies with the view beacon (route value `c`): it has them,
@@ -402,10 +408,14 @@ export async function setViewCounting(deps: Deps, p: Principal, on: boolean) {
   if (!deps.config.viewCounts) {
     throw badRequest('This Fling doesn’t count views (SITE_VIEW_COUNTS is off)', 'view_counts_off')
   }
+  const before = await deps.store.getViewCounting()
+  // On again while on is no break in counting (the archive policy measures counting by it).
+  const onSince = on && before?.on ? (before.onSince ?? before.setAt) : undefined
   await deps.store.putViewCounting({
     on,
     setBy: p.email,
     setAt: deps.clock.now().toISOString(),
+    ...(onSince ? { onSince } : {}),
     rollout: { after: null, sites: 0 },
   })
   await audit(deps, { action: 'usage.view_counting', actor: p.email, target: on ? 'on' : 'off' })

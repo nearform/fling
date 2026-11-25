@@ -116,6 +116,8 @@ const EXPECTED: Record<Action, Record<Access, string>> = {
   'site.publishers': changes,
   'site.archive': changes,
   'site.delete': changes,
+  // Exempting a site from the archive policy: its owners, and admins from their browser session.
+  'site.keep': changes,
   'site.thumbnail': rollsBack,
   'site.metrics.read': reads,
   'share.read': ownerReads,
@@ -276,6 +278,9 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'admin.deleted.read': 'at',
   'admin.deleted.restore': 'a',
   'admin.deleted.purge': 'a',
+  'admin.archive.read': 'at',
+  // Going live archives and deletes sites: a browser session's admin only.
+  'admin.archive.write': 'a',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {

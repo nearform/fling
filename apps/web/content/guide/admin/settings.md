@@ -5,7 +5,7 @@ order: 30
 summary: See how the instance is configured; changing it is a deploy.
 audience: admin
 sources: [apps/web/src/pages/AdminSettings.tsx, apps/web/src/lib/admin.ts, apps/api/src/config.ts, apps/api/src/admin.ts]
-verified: c82d9d4
+verified: 0a10243
 ---
 
 The **Settings** page shows how {{instance:name}} is configured as it runs: who may sign in, its
@@ -22,7 +22,7 @@ Open **Admin → Settings**. The values are in groups:
 | **Sign-in** | The email domains and addresses that may sign in, the admins, and the sign-in provider |
 | **Sites** | The app's address, the sites' domain, who can open a new site by default, and how many live Paths one site may have |
 | **Branding** | The instance's name, the install command it shows, its logo, favicon and colours |
-| **Features** | Comments, live review, outside invitations and their daily limit, whether sites count their views, how many versions of each site are kept, and site servers: who may publish one, what they may reach and their limits |
+| **Features** | Comments, live review, outside invitations and their daily limit, whether sites count their views, how many versions of each site are kept, what a delete keeps, the archive policy's days, and site servers: who may publish one, what they may reach and their limits |
 | **Mail** | How email is sent, and from which address |
 | **Platform** | Where its data and files are kept |
 
@@ -44,6 +44,7 @@ do day to day is elsewhere:
 | Let someone from outside in, or take their access away, where invitations are on | [Invitations](/guide/admin/users-and-invitations) |
 | Change who can open a site, or delete it | The site's own page, as an admin |
 | Restore a deleted site or Path, or delete it for good | [Deleted sites](/guide/admin/deleted) |
+| Turn the archive policy live or back to dry run, and see what it will do | [Archive policy](/guide/admin/archive-policy) |
 | See what admins did | [Audit](/guide/admin/audit) |
 | Make room in the route table, or choose its format | [Routes](/guide/admin/routes) |<!-- requires: viewCounts -->
 | Turn view counting on or off for every site | [Usage](/guide/admin/usage#turn-view-counting-on-or-off) |<!-- /requires -->

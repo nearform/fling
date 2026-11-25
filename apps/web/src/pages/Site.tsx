@@ -17,7 +17,11 @@
  *
  * With the `metrics` capability, its owners, publishers and admins see its Metrics below the
  * overview (SiteMetrics): views and pushes, counts only.
+ *
+ * With the `archivePolicy` capability, the page says when the archive policy will archive or
+ * delete the site, or that it archived it (SiteArchiveNotice), and Settings has its Keep switch.
  */
+import { archivePolicyOf } from '@fling/shared'
 import { ShieldCheckIcon } from '@heroicons/react/24/outline'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { NotFound } from '../components/NotFound'
@@ -26,6 +30,7 @@ import { ResponsesLink } from '../components/review/Forms'
 import { ReviewButton } from '../components/SiteButtons'
 import { SiteBadges } from '../components/site/badges'
 import { SiteAccess } from '../components/site/SiteAccess'
+import { SiteArchiveNotice } from '../components/site/SiteArchiveNotice'
 import { SiteDangerZone } from '../components/site/SiteDangerZone'
 import { SiteLogs } from '../components/site/SiteLogs'
 import { SiteMetrics } from '../components/site/SiteMetrics'
@@ -155,6 +160,11 @@ export default function Site() {
           </span>
         </div>
       )}
+      <SiteArchiveNotice
+        site={site}
+        canKeep={archivePolicyOf(instance) && tabs.includes('settings')}
+        onKeep={() => selectTab('settings')}
+      />
       <SiteOverview site={site} />
       {metricsShown(instance, site, admin) && <SiteMetrics name={site.name} />}
       <SiteTabs

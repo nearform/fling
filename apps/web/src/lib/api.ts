@@ -23,6 +23,8 @@ import {
   AdminUserListSchema,
   ApiKeyListSchema,
   type ApiKeySchema,
+  type ArchivePolicyStatus,
+  ArchivePolicyStatusSchema,
   type AudienceInput,
   type AuditEntry,
   AuditListSchema,
@@ -81,6 +83,7 @@ import {
   type SharedSite,
   SharedSiteListSchema,
   type SignInLinkRequest,
+  type Site,
   type SiteDetail,
   SiteDetailSchema,
   type SiteList,
@@ -88,6 +91,7 @@ import {
   type SitePath,
   SitePathSchema,
   type SiteRoleInput,
+  SiteSchema,
   type SiteSecretsResponse,
   SiteSecretsResponseSchema,
   type Thumbnail,
@@ -313,6 +317,9 @@ export const api = {
   revokeShare: (name: string) => request(`${site(name)}/share`, ignoreBody, { method: 'DELETE' }),
   archive: (name: string) => request(`${site(name)}/archive`, ignoreBody, { method: 'POST' }),
   unarchive: (name: string) => request(`${site(name)}/unarchive`, ignoreBody, { method: 'POST' }),
+  /** Exempt the site from the archive policy, or stop exempting it (`archivePolicy` capability). */
+  setKeep: (name: string, keep: boolean): Promise<Site> =>
+    request(`${site(name)}/keep`, SiteSchema, { method: 'PUT', body: { keep } }),
   deleteSite: (name: string) => request(site(name), ignoreBody, { method: 'DELETE' }),
   setCurrentVersion: (name: string, versionId: string) =>
     request(`${site(name)}/current`, ignoreBody, { method: 'POST', body: { versionId } }),
@@ -533,6 +540,15 @@ export const api = {
   /** Admins, in a browser session: turn view counting on or off, rolled out to every site. */
   setViewCounting: (on: boolean): Promise<InstanceUsage> =>
     request('/api/admin/usage/view-counting', InstanceUsageSchema, { method: 'PUT', body: { on } }),
+  /** Admins: the archive policy's settings, state, pause, preview and recent actions. */
+  adminArchivePolicy: (): Promise<ArchivePolicyStatus> =>
+    request('/api/admin/archive-policy', ArchivePolicyStatusSchema),
+  /** Admins, in a browser session: turn the archive policy live, or back to dry run. */
+  setArchivePolicyLive: (live: boolean): Promise<ArchivePolicyStatus> =>
+    request('/api/admin/archive-policy', ArchivePolicyStatusSchema, {
+      method: 'PUT',
+      body: { live },
+    }),
   /** Admins, in a browser session: choose the route format and start the rewrite into it. */
   setRouteFormat: (format: RouteFormat): Promise<AdminRouteTable> =>
     request('/api/admin/route-table', AdminRouteTableSchema, { method: 'POST', body: { format } }),

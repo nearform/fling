@@ -15,6 +15,9 @@
 // turns site servers on for whom it names (SERVERS): each version's server in an isolate
 // of the local Worker Loader, as deployed, except that local workerd doesn't enforce SERVER_CPU_MS.
 //
+// The archive policy (ARCHIVE_INACTIVE_DAYS, ARCHIVE_WARN_DAYS, DELETE_ARCHIVED_DAYS,
+// PURGE_DELETED_DAYS) goes as vars from the environment when set, as the e2e sets them.
+//
 // Secrets: SESSION_SECRET and SITE_HMAC_KEY from the environment when both are set (the e2e),
 // else from .dev.vars, created with random values the first time. SITE_SECRETS_KEY (site servers)
 // likewise: from the environment, else .dev.vars, which gains one the first time servers are on.
@@ -54,6 +57,15 @@ if (args.mail) {
   if (args.invites) vars.INVITES = 'on'
 }
 if (args.servers !== undefined) vars.SERVERS = args.servers.trim()
+// The archive policy's settings, from the environment when set (the e2e sets them).
+for (const key of [
+  'ARCHIVE_INACTIVE_DAYS',
+  'ARCHIVE_WARN_DAYS',
+  'DELETE_ARCHIVED_DAYS',
+  'PURGE_DELETED_DAYS',
+]) {
+  if (process.env[key]) vars[key] = process.env[key]
+}
 if (process.env.SESSION_SECRET && process.env.SITE_HMAC_KEY) {
   vars.SESSION_SECRET = process.env.SESSION_SECRET
   vars.SITE_HMAC_KEY = process.env.SITE_HMAC_KEY

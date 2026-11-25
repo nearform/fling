@@ -17,7 +17,7 @@ import { METRIC_DAYS, METRIC_MONTHS } from '@fling/shared/metrics'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import chalk from 'chalk'
 import { Command, InvalidArgumentError, Option } from 'commander'
-import { runAdminDeleted } from './commands/admin.ts'
+import { runAdminArchivePolicy, runAdminDeleted } from './commands/admin.ts'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
@@ -55,6 +55,7 @@ import {
   runArchive,
   runFiles,
   runInfo,
+  runKeep,
   runList,
   runListShared,
   runRemove,
@@ -517,6 +518,15 @@ program
   .description('bring an archived site back')
   .action(action((ctx, name: string) => runArchive(ctx, name, true)))
 program
+  .command('keep <name>')
+  .helpGroup('Sites:')
+  .description(
+    'keep a site from the archive policy, which archives sites nobody views or publishes (owners; where the Fling has the policy); --off: stop keeping it'
+  )
+  .option('--off', 'stop keeping it: archived like any site once nobody uses it')
+  .action(action((ctx, name: string, opts: { off?: boolean }) => runKeep(ctx, name, opts)))
+
+program
   .command('rm <name>')
   .helpGroup('Sites:')
   .alias('delete')
@@ -860,13 +870,19 @@ program
 const admin = program
   .command('admin')
   .helpGroup('Admin:')
-  .description("this Fling's admins only: deleted sites")
+  .description("this Fling's admins only: deleted sites, the archive policy")
 admin
   .command('deleted [name]')
   .description(
     "list deleted sites and Paths, newest first (name: one site name's): owner, who deleted it and when, size kept, Paths; restore or delete one for good from Admin → Deleted in the app"
   )
   .action(action((ctx, name: string | undefined) => runAdminDeleted(ctx, name)))
+admin
+  .command('archive-policy')
+  .description(
+    'the archive policy: its settings, live or dry run, why it is paused, what it would or will do in the next 7 days and what it did lately; turn it live or back to dry run from Admin → Archive policy in the app'
+  )
+  .action(action(ctx => runAdminArchivePolicy(ctx)))
 
 program
   .command('mcp')

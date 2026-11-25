@@ -1,7 +1,8 @@
 /**
  * The badges a site wears in the list and on its page: its access level (or archived), with how
  * many people and teams a list names, whether it has a share link, and Publisher when the user
- * publishes it without owning it. Neutral and muted, so they
+ * publishes it without owning it, and Kept where the archive policy exempts it (`archivePolicy`
+ * capability). Neutral and muted, so they
  * read as status beside the tinted Review button, never as actions; the icon tells the levels
  * apart. `compact` (the grid's cards) shows the icons alone: the labels stay for screen readers
  * and in the tooltips.
@@ -9,11 +10,13 @@
 import {
   type AccessLevel,
   accessDescription,
+  archivePolicyOf,
   type Site,
   type SiteAccessFields,
   siteAccessLevel,
 } from '@fling/shared'
 import {
+  BookmarkIcon,
   GlobeAltIcon,
   LinkIcon,
   LockClosedIcon,
@@ -77,10 +80,16 @@ export function SiteBadges({
   compact?: boolean
 }) {
   const pad = compact ? 'px-1' : ''
+  const keeps = archivePolicyOf(useInstance())
   return (
     <>
       {site.archived ? (
-        <span className="badge badge-sm badge-ghost">Archived</span>
+        <span
+          className="badge badge-sm badge-ghost"
+          {...(site.archivedBy === 'policy' && { title: 'Archived by the archive policy' })}
+        >
+          Archived
+        </span>
       ) : (
         <AccessBadge
           site={site}
@@ -92,6 +101,15 @@ export function SiteBadges({
         <span className={`badge badge-sm badge-ghost gap-1 ${pad}`} title="Has a share link">
           <LinkIcon className="h-3 w-3" aria-hidden />
           <Label text="Shared" compact={compact} />
+        </span>
+      )}
+      {keeps && site.keep && (
+        <span
+          className={`badge badge-sm badge-ghost gap-1 ${pad}`}
+          title="Kept: exempt from the archive policy"
+        >
+          <BookmarkIcon className="h-3 w-3" aria-hidden />
+          <Label text="Kept" compact={compact} />
         </span>
       )}
       {site.role === 'publisher' && (

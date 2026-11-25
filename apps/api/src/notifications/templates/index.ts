@@ -312,6 +312,71 @@ const commentReply = (items: DeliveryItem<'comment.reply'>[], ctx: TemplateConte
   }
 }
 
+/** A date as an email gives it: `2 December 2026` (UTC, the day the policy works to). */
+export const dateInWords = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+
+const POLICY_WORDS = {
+  'site.archive_due': {
+    verb: 'archived',
+    lead: (site: string, ctx: TemplateContext, since: string, due: string) =>
+      `Nobody has viewed or published ${site} on ${ctx.instance} since ${since}, so it will be archived on ${due}.`,
+    leadMany: (ctx: TemplateContext) =>
+      `Nobody has viewed or published these sites on ${ctx.instance} for a while, so each will be archived on the date beside it:`,
+    lines: [
+      'Archiving takes a site offline but keeps its name, files and versions, and an owner can unarchive it at any time.',
+      'To keep it live, view or publish it before then, or mark it Keep on its page so it is never archived for this.',
+    ],
+  },
+  'site.delete_due': {
+    verb: 'deleted',
+    lead: (site: string, ctx: TemplateContext, since: string, due: string) =>
+      `${site} on ${ctx.instance} was archived on ${since} because nobody used it, and will be deleted on ${due}.`,
+    leadMany: (ctx: TemplateContext) =>
+      `These sites on ${ctx.instance} were archived because nobody used them, and each will be deleted on the date beside it:`,
+    lines: [
+      'Deleting a site takes its files and versions and frees its name.',
+      'To keep it, unarchive it before then, or mark it Keep on its page.',
+    ],
+  },
+} as const
+
+const policyDue = <K extends 'site.archive_due' | 'site.delete_due'>(
+  items: DeliveryItem<K>[],
+  ctx: TemplateContext
+): Section => {
+  const key = (items[0] as DeliveryItem<K>).key
+  const words = POLICY_WORDS[key]
+  const sites = [...new Map(items.map(i => [i.details.site.name, i])).values()]
+  if (sites.length === 1) {
+    const { site, dueAt, since } = (sites[0] as DeliveryItem<K>).details
+    const due = dateInWords(dueAt)
+    return {
+      subject: `${site.name} will be ${words.verb} on ${due}`,
+      lead: words.lead(site.name, ctx, dateInWords(since), due),
+      lines: [...words.lines],
+      action: { label: `Open ${site.name}`, url: site.url },
+      why: `you own a site on ${ctx.instance}`,
+    }
+  }
+  return {
+    subject: `${plural(sites.length, 'site')} of yours will be ${words.verb}`,
+    lead: words.leadMany(ctx),
+    links: sites.slice(0, LIST_MAX).map(i => ({
+      text: `${i.details.site.name} (${dateInWords(i.details.dueAt)})`,
+      url: i.details.site.url,
+    })),
+    lines: [...moreLine(sites.length, 'sites'), ...words.lines],
+    action: { label: 'See your sites', url: `${ctx.appOrigin}/sites` },
+    why: `you own sites on ${ctx.instance}`,
+  }
+}
+
 export const TEMPLATES: Templates = {
   'site.shared': { email: siteShared },
   'site.shared_via_group': { email: siteSharedViaGroup },
@@ -320,4 +385,6 @@ export const TEMPLATES: Templates = {
   'group.member_added': { email: groupMemberAdded },
   'comment.created': { email: commentCreated },
   'comment.reply': { email: commentReply },
+  'site.archive_due': { email: policyDue },
+  'site.delete_due': { email: policyDue },
 }

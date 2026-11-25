@@ -13,6 +13,7 @@
 import { z } from 'zod'
 import { ACCESS_LEVELS, type DefaultAccessLevel } from './access.ts'
 import type { PathDetail, SitePath, VersionFiles } from './api.ts'
+import { ADMIN_ARCHIVE_POLICY_PATH, ARCHIVE_PREVIEW_DAYS } from './archive-policy.ts'
 import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import {
   ANCHOR_QUOTE_MAX,
@@ -1251,6 +1252,22 @@ export function mcpToolsFor(w: McpWording) {
       annotations: { idempotentHint: true, openWorldHint: false },
     }),
 
+    keep: tool({
+      name: 'fling_keep',
+      title: 'Keep a site from being archived',
+      description:
+        `${w.name} archives sites nobody has viewed or published for a while, after telling their owners. ` +
+        'Keep a site (`keep: true`) to exempt it from that, or stop keeping it (`keep: false`). ' +
+        "Only the site's owners can here (an admin keeps anyone's site from its page in the web app). Use it when the user wants a site left alone however rarely it is used.",
+      inputSchema: {
+        name: siteName,
+        keep: z
+          .boolean()
+          .describe('true: never archive it for disuse; false: treat it like any site'),
+      },
+      annotations: { idempotentHint: true, openWorldHint: false },
+    }),
+
     delete: tool({
       name: 'fling_delete',
       title: 'Delete a site',
@@ -1279,6 +1296,18 @@ export function mcpToolsFor(w: McpWording) {
           .optional()
           .describe("Only this site name's deletes and its Paths' (default: every deleted site)"),
       },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    }),
+
+    adminArchivePolicy: tool({
+      name: 'fling_admin_archive_policy',
+      title: 'Show the archive policy (admins)',
+      description:
+        `Show ${w.name}'s archive policy, for admins only: what it archives, deletes and purges (in days), whether ` +
+        `it is live or in dry run, why it is paused if it is, what it would or will do in the next ${ARCHIVE_PREVIEW_DAYS} days ` +
+        '(each site, its owner and the date) and what it did lately. Read only: an admin turns it live or back to dry run in their browser, at ' +
+        `Admin → Archive policy (${ADMIN_ARCHIVE_POLICY_PATH} of the ${w.name} web app, the link in the result); no tool does.`,
+      inputSchema: {},
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),
 

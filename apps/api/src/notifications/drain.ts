@@ -160,25 +160,29 @@ const count = (run: Run, counter: NotifyCounter, n = 1) => {
 
 const latest = (a: Minute, b: Minute) => (a > b ? a : b)
 
-export async function drain(deps: Deps, opts: DrainOptions = {}): Promise<DrainResult> {
-  const now = opts.now ?? deps.clock.now()
-  const result: DrainResult = {
-    cursor: null,
-    minutes: 0,
-    queued: 0,
-    sent: 0,
-    deferred: 0,
-    dropped: 0,
-    givenUp: 0,
-    suppressed: 0,
-    complete: true,
-  }
-  const channels = channelsOf(deps)
-  if (channels.length === 0) return result
+const emptyResult = (): DrainResult => ({
+  cursor: null,
+  minutes: 0,
+  queued: 0,
+  sent: 0,
+  deferred: 0,
+  dropped: 0,
+  givenUp: 0,
+  suppressed: 0,
+  complete: true,
+})
+
+function startRun(
+  deps: Deps,
+  now: Date,
+  opts: DrainOptions,
+  channels: Channel[],
+  result: DrainResult
+): Run {
   const started = Date.now()
   const deadline = opts.deadline ?? started + DRAIN_BUDGET_MS
   const end = minuteOf(new Date(now.getTime() - LAG_MS - 60_000))
-  const run: Run = {
+  return {
     deps,
     now,
     nowIso: now.toISOString(),
@@ -192,6 +196,14 @@ export async function drain(deps: Deps, opts: DrainOptions = {}): Promise<DrainR
     stats: {},
     result,
   }
+}
+
+export async function drain(deps: Deps, opts: DrainOptions = {}): Promise<DrainResult> {
+  const now = opts.now ?? deps.clock.now()
+  const result = emptyResult()
+  const channels = channelsOf(deps)
+  if (channels.length === 0) return result
+  const run = startRun(deps, now, opts, channels, result)
   let cursor = await deps.store.getNotifyCursor()
   result.cursor = cursor
   const last = opts.flush ? addMinutes(minuteOf(now), FLUSH_MINUTES) : run.end
@@ -233,6 +245,44 @@ export async function drain(deps: Deps, opts: DrainOptions = {}): Promise<DrainR
       .catch(err => logNotify('error', 'notify stats failed', { err: errorName(err) }))
   }
   return result
+}
+
+/**
+ * The dev clock jumped from `from` to now (`POST /dev/clock`; never on a tick): move the cursor to
+ * just behind the clock rather than walk the days between, a few hours a drain. The caller drained
+ * as of `from` until complete (`flush` included), so after the cursor nothing is due but what that
+ * moved later, relative to `from`: at most FLUSH_MINUTES + 1 minutes on (a retry, the hourly
+ * limit, a cool-down, a fan-out parked or backing off) or to the next UTC day (the daily quota).
+ * Those minutes are drained as of now, then the cursor skips the rest, which are empty. false when
+ * it did not move (something there not done, a batch another drain holds, or another drain moved
+ * the cursor): the walk then catches up as usual.
+ */
+export async function skipToNow(deps: Deps, from: Date): Promise<boolean> {
+  const channels = channelsOf(deps)
+  if (channels.length === 0) return true
+  const result = emptyResult()
+  const run = startRun(deps, deps.clock.now(), {}, channels, result)
+  const cursor = await deps.store.getNotifyCursor()
+  if (cursor === null) return false
+  if (cursor >= run.end) return true
+  const flushed = addMinutes(minuteOf(from), FLUSH_MINUTES + 1)
+  const minutes: Minute[] = []
+  for (let m = addMinutes(cursor, 1); m <= flushed && m <= run.end; m = addMinutes(m, 1)) {
+    minutes.push(m)
+  }
+  const day = nextUtcDay(from)
+  if (day > flushed && day <= run.end) minutes.push(day)
+  try {
+    for (const minute of minutes) {
+      result.minutes++
+      if ((await drainMinute(run, minute)) !== 'done') return false
+    }
+  } finally {
+    await deps.store
+      .addNotifyStats(hourOf(run.now), run.stats)
+      .catch(err => logNotify('error', 'notify stats failed', { err: errorName(err) }))
+  }
+  return deps.store.setNotifyCursor(run.end, cursor)
 }
 
 /** Everything due at `minute`: batches first, then fan-outs (which queue only after the walk). */

@@ -1,11 +1,12 @@
 /**
- * Taking a site away: archive (offline, files and versions kept), unarchive, and delete, which
+ * Keeping a site, and taking it away. With the `archivePolicy` capability, Keep exempts the site
+ * from the archive policy (`PUT /api/sites/:name/keep`, its owners and admins). Then archive (offline, files and versions kept), unarchive, and delete, which
  * needs the name typed (`TypedDeleteModal`, which a Path's danger zone uses too). A delete is one
  * an admin can recover where the instance keeps deleted sites (`recoverableDeletes`), and for good
  * where it doesn't; the wording is the shared `deleteConfirmText`. After a delete the page has
  * nothing left to show, so it goes back to the list it came from (`home`).
  */
-import { deleteConfirmText, recoverableDeletesOf, type Site } from '@fling/shared'
+import { archivePolicyOf, deleteConfirmText, recoverableDeletesOf, type Site } from '@fling/shared'
 import {
   ArchiveBoxArrowDownIcon,
   ArchiveBoxXMarkIcon,
@@ -15,19 +16,38 @@ import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInstance } from '../../hooks/instance'
 import { useSiteActions } from '../../hooks/queries'
+import { keepText } from '../../lib/archive-policy'
 import { ConfirmModal } from '../ConfirmModal'
 import { Modal } from '../Modal'
 import { SiteSection } from './SiteSection'
 
 export function SiteDangerZone({ site, home = '/' }: { site: Site; home?: string }) {
   const actions = useSiteActions(site.name)
-  const recoverable = recoverableDeletesOf(useInstance())
+  const instance = useInstance()
+  const recoverable = recoverableDeletesOf(instance)
+  const keeps = archivePolicyOf(instance)
+  const kept = site.keep === true
   const navigate = useNavigate()
   const [dialog, setDialog] = useState<'archive' | 'delete' | null>(null)
   const close = () => setDialog(null)
 
   return (
     <SiteSection title="Danger zone" tone="danger">
+      {keeps && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--border-subtle)] pb-3">
+          <p className="min-w-0 text-sm text-secondary">{keepText(kept)}</p>
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="toggle toggle-sm"
+              checked={kept}
+              disabled={actions.setKeep.isPending}
+              onChange={e => actions.setKeep.mutate(e.target.checked)}
+            />
+            Keep: exempt from the archive policy
+          </label>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="min-w-0 text-sm text-secondary">
           {site.archived

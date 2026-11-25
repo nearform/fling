@@ -11,6 +11,7 @@ import { identityProvidersFor } from './auth/oidc.ts'
 import { FsBlobs } from './blobs/fs.ts'
 import type { Blobs } from './blobs/types.ts'
 import type { Config } from './config.ts'
+import { devClock } from './lib/dev-clock.ts'
 import { type LiveHub, noLiveHub } from './live.ts'
 import { FileMailer } from './mail/file.ts'
 import { KeptMailer } from './mail/kept.ts'
@@ -76,6 +77,8 @@ export function buildDeps(
   if (config.secrets.siteSecretsKey) parseSiteSecretsKey(config.secrets.siteSecretsKey)
   const servers = opts.servers ?? (serversOn ? missing('site servers') : undefined)
   const serverLogs = opts.serverLogs ?? (servers ? new MemoryServerLogs() : undefined)
+  // Local development's clock can be moved on (lib/dev-clock.ts); production's is the system's.
+  const clock = config.devLogin ? devClock : systemClock
   return {
     config,
     store,
@@ -88,12 +91,12 @@ export function buildDeps(
     ...(serverLogs ? { serverLogs } : {}),
     ...(config.viewCounts
       ? {
-          views: new ViewCounter(store, systemClock, FLUSH_INTERVAL_MS, () =>
+          views: new ViewCounter(store, clock, FLUSH_INTERVAL_MS, () =>
             viewCountingOn({ config, store })
           ),
         }
       : {}),
-    clock: systemClock,
+    clock,
   }
 }
 

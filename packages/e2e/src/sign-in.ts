@@ -17,13 +17,21 @@ export function cookiePairs(res: Response): string[] {
   return res.headers.getSetCookie().map(c => c.split(';')[0] as string)
 }
 
-export async function devLogin(appOrigin: string, email: string): Promise<Session> {
+/**
+ * A browser session by dev login, its cookies (`name=value; …`), signed as of the instance's
+ * clock: what a step signs in again with once the dev clock has moved past a session's expiry.
+ */
+export async function devSession(appOrigin: string, email: string): Promise<string[]> {
   const login = await fetch(
     `${appOrigin}/auth/dev-login?email=${encodeURIComponent(email)}&return=${encodeURIComponent('/')}`,
     { redirect: 'manual' }
   )
   if (login.status !== 302) throw new Error(`dev login: ${login.status} (is DEV_LOGIN on?)`)
-  const cookies = cookiePairs(login)
+  return cookiePairs(login)
+}
+
+export async function devLogin(appOrigin: string, email: string): Promise<Session> {
+  const cookies = await devSession(appOrigin, email)
   const siteCookie = cookies.find(c => c.startsWith('fling_site='))
   // The browser half of `fling login`: a signed-in session mints a key for the loopback callback.
   const cli = await fetch(

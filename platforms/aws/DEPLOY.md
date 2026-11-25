@@ -222,7 +222,11 @@ Values reach the function two ways, and the function's own environment wins:
 | `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
 | `MAINTENANCE_SWEEP_ENABLED` | no (on) | Maintenance works on the sites queued for it, then sweeps every site in turn, a little each run. `off` maintains only queued sites, for the least background work: sites from before the queue, and every site after a change to `VERSION_RETENTION`, then wait until something queues them (a publish, a rollback). |
 | `SITE_VIEW_COUNTS` | no (on) | Sites' view counts. On, every HTML page of a version that goes live gets a copy with the view beacon, a small script that tells the site's own host once per page load (`POST /_fling-seen`), and the views it reports are counted, per site, in a site's metrics, beside its pushes. Advertised as the `viewCounts` capability. On, an admin turns view counting on or off for every site in Admin → Usage. `off` is the operator's hard off: it makes no new copies, stops serving the ones there are at each site's next route write, counts nothing and removes the admins' switch; pushes are still counted. AWS: the sites distribution's `/_fling-seen` behaviour (the module's `edge.tf`) carries the beacon to the API. |
-| `SITE_DELETE` | no (`soft`) | What deleting a site or a Path does. `soft` takes it down and frees its name, but keeps its files in the sites bucket with a recovery file beside them (`sites/<id>/deleted.json`) and a deleted-site record, so an admin can restore it from Admin → Deleted; advertised as the `recoverableDeletes` capability. Fling never removes what it kept by itself: the files stay until an admin deletes them for good there. `hard` deletes the files too, and nothing can be recovered. Any other value stops the API starting. Changing it affects later deletes only: what was kept can still be restored. See [Deleted sites](#deleted-sites). |
+| `ARCHIVE_INACTIVE_DAYS` | no (`0`) | The [archive policy](#archive-policy): a published site nobody has viewed or published for this many days (0 to 3650; its creation and its last unarchive count too) is archived, after its owners are told `ARCHIVE_WARN_DAYS` before. `0` is off; above 0 it is advertised as the `archivePolicy` capability (the Keep flag, the site page's "Will be archived on …"). It starts in dry run (Admin → Archive policy shows what it would do, and it does nothing) until an admin turns it live there. It is paused while views aren't counted (`SITE_VIEW_COUNTS=off`, or view counting off on Admin → Usage), and until they have been counted for this many days without a break. |
+| `ARCHIVE_WARN_DAYS` | no (`7`) | How many days (0 to 3650) before the archive policy archives or deletes a site its owners are told: by email (`site.archive_due`, `site.delete_due`) where the instance sends it, and on the site page. While `ARCHIVE_INACTIVE_DAYS` is on it must be at least 1 and less than it, and less than `DELETE_ARCHIVED_DAYS` while that is on, or the API refuses to start. |
+| `DELETE_ARCHIVED_DAYS` | no (`0`) | Delete a site the archive policy archived this many days (0 to 3650) after it did, warned the same way; never one an owner or admin archived. Set without `ARCHIVE_INACTIVE_DAYS`, the API refuses to start. Without email (no mail driver) the policy archives but never deletes. The delete is soft unless `SITE_DELETE=hard`. |
+| `PURGE_DELETED_DAYS` | no (`0`) | Delete for good what a soft delete kept, this many days (0 to 3650) after the delete, whoever deleted it: what Admin → Deleted's "Delete for good" does, with its checks (never a site or Path live again or being restored), audited as `archive-policy`. The oldest first, at most 25 a maintenance run, without notice. Only while the policy is live, and also while it is paused. Never a site that was marked Keep when it was deleted. It works without `ARCHIVE_INACTIVE_DAYS`, but then there is no Keep flag. |
+| `SITE_DELETE` | no (`soft`) | What deleting a site or a Path does. `soft` takes it down and frees its name, but keeps its files in the sites bucket with a recovery file beside them (`sites/<id>/deleted.json`) and a deleted-site record, so an admin can restore it from Admin → Deleted; advertised as the `recoverableDeletes` capability. The files stay until an admin deletes them for good there, or the [archive policy](#archive-policy) purges them (`PURGE_DELETED_DAYS`). `hard` deletes the files too, and nothing can be recovered. Any other value stops the API starting. Changing it affects later deletes only: what was kept can still be restored. See [Deleted sites](#deleted-sites). |
 | `PATHS_PER_SITE_MAX` | no (`1000`; AWS: `200`) | The most live Paths (published, not archived) one site may have, from 1 to 1000. Publishing to a new Path, and bringing back an archived one, are refused with `too_large` once a site has that many; archived Paths don't count. A site can keep at most 1000 Paths in all, archived ones included. Published as `limits.pathsPerSite` in the metadata, which the CLI, the MCP servers and the Guide state. Lowering it stops sites that have more from adding any, and takes none away. AWS: the module sets it from `paths_per_site` (default 200), over anything in `INSTANCE`. |
 | `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
 | `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
@@ -820,9 +824,10 @@ own name or another, with its Paths, versions, comments and the people it was sh
 are audited. `fling admin deleted [name]` and the `fling_admin_deleted` MCP tool list what is kept
 (with each site's id in the tool's answer and with `--json`), and link to the page.
 
-Fling never removes kept files by itself, and a bucket lifecycle rule can't do it for you: a kept
-prefix sits among the live sites' prefixes under `sites/`, and nothing in its keys tells it apart.
-Delete for good what nobody will need.
+Kept files stay until an admin deletes them for good, or the [archive policy](#archive-policy)
+purges them `PURGE_DELETED_DAYS` after their delete. A bucket lifecycle rule can't do it for you: a
+kept prefix sits among the live sites' prefixes under `sites/`, and nothing in its keys tells it
+apart. Delete for good what nobody will need, or set `PURGE_DELETED_DAYS`.
 
 **What it costs.** Kept files are billed like live ones. **Admin → Usage** has a line for them:
 how many deleted sites and Paths are kept, and about how much they take (the sizes of their
@@ -866,6 +871,46 @@ Comments, form responses and older versions don't come back this way; they stay 
 - **A late upload can land in a kept prefix.** A presigned upload URL handed out just before the delete
   (good for at most 15 minutes) can still write a file into the kept prefix. Nothing serves it, and
   Delete for good removes it with the rest.
+
+## Archive policy
+
+The archive policy archives the sites nobody uses, can delete what it archived, and can purge what
+soft deletes kept. It is a step of maintenance, so it runs on every platform on maintenance's own
+schedule, and it is off until you set it: every setting but the warning is 0 unless set.
+
+1. **Turn it on.** Set `ARCHIVE_INACTIVE_DAYS` in `INSTANCE` (and `ARCHIVE_WARN_DAYS`,
+   `DELETE_ARCHIVED_DAYS`, `PURGE_DELETED_DAYS` as you want them; see the
+   [table](#instance-configuration)), and deploy. Settings that contradict each other (a warning
+   as long as the wait, deleting without archiving) stop the API starting, and the deploy's check
+   of `/.well-known/fling` fails.
+2. **Read the dry run.** It starts in dry run: it works out what it would do and does nothing, and
+   sends no email. **Admin → Archive policy** (or `fling admin archive-policy`) shows the settings,
+   why it is paused if it is, and what it would do in the next 7 days. Maintenance fills the list
+   as it reaches each site, from its queue and its sweep (`MAINTENANCE_SWEEP_ENABLED`), so give it
+   a day or so after the deploy.
+3. **Go live.** An admin turns it live on **Admin → Archive policy**, from their browser session
+   (not an API key or MCP), audited as `archive_policy.switch`. Nothing is archived or deleted until
+   its owners have been warned `ARCHIVE_WARN_DAYS` before while it was live, so going live the first
+   time warns the overdue sites first. **Back to dry run** there stops it again, but keeps the
+   warnings given: a site warned before, and unused since, is archived as soon as it is live again.
+
+It is paused while views aren't counted, and until they have been for `ARCHIVE_INACTIVE_DAYS`
+without a break, since a site nobody viewed can't be told from one nobody could count: an instance
+that has just turned `SITE_VIEW_COUNTS` on waits that long. Purging goes on while paused. A site's
+owners exempt it with Keep (`fling keep`, the site's Settings). Everything it does is on the audit
+log with `archive-policy` as the actor. The Guide's **Archive policy** page
+(`/guide/admin/archive-policy`) is the admin's view of it.
+
+**What it costs.** Viewing a site costs nothing more: views are counted as they already are.
+While `ARCHIVE_INACTIVE_DAYS` is on, every read of one site's details (its page in the web app,
+`fling info`, `fling_info`) of a site that isn't kept also reads the policy's record and the
+view-counting switch and, while live and not paused, a live site's activity record (and its
+versions, for a site with no activity record): a few Table reads more. Maintenance reads the
+activity record of each site it looks at, queues the site for its next policy date (in dry run, a
+site due now again each day), writes the policy's record when view counting starts or stops, and
+writes a site only to warn, archive or delete it. Admin → Archive policy reads up to 500 entries
+of the maintenance queue, up to 100 of those sites with their activity records, the deleted-site
+records due a purge in the next 7 days (in pages of 50), and the latest 500 audit entries.
 
 ## Claude's sandbox: allow your Fling's host
 

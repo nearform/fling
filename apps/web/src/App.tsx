@@ -17,9 +17,11 @@ import {
   ADMIN_USERS_PATH,
 } from './lib/admin'
 import { errorMessage, isUnauthorized } from './lib/api'
+import { ADMIN_ARCHIVE_POLICY_PATH } from './lib/archive-policy'
 import { ADMIN_DELETED_PATH } from './lib/deleted'
 import { ADMIN_MAIL_PATH, NOTIFICATION_SETTINGS_PATH } from './lib/notifications'
 import { ADMIN_USAGE_PATH } from './lib/usage'
+import AdminArchivePolicy from './pages/AdminArchivePolicy'
 import AdminAudit from './pages/AdminAudit'
 import AdminDeleted from './pages/AdminDeleted'
 import AdminInvitations from './pages/AdminInvitations'
@@ -134,6 +136,7 @@ export default function App() {
                 <Route path={ADMIN_INVITATIONS_PATH.slice(1)} element={<AdminInvitations />} />
                 <Route path={ADMIN_MAIL_PATH.slice(1)} element={<AdminMail />} />
                 <Route path={ADMIN_USAGE_PATH.slice(1)} element={<AdminUsage />} />
+                <Route path={ADMIN_ARCHIVE_POLICY_PATH.slice(1)} element={<AdminArchivePolicy />} />
                 <Route path={ADMIN_DELETED_PATH.slice(1)} element={<AdminDeleted />} />
                 <Route path={ADMIN_AUDIT_PATH.slice(1)} element={<AdminAudit />} />
                 <Route path={ADMIN_ROUTES_PATH.slice(1)} element={<AdminRoutes />} />

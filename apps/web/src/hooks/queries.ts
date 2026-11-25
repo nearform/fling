@@ -59,6 +59,7 @@ export const queryKeys = {
   adminSettings: ['admin', 'settings'] as const,
   adminRouteTable: ['admin', 'route-table'] as const,
   adminUsage: ['admin', 'usage'] as const,
+  adminArchivePolicy: ['admin', 'archive-policy'] as const,
   adminDeleted: (name: string) => ['admin', 'deleted', name] as const,
   allAdminDeleted: ['admin', 'deleted'] as const,
   // Under the site's key, so whatever refetches the site refetches these too.
@@ -301,6 +302,12 @@ export function useSiteActions(name: string) {
     revokeShare: useSiteMutation(name, () => api.revokeShare(name), 'Share link revoked'),
     archive: useSiteMutation(name, () => api.archive(name), `${name} archived`),
     unarchive: useSiteMutation(name, () => api.unarchive(name), `${name} restored`),
+    /** The keep flag (`archivePolicy` capability): exempt it from the archive policy, or not. */
+    setKeep: useSiteMutation(
+      name,
+      (keep: boolean) => api.setKeep(name, keep),
+      site => (site.keep ? `${name} is kept` : `${name} is no longer kept`)
+    ),
     remove: useSiteMutation(name, () => api.deleteSite(name), deletedText(recoverable, name)),
     restoreVersion: useSiteMutation(
       name,
@@ -744,6 +751,28 @@ export function useSetViewCounting() {
   return useMutation({
     mutationFn: api.setViewCounting,
     onSuccess: data => queryClient.setQueryData(queryKeys.adminUsage, data),
+  })
+}
+
+/** Admins: the archive policy (Admin → Archive policy), on every instance. */
+export function useAdminArchivePolicy(enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.adminArchivePolicy,
+    queryFn: api.adminArchivePolicy,
+    retry: false,
+  })
+}
+
+/** Admins, in a browser session: turn the archive policy live or back to dry run. */
+export function useSetArchivePolicyLive() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.setArchivePolicyLive,
+    onSuccess: data => {
+      queryClient.setQueryData(queryKeys.adminArchivePolicy, data)
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit })
+    },
   })
 }
 

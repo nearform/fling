@@ -273,7 +273,9 @@ file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a
 each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
 their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
 and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
-the same here.
+the same here. So is the
+[archive policy](../aws/DEPLOY.md#archive-policy), which can purge them `PURGE_DELETED_DAYS` after
+their delete.
 
 The prefixes are in the sites bucket (`<prefix>$NAME-sites`; `BUCKET=$(terraform output -raw sites_bucket)`).
 In the console, **Cloud Storage → Buckets →** the bucket, then `sites/<siteId>/`. From a shell:

@@ -49,6 +49,12 @@ export interface EventDetails {
   'group.member_added': { group: GroupView; sites: SiteView[]; moreSites: number }
   'comment.created': { site: SiteView; comment: CommentView }
   'comment.reply': { site: SiteView; comment: CommentView }
+  /**
+   * `site`: the site's page in the app; `dueAt`: when the archive policy archives (deletes) it;
+   * `since`: when it was last viewed or published (archived)
+   */
+  'site.archive_due': { site: SiteView; dueAt: string; since: string }
+  'site.delete_due': { site: SiteView; dueAt: string; since: string }
 }
 
 export interface DeliveryItem<K extends EventKey = EventKey> {

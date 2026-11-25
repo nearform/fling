@@ -1,6 +1,6 @@
 /**
  * Site management: ls, info, versions, rollback, share, visibility, access, owners, publishers,
- * archive/unarchive, rm, stats. `versions`, `files`, `rollback`, `owners` and `publishers` take `--path`
+ * archive/unarchive, keep (the archive policy's flag), rm, stats. `versions`, `files`, `rollback`, `owners` and `publishers` take `--path`
  * to act on one of the site's Paths instead (commands/paths.ts).
  */
 import {
@@ -11,6 +11,7 @@ import {
   deletedText,
   describeAudience,
   describeRoles,
+  describeSiteArchive,
   privateAudience,
   recoverableDeletesOf,
   type Site,
@@ -25,6 +26,7 @@ import {
 } from '@fling/shared'
 import chalk from 'chalk'
 import { CliApiError } from '../api.ts'
+import { requireArchivePolicy, setKeep } from '../archive-policy.ts'
 import { type CommandContext, requireClient } from '../context.ts'
 import { CliError } from '../errors.ts'
 import { loadFreshInstance, loadInstanceWith } from '../instance.ts'
@@ -187,6 +189,13 @@ function rolesRows(site: SiteDetail): string[] {
   ]
 }
 
+/** What the archive policy says of the site: kept, archived by it, what it does next and when. */
+function archiveRows(site: SiteDetail): string[] {
+  return describeSiteArchive(site, formatDate).map((line, i) =>
+    i === 0 ? row('Archiving', line) : `${' '.repeat(14)}${line}`
+  )
+}
+
 function filesRow(site: Site & { versions?: SiteDetail['versions'] }): string[] {
   const current = site.versions?.find(v => v.id === site.currentVersionId)
   if (!current) return []
@@ -213,6 +222,7 @@ export async function runInfo(ctx: CommandContext, name: string): Promise<void> 
       ...describeSite(site),
       ...access,
       ...rolesRows(site),
+      ...archiveRows(site),
       '',
       chalk.dim(
         `${site.versions.length} version(s) — \`fling versions ${name}\`; files — \`fling files ${name}\``
@@ -632,6 +642,28 @@ export async function runArchive(
   )
   if (ctx.json) ctx.out.data(site, () => '')
   else if (unarchive) ctx.out.text(site.url)
+}
+
+/**
+ * `fling keep <name> [--off]`: exempt the site from the archive policy, or stop exempting it. Its
+ * owners only (an admin, from their browser session); a Fling without the policy is refused.
+ */
+export async function runKeep(
+  ctx: CommandContext,
+  name: string,
+  opts: { off?: boolean }
+): Promise<void> {
+  const client = requireClient(ctx)
+  const instance = await loadInstanceWith(ctx.store, ctx.config, ctx.fetch, 'archivePolicy')
+  requireArchivePolicy(instance)
+  const keep = !opts.off
+  const site = await setKeep(client, name, keep, { appOrigin: instance?.appOrigin })
+  ctx.log.success(
+    keep
+      ? `${name} is kept: the archive policy never archives it for disuse (undo with \`fling keep ${name} --off\`)`
+      : `${name} is no longer kept: it is archived like any site once nobody views or publishes it for a while`
+  )
+  if (ctx.json) ctx.out.data(site, () => '')
 }
 
 export async function runRemove(

@@ -86,6 +86,10 @@
       "name": "fling_archive",
       "description": "Take a site offline (or restore it), keeping its files"
     },
+    {
+      "name": "fling_keep",
+      "description": "Keep a site you own from the archive policy, which archives sites nobody uses"
+    },
     { "name": "fling_rollback", "description": "Serve an earlier version of a site" },
     {
       "name": "fling_delete",
@@ -94,6 +98,10 @@
     {
       "name": "fling_admin_deleted",
       "description": "List deleted sites (admins), to restore or delete for good from Admin → Deleted"
+    },
+    {
+      "name": "fling_admin_archive_policy",
+      "description": "Show the archive policy and what it will archive next (admins)"
     },
     {
       "name": "fling_notifications",

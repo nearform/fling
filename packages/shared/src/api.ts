@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { AccessLevelSchema } from './access.ts'
+import { SiteArchiveDueSchema } from './archive-policy.ts'
 import { AudienceInputSchema, AudienceSchema } from './audience.ts'
 import { FormsConfigSchema } from './forms.ts'
 import { ROUTE_FORMATS } from './kvs.ts'
@@ -66,6 +67,12 @@ export const SiteSchema = z.object({
    * the review page says so. Servers without the capability omit it
    */
   hasServer: z.boolean().optional(),
+  /** its owners exempt it from the archive policy (`archivePolicy` capability; archive-policy.ts) */
+  keep: z.boolean().optional(),
+  /** when it was archived, while it is (servers before the archive policy omit it) */
+  archivedAt: z.string().optional(),
+  /** `policy`: the archive policy archived it (it may then delete it); absent: an owner or admin did */
+  archivedBy: z.literal('policy').optional(),
   /**
    * its views and pushes a day (`GET /api/sites?metrics=1`, live sites, where the instance has
    * metrics): one of the sites its list's `metrics` adds up
@@ -119,6 +126,8 @@ export const SiteDetailSchema = SiteWithAudienceSchema.extend({
    * secrets it was missing then. Setting the last of them takes it live (`servers` capability)
    */
   awaitingSecrets: z.object({ versionId: z.string(), secrets: z.array(z.string()) }).optional(),
+  /** what the archive policy will do to it and when, while the policy is live (`archivePolicy`) */
+  archiveDue: SiteArchiveDueSchema.optional(),
 })
 export type SiteDetail = z.infer<typeof SiteDetailSchema>
 
@@ -740,6 +749,8 @@ export const AuditEntrySchema = z.object({
     'path.restore',
     'site.purge',
     'path.purge',
+    'site.archive',
+    'archive_policy.switch',
   ]),
   actor: z.string(),
   /** the person, or for site.change and site.open the site's name */

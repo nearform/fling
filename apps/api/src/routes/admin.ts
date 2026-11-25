@@ -3,7 +3,8 @@
  * check): the users list, every site's listing, the audit log, the mail page (settings, health
  * and a test email), the instance's settings, the invitations (list, invite, revoke), a site
  * server's kill switch and limits, resolving a viewer id, the deleted sites kept, restoring them
- * and deleting them for good (deletion.ts), and starting and stopping an impersonation. admin.ts
+ * and deleting them for good (deletion.ts), the archive policy and its switch (archive-policy.ts),
+ * and starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
@@ -14,6 +15,8 @@ import {
   AdminSettingsSchema,
   AdminSiteListSchema,
   AdminUserListSchema,
+  ArchivePolicyStatusSchema,
+  ArchivePolicySwitchRequestSchema,
   AuditListSchema,
   DeletedSitesSchema,
   ImpersonateRequestSchema,
@@ -30,6 +33,7 @@ import { InstanceUsageSchema, ViewCountingRequestSchema } from '@fling/shared/me
 import { Hono } from 'hono'
 import { z } from 'zod'
 import * as admin from '../admin.ts'
+import { archivePolicyStatus, setArchivePolicyLive } from '../archive-policy.ts'
 import { principalOf } from '../auth/middleware.ts'
 import { IMPERSONATION_TTL_SECONDS, reissueSession } from '../auth/session.ts'
 import * as deletion from '../deletion.ts'
@@ -124,6 +128,20 @@ adminRoutes.put('/usage/view-counting', async c => {
   admin.ensure(p, 'admin.usage.write')
   const { on } = await jsonBody(c, ViewCountingRequestSchema)
   return c.json(InstanceUsageSchema.parse(await setViewCounting(c.get('deps'), p, on)))
+})
+
+// The archive policy (archive-policy.ts): any admin credential reads it; only a browser session
+// turns it live or back to dry run.
+adminRoutes.get('/archive-policy', async c =>
+  c.json(ArchivePolicyStatusSchema.parse(await archivePolicyStatus(c.get('deps'), principalOf(c))))
+)
+
+adminRoutes.put('/archive-policy', async c => {
+  const p = principalOf(c)
+  admin.ensure(p, 'admin.archive.write')
+  const { live } = await jsonBody(c, ArchivePolicySwitchRequestSchema)
+  const status = await setArchivePolicyLive(c.get('deps'), p, live)
+  return c.json(ArchivePolicyStatusSchema.parse(status))
 })
 
 // Deleted sites (deletion.ts): any admin credential lists them; only a browser session restores

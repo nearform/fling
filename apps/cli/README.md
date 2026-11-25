@@ -271,6 +271,7 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling owners <name> [--add <emails>] [--remove <emails>] [--set <emails>] [--group <slugs>] [--remove-group <slugs>] [--path <folder>]` | who owns a site (or a Path), or change it |
 | `fling publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …] [--path <folder>]` | who publishes a site (or a Path) without owning it, or change it |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
+| `fling keep <name> [--off]` | keep a site from the archive policy (owners, where the Fling has one); `--off` stops keeping it |
 | `fling rm <name> [--yes]` | delete it: its link stops working and the name is freed |
 
 Before a delete, the CLI says whether it can be recovered, from the instance's
@@ -292,6 +293,37 @@ site or a Path, or deletes it for good, from their browser session; the CLI does
 An admin of the instance can read anyone's site with these commands (`fling info`, `fling files`,
 the comments). Changing someone else's site needs the admin's browser session: open it from All
 sites in the web app.
+
+### The archive policy
+
+Where the Fling archives the sites nobody uses (its `archivePolicy` capability), a live site nobody
+has viewed or published for a while is archived, after its owners are told; an unarchive or a
+publish brings it back. Where the Fling deletes too, a site the policy archived is deleted a while
+after, warned the same way. An owner exempts a site with `fling keep`:
+
+```sh
+fling keep pitch-deck          # never archived for disuse
+fling keep pitch-deck --off    # archived like any site again, once nobody uses it
+```
+
+`--json` prints the site, with `keep: true` while it is kept. On a Fling without the policy the
+command says there is nothing to keep a site from. Only owners keep a site: a publisher is told to
+ask one, and an admin to do it from their browser session on the site's page. `fling info` says
+what the policy has to say of a site, on its Archiving line: *"Kept: the archive policy never
+archives it for disuse"*, *"Archived by the archive policy on …"*, or *"Will be archived on …,
+unless someone views or publishes it first, or an owner keeps it"* (*"Will be deleted on …"* for
+one it archived), with *"at the earliest"* until its owners have been told. `--json` gives `keep`,
+`archivedAt`, `archivedBy` and `archiveDue` (`{ action, at, warned }`).
+
+An admin reads the policy (any admin credential; anyone else is refused, exit 3):
+
+```sh
+fling admin archive-policy     # its settings, live or dry run, why it is paused, the next 7 days, what it did lately
+```
+
+It ends with the link to Admin → Archive policy (`<your Fling>/admin/archive-policy`), where an
+admin turns it live or back to dry run from their browser session; the CLI does neither. `--json`
+prints the whole status: `settings`, `live`, `paused`, `preview` and `recent`.
 
 ### Who can open a site
 
@@ -600,9 +632,9 @@ The MCP tools:
   act on one Path.
 - `fling_stats` (a site's views and pushes, or without a name your live sites', counts only) where a Fling has metrics.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
-  `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
+  `fling_set_visibility`, `fling_archive`, `fling_keep` (where a Fling has the archive policy), `fling_rollback`, `fling_delete` (needs
   `confirm: true`; its result says whether an admin can recover the site), `fling_admin_deleted`
-  (admins: deleted sites and Paths, with the link to Admin → Deleted to restore one or delete it for good), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
+  (admins: deleted sites and Paths, with the link to Admin → Deleted to restore one or delete it for good), `fling_admin_archive_policy` (admins, where a Fling has the archive policy: what it would or will do, with the link to Admin → Archive policy to switch it), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
   (`fling_forms`, `fling_forms_template`, `fling_forms_check`, `fling_responses_list`, and
   `fling_response_submit`, which answers a form as you, only when you ask), and
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,

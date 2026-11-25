@@ -129,7 +129,36 @@ stays until an admin restores it or purges it.
 `apps/api/src/deletion.ts`; `admin.deleted.purge`, browser session only): deletes a deleted site's
 kept files (its Paths' too) and its deleted-site record, audited as `site.purge` or `path.purge`.
 It refuses a record marked `restoring` and any id still live, and marks the record `purging` so a
-restore can't start meanwhile.
+restore can't start meanwhile. The archive policy purges through the same checks (`purgeRecord`).
+
+**Archive policy** — archiving the sites nobody uses (`apps/api/src/archive-policy.ts`,
+`packages/shared/src/archive-policy.ts`), a step of maintenance: a live site whose **activity** is
+older than `ARCHIVE_INACTIVE_DAYS` is archived as the policy (`archivedBy: 'policy'`, audited with
+the actor `archive-policy`); `DELETE_ARCHIVED_DAYS` deletes what it archived that long after, and
+`PURGE_DELETED_DAYS` purges deleted-site records that old. All 0 (off) unless set; the
+`archivePolicy` capability. It always warns first: nothing is archived or deleted unless its owners
+were told (`site.archive_due`, `site.delete_due`, the site's `policyWarning`) at least
+`ARCHIVE_WARN_DAYS` before, while it was live, and a warning holds only while it stays live, so
+going live again after a dry run warns first. A site an admin restores comes back without the
+policy's marks, so the policy never deletes it again. Purging on its own is the `purgeDeleted`
+capability. Without mail it archives but never deletes. It is
+**paused** while views aren't counted, and until they have been for `ARCHIVE_INACTIVE_DAYS`.
+
+**Activity** — what the archive policy measures a site by: the latest of its last view, its last
+push, its creation and its last unarchive (`unarchivedAt`), or for a site with no activity record,
+its newest version's date (`activityOf`, `apps/api/src/archive-policy.ts`). A view, a publish or an
+unarchive moves it, and takes back a warning given before.
+
+**Dry run** — the archive policy working out what it would do and doing none of it: no warning,
+archive, delete or purge, no email. It starts in dry run and stays there until an admin turns it
+live on Admin → Archive policy (`PUT /api/admin/archive-policy`, `admin.archive.write`, browser
+session only, audited as `archive_policy.switch`; `ARCHIVE/POLICY`), whose preview lists what falls
+due in the next 7 days. Admins read it with any credential (`fling admin archive-policy`,
+`fling_admin_archive_policy`); neither switches it.
+
+**Keep** — a site's flag (`SiteRecord.keep`) that exempts it from the archive policy: no warning,
+archive, delete, and once deleted no purge. Its owners and admins (browser session, audited) set it
+(`site.keep`: `PUT /api/sites/:name/keep`, `fling keep`, `fling_keep`).
 
 **Recovery file** — `sites/<siteId>/deleted.json` (and `sites/<pathId>/deleted.json` for each Path,
 `deletedKey` in `apps/api/src/blobs/types.ts`): the snapshot a soft delete writes before anything

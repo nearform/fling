@@ -7,8 +7,10 @@
  * - policy still lets the recipient, as a user with their memberships loaded (a guest as one), see what the email
  *   is about: `site.view` for shares, the role itself for a new owner or publisher (owners change
  *   the owners, publishers deploy and are no owner), `comment.read` for comments, and the group still holds them
- *   for group events. A site that is gone or archived, a narrowed audience, a group they left, a
- *   deleted comment or thread: the item is dropped. This is the one guarantee that an email never
+ *   for group events; for the archive policy's warnings, that they still own the site and the
+ *   warning still holds (the site's `policyWarning`: nothing has happened since, and nobody kept
+ *   it). A site that is gone or archived (but for a warning of its delete), a narrowed audience, a
+ *   group they left, a deleted comment or thread: the item is dropped. This is the one guarantee that an email never
  *   reveals a site to someone who cannot see it.
  *
  * Standing (the email policy, or a live invitation) and suppression are about the address, not
@@ -168,6 +170,20 @@ export class Resolver {
           key: item.key,
           details: { group: this.groupView(group), sites, moreSites: more },
         }
+      }
+      case 'site.archive_due':
+      case 'site.delete_due': {
+        if (!item.siteId || typeof data.siteName !== 'string') return null
+        const site = await this.deps.store.findSite(data.siteName)
+        const kind = item.key === 'site.archive_due' ? 'archive' : 'delete'
+        if (site?.id !== item.siteId || site.policyWarning?.kind !== kind) return null
+        if (!can(this.recipient, 'site.owners', site)) return null
+        const details = {
+          site: { name: site.name, url: sitePage(this.deps, site.name) },
+          dueAt: String(data.dueAt),
+          since: String(data.since),
+        }
+        return { ...base, key: item.key, details } as AnyDeliveryItem
       }
       case 'comment.created':
       case 'comment.reply': {

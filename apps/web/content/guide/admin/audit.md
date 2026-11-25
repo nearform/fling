@@ -2,14 +2,14 @@
 title: Audit
 part: admin
 order: 25
-summary: See what admins did: impersonations, invitations, changes to other people's sites.
+summary: See what admins did, and the archive policy: impersonations, invitations, changes to other people's sites.
 audience: admin
-sources: [apps/web/src/pages/AdminAudit.tsx, apps/api/src/audit.ts, apps/api/src/admin.ts]
-verified: b4d7792
+sources: [apps/web/src/pages/AdminAudit.tsx, apps/web/src/lib/archive-policy.ts, apps/api/src/audit.ts, apps/api/src/admin.ts, apps/api/src/archive-policy.ts]
+verified: 0a10243
 ---
 
-{{instance:name}} records what admins do beyond their own sites, so that anyone who looks after
-the instance can see it afterwards.
+{{instance:name}} records what admins do beyond their own sites, and what its archive policy does,
+so that anyone who looks after the instance can see it afterwards.
 
 ## In the web app
 
@@ -22,7 +22,10 @@ Open **Admin → Audit**. The newest entries come first:
 - each time view counting was turned on or off for every site ([Usage](/guide/admin/usage#turn-view-counting-on-or-off));<!-- /requires -->
 - every site and Path deleted, by anyone, its owners included, and each one an admin restored or
   deleted for good ([Deleted sites](/guide/admin/deleted));
-- each choice of the route table's format ([Routes](/guide/admin/routes)).
+- each choice of the route table's format ([Routes](/guide/admin/routes));
+- each time an admin set the [archive policy](/guide/admin/archive-policy) live or back to dry run,
+  and every site it archived, deleted or deleted for good. Those entries name **The archive
+  policy** as who did it.
 
 Entries are kept for {{fact:audit-days}}.
 

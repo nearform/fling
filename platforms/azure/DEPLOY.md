@@ -310,7 +310,9 @@ file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a
 each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
 their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
 and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
-the same here, but for the late upload: on Azure every upload goes through the app's own route.
+the same here, but for the late upload: on Azure every upload goes through the app's own route. So is the
+[archive policy](../aws/DEPLOY.md#archive-policy), which can purge them `PURGE_DELETED_DAYS` after
+their delete.
 
 The prefixes are in the `sites` container of the module's storage account (the one in the
 resource group: `az storage account list -g <resource group> --query "[].name" -o tsv`). Account

@@ -4,7 +4,7 @@ part: publish
 order: 70
 summary: Take a site offline and keep it, or delete it and free its name.
 sources: [apps/api/src/sites.ts, apps/api/src/publication.ts, apps/cli/src/commands/sites.ts, apps/web/src/components/site/SiteDangerZone.tsx, apps/web/src/pages/Sites.tsx, apps/web/src/lib/site-tabs.ts, packages/shared/src/deletion.ts]
-verified: b4d7792
+verified: 0a10243
 ---
 
 When a site has done its job, you can take it away in two ways.
@@ -19,6 +19,10 @@ delete yourself.
 The question before a delete says whether an admin can recover it, or whether it is gone for good.
 
 Only a site's owners can archive or delete it.
+<!-- requires: archivePolicy -->
+{{instance:name}} also archives the sites nobody uses, after telling their owners: see
+[Sites nobody uses](/guide/publish/sites-nobody-uses).
+<!-- /requires -->
 
 <!-- requires: archive -->
 | | Archive | Delete |
@@ -80,6 +84,10 @@ Open the site from **Sites** and choose its **Settings** tab, with the **Danger 
   restore it. If someone has taken the name since, it comes back under
   another.<!-- /requires --> If the delete was for good and you still have the files, publish them
   again under the same name, if nobody has taken it since.
+<!-- requires: archivePolicy -->
+- **A site you still need was archived for nobody using it.** Unarchive it, then keep it: see
+  [Sites nobody uses](/guide/publish/sites-nobody-uses).
+<!-- /requires -->
 
 ## Good to know
 

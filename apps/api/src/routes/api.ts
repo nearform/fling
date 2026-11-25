@@ -40,6 +40,7 @@ import {
   SITE_SORTS,
   SiteArrivalSchema,
   SiteDetailSchema,
+  SiteKeepRequestSchema,
   SiteListSchema,
   SitePathSchema,
   SiteSchema,
@@ -425,6 +426,15 @@ apiRoutes.post('/sites/:name/archive', async c => {
 
 apiRoutes.post('/sites/:name/unarchive', async c => {
   const site = await sites.setArchived(c.get('deps'), c.get('user'), c.req.param('name'), false)
+  return c.json(SiteSchema.parse(site))
+})
+
+// The archive policy's keep flag (archive-policy.ts): only where the instance has the policy.
+apiRoutes.put('/sites/:name/keep', async c => {
+  const deps = c.get('deps')
+  if (!deps.config.archivePolicy.inactiveDays) throw notFound('This Fling has no archive policy')
+  const { keep } = await jsonBody(c, SiteKeepRequestSchema)
+  const site = await sites.setKeep(deps, c.get('user'), c.req.param('name'), keep)
   return c.json(SiteSchema.parse(site))
 })
 

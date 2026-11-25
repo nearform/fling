@@ -81,6 +81,10 @@ export type AuditAction =
   | 'site.purge'
   /** an admin deleted a deleted Path's files for good (`target`: `<site>/<folder>`; `siteId`) */
   | 'path.purge'
+  /** the archive policy archived a site (`actor`: ARCHIVE_POLICY_ACTOR; `target`: its name; `siteId`) */
+  | 'site.archive'
+  /** an admin turned the archive policy live or back to dry run (`target`: `live` or `dry_run`) */
+  | 'archive_policy.switch'
 
 /**
  * An address outside the email policy that may sign in (`INVITE#<email>/INVITE`, with a directory
@@ -155,7 +159,30 @@ export interface ViewCountingRecord {
   /** absent: Fling itself, for the sites live before view counting existed */
   setBy?: string
   setAt: string
+  /**
+   * While on: since when it has been on without a break (setting it on again while on keeps it).
+   * Absent: `setAt`. What the archive policy measures counting by (archive-policy.ts).
+   */
+  onSince?: string
   rollout: { after: string | null; sites: number; finishedAt?: string }
+}
+
+/**
+ * The archive policy's state (`ARCHIVE/POLICY`, archive-policy.ts): the admins' switch (absent:
+ * dry run, never set) and what maintenance has seen of view counting.
+ */
+export interface ArchivePolicyRecord {
+  /** live: it acts; false: dry run */
+  live: boolean
+  /** who set the switch, and when; absent while nobody has */
+  setBy?: string
+  setAt?: string
+  /**
+   * Since when maintenance has seen views counted without a break (the later of this and the
+   * view-counting switch's `onSince` is what counts); null: it last saw them not counted;
+   * absent: it hasn't looked yet.
+   */
+  countingSince?: string | null
 }
 
 /** What maintenance's sweep tallies of the sites' use in a lap (views.ts `tallySite`). */
@@ -308,6 +335,20 @@ export interface SiteRecord {
   owners: SiteRoleList
   /** v3; older records read as none */
   publishers: SiteRoleList
+  /** while archived: when (absent on sites archived before the archive policy) */
+  archivedAt?: string
+  /** while archived: `policy` when the archive policy archived it (only those does it delete) */
+  archivedBy?: 'policy'
+  /** when it was last unarchived: activity, for the archive policy (archive-policy.ts) */
+  unarchivedAt?: string
+  /** its owners or an admin exempt it from the archive policy */
+  keep?: true
+  /**
+   * The archive policy told its owners it will archive it (`archive`) or, archived by the policy,
+   * delete it (`delete`) at `dueAt`: when (`at`). It holds only while nothing happened since (a
+   * view, a publish, an unarchive: archive-policy.ts).
+   */
+  policyWarning?: { kind: 'archive' | 'delete'; at: string; dueAt: string }
   /**
    * Its home page's thumbnail (`thumbnailKey`, blobs/types.ts): the version it was taken of and
    * when. Absent until an owner's or publisher's browser takes one (thumbnails.ts in shared).
@@ -766,6 +807,8 @@ export interface DeletedSiteRecord {
   bytes: number
   /** a site's Paths, deleted with it */
   paths?: { folder: string; pathId: string }[]
+  /** the site was kept from the archive policy (`keep`) when deleted: never purged by it */
+  keep?: true
   /**
    * A restore under way (set before it writes anything): the name it claims, who and when. A
    * retry carries on under that name, and the records it finds are its own, not a delete left
@@ -904,6 +947,14 @@ export interface Store extends NotificationStore {
    * exactly that site name (its Paths' included).
    */
   listDeletedSites(opts: { name?: string; limit: number }): Promise<DeletedSiteRecord[]>
+  /**
+   * Every name's deleted sites and Paths, oldest first, at most `limit`, from the first after
+   * `after` (one a page returned) or from the oldest: the archive policy's purge.
+   */
+  oldestDeletedSites(opts: {
+    limit: number
+    after?: DeletedSiteRecord
+  }): Promise<DeletedSiteRecord[]>
   /** Mark a restore under way (`restoring`); false when the record is gone or being purged. */
   markRestoring(
     record: DeletedSiteRecord,
@@ -1025,6 +1076,12 @@ export interface Store extends NotificationStore {
   getViewCounting(): Promise<ViewCountingRecord | null>
   /** Store it; with `ifSetAt`, only over that setting (null: only where none is stored). */
   putViewCounting(record: ViewCountingRecord, ifSetAt?: string | null): Promise<boolean>
+  /** The archive policy's state (`ARCHIVE/POLICY`); null: never written. */
+  getArchivePolicy(): Promise<ArchivePolicyRecord | null>
+  /**
+   * Set these fields of it, and only these (created in dry run when absent), so the admins' switch and what maintenance saw never write over each other.
+   */
+  updateArchivePolicy(fields: Partial<ArchivePolicyRecord>): Promise<void>
   putMaintenanceCursor(cursor: MaintenanceCursorRecord): Promise<void>
   /**
    * The site directory (every site on the instance, for admins and maintenance) a page at a time,

@@ -80,6 +80,7 @@ const SESSION_ONLY: Partial<Record<InstanceAction, string>> = {
   'admin.invitations.manage': 'Inviting and revoking',
   'admin.deleted.restore': 'Restoring a deleted site',
   'admin.deleted.purge': 'Deleting a deleted site for good',
+  'admin.archive.write': 'Turning the archive policy live or back to dry run',
 }
 
 /** Non-admins see nothing here: the admin routes are 404s to them (an impersonator is told). */

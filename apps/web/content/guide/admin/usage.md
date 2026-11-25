@@ -6,13 +6,14 @@ summary: How much every site is viewed and pushed to, which sites are busy, and 
 audience: admin
 requires: [metrics]
 sources: [apps/web/src/pages/AdminUsage.tsx, apps/web/src/components/usage/**, apps/web/src/lib/usage.ts, apps/web/src/components/AdminSiteCard.tsx, apps/api/src/routes/admin.ts, apps/api/src/views.ts, apps/api/src/maintenance.ts, packages/shared/src/metrics.ts, packages/shared/src/deletion.ts]
-verified: b4d7792
+verified: 0a10243
 ---
 
 The **Usage** page shows how much {{instance:name}} is used: every site's
 <!-- requires: viewCounts -->views and <!-- /requires -->pushes added together, how many sites
 are in use, the busiest ones and the ones nobody has touched in a while. Use it to see whether
-people are getting value from {{instance:name}}, and to find sites that may be ready to archive.
+people are getting value from {{instance:name}}, and to find sites that may be ready to archive.<!-- requires: archivePolicy --> The [archive
+policy](/guide/admin/archive-policy) can archive them for you.<!-- /requires -->
 
 It shows counts only. {{instance:name}} keeps nothing about who opened a site, so there is nobody
 to name.
@@ -89,6 +90,11 @@ to the web app can use the switch: an API key can't.
 
 A page someone already has open can still report a view after counting is turned off. It isn't
 counted.
+<!-- /requires -->
+<!-- requires: viewCounts, archivePolicy -->
+While view counting is off, the [archive policy](/guide/admin/archive-policy) warns, archives and deletes nothing: it
+can't tell a site nobody viewed from one whose views weren't counted. Once it is back on, the
+policy waits until views have been counted for its whole wait again.
 <!-- /requires -->
 
 ## In All sites

@@ -119,6 +119,9 @@
  *                                                        and the rewrite into it (route-format.ts)
  *   VIEWS                  COUNTING                      view counting on or off, and its rollout
  *                                                        to every live site (views.ts)
+ *   ARCHIVE                POLICY                        the archive policy's switch (live or dry
+ *                                                        run) and what maintenance saw of view
+ *                                                        counting (archive-policy.ts)
  *
  * An invitation and its directory copy are written together, each write conditioned on the
  * `updatedAt` read (or on there being none), so racing invites of one address store one.
@@ -290,6 +293,7 @@ import {
 import { decode, encode, type Kind } from './evolution.ts'
 import {
   type ApiKeyRecord,
+  type ArchivePolicyRecord,
   type AuditRecord,
   type AuthCodeRecord,
   addMinutes,
@@ -472,6 +476,7 @@ const key = {
   }),
   deletedTotals: () => ({ pk: 'DELETED', sk: 'TOTALS' }),
   viewCounting: () => ({ pk: 'VIEWS', sk: 'COUNTING' }),
+  archivePolicy: () => ({ pk: 'ARCHIVE', sk: 'POLICY' }),
 }
 
 /** A deleted-site record's id: the site's, or the Path's storage id. */
@@ -1052,6 +1057,15 @@ export class Records implements Store {
       opts.name === undefined
         ? await this.table.query('DELETED', { skPrefix: 'AT#', reverse: true, limit: opts.limit })
         : await this.table.query(`DELETEDNAME#${opts.name}`, { reverse: true, limit: opts.limit })
+    return page.items.map(i => decode<DeletedSiteRecord>('deletedsite', i))
+  }
+
+  async oldestDeletedSites(opts: { limit: number; after?: DeletedSiteRecord }) {
+    const page = await this.table.query('DELETED', {
+      skPrefix: 'AT#',
+      limit: opts.limit,
+      ...(opts.after ? { cursor: encodeCursor(key.deletedAt(opts.after).sk) } : {}),
+    })
     return page.items.map(i => decode<DeletedSiteRecord>('deletedsite', i))
   }
 
@@ -2421,6 +2435,22 @@ export class Records implements Store {
           ? ifAbsent
           : fieldEquals('setAt', ifSetAt)
     return unless(this.table.put(encode('viewcounting', key.viewCounting(), record), cond))
+  }
+
+  async getArchivePolicy() {
+    const k = key.archivePolicy()
+    const item = await this.table.get(k.pk, k.sk)
+    return item ? decode<ArchivePolicyRecord>('archivepolicy', item) : null
+  }
+
+  async updateArchivePolicy(fields: Partial<ArchivePolicyRecord>) {
+    const k = key.archivePolicy()
+    const set = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined))
+    for (;;) {
+      if (await unless(this.table.update(k.pk, k.sk, { set }))) return
+      const first: ArchivePolicyRecord = { live: false, ...set }
+      if (await unless(this.table.put(encode('archivepolicy', k, first), ifAbsent))) return
+    }
   }
 
   async pageSites(opts: { after?: string | null; limit: number; prefix?: string }) {

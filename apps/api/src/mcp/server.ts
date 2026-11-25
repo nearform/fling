@@ -7,12 +7,15 @@ import {
   type AccessLevel,
   ADMIN_DELETED_PATH,
   accessChangeHint,
+  adminArchivePolicyUrl,
+  archivePolicyOnOf,
   type Comment,
   changesAudience,
   checkFormsConfig,
   commentThreads,
   type DeletedSite,
   deletedText,
+  describeArchivePolicy,
   describeAudience,
   describeComments,
   describeFormsSummary,
@@ -31,6 +34,7 @@ import {
   describeServerLive,
   describeSharedSite,
   describeSiteAccess,
+  describeSiteArchive,
   describeSiteMetrics,
   describeUploadBegun,
   describeVersionFiles,
@@ -71,6 +75,7 @@ import { pathsTemplate } from '@fling/shared/paths-templates'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { z } from 'zod'
+import { archivePolicyStatus } from '../archive-policy.ts'
 import { manifestKey } from '../blobs/types.ts'
 import * as comments from '../comments.ts'
 import { isAdminEmail } from '../config.ts'
@@ -484,6 +489,9 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       text:
         `${site.name}: ${describeSite(site)}\n${describeAudience(site, members)}\n` +
         `${describeRoles(site)}\n` +
+        describeSiteArchive(site)
+          .map(line => `${line}\n`)
+          .join('') +
         `Versions (newest first):\n${versions || '(none)'}`,
       data: site,
     }
@@ -781,6 +789,19 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
     }
   })
 
+  // The archive policy's keep flag, where the instance has the policy (`archivePolicy`).
+  if (instanceMetadata(deps.config).capabilities.archivePolicy === true) {
+    registerSiteTool(mcpTools.keep, async args => {
+      const site = await sites.setKeep(deps, user, args.name, args.keep)
+      return {
+        text: args.keep
+          ? `${site.name} is kept: the archive policy never archives it for disuse (undo with fling_keep keep: false).`
+          : `${site.name} is no longer kept: it is archived like any site once nobody views or publishes it for a while.`,
+        data: site,
+      }
+    })
+  }
+
   registerSiteTool(mcpTools.delete, async args => {
     await sites.deleteSite(deps, user, args.name)
     const recoverable = softDeletes(deps)
@@ -810,6 +831,24 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
       return {
         text: `${head}\nRestore or delete for good from Admin → Deleted: ${restoreUrl} (an admin's browser session; there is no tool for either)`,
         data: { deleted, restoreUrl },
+      }
+    })
+  }
+
+  // Admins only (any credential), where the instance has the policy in any form (archiving, or
+  // purging only): read only, since turning it live is the browser's.
+  if (
+    archivePolicyOnOf(instanceMetadata(deps.config)) &&
+    canInstance(principal, 'admin.archive.read')
+  ) {
+    register(mcpTools.adminArchivePolicy, async () => {
+      const status = await archivePolicyStatus(deps, principal)
+      return {
+        text: describeArchivePolicy(status, {
+          fling: wording.name,
+          appOrigin: deps.config.appOrigin,
+        }),
+        data: { ...status, switchUrl: adminArchivePolicyUrl(deps.config.appOrigin) },
       }
     })
   }

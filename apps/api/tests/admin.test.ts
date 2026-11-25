@@ -135,7 +135,7 @@ describe('the users list', () => {
       },
       expect.objectContaining({ email: OTHER_ADMIN, admin: true }),
     ])
-    // An admin's API key may list (the smoke test does), not impersonate.
+    // An admin's API key may list, not impersonate.
     expect((await api(env, boss.key, 'GET', '/api/admin/users')).status).toBe(200)
   })
 

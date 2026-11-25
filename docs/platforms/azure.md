@@ -235,8 +235,7 @@ The module's tests run as `terraform test` with mocked providers (`infra/tests/`
   2. points the Container App and the jobs at the image;
   3. starts the migrate job and waits for it to succeed;
   4. polls `/.well-known/fling` for the release;
-  5. purges Front Door;
-  6. runs the e2e smoke test.
+  5. purges Front Door.
 - **Local runtime:** none of its own. The Node runtime (`packages/e2e/src/local.ts`) runs the same
   host, and the Azure adapters' conformance runs against the Cosmos DB Linux emulator (vNext) and
   Azurite.

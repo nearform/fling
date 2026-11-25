@@ -72,8 +72,7 @@ The module would be `platforms/vercel/infra`, versioned like the AWS one.
   1. runs `vercel build` and `vercel deploy --prebuilt` with a team token kept as a GitHub
      secret;
   2. calls `migrate`;
-  3. polls `/.well-known/fling`;
-  4. runs the e2e smoke test.
+  3. polls `/.well-known/fling`.
 
   Vercel can trust GitHub OIDC for its own cloud integrations, but deploys still need a token.
 - **Local runtime:** the middleware and Functions under `vercel dev`, or the Node host with the

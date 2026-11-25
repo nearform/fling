@@ -654,8 +654,6 @@ Nothing in CI or the deploy sends real email.
   opt-out (the settings read with the CLI, changed with MCP `fling_notifications_set`, read back
   with `fling_notifications`, and set back with the CLI). Against a live instance the drain route
   does not exist, so these steps are skipped.
-- **Post-deploy smoke test** (the same scenario): where `/.well-known/fling` advertises `email`, it
-  checks that `GET /api/me/notifications` answers with the email channel. It sends nothing.
 - **By hand**, once at setup and after any change to the mail settings: send a test email from
   `/admin/mail` to a real mailbox and check SPF, DKIM and DMARC alignment in its headers.
 

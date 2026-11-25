@@ -5,7 +5,7 @@ order: 30
 summary: Keys and webhook addresses a site's server reads, set beside the site and never shown again.
 requires: [servers]
 sources: [apps/api/src/servers/secrets.ts, apps/api/src/servers/api.ts, apps/api/src/policy.ts, apps/cli/src/commands/servers.ts, apps/cli/src/site-server.ts, apps/cli/src/dotenv.ts, apps/web/src/components/site/SiteSecrets.tsx, packages/shared/src/site-server.ts, packages/shared/src/mcp-tools.ts]
-verified: b4d7792
+verified: 0ead0eb
 ---
 
 {{instance:name}} refuses to publish any file with a secret in it, the server's bundle included,

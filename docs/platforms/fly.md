@@ -82,8 +82,7 @@ Terraform is used only for DNS, wherever the operator's DNS provider has one.
   1. builds one image (the Node host, the UI, the sites' own pages);
   2. runs `fly deploy`;
   3. runs the release command (`migrate`);
-  4. polls `/.well-known/fling`;
-  5. runs the e2e smoke test.
+  4. polls `/.well-known/fling`.
 - **Local runtime:** the Node host over a local Postgres and MinIO, added to
   `packages/e2e/src/local.ts`.
 - **Emulators:** Postgres and MinIO in CI. MinIO is already there for `S3Blobs`.

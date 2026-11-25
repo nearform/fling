@@ -136,8 +136,7 @@ Terraform owns the shape, `deploy-gcp.yml` owns the image, and the app owns docu
      `.mcpb`, and the image (`platforms/gcp/Dockerfile`), and pushes it to Artifact Registry;
   2. deploys a new revision on it;
   3. loops `POST /ticks/migrate` until done;
-  4. polls `/.well-known/fling`;
-  5. runs the e2e smoke test.
+  4. polls `/.well-known/fling`.
 
   The web UI and Fling's pages for the sites are in the image, so there is nothing to sync. The
   `deploy` Terraform output becomes the `GCP_DEPLOY_CONFIG` GitHub variable.

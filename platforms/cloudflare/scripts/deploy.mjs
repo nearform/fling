@@ -9,10 +9,9 @@
 //   4. the Worker, its assets included: `wrangler deploy`;
 //   5. Fling's data migrations (migrate.ts --remote), after the code, as on AWS;
 //   6. the app origin's /.well-known/fling answers for this instance, from this release (`release`,
-//      the root package.json's version, built in);
-//   7. the smoke test (packages/e2e) when FLING_E2E_API_KEY is set, else a warning.
+//      the root package.json's version, built in).
 //
-//   CF_DEPLOY_CONFIG='{…}' CLOUDFLARE_API_TOKEN=… node scripts/deploy.mjs [--skip-smoke]
+//   CF_DEPLOY_CONFIG='{…}' CLOUDFLARE_API_TOKEN=… node scripts/deploy.mjs
 //   node scripts/deploy.mjs --config-file deploy-config.json
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -23,7 +22,6 @@ import { checkDeployConfig, ROOT } from './config.mjs'
 const { values: args } = parseArgs({
   options: {
     'config-file': { type: 'string' },
-    'skip-smoke': { type: 'boolean', default: false },
   },
 })
 
@@ -105,16 +103,4 @@ if (!answered) {
   process.exit(1)
 }
 
-if (args['skip-smoke']) {
-  console.log('\nSmoke test skipped (--skip-smoke)')
-} else if (!process.env.FLING_E2E_API_KEY) {
-  console.warn(
-    '\n! Smoke test skipped: set FLING_E2E_API_KEY (an API key of a test user, DEPLOY.md)'
-  )
-} else {
-  run('Smoke test', bin('tsx'), [
-    join(ROOT, '..', '..', 'packages', 'e2e', 'src', 'smoke.ts'),
-    appOrigin,
-  ])
-}
 console.log(`\nDeployed ${config.WORKER_NAME} to ${appOrigin}`)

@@ -24,8 +24,8 @@ name: Deploy
 #      apps/api/src/migrations), so this comes after the code, never before. Needs
 #      lambda:InvokeFunction on the deploy role and dynamodb:Scan on the function role
 #      (platforms/aws/DEPLOY.md); without them the step warns and the deploy goes on, migrations pending;
-#   1c. smoke test: the app origin's /.well-known/fling answers from the new code, for this instance
-#      and this release (`release`, built in from the root package.json);
+#   1c. the app origin's /.well-known/fling answers from the new code, for this instance and this
+#      release (`release`, built in from the root package.json);
 #   2. the UI: hashed assets first and never deleted (open tabs keep loading their chunks), then the
 #      other public files, then index.html last; plus the Claude Desktop extension at
 #      downloads/fling.mcpb (built from apps/cli);
@@ -227,7 +227,7 @@ jobs:
 
       # The new code answers for this instance before anything points at it (the function can only
       # start with a valid instance config, e.g. ALLOWED_EMAIL_DOMAINS).
-      - name: Smoke test the API
+      - name: Check the instance answers
         env:
           APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
         run: |

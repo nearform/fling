@@ -824,7 +824,7 @@ racing writers wins, and migrations drizzle-kit generates (`platforms/node/drizz
 `<schema>.fling_migrations`). Expired items are hidden
 at once and purged by maintenance. Every adapter, including the core's memory/fs ones,
 passes the same suites from `packages/conformance`, and every platform passes the same e2e
-scenario (`packages/e2e`) locally and as its post-deploy smoke test.
+scenario (`packages/e2e`) on its local runtime.
 
 **Cosmos DB Table** — the Table on one Cosmos DB for NoSQL container (`CosmosTable`,
 `platforms/azure/src/table/cosmos.ts`): every item in one logical partition, so every write is one

@@ -5,7 +5,7 @@ order: 10
 summary: Reviewers comment on a site's pages beside the site itself; you act on them and resolve them.
 requires: [comments]
 sources: [apps/api/src/comments.ts, packages/shared/src/comments.ts, apps/api/src/policy.ts, apps/web/src/pages/Review.tsx, apps/web/src/components/SiteButtons.tsx, apps/cli/src/commands/comments.ts, packages/shared/src/mcp-tools.ts]
-verified: c82d9d4
+verified: 0ead0eb
 ---
 
 Every site has a review page, `{{instance:origin}}/review/<name>`, that shows the site with its

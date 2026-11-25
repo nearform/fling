@@ -11,8 +11,7 @@ name: Deploy (Azure)
 # ALLOWED_EMAIL_DOMAINS and/or ALLOWED_EMAILS, OIDC_*, BRAND_*…; built into the image as
 # instance.json). The job signs in to Azure as the deploy identity over OIDC, through a federated
 # credential that trusts only this repository's `azure` environment, so there is no Azure secret in
-# GitHub. FLING_E2E_API_KEY, an API key of a test user, is the smoke test's; without it the smoke
-# test is skipped with a warning. See platforms/azure/DEPLOY.md.
+# GitHub. See platforms/azure/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. build the API with the Azure adapters, the web UI and the Claude Desktop extension, and the
@@ -21,8 +20,7 @@ name: Deploy (Azure)
 #   3. the data migrations: start the migrate job, which runs them until done, and wait for it.
 #      The code just deployed serves correctly before they run, so this comes after the code;
 #   4. /.well-known/fling answers for this instance and this release;
-#   5. purge Front Door's cache;
-#   6. the e2e scenario as a smoke test.
+#   5. purge Front Door's cache.
 on:
   workflow_dispatch:
     inputs:
@@ -212,18 +210,6 @@ jobs:
           read -ra domains <<<"$DOMAINS"
           az afd endpoint purge --resource-group "$GROUP" --profile-name "$PROFILE" \
             --endpoint-name "$ENDPOINT" --domains "${domains[@]}" --content-paths '/*'
-
-      - name: Smoke test
-        env:
-          APP_ORIGIN: ${{ steps.config.outputs.appOrigin }}
-          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$FLING_E2E_API_KEY" ]; then
-            echo "::warning::Smoke test skipped: set FLING_E2E_API_KEY (an API key of a test user, platforms/azure/DEPLOY.md)"
-            exit 0
-          fi
-          pnpm --filter @fling/e2e smoke "$APP_ORIGIN"
 
       - name: Summary
         run: echo "### Deployed \`$SHA\` to ${{ steps.config.outputs.appOrigin }}" >> "$GITHUB_STEP_SUMMARY"

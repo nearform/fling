@@ -133,8 +133,6 @@ the code, and the app owns KVS keys and table items.
   sites with 1000 Paths each could otherwise fill it for everyone.
 - **The decision's headers on S3 responses.** These need a response-side function or a response
   headers policy.
-- **No smoke e2e after deploy.** `deploy.yml` checks only `/.well-known/fling`, whereas the
-  Cloudflare deploy runs the e2e scenario.
 - **The KeyValueStore adapter is not covered by `routeTableConformance`,** because there is no
   emulator.
 

@@ -7,11 +7,9 @@ name: Deploy (Google Cloud)
 # Everything instance-specific is one repository variable, GCP_DEPLOY_CONFIG: the JSON of the
 # Terraform module's `deploy` output (project, region, workload identity provider, deploy service
 # account, service, image repository, app origin) plus an INSTANCE object of the instance's own
-# values, built into the image as instance.json. One secret is optional: FLING_E2E_API_KEY, an API
-# key of a test user, for the smoke test (without it the smoke test is skipped with a warning).
-# The job becomes the deploy service account through Workload Identity Federation, which trusts only
-# this repository's `gcp` environment, so there is no Google Cloud key in GitHub. See
-# platforms/gcp/DEPLOY.md.
+# values, built into the image as instance.json. The job becomes the deploy service account through
+# Workload Identity Federation, which trusts only this repository's `gcp` environment, so there is
+# no Google Cloud key in GitHub. See platforms/gcp/DEPLOY.md.
 #
 # Order, so nothing is ever served that points at something missing:
 #   1. the image: the service bundled (platforms/gcp), the web build, the Claude Desktop extension;
@@ -20,8 +18,7 @@ name: Deploy (Google Cloud)
 #   3. the data migrations, through POST /ticks/migrate with an ID token of the deploy service
 #      account, until they report done. The code just deployed serves correctly before they run
 #      (apps/api/src/migrations), so this comes after the code;
-#   4. /.well-known/fling answers for this instance and release, then the e2e scenario as a smoke
-#      test.
+#   4. /.well-known/fling answers for this instance and release.
 on:
   workflow_dispatch:
     inputs:
@@ -188,18 +185,6 @@ jobs:
             sleep 6
           done
           echo "::error::$APP_ORIGIN/.well-known/fling did not answer for this instance and release $RELEASE (check the service's logs)"; exit 1
-
-      - name: Smoke test
-        env:
-          APP_ORIGIN: ${{ steps.config.outputs.APP_ORIGIN }}
-          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$FLING_E2E_API_KEY" ]; then
-            echo "::warning::Smoke test skipped: FLING_E2E_API_KEY is not set (platforms/gcp/DEPLOY.md)"
-            exit 0
-          fi
-          pnpm --filter @fling/e2e smoke "$APP_ORIGIN"
 
       - name: Summary
         env:

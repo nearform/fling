@@ -5,7 +5,7 @@ order: 40
 summary: Every request a site's server took and what it printed, kept for a week.
 requires: [servers]
 sources: [apps/api/src/servers/logs.ts, apps/api/src/servers/api.ts, apps/api/src/policy.ts, apps/cli/src/commands/servers.ts, apps/cli/src/site-server.ts, apps/web/src/components/site/SiteServer.tsx, apps/web/src/components/site/SiteLogs.tsx, apps/web/src/lib/servers.ts, apps/web/src/pages/Site.tsx, packages/shared/src/site-server.ts, packages/shared/src/mcp-tools.ts]
-verified: c82d9d4
+verified: 0ead0eb
 ---
 
 {{instance:name}} writes a line for every request a site's server takes (method, path, status,

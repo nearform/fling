@@ -54,8 +54,8 @@
  * publisher and owner (directly and through a group), nothing for the actor, and nothing after an
  * opt-out.
  *
- * Content checks poll (up to `propagationMs`): on a real deployment a changed route can take a while
- * to reach the edge location the check lands on. New sites must not need it: the CLI's readiness
+ * Content checks poll (up to `propagationMs`): a changed route can take a moment to reach the
+ * sites host the check lands on. New sites must not need it: the CLI's readiness
  * wait covers them, and the scenario fails if a new site is not routed when the CLI says it is.
  */
 import { createHash, randomBytes } from 'node:crypto'
@@ -99,9 +99,9 @@ export interface ScenarioOptions {
    */
   member?: Session
   /**
-   * An admin of the instance (ADMIN_EMAILS): with a browser session (`cookie`, local runs) the
-   * users list and an impersonation of `session`; with only an API key (smoke tests) the list,
-   * and impersonation refused. Without one, skipped.
+   * An admin of the instance (ADMIN_EMAILS): with a browser session (`cookie`) the users list and
+   * an impersonation of `session`; with only an API key the list, and impersonation refused.
+   * Without one, skipped.
    */
   admin?: Session
   /**
@@ -110,7 +110,7 @@ export interface ScenarioOptions {
    * add the admin to the group; without either, those checks are skipped.
    */
   outsider?: Session
-  /** how long a changed route may take to show (default 5 s locally; smoke tests pass more) */
+  /** how long a changed route may take to show (default 5 s) */
   propagationMs?: number
   log?: (line: string) => void
 }
@@ -932,7 +932,7 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     }
 
     // Site servers: a site's own backend at /api/*, published, called, logged and rolled back.
-    // Only where the instance runs them (a deployed instance's smoke test may not).
+    // Only where the instance runs them (the `servers` capability).
     if (meta.capabilities.servers === true) {
       await serversStep({
         appOrigin,
@@ -952,8 +952,8 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
 
     // Soft delete: a deleted site and a deleted Path are kept, and an admin's session restores
     // them, then deletes them for good. Only where deletes are recoverable (SITE_DELETE is not
-    // `hard`) and with an admin's browser session (local runs): without one nothing could clean
-    // up what it keeps, so a smoke test never runs it.
+    // `hard`) and with an admin's browser session: without one nothing could clean up what it
+    // keeps.
     if (meta.capabilities.recoverableDeletes === true && opts.admin?.cookie) {
       await softDeleteStep({
         appOrigin,
@@ -3239,8 +3239,8 @@ async function adminStep(ctx: {
     )
   }
 
-  // Not admins: nothing there. A smoke run may sign in as one admin for both roles (a personal
-  // instance has no second account), and then there is no non-admin to ask.
+  // Not admins: nothing there. Where one account signs in for both roles there is no non-admin to
+  // ask.
   if (admin.email !== owner) {
     const refused = await call({ key: opts.session.apiKey }, 'GET', '/api/admin/users')
     check(refused.status === 404, `a non-admin listing users: ${refused.status}`)
@@ -3254,7 +3254,7 @@ async function adminStep(ctx: {
   await allSites({ key: admin.apiKey })
   await settings({ key: admin.apiKey })
   // Admin → Usage: every site's counts, and view counting's switch where views are counted. Only
-  // read here: the switch reaches every site, so a smoke run never sets it; a key may not anyway.
+  // read here: the switch reaches every site, so the scenario never sets it; a key may not anyway.
   const usage = await call({ key: admin.apiKey }, 'GET', '/api/admin/usage')
   check(usage.status === 200, `admin usage: ${usage.status}`)
   const usageBody = (await usage.json()) as { viewCounts: boolean; counting?: { on: unknown } }
@@ -3437,8 +3437,8 @@ async function serversStep(ctx: {
   const nodeName = `e2e-${nonce}-node`
   const owner = opts.session
   // The viewer: a member who isn't the site's owner, where there is one. A browser's `fling_site`
-  // is how a request reaches a members-only site's server with a viewer; without one (a smoke
-  // test signed in by key), the server is called through the share link, with no viewer.
+  // is how a request reaches a members-only site's server with a viewer; without one (a session
+  // signed in by key), the server is called through the share link, with no viewer.
   const viewer = opts.member?.siteCookie ? opts.member : owner
   const withViewer = viewer.siteCookie !== undefined
   const egress = ctx.meta.capabilities.serversEgress === true ? 'open' : 'none'

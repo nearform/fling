@@ -35,7 +35,7 @@ Azure, DigitalOcean or self-hosted) with its own name, domains, sign-in and bran
 | `platforms/s3` | `S3Blobs`, the `Blobs` adapter for any S3-compatible store (S3, Spaces, MinIO), shared by AWS and the Node host |
 | `packages/shared` | Contracts used by every app, including the sites' routing decision (`site-routing.ts`) |
 | `packages/conformance` | Suites every adapter must pass (Table, Blobs, RouteTable, Store, migrations) |
-| `packages/e2e` | The one scenario every platform passes, locally (`pnpm e2e`) and as the post-deploy smoke test |
+| `packages/e2e` | The one scenario every platform passes on its local runtime (`pnpm e2e`) |
 | `edge` | The CloudFront Function, generated around `site-routing.ts` |
 | `apps/web` | React UI, the user guide (`/guide`, `content/guide/`) and the sites' 404 page, themed from the instance metadata |
 | `apps/cli` | The CLI, the local MCP server and the Claude Desktop extension (`.mcpb`) |

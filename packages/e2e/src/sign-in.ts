@@ -1,8 +1,7 @@
 /**
- * How the scenario signs in. Locally, `dev`: the instance's dev login (DEV_LOGIN, never in
- * production) gives a browser session and the `fling_site` cookie, and the CLI's own loopback
- * login turns the session into an API key. Against a real deployment, `apiKey`: an API key of a
- * test user, from the environment (made once in the web UI, API keys page).
+ * How the scenario signs in: the instance's dev login (DEV_LOGIN, never in production) gives a
+ * browser session and the `fling_site` cookie, and the CLI's own loopback login turns the session
+ * into an API key.
  */
 export interface Session {
   email: string
@@ -35,15 +34,4 @@ export async function devLogin(appOrigin: string, email: string): Promise<Sessio
   const apiKey = location ? new URL(location).searchParams.get('key') : null
   if (!apiKey) throw new Error(`CLI login: ${cli.status} ${location}`)
   return { email, apiKey, siteCookie, cookie: cookies.join('; ') }
-}
-
-export async function apiKeySession(appOrigin: string, apiKey: string): Promise<Session> {
-  const res = await fetch(`${appOrigin}/api/me`, {
-    headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' },
-  })
-  if (!res.ok) throw new Error(`the API key was refused: GET /api/me answered ${res.status}`)
-  const me = (await res.json()) as { email?: string; user?: { email?: string } }
-  const email = me.email ?? me.user?.email
-  if (!email) throw new Error(`GET /api/me: ${JSON.stringify(me)}`)
-  return { email, apiKey }
 }

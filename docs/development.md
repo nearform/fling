@@ -309,13 +309,13 @@ platforms are capability flags, never `if (platform === …)`.
   (`gh pr merge --rebase`). Every PR that changes behaviour adds its bullet under `## Unreleased`
   in [CHANGELOG.md](../CHANGELOG.md).
 - Merging deploys nothing. A release does: its tag publishes the CLI and deploys the AWS production
-  instance (see [Releasing](#releasing)). That deploy covers the API, data migrations, the smoke
-  check, the UI, the 404 page, the review shell, the sites' robots.txt and the site router.
+  instance (see [Releasing](#releasing)). That deploy covers the API, data migrations, the
+  `/.well-known/fling` check, the UI, the 404 page, the review shell, the sites' robots.txt and the site router.
 - The Cloudflare instance is deployed by hand through the **Deploy (Cloudflare)** workflow with the
   release tag as `ref`, or locally with `pnpm --filter @fling/platform-cloudflare run deploy` from
-  a checkout of the tag. It ends with the e2e smoke test.
+  a checkout of the tag. It ends by checking that `/.well-known/fling` answers with the release.
 - A Google Cloud instance is deployed by hand through the **Deploy (Google Cloud)** workflow
-  (`deploy-gcp.yml`) with the release tag as `ref`. It ends with the e2e smoke test.
+  (`deploy-gcp.yml`) with the release tag as `ref`. It ends the same way.
 - To roll back, run any deploy workflow with an older release tag. Data is never rolled back,
   which is why migrations use expand/contract.
 
@@ -357,8 +357,7 @@ The tag starts the **Release** workflow (`.github/workflows/release-cli.yml`):
    the Claude Desktop extension (`fling.mcpb`) attached.
 
 When the Release workflow succeeds, **Deploy** (`deploy.yml`) deploys that commit to the AWS
-production instance; its smoke test checks that `/.well-known/fling` answers with the new
-`release`. Deploy Cloudflare by hand from the same tag (**Deploy (Cloudflare)**, `ref` `v0.7.0`).
+production instance and checks that `/.well-known/fling` answers with the new `release`. Deploy Cloudflare by hand from the same tag (**Deploy (Cloudflare)**, `ref` `v0.7.0`).
 
 **Redeploy or roll back.** Run **Deploy** by hand from `main` (Actions → Deploy → Run workflow)
 with a release tag as `ref`: the current tag redeploys, an older one rolls back. Do the same with

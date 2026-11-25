@@ -101,3 +101,9 @@ export const thumbnailKey = (siteId: string) => `sites/${siteId}/_thumbnail.png`
 
 /** Staging area for chunked MCP uploads (never routed by the edge; deleted on finish). */
 export const uploadPrefix = (uploadId: string) => `uploads/${uploadId}/`
+
+/**
+ * A deleted site's (or Path's) recovery file (deletion.ts): what a restore reads, beside the files
+ * a soft delete kept. Outside every version, so the edge never serves it.
+ */
+export const deletedKey = (storageId: string) => `sites/${storageId}/deleted.json`

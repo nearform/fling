@@ -222,6 +222,7 @@ Values reach the function two ways, and the function's own environment wins:
 | `VERSION_RETENTION` | no (`0`) | How many complete versions of each site and each Path to keep besides the current one, a whole number from 0 to 10000. `0` keeps every version. Above it, maintenance marks older versions and deletes their files at least an hour later; a version published again or rolled back to in that hour is kept. |
 | `MAINTENANCE_SWEEP_ENABLED` | no (on) | Maintenance works on the sites queued for it, then sweeps every site in turn, a little each run. `off` maintains only queued sites, for the least background work: sites from before the queue, and every site after a change to `VERSION_RETENTION`, then wait until something queues them (a publish, a rollback). |
 | `SITE_VIEW_COUNTS` | no (on) | Sites' view counts. On, every HTML page of a version that goes live gets a copy with the view beacon, a small script that tells the site's own host once per page load (`POST /_fling-seen`), and the views it reports are counted, per site, in a site's metrics, beside its pushes. Advertised as the `viewCounts` capability. On, an admin turns view counting on or off for every site in Admin → Usage. `off` is the operator's hard off: it makes no new copies, stops serving the ones there are at each site's next route write, counts nothing and removes the admins' switch; pushes are still counted. AWS: the sites distribution's `/_fling-seen` behaviour (the module's `edge.tf`) carries the beacon to the API. |
+| `SITE_DELETE` | no (`soft`) | What deleting a site or a Path does. `soft` takes it down and frees its name, but keeps its files in the sites bucket with a recovery file beside them (`sites/<id>/deleted.json`) and a deleted-site record, so an admin can restore it from Admin → Deleted; advertised as the `recoverableDeletes` capability. Fling never removes what it kept by itself: the files stay until an admin deletes them for good there. `hard` deletes the files too, and nothing can be recovered. Any other value stops the API starting. Changing it affects later deletes only: what was kept can still be restored. See [Deleted sites](#deleted-sites). |
 | `PATHS_PER_SITE_MAX` | no (`1000`; AWS: `200`) | The most live Paths (published, not archived) one site may have, from 1 to 1000. Publishing to a new Path, and bringing back an archived one, are refused with `too_large` once a site has that many; archived Paths don't count. A site can keep at most 1000 Paths in all, archived ones included. Published as `limits.pathsPerSite` in the metadata, which the CLI, the MCP servers and the Guide state. Lowering it stops sites that have more from adding any, and takes none away. AWS: the module sets it from `paths_per_site` (default 200), over anything in `INSTANCE`. |
 | `SERVERS` | no (`off`) | Who may publish a site server (`_fling/server.mjs`, run for the site's `/api/*`): `off`, `admins`, `members` (everyone but guests), or `groups:<slug>,<slug>` (members of those groups). Anything but `off` turns on the `servers` capability, and needs a platform that runs servers. AWS: needs the module's `servers.enabled`; the function refuses to start without it. |
 | `SERVERS_EGRESS` | no (`none`) | What a site server may reach: `none` (nothing outside its platform) or `open` (the internet; the `serversEgress` capability). AWS: the module sets it from `servers.egress`, over anything in `INSTANCE`. |
@@ -793,6 +794,84 @@ The function logs in the Text format, so each JSON line follows Lambda's own pre
 match the message as text and parse the numbers out of it. **Admin → Routes** shows the last lap's
 length and when it finished.
 
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, deleting a site takes it down and frees its name at once,
+but leaves its files where they were in the sites bucket (`SITES_BUCKET` in `AWS_DEPLOY_CONFIG`,
+`<bucket_prefix><namespace>-<env>-<name>-sites`):
+
+- `sites/<siteId>/`: every kept version's files (`sites/<siteId>/<versionId>/…`), their manifests,
+  the thumbnail, a site server's bundle, and the recovery file, `deleted.json`.
+- `sites/<pathId>/`: each of the site's Paths, with a `deleted.json` of its own. A Path deleted on
+  its own leaves only its prefix.
+
+`deleted.json` (`format: 1`) holds the site's records as they were: the site (name, owners,
+publishers, audience, current version, whether it was archived), its versions, comments and form
+responses, its Paths' folders and ids, the names of its secrets (never a value), who deleted it,
+when, and the bytes kept. A Path's holds its Path record and versions. A deleted-site record in
+the Table lists the site for admins. Nothing serves a kept prefix: its routes are gone.
+
+**Restoring, and deleting for good**, are done on **Admin → Deleted** in the web app, by an admin
+signed in to it as themselves: not with an API key, an MCP connection or while impersonating, so a
+leaked credential can't put back what someone took down. **Restore…** puts a site back under its
+own name or another, with its Paths, versions, comments and the people it was shared with
+(the Guide's **Deleted sites** page, `/guide/admin/deleted`, says what comes back).
+**Delete for good** removes the kept files, the recovery files and the deleted-site record. Both
+are audited. `fling admin deleted [name]` and the `fling_admin_deleted` MCP tool list what is kept
+(with each site's id in the tool's answer and with `--json`), and link to the page.
+
+Fling never removes kept files by itself, and a bucket lifecycle rule can't do it for you: a kept
+prefix sits among the live sites' prefixes under `sites/`, and nothing in its keys tells it apart.
+Delete for good what nobody will need.
+
+**What it costs.** Kept files are billed like live ones. **Admin → Usage** has a line for them:
+how many deleted sites and Paths are kept, and about how much they take (the sizes of their
+versions, a guide).
+
+**Switching to `hard`** affects later deletes only. Those kept stay kept, and Admin → Deleted still
+restores them and deletes them for good. A hard delete removes the files at once, writes no
+recovery file or record, and is audited.
+
+### Recovering a site by hand
+
+When a restore can't, the files are still in the bucket. That happens when Admin → Deleted answers
+`recovery_unreadable` (a recovery file written long before by a release whose records had another
+shape), or when the Table was restored from a backup without the deleted-site record, so the site
+isn't listed at all.
+
+1. **Find the prefix.** Listed, the site's id is in `fling admin deleted <name> --json`
+   (`siteId`, and each Path's `pathId`). Not listed, find the recovery files and read each one's
+   `site.name` (a Path's: `siteName` and `path.folder`):
+   `aws s3 ls s3://$SITES_BUCKET/sites/ --recursive | grep /deleted.json`.
+2. **Read the recovery file**:
+   `aws s3 cp s3://$SITES_BUCKET/sites/<siteId>/deleted.json -`. `site.currentVersionId` is the
+   version that was live, and `site.owners`, `site.publishers` and `site.audience` who had it;
+   `paths` lists its Paths' folders and ids.
+3. **Publish it again.** Download that version,
+   `aws s3 cp --recursive s3://$SITES_BUCKET/sites/<siteId>/<versionId>/ ./recovered`, leave out
+   `_fling/` (a server's bundle: publish a server from its source), then
+   `fling deploy ./recovered --name <name>` and set who can open it. Each Path the same way, from
+   `sites/<pathId>/<versionId>/` (its `deleted.json` names the version), with `--path <folder>`.
+
+Comments, form responses and older versions don't come back this way; they stay readable in
+`deleted.json` and the bucket. Once it is published again, delete the old prefixes by hand
+(`aws s3 rm --recursive s3://$SITES_BUCKET/sites/<siteId>/`) if Admin → Deleted doesn't list them.
+
+### Known risks
+
+- **An old recovery file may not restore.** Only the current release reads `deleted.json`, in one
+  format. One written long before a change to the records may be refused with
+  `recovery_unreadable`; its content is still in the bucket, to recover by hand. It is readable
+  JSON, but not a stable interface for other tools.
+- **The smoke test leaves small kept sites behind.** Where a deploy runs the e2e scenario as its
+  smoke test (Cloudflare, GCP, Azure and DigitalOcean with `FLING_E2E_API_KEY`), it deletes the
+  sites it made (`e2e-<random>…`) with an API key, so they are kept like any other: about 15 small
+  ones a run, which an admin deletes for good on Admin → Deleted now and then. Its soft-delete
+  checks need an admin's browser session and run only locally (`pnpm e2e`).
+- **A late upload can land in a kept prefix.** A presigned upload URL handed out just before the delete
+  (good for at most 15 minutes) can still write a file into the kept prefix. Nothing serves it, and
+  Delete for good removes it with the rest.
+
 ## Claude's sandbox: allow your Fling's host
 
 Claude's code execution runs in a sandbox whose network goes through a proxy, and the proxy only
@@ -1003,7 +1082,8 @@ puts it there alongside its first request, and logs `edge key` when done.
 
 About $0 when idle. Lambda, CloudFront (PriceClass_100), DynamoDB on demand, the KeyValueStore,
 CloudFront Functions and standard SSM parameters cost nothing or pennies at internal scale. The ACM
-certificate is free. The only steady cost is S3 storage of site versions, about $0.023 per GB-month.
+certificate is free. The only steady cost is S3 storage of site versions, those of [deleted sites](#deleted-sites) kept
+included, about $0.023 per GB-month.
 
 Live rooms are the one part billed per message. API Gateway WebSockets charge for connection
 minutes and messages (about $0.25 per million minutes and $1 per million messages), and every

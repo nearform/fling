@@ -225,6 +225,23 @@ number of containers may run them. App Platform's scheduled jobs run at most eve
 seldom for the minute tick. `POST /ticks/notify` and `/ticks/maintain` also answer with
 `TICK_SECRET`, for an outside scheduler.
 
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, a deleted site's files stay where they were, with a recovery
+file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a `deleted.json` in
+each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
+their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
+and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
+the same here.
+
+The prefixes are in the Spaces bucket (`bucket_name`, default `<name>-sites`). In the control
+panel, **Spaces Object Storage →** the bucket, then `sites/<siteId>/`. From a shell, with a Spaces
+key that reads the bucket, any S3 client works:
+`aws s3 cp --recursive --endpoint-url https://$REGION.digitaloceanspaces.com
+s3://<bucket>/sites/<siteId>/<versionId>/ ./recovered` downloads a version, and
+`aws s3 cp --endpoint-url … s3://<bucket>/sites/<siteId>/deleted.json -` reads the recovery file.
+The bucket's lifecycle rule touches only `uploads/`.
+
 ## Claude's sandbox: allow your Fling's host
 
 So that Claude can upload the files it makes with code execution rather than typing them out

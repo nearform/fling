@@ -5,7 +5,7 @@ order: 25
 summary: See what admins did: impersonations, invitations, changes to other people's sites.
 audience: admin
 sources: [apps/web/src/pages/AdminAudit.tsx, apps/api/src/audit.ts, apps/api/src/admin.ts]
-verified: c82d9d4
+verified: b4d7792
 ---
 
 {{instance:name}} records what admins do beyond their own sites, so that anyone who looks after
@@ -20,6 +20,8 @@ Open **Admin → Audit**. The newest entries come first:
 - what admins changed on other people's sites, and what they opened of restricted ones;<!-- requires: servers -->
 - each site server published, and each viewer id an admin looked up;<!-- /requires --><!-- requires: viewCounts -->
 - each time view counting was turned on or off for every site ([Usage](/guide/admin/usage#turn-view-counting-on-or-off));<!-- /requires -->
+- every site and Path deleted, by anyone, its owners included, and each one an admin restored or
+  deleted for good ([Deleted sites](/guide/admin/deleted));
 - each choice of the route table's format ([Routes](/guide/admin/routes)).
 
 Entries are kept for {{fact:audit-days}}.

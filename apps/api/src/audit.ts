@@ -1,6 +1,7 @@
 /**
  * The audit log: what admins did (impersonations, invitations, revocations, changes to other
- * people's sites, opening restricted ones) and every invitation someone made by sharing. Each
+ * people's sites, opening restricted ones, restoring deleted sites), every invitation someone made
+ * by sharing, and every site or Path deleted, by anyone. Each
  * entry is written twice: an AUDIT record, kept AUDIT_TTL_DAYS and listed on the admin page, and a
  * structured log line. The record is written first, so a caller
  * that audits before acting never acts off the record.
@@ -37,6 +38,7 @@ export async function audit(
       ...(record.role && { role: record.role }),
       ...(record.owner && { owner: record.owner }),
       ...(record.change && { change: record.change }),
+      ...(record.siteId && { siteId: record.siteId }),
     })
   )
 }

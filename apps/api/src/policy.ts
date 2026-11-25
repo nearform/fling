@@ -513,6 +513,11 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *                            the user's standing goes; `SERVERS` narrows it (`canPublishServer`)
  *   admin.viewers.resolve    POST /api/admin/sites/:name/viewers/resolve: who a viewer id is
  *                            (audited as `viewer.resolved`)
+ *   admin.deleted.read       GET /api/admin/deleted: the deleted sites and Paths kept (deletion.ts)
+ *   admin.deleted.restore    POST /api/admin/deleted/:siteId/restore and …/paths/:pathId/restore:
+ *                            browser session only, a restore puts back what someone took down
+ *   admin.deleted.purge      DELETE /api/admin/deleted/:siteId and …/paths/:pathId: delete what
+ *                            was kept for good; browser session only, it can't be undone
  *
  * Admins see every site's listing (`admin.sites.list`: its name, owner, dates, state and access
  * level), and administer the sites themselves through `can` (the `admin` and `admin-token`
@@ -555,6 +560,9 @@ export const INSTANCE_ACTIONS = [
   'account.notifications.sent',
   'server.publish',
   'admin.viewers.resolve',
+  'admin.deleted.read',
+  'admin.deleted.restore',
+  'admin.deleted.purge',
 ] as const
 
 export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
@@ -594,6 +602,11 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'account.notifications.sent': notImpersonating,
   'server.publish': notGuest,
   'admin.viewers.resolve': isAdminRole,
+  'admin.deleted.read': isAdminRole,
+  // A leaked key or token must not be able to put back what someone took down.
+  'admin.deleted.restore': role => role === 'admin',
+  // Nor delete for good what an admin could still put back.
+  'admin.deleted.purge': role => role === 'admin',
 }
 
 export function principalRole(p: Principal): PrincipalRole {

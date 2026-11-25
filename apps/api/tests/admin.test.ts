@@ -566,11 +566,15 @@ describe("administering other people's sites", () => {
       ['site.rollback'],
       ['share.create'],
       ['share.revoke'],
-      ['site.delete'],
     ]
       .map(([change]) => ['site.change', change, BOSS, 'secret', MEMBER])
       .sort((a, b) => String(a[1]).localeCompare(String(b[1])))
     expect(await siteAudit()).toEqual(expected)
+    // The delete is on the record once, as every delete is (deletion.ts), with the site's id.
+    const deletes = (await env.store.listAuditEntries(100)).filter(e => e.action === 'site.delete')
+    expect(deletes).toMatchObject([
+      { actor: BOSS, target: 'secret', owner: MEMBER, siteId: site?.id, change: 'soft' },
+    ])
   })
 
   it('an admin key reads any site but changes none of them', async () => {

@@ -5,11 +5,14 @@
  */
 import {
   type AccessLevel,
+  ADMIN_DELETED_PATH,
   accessChangeHint,
   type Comment,
   changesAudience,
   checkFormsConfig,
   commentThreads,
+  type DeletedSite,
+  deletedText,
   describeAudience,
   describeComments,
   describeFormsSummary,
@@ -71,6 +74,7 @@ import type { z } from 'zod'
 import { manifestKey } from '../blobs/types.ts'
 import * as comments from '../comments.ts'
 import { isAdminEmail } from '../config.ts'
+import { listDeleted, softDeletes } from '../deletion.ts'
 import { formsOf, readForms, responsesOf } from '../forms.ts'
 import * as groups from '../groups.ts'
 import { instanceMetadata, notificationChannels } from '../instance.ts'
@@ -779,11 +783,36 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
 
   registerSiteTool(mcpTools.delete, async args => {
     await sites.deleteSite(deps, user, args.name)
+    const recoverable = softDeletes(deps)
     return {
-      text: `${args.name} deleted; the name is free again.`,
-      data: { name: args.name, deleted: true },
+      text: `${deletedText(recoverable, args.name)} The name is free again.`,
+      data: { name: args.name, deleted: true, recoverable },
     }
   })
+
+  // Admins only (any credential): the deleted sites kept; restoring and purging are the browser's.
+  if (canInstance(principal, 'admin.deleted.read')) {
+    register(mcpTools.adminDeleted, async args => {
+      const { deleted } = await listDeleted(deps, principal, args.name)
+      const restoreUrl = `${deps.config.appOrigin}${ADMIN_DELETED_PATH}`
+      const what = (d: DeletedSite) => (d.kind === 'path' ? `${d.folder}/ of ${d.name}` : d.name)
+      const lines = deleted.map(d => {
+        const withPaths = d.paths?.length
+          ? `, with its Paths ${d.paths.map(p => `${p.folder}/`).join(', ')}`
+          : ''
+        return `- ${what(d)} (${d.kind === 'path' ? 'a Path' : 'site'} ${d.siteId}): owner ${d.owner}, deleted by ${d.deletedBy} at ${d.deletedAt}, ${d.bytes} bytes kept${withPaths}`
+      })
+      const head = deleted.length
+        ? `${deleted.length} deleted site(s) and Path(s), newest first:\n${lines.join('\n')}`
+        : args.name
+          ? `Nothing named ${args.name} was deleted.`
+          : 'No deleted sites.'
+      return {
+        text: `${head}\nRestore or delete for good from Admin → Deleted: ${restoreUrl} (an admin's browser session; there is no tool for either)`,
+        data: { deleted, restoreUrl },
+      }
+    })
+  }
 
   registerSiteTool(mcpTools.rollback, async args => {
     if (args.path !== undefined) {

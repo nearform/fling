@@ -271,7 +271,23 @@ and a taken name fails (exit 1) with suggestions rather than picking another nam
 | `fling owners <name> [--add <emails>] [--remove <emails>] [--set <emails>] [--group <slugs>] [--remove-group <slugs>] [--path <folder>]` | who owns a site (or a Path), or change it |
 | `fling publishers <name> [--add …] [--remove …] [--set …] [--group …] [--remove-group …] [--path <folder>]` | who publishes a site (or a Path) without owning it, or change it |
 | `fling archive <name>` / `fling unarchive <name>` | take offline and keep the files, or bring back |
-| `fling rm <name> [--yes]` | delete permanently |
+| `fling rm <name> [--yes]` | delete it: its link stops working and the name is freed |
+
+Before a delete, the CLI says whether it can be recovered, from the instance's
+`recoverableDeletes` capability: *"Delete pitch-deck? Its link stops working and the name is freed.
+An admin can recover it."*, or on a Fling that deletes for good *"…This can't be undone."* Then
+*"Deleted pitch-deck. An admin can recover it."* or *"Deleted pitch-deck for good."* `--json`
+includes `recoverable`. `fling paths delete` says the same of a Path.
+
+An admin lists what was deleted, and restores it from the web app:
+
+```sh
+fling admin deleted              # deleted sites and Paths, newest first: owner, who and when, size kept, Paths
+fling admin deleted pitch-deck   # only that name's deletes and its Paths'
+```
+
+It ends with the link to Admin → Deleted (`<your Fling>/admin/deleted`), where an admin restores a
+site or a Path, or deletes it for good, from their browser session; the CLI does neither. Anyone else is refused (exit 3).
 
 An admin of the instance can read anyone's site with these commands (`fling info`, `fling files`,
 the comments). Changing someone else's site needs the admin's browser session: open it from All
@@ -364,7 +380,7 @@ fling rollback payments-plans <versionId> --path PAY-412   # roll back only the 
 fling owners payments-plans --path PAY-412 --add cat@example.com
 fling publishers payments-plans --path PAY-412 --add bob@example.com
 fling paths archive payments-plans PAY-412        # take it off the site (404), keep its versions; `paths unarchive` brings it back
-fling paths delete payments-plans PAY-412         # delete it and its versions (asks first unless --yes)
+fling paths delete payments-plans PAY-412         # delete it and its versions (asks first unless --yes; says whether an admin can recover it)
 fling pull payments-plans --path PAY-412          # its files, to change and deploy back to the Path
 ```
 
@@ -585,7 +601,8 @@ The MCP tools:
 - `fling_stats` (a site's views and pushes, or without a name your live sites', counts only) where a Fling has metrics.
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_rollback`, `fling_delete` (needs
-  `confirm: true`), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
+  `confirm: true`; its result says whether an admin can recover the site), `fling_admin_deleted`
+  (admins: deleted sites and Paths, with the link to Admin → Deleted to restore one or delete it for good), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
   (`fling_forms`, `fling_forms_template`, `fling_forms_check`, `fling_responses_list`, and
   `fling_response_submit`, which answers a form as you, only when you ask), and
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,

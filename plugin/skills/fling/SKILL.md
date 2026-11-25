@@ -323,8 +323,19 @@ published as it is: no need to convert it to HTML.
 
 - `fling_archive { name }` takes a site offline (404) and hides it, but keeps every file and
   version; `unarchive: true` restores it. Prefer this.
-- `fling_delete { name, confirm: true }` permanently removes the site and all versions. Only call
-  it after the user has explicitly confirmed deleting that site.
+- `fling_delete { name, confirm: true }` takes the site down with all its versions and frees its
+  name. Only call it after the user has explicitly confirmed deleting that site.
+- Before asking, read `recoverableDeletes` in the Fling's capabilities (`fling_servers` or
+  `/.well-known/fling`) and tell the user which applies, in these words: *"Delete pitch-deck? Its
+  link stops working and the name is freed. An admin can recover it."* when it is `true`, or
+  *"…This can't be undone."* when it is not. A Path: *"Delete PAY-412/ of team? Its pages stop
+  being served."* and the same ending. The result says the same: *"Deleted pitch-deck. An admin
+  can recover it."* or *"Deleted pitch-deck for good."*
+- Admins list deleted sites and Paths with `fling_admin_deleted { name? }` (`fling admin deleted
+  [name]`): owner, who deleted it and when, the size kept. Restoring, or deleting for good, is done
+  in the browser by an admin, at Admin → Deleted in the Fling's web app (the link the result
+  gives); no tool does either.
+  Anyone else who wants a site back asks an admin.
 
 ## Comments
 
@@ -495,5 +506,5 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
 
 CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling stats [name]`, `fling versions <name>`, `fling files <name>`, `fling share <name>
 [--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling owners|publishers <name> [--add|--remove|--set <emails>|--group|--remove-group <slugs>]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
-`fling rm <name> --yes`, `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
+`fling rm <name> --yes`, `fling admin deleted [name]` (admins), `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

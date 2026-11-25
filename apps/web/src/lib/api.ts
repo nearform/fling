@@ -34,6 +34,8 @@ import {
   ConnectionListSchema,
   type CreateCommentRequest,
   type CreateGroupRequest,
+  type DeletedSite,
+  DeletedSitesSchema,
   type DeleteSiteSecretResponse,
   DeleteSiteSecretResponseSchema,
   ErrorEnvelopeSchema,
@@ -69,6 +71,8 @@ import {
   type ResponseExportFormat,
   type ResponsesExport,
   ResponsesExportSchema,
+  type RestoreResult,
+  RestoreResultSchema,
   type RouteFormat,
   type SentNotification,
   SentNotificationListSchema,
@@ -112,13 +116,22 @@ export class ApiError extends Error {
   readonly code: string
   /** what was wrong with each field of a form's response (`invalid_response`); empty otherwise */
   readonly fieldErrors: FieldError[]
+  /** free names to use instead (`name_taken`); empty otherwise */
+  readonly suggestions: string[]
 
-  constructor(status: number, code: string, message: string, fieldErrors: FieldError[] = []) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    fieldErrors: FieldError[] = [],
+    suggestions: string[] = []
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.fieldErrors = fieldErrors
+    this.suggestions = suggestions
   }
 }
 
@@ -186,14 +199,17 @@ function failure(res: Response, data: unknown): ApiError {
   if (!envelope.success) {
     return new ApiError(res.status, `http_${res.status}`, `Request failed (${res.status})`)
   }
-  const fields = FieldErrorSchema.array().safeParse(
-    (data as { error: { errors?: unknown } }).error.errors
-  )
+  const extra = (data as { error: { errors?: unknown; suggestions?: unknown } }).error
+  const fields = FieldErrorSchema.array().safeParse(extra.errors)
+  const suggestions = Array.isArray(extra.suggestions)
+    ? extra.suggestions.filter((n): n is string => typeof n === 'string')
+    : []
   return new ApiError(
     res.status,
     envelope.data.error.code,
     envelope.data.error.message,
-    fields.success ? fields.data : []
+    fields.success ? fields.data : [],
+    suggestions
   )
 }
 
@@ -485,6 +501,35 @@ export const api = {
     request('/api/admin/route-table', AdminRouteTableSchema),
   /** Admins, on an instance with metrics: every site's views and pushes, and the last lap's tally. */
   adminUsage: (): Promise<InstanceUsage> => request('/api/admin/usage', InstanceUsageSchema),
+  /** Admins: the deleted sites and Paths still kept, newest first; `name`: one site name's. */
+  async adminDeleted(name = ''): Promise<DeletedSite[]> {
+    const query = name ? `?${new URLSearchParams({ name })}` : ''
+    const { deleted } = await request(`/api/admin/deleted${query}`, DeletedSitesSchema)
+    return deleted
+  },
+  /** Admins, in a browser session: restore a deleted site, under `name` when not its own. */
+  restoreSite: (siteId: string, name?: string): Promise<RestoreResult> =>
+    request(`/api/admin/deleted/${encodeURIComponent(siteId)}/restore`, RestoreResultSchema, {
+      method: 'POST',
+      body: name ? { name } : {},
+    }),
+  /** Admins, in a browser session: restore a Path deleted on its own, into its site. */
+  restorePath: (siteId: string, pathId: string): Promise<RestoreResult> =>
+    request(
+      `/api/admin/deleted/${encodeURIComponent(siteId)}/paths/${encodeURIComponent(pathId)}/restore`,
+      RestoreResultSchema,
+      { method: 'POST' }
+    ),
+  /** Admins, in a browser session: delete a deleted site's kept files for good, its Paths' too. */
+  purgeSite: (siteId: string) =>
+    request(`/api/admin/deleted/${encodeURIComponent(siteId)}`, ignoreBody, { method: 'DELETE' }),
+  /** Admins, in a browser session: delete a Path deleted on its own for good. */
+  purgePath: (siteId: string, pathId: string) =>
+    request(
+      `/api/admin/deleted/${encodeURIComponent(siteId)}/paths/${encodeURIComponent(pathId)}`,
+      ignoreBody,
+      { method: 'DELETE' }
+    ),
   /** Admins, in a browser session: turn view counting on or off, rolled out to every site. */
   setViewCounting: (on: boolean): Promise<InstanceUsage> =>
     request('/api/admin/usage/view-counting', InstanceUsageSchema, { method: 'PUT', body: { on } }),

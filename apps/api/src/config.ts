@@ -176,6 +176,11 @@ const envSchema = z.object({
   INVITES: flag,
   /** Sites' view counts (views.ts): on unless `off` (or false/no/0). */
   SITE_VIEW_COUNTS: flagDefaultOn,
+  /** Deleting a site (deletion.ts): `soft` (the default) keeps its files for an admin to restore. */
+  SITE_DELETE: z.preprocess(
+    value => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+    z.preprocess(blank, z.enum(['soft', 'hard']).default('soft'))
+  ),
   INVITES_PER_DAY: z.preprocess(blank, z.coerce.number().int().positive().default(20)),
   VERSION_RETENTION: z.preprocess(blank, z.coerce.number().int().min(0).max(10_000).default(0)),
   /** Maintenance's sweep of every site, behind its queue: on unless `off` (or false/no/0). */
@@ -254,6 +259,7 @@ export const SETTING_GROUP: Record<EnvKey, SettingGroup> = {
   INVITES: 'features',
   INVITES_PER_DAY: 'features',
   SITE_VIEW_COUNTS: 'features',
+  SITE_DELETE: 'features',
   VERSION_RETENTION: 'features',
   MAINTENANCE_SWEEP_ENABLED: 'features',
   SERVERS: 'features',
@@ -561,6 +567,13 @@ export interface Config {
    * as the `viewCounts` capability.
    */
   viewCounts: boolean
+  /**
+   * What deleting a site or a Path does (`SITE_DELETE`, default `soft`; deletion.ts): `soft` takes
+   * it down and frees its name but keeps its files, with a recovery file and a deleted-site record,
+   * so an admin can restore it; `hard` deletes its files too. Advertised as the
+   * `recoverableDeletes` capability.
+   */
+  siteDelete: 'soft' | 'hard'
   /** New outside addresses one person may invite a day (`INVITES_PER_DAY`, default 20). */
   invitesPerDay: number
   /**
@@ -692,6 +705,7 @@ export function loadBaseConfig(env: Record<string, string | undefined> = process
     invites: e.INVITES,
     invitesPerDay: e.INVITES_PER_DAY,
     viewCounts: e.SITE_VIEW_COUNTS,
+    siteDelete: e.SITE_DELETE,
     versionRetention: e.VERSION_RETENTION,
     maintenanceSweep: e.MAINTENANCE_SWEEP_ENABLED,
     servers: {

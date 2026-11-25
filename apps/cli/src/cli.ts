@@ -17,6 +17,7 @@ import { METRIC_DAYS, METRIC_MONTHS } from '@fling/shared/metrics'
 import { PATHS_TEMPLATE_DESCRIPTIONS, PATHS_TEMPLATE_NAMES } from '@fling/shared/paths-templates'
 import chalk from 'chalk'
 import { Command, InvalidArgumentError, Option } from 'commander'
+import { runAdminDeleted } from './commands/admin.ts'
 import { runLogin, runLogout, runUse, runWhoami } from './commands/auth.ts'
 import { runComment, runComments, runResolve, runUncomment } from './commands/comments.ts'
 import { runDeploy } from './commands/deploy.ts'
@@ -519,7 +520,9 @@ program
   .command('rm <name>')
   .helpGroup('Sites:')
   .alias('delete')
-  .description('delete a site and all its versions (asks first unless --yes)')
+  .description(
+    'delete a site and all its versions; says first whether an admin can recover it (asks unless --yes)'
+  )
   .option('-y, --yes', 'do not ask for confirmation')
   .action(action((ctx, name: string, opts: { yes?: boolean }) => runRemove(ctx, name, opts)))
 
@@ -549,7 +552,9 @@ paths
 paths
   .command('delete <name> <folder>')
   .alias('rm')
-  .description('delete a Path and all its versions (asks first unless --yes)')
+  .description(
+    'delete a Path and all its versions; says first whether an admin can recover it (asks unless --yes)'
+  )
   .option('-y, --yes', 'do not ask for confirmation')
   .action(
     action((ctx, name: string, folder: string, opts: { yes?: boolean }) =>
@@ -849,6 +854,19 @@ program
       runLogs(ctx, name, opts)
     )
   )
+
+// ---- admin ---------------------------------------------------------------------------------
+
+const admin = program
+  .command('admin')
+  .helpGroup('Admin:')
+  .description("this Fling's admins only: deleted sites")
+admin
+  .command('deleted [name]')
+  .description(
+    "list deleted sites and Paths, newest first (name: one site name's): owner, who deleted it and when, size kept, Paths; restore or delete one for good from Admin → Deleted in the app"
+  )
+  .action(action((ctx, name: string | undefined) => runAdminDeleted(ctx, name)))
 
 program
   .command('mcp')

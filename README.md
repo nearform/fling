@@ -25,7 +25,7 @@ Fling: <https://fling-tour.fling.labs.nearform.com/>
   and mobile (connector `https://<your Fling>/mcp`), and any script, CI job or background agent
   with an API key.
 - **Private by default.** A new site is yours alone until you say who else may see it: specific
-  people, teams, everyone signed in with your identity provider, or anyone. Share links, public sites, archive and delete are one command each. Secrets and dotfiles never ship.
+  people, teams, everyone signed in with your identity provider, or anyone. Share links, public sites, archive and delete are one command each, and an admin can restore a deleted site (unless the instance deletes for good). Secrets and dotfiles never ship.
 - **Every deploy is a version.** Same link, new contents; roll back instantly.
 - **Review it together, live.** Pin comments to the exact spot, see each other's pointers, and let
   agents read the feedback and act on it. Ship a form with the site to collect labels or scores,

@@ -78,6 +78,8 @@ const SESSION_ONLY: Partial<Record<InstanceAction, string>> = {
   'admin.impersonate': 'Impersonation',
   'admin.mail.test': 'Sending a test email',
   'admin.invitations.manage': 'Inviting and revoking',
+  'admin.deleted.restore': 'Restoring a deleted site',
+  'admin.deleted.purge': 'Deleting a deleted site for good',
 }
 
 /** Non-admins see nothing here: the admin routes are 404s to them (an impersonator is told). */

@@ -273,6 +273,9 @@ const INSTANCE_EXPECTED: Record<InstanceAction, string> = {
   'account.notifications.sent': 'atgu',
   'server.publish': 'atiu',
   'admin.viewers.resolve': 'at',
+  'admin.deleted.read': 'at',
+  'admin.deleted.restore': 'a',
+  'admin.deleted.purge': 'a',
 }
 
 const ROLE_LETTER: Record<PrincipalRole, string> = {

@@ -5,7 +5,7 @@ order: 30
 summary: Keys and webhook addresses a site's server reads, set beside the site and never shown again.
 requires: [servers]
 sources: [apps/api/src/servers/secrets.ts, apps/api/src/servers/api.ts, apps/api/src/policy.ts, apps/cli/src/commands/servers.ts, apps/cli/src/site-server.ts, apps/cli/src/dotenv.ts, apps/web/src/components/site/SiteSecrets.tsx, packages/shared/src/site-server.ts, packages/shared/src/mcp-tools.ts]
-verified: c82d9d4
+verified: b4d7792
 ---
 
 {{instance:name}} refuses to publish any file with a secret in it, the server's bundle included,
@@ -74,6 +74,11 @@ There is nothing to publish again. Each set or removal says what it did:
   If its server fails to start then, the version keeps waiting, and every later set or removal
   tries it again. Or fix the server and publish again: the new version replaces the waiting one,
   and goes live at once if its secrets are set.
+<!-- requires: recoverableDeletes -->
+- **A restored site's server starts** once the last secret it needs is set. An admin's
+  [restore](/guide/publish/archive-and-delete) brings the site back without its secrets' values:
+  the static site is live at once, and its server waits for them.
+<!-- /requires -->
 
 ## When it goes wrong
 

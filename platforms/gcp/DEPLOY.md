@@ -278,6 +278,22 @@ test. By hand:
 FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
 ```
 
+## Deleted sites
+
+With `SITE_DELETE=soft`, the default, a deleted site's files stay where they were, with a recovery
+file beside them: `sites/<siteId>/`, each of its Paths' `sites/<pathId>/`, and a `deleted.json` in
+each. An admin restores one, or deletes it for good, on **Admin → Deleted** in the web app, from
+their own browser session. What is kept, recovering a site by hand when a restore can't, the cost
+and the known risks are in [Deleted sites](../aws/DEPLOY.md#deleted-sites) in the AWS guide; it is
+the same here.
+
+The prefixes are in the sites bucket (`<prefix>$NAME-sites`; `BUCKET=$(terraform output -raw sites_bucket)`).
+In the console, **Cloud Storage → Buckets →** the bucket, then `sites/<siteId>/`. From a shell:
+`gcloud storage ls "gs://$BUCKET/sites/*/deleted.json"` finds every recovery file,
+`gcloud storage cat gs://$BUCKET/sites/<siteId>/deleted.json` reads one, and
+`gcloud storage cp -r "gs://$BUCKET/sites/<siteId>/<versionId>/*" ./recovered` downloads a version.
+The bucket's lifecycle rules remove only `uploads/` leftovers and unfinished uploads.
+
 ## Claude's sandbox: allow your Fling's host
 
 So that Claude can upload the files it makes with code execution rather than typing them out

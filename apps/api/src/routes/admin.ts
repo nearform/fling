@@ -2,8 +2,8 @@
  * `/api/admin/*` (behind requireAuth, so cookie requests that change something carry the Origin
  * check): the users list, every site's listing, the audit log, the mail page (settings, health
  * and a test email), the instance's settings, the invitations (list, invite, revoke), a site
- * server's kill switch and limits, resolving a viewer id, and starting and stopping an
- * impersonation. admin.ts
+ * server's kill switch and limits, resolving a viewer id, the deleted sites kept, restoring them
+ * and deleting them for good (deletion.ts), and starting and stopping an impersonation. admin.ts
  * decides and audits; this turns the result into the session cookie.
  */
 import {
@@ -15,12 +15,15 @@ import {
   AdminSiteListSchema,
   AdminUserListSchema,
   AuditListSchema,
+  DeletedSitesSchema,
   ImpersonateRequestSchema,
   InviteRequestSchema,
   MailAdminSchema,
   MailTestRequestSchema,
   MailTestResultSchema,
   MeSchema,
+  RestoreResultSchema,
+  RestoreSiteRequestSchema,
   RouteFormatRequestSchema,
 } from '@fling/shared'
 import { InstanceUsageSchema, ViewCountingRequestSchema } from '@fling/shared/metrics'
@@ -29,6 +32,7 @@ import { z } from 'zod'
 import * as admin from '../admin.ts'
 import { principalOf } from '../auth/middleware.ts'
 import { IMPERSONATION_TTL_SECONDS, reissueSession } from '../auth/session.ts'
+import * as deletion from '../deletion.ts'
 import { notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { routeTableStatus, setRouteFormat } from '../route-format.ts'
@@ -120,6 +124,41 @@ adminRoutes.put('/usage/view-counting', async c => {
   admin.ensure(p, 'admin.usage.write')
   const { on } = await jsonBody(c, ViewCountingRequestSchema)
   return c.json(InstanceUsageSchema.parse(await setViewCounting(c.get('deps'), p, on)))
+})
+
+// Deleted sites (deletion.ts): any admin credential lists them; only a browser session restores
+// them or deletes them for good.
+adminRoutes.get('/deleted', async c => {
+  const list = await deletion.listDeleted(c.get('deps'), principalOf(c), c.req.query('name'))
+  return c.json(DeletedSitesSchema.parse(list))
+})
+
+adminRoutes.post('/deleted/:siteId/restore', async c => {
+  const p = principalOf(c)
+  // Only admins learn that the body was wrong: everyone else gets the 404 first.
+  admin.ensure(p, 'admin.deleted.restore')
+  const req = await jsonBody(c, RestoreSiteRequestSchema)
+  const deps = c.get('deps')
+  const result = await deletion.restoreSite(deps, c.get('user'), p, c.req.param('siteId'), req)
+  return c.json(RestoreResultSchema.parse(result))
+})
+
+adminRoutes.post('/deleted/:siteId/paths/:pathId/restore', async c => {
+  const deps = c.get('deps')
+  const { siteId, pathId } = c.req.param()
+  const result = await deletion.restorePath(deps, c.get('user'), principalOf(c), siteId, pathId)
+  return c.json(RestoreResultSchema.parse(result))
+})
+
+adminRoutes.delete('/deleted/:siteId', async c => {
+  await deletion.purgeSite(c.get('deps'), c.get('user'), principalOf(c), c.req.param('siteId'))
+  return c.body(null, 204)
+})
+
+adminRoutes.delete('/deleted/:siteId/paths/:pathId', async c => {
+  const { siteId, pathId } = c.req.param()
+  await deletion.purgePath(c.get('deps'), c.get('user'), principalOf(c), siteId, pathId)
+  return c.body(null, 204)
 })
 
 adminRoutes.get('/settings', c =>

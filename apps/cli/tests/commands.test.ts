@@ -358,12 +358,45 @@ describe('commands', () => {
       },
     })
     expect((await captureError(runRemove(declined.ctx, 'my-app', {}))).message).toBe('Cancelled')
-    expect(questions[0]).toMatch(/Delete my-app/)
-    expect(m.calls).toHaveLength(0)
+    expect(questions[0]).toBe(
+      "Delete my-app? Its link stops working and the name is freed. This can't be undone."
+    )
+    const deletes = () => m.calls.filter(c => c.method === 'DELETE')
+    expect(deletes()).toHaveLength(0)
 
     const yes = await testContext({ store, fetch: m.fetch })
     await runRemove(yes.ctx, 'my-app', { yes: true })
-    expect(m.calls.map(c => c.method)).toEqual(['DELETE'])
+    expect(deletes()).toHaveLength(1)
+    expect(yes.log.lines.join('\n')).toMatch(/Deleted my-app for good/)
+  })
+
+  it('rm says an admin can recover the site when the Fling keeps deleted sites', async () => {
+    const store = await loggedInStore()
+    const instance = {
+      ...INSTANCE,
+      capabilities: { ...INSTANCE.capabilities, recoverableDeletes: true },
+    }
+    const m = mockFetch({
+      'GET /.well-known/fling': () => jsonResponse(instance),
+      'DELETE /api/sites/my-app': () => new Response(null, { status: 204 }),
+    })
+    const questions: string[] = []
+    const { ctx, log, out } = await testContext({
+      store,
+      fetch: m.fetch,
+      interactive: true,
+      json: true,
+      confirm: async q => {
+        questions.push(q)
+        return true
+      },
+    })
+    await runRemove(ctx, 'my-app', {})
+    expect(questions[0]).toBe(
+      'Delete my-app? Its link stops working and the name is freed. An admin can recover it.'
+    )
+    expect(log.lines.join('\n')).toMatch(/Deleted my-app\. An admin can recover it\./)
+    expect(JSON.parse(out.content())).toEqual({ name: 'my-app', deleted: true, recoverable: true })
   })
 })
 

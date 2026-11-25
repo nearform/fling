@@ -213,6 +213,8 @@ export const CONFIGURED_CAPABILITIES = [
   'servers',
   /** a site server may reach the internet (`SERVERS_EGRESS=open`); without it, nothing outside */
   'serversEgress',
+  /** a deleted site's files are kept and an admin can restore it (`SITE_DELETE`, deletion.ts) */
+  'recoverableDeletes',
 ] as const
 
 /** Every capability name an instance may advertise. */

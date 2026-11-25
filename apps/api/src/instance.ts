@@ -81,6 +81,8 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       // Site servers (SERVERS), and whether they reach the internet (SERVERS_EGRESS).
       servers: config.servers.publish.kind !== 'off',
       serversEgress: config.servers.publish.kind !== 'off' && config.servers.egress === 'open',
+      // A deleted site's files are kept and an admin can restore it (SITE_DELETE, deletion.ts).
+      recoverableDeletes: config.siteDelete === 'soft',
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,

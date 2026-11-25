@@ -117,6 +117,41 @@ it off.
 `pruning`, then at least an hour later claimed `sweeping` and deleted, files and records; one
 published again or rolled back to meanwhile is kept.
 
+**Soft delete** — what deleting a site or a Path does unless the instance sets
+`SITE_DELETE=hard` (`config.siteDelete`, advertised as `recoverableDeletes`;
+`apps/api/src/deletion.ts`): it takes the site down and frees its name at once, but keeps its files
+in the blob store, with a recovery file beside them and a deleted-site record, so an admin can
+restore it. Every delete, soft or hard, an owner's own included, is audited (`site.delete`,
+`path.delete`). A **hard delete** removes the files too and keeps nothing. What a soft delete kept
+stays until an admin restores it or purges it.
+
+**Purge** — "Delete for good" on Admin → Deleted (`purgeSite`, `purgePath` in
+`apps/api/src/deletion.ts`; `admin.deleted.purge`, browser session only): deletes a deleted site's
+kept files (its Paths' too) and its deleted-site record, audited as `site.purge` or `path.purge`.
+It refuses a record marked `restoring` and any id still live, and marks the record `purging` so a
+restore can't start meanwhile.
+
+**Recovery file** — `sites/<siteId>/deleted.json` (and `sites/<pathId>/deleted.json` for each Path,
+`deletedKey` in `apps/api/src/blobs/types.ts`): the snapshot a soft delete writes before anything
+comes down, `format: 1`. It holds the domain records (the site, its versions, comments and form
+responses, its Paths' ids; a Path's: its Path record and versions), the names of its secrets
+(never their values), who deleted it, when, and the bytes kept. A retried delete keeps the first.
+Read only by a restore (`SiteRecoverySchema`, `PathRecoverySchema`).
+
+**Deleted-site record** — `DELETED/SITE#<siteId>` (or `DELETED/PATH#<pathId>` for a Path deleted on
+its own), with copies to list them newest first and by exact site name (`DeletedSiteRecord`,
+`apps/api/src/store/types.ts`): name, owner, who deleted it, when, bytes kept and a site's Paths. No
+expiry. `DELETED/TOTALS` adds them up for Admin → Usage. Admins list them (`GET
+/api/admin/deleted`, `fling admin deleted`, `fling_admin_deleted`; `admin.deleted.read`).
+
+**Restore** — an admin putting a soft-deleted site or Path back, from their browser session only
+(Admin → Deleted; `POST /api/admin/deleted/:siteId/restore`, `…/paths/:pathId/restore`;
+`admin.deleted.restore`; `restoreSite`, `restorePath` in `apps/api/src/deletion.ts`): under its own
+name if free (or one the admin gives), with its owners, publishers and audience less the groups gone
+and the people no longer on the instance, its versions and comments, its current version live again
+on the site and its Paths, archived if it was, without its share link, and its site server waiting
+for its secrets. Safe to retry when it fails midway.
+
 **Base** — the version a publish after a pull builds on (`DeployRequest.base`, of the site or,
 with `path`, of a Path; `layerOn` in `apps/api/src/publication.ts`). The new version is the files sent
 plus the base's other files, copied forward with `Blobs.copy`; a sent file the base already has
@@ -466,7 +501,8 @@ nothing that outlives the session (no API keys or `fling login`, no OAuth approv
 impersonation). Every start and stop is audited.
 
 **Audit log** — what admins did (impersonations, invitations and revocations, changes to other
-people's sites, opening restricted ones) and every invitation made by sharing
+people's sites, opening restricted ones, restoring deleted sites), every site or Path deleted, by
+anyone, and every invitation made by sharing
 (`apps/api/src/audit.ts`): an `AUDIT` item per entry, time-ordered and kept 180 days, and a log
 line. Admin → Audit shows the latest 50 (`GET /api/admin/audit`).
 

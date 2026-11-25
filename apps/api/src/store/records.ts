@@ -213,6 +213,22 @@
  *                                                        stop) — 180 days; ids sort by time, so the
  *                                                        latest are one reverse query
  *
+ * Deleted sites (deletion.ts; no expiry: kept until an admin restores or purges one):
+ *
+ *   DELETED                SITE#<siteId>                 a deleted site (name, owner, deletedBy,
+ *                                                        deletedAt, bytes, its Paths, restoring?,
+ *                                                        purging?)
+ *   DELETED                PATH#<pathId>                 a Path deleted on its own (its site's id
+ *                                                        and name, folder, …)
+ *   DELETED                AT#<deletedAt>#<id>           a copy, so they list newest first by one
+ *                                                        reverse query
+ *   DELETEDNAME#<name>     <deletedAt>#<id>              a copy under the site's name, so one
+ *                                                        name's deletes (its Paths' too) are one
+ *                                                        query, and no other name's
+ *   DELETED                TOTALS                        sites, Paths and bytes the records add up
+ *                                                        to, by atomic adds after each record is
+ *                                                        written or removed (Admin → Usage)
+ *
  * Notifications (the outbox: the queue the drainer works through, by key and prefix only):
  *
  *   USER#<email>           NOTIFYPREFS                   preferences: muted and the recipient's own
@@ -282,6 +298,8 @@ import {
   type BatchSent,
   type CommentRecord,
   type Day,
+  type DeletedSiteRecord,
+  type DeletedTotals,
   directoryOf,
   type FanOutRecord,
   type GrantRecord,
@@ -440,7 +458,25 @@ const key = {
   }),
   maintenanceCursor: () => ({ pk: 'MAINTAIN', sk: 'CURSOR' }),
   routeFormat: () => ({ pk: 'ROUTES', sk: 'FORMAT' }),
+  deleted: (kind: DeletedSiteRecord['kind'], id: string) => ({
+    pk: 'DELETED',
+    sk: `${kind === 'site' ? 'SITE' : 'PATH'}#${id}`,
+  }),
+  deletedAt: (r: DeletedSiteRecord) => ({
+    pk: 'DELETED',
+    sk: `AT#${r.deletedAt}#${deletedId(r)}`,
+  }),
+  deletedName: (r: DeletedSiteRecord) => ({
+    pk: `DELETEDNAME#${r.name}`,
+    sk: `${r.deletedAt}#${deletedId(r)}`,
+  }),
+  deletedTotals: () => ({ pk: 'DELETED', sk: 'TOTALS' }),
   viewCounting: () => ({ pk: 'VIEWS', sk: 'COUNTING' }),
+}
+
+/** A deleted-site record's id: the site's, or the Path's storage id. */
+function deletedId(r: Pick<DeletedSiteRecord, 'kind' | 'siteId' | 'pathId'>) {
+  return r.kind === 'path' ? (r.pathId as string) : r.siteId
 }
 
 /** The outbox's partition for a minute. */
@@ -975,6 +1011,103 @@ export class Records implements Store {
 
   listSiteGrants(email: string) {
     return this.list<SiteGrantRecord>('sitegrant', userPk(email), 'SHARED#')
+  }
+
+  async getSiteById(siteId: string) {
+    return this.read<SiteRecord>('site', key.site(siteId))
+  }
+
+  async hasSiteRecords(siteId: string) {
+    const pk = sitePk(siteId)
+    if (await this.table.get(pk, 'SITE')) return true
+    for (const skPrefix of ['VERSION#', 'PATH#', 'COMMENT#']) {
+      if ((await this.table.query(pk, { skPrefix, limit: 1 })).items.length > 0) return true
+    }
+    return false
+  }
+
+  // --- deleted sites ---
+
+  async putDeletedSite(record: DeletedSiteRecord) {
+    const written = await unless(
+      this.table.transact([
+        {
+          put: encode('deletedsite', key.deleted(record.kind, deletedId(record)), record),
+          cond: ifAbsent,
+        },
+        { put: encode('deletedsite', key.deletedAt(record), record) },
+        { put: encode('deletedsite', key.deletedName(record), record) },
+      ])
+    )
+    if (written) await this.addDeletedTotals(record, 1)
+    return written
+  }
+
+  getDeletedSite(kind: DeletedSiteRecord['kind'], id: string) {
+    return this.read<DeletedSiteRecord>('deletedsite', key.deleted(kind, id))
+  }
+
+  async listDeletedSites(opts: { name?: string; limit: number }) {
+    const page =
+      opts.name === undefined
+        ? await this.table.query('DELETED', { skPrefix: 'AT#', reverse: true, limit: opts.limit })
+        : await this.table.query(`DELETEDNAME#${opts.name}`, { reverse: true, limit: opts.limit })
+    return page.items.map(i => decode<DeletedSiteRecord>('deletedsite', i))
+  }
+
+  async markRestoring(
+    record: DeletedSiteRecord,
+    restoring: NonNullable<DeletedSiteRecord['restoring']>
+  ) {
+    const k = key.deleted(record.kind, deletedId(record))
+    // Never while a purge is under way: the condition is what keeps the two apart.
+    const notPurging = fieldEquals('purging', undefined)
+    return unless(this.table.update(k.pk, k.sk, { set: { restoring } }, notPurging))
+  }
+
+  async markPurging(record: DeletedSiteRecord, purging: NonNullable<DeletedSiteRecord['purging']>) {
+    const k = key.deleted(record.kind, deletedId(record))
+    const notRestoring = fieldEquals('restoring', undefined)
+    return unless(this.table.update(k.pk, k.sk, { set: { purging } }, notRestoring))
+  }
+
+  async deleteDeletedSite(record: DeletedSiteRecord) {
+    const removed = await unless(
+      this.table.transact([
+        { delete: key.deleted(record.kind, deletedId(record)), cond: ifExists },
+        { delete: key.deletedAt(record) },
+        { delete: key.deletedName(record) },
+      ])
+    )
+    if (removed) await this.addDeletedTotals(record, -1)
+    return removed
+  }
+
+  async deletedTotals(): Promise<DeletedTotals> {
+    const item = await this.table.get(key.deletedTotals().pk, key.deletedTotals().sk)
+    const n = (field: string) => Math.max(0, Number(item?.[field] ?? 0) || 0)
+    return { sites: n('sites'), paths: n('paths'), bytes: n('bytes') }
+  }
+
+  /**
+   * Add a record to the totals (`sign` 1) or take it off (-1). After the record's own write, not
+   * in its transaction (a transaction can't add), so a crash between the two leaves the totals
+   * off by one record: they are a guide, and read as never below zero.
+   */
+  private async addDeletedTotals(record: DeletedSiteRecord, sign: 1 | -1) {
+    const add: Record<string, number> = { bytes: sign * record.bytes }
+    add[record.kind === 'site' ? 'sites' : 'paths'] = sign
+    const k = key.deletedTotals()
+    for (;;) {
+      try {
+        await this.table.update(k.pk, k.sk, { add })
+        return
+      } catch (err) {
+        if (!(err instanceof ConditionFailed)) throw err
+      }
+      const item = encode('deletedtotals', k, { sites: 0, paths: 0, ...add })
+      if (await unless(this.table.put(item, ifAbsent))) return
+    }
   }
 
   async knownEmails(emails: readonly string[]) {

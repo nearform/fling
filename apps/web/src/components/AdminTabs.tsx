@@ -1,7 +1,8 @@
 /**
  * Admin's pages, as a menu down the left of each of them (`AdminLayout`, the route around every
  * admin page): Users, Invitations on an instance with outside invitations on, Mail on one that
- * sends email, Usage on one with metrics, Audit, Routes and Settings. Only admins see the menu; to anyone else each page says
+ * sends email, Usage on one with metrics, Deleted, Audit, Routes and Settings. Deleted is offered
+ * on every instance: sites kept before it switched to hard deletes stay restorable. Only admins see the menu; to anyone else each page says
  * it is for admins.
  */
 import {
@@ -10,6 +11,7 @@ import {
   Cog6ToothIcon,
   EnvelopeIcon,
   MapIcon,
+  TrashIcon,
   UserPlusIcon,
   UsersIcon,
 } from '@heroicons/react/24/outline'
@@ -26,6 +28,7 @@ import {
   showsAdmin,
   showsInvitationsAdmin,
 } from '../lib/admin'
+import { ADMIN_DELETED_PATH } from '../lib/deleted'
 import { ADMIN_MAIL_PATH, showsMailAdmin } from '../lib/notifications'
 import { ADMIN_USAGE_PATH, showsUsageAdmin } from '../lib/usage'
 
@@ -47,6 +50,11 @@ export const ADMIN_USAGE_TAB: AdminTab = {
   label: 'Usage',
   icon: ChartBarSquareIcon,
 }
+export const ADMIN_DELETED_TAB: AdminTab = {
+  to: ADMIN_DELETED_PATH,
+  label: 'Deleted',
+  icon: TrashIcon,
+}
 export const ADMIN_AUDIT_TAB: AdminTab = {
   to: ADMIN_AUDIT_PATH,
   label: 'Audit',
@@ -65,6 +73,7 @@ export function adminTabsFor(mail: boolean, invites = false, usage = false): Adm
     ...(invites ? [ADMIN_INVITATIONS_TAB] : []),
     ...(mail ? [ADMIN_MAIL_TAB] : []),
     ...(usage ? [ADMIN_USAGE_TAB] : []),
+    ADMIN_DELETED_TAB,
     ADMIN_AUDIT_TAB,
     ADMIN_ROUTES_TAB,
     ADMIN_SETTINGS_TAB,

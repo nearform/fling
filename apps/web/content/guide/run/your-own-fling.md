@@ -4,7 +4,7 @@ part: run
 order: 10
 summary: What an instance is, on AWS, Cloudflare, Google Cloud, Azure, DigitalOcean or your own machines, and how its name, sign-in and brand are set.
 sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, platforms/gcp/DEPLOY.md, platforms/azure/DEPLOY.md, platforms/digitalocean/DEPLOY.md, platforms/node/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
-verified: c82d9d4
+verified: b4d7792
 ---
 
 Fling is open source. Anyone can run their own, on their own cloud account or machines, under their own
@@ -76,6 +76,7 @@ deploy. The main ones:
 | Feature switches | `COMMENTS`, `LIVE` (on unless turned off), `INVITES` (off unless turned on; needs email), `SITE_VIEW_COUNTS` (on unless turned off; [views](/guide/publish/metrics) in a site's metrics) |
 | Site servers | `SERVERS`: nobody (the default), admins, named groups or every member; `SERVERS_EGRESS` for whether they reach the internet, and the `SERVER_*` limits |
 | Versions kept | `VERSION_RETENTION` (every version, unless set) |
+| What a delete keeps | `SITE_DELETE`: `soft`, unless set, keeps a deleted site's files for an admin to restore or delete for good; `hard` removes them at once |
 | Live Paths per site | `PATHS_PER_SITE_MAX` ({{fact:max-paths}} unless set lower; on AWS the Terraform module's `paths_per_site`, 200 unless set) |
 
 The domains come from the infrastructure: Terraform's inputs on AWS, Google Cloud, Azure and

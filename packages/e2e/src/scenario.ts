@@ -40,7 +40,11 @@
  *   and build inputs unserved, sends anonymous visitors to sign in and, restricted, answers an
  *   outsider as a missing site; `fling logs` has the request with the viewer id; a node:http
  *   server, rolled back to a version without one; the remote MCP's template published as it is)
- *   → conditional-write race (concurrent first deploys of one name) →
+ *   → soft delete (where deletes are recoverable, local runs only: a site with a Path and a comment, deleted with
+ *   the CLI, 404s and frees its name for a new site; an admin lists it (any credential) and,
+ *   from the browser session only, restores it under a new name with its Path and comment; a Path
+ *   deleted on its own is listed and restored; then both sites are deleted and their records
+ *   purged) → conditional-write race (concurrent first deploys of one name) →
  *   MCP publish → clean up (every site it made is removed).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
@@ -71,6 +75,7 @@ import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
 import {
   defaultAccessOf,
+  deletedText,
   GUIDE_ROUTE,
   INSTANCE_METADATA_PATH,
   type InstanceMetadata,
@@ -78,6 +83,7 @@ import {
   instanceMetadataUrl,
   type LiveServerMessage,
   RELEASE_HEADER,
+  type RestoreResult,
 } from '@fling/shared'
 import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { zipSync } from 'fflate'
@@ -942,6 +948,29 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       })
     } else {
       step('site servers: not on this instance (the servers capability is off; skipped)')
+    }
+
+    // Soft delete: a deleted site and a deleted Path are kept, and an admin's session restores
+    // them, then deletes them for good. Only where deletes are recoverable (SITE_DELETE is not
+    // `hard`) and with an admin's browser session (local runs): without one nothing could clean
+    // up what it keeps, so a smoke test never runs it.
+    if (meta.capabilities.recoverableDeletes === true && opts.admin?.cookie) {
+      await softDeleteStep({
+        appOrigin,
+        nonce,
+        work,
+        levels,
+        paths: meta.capabilities.pathPublish === true && meta.capabilities.paths === true,
+        comments: meta.capabilities.comments === true,
+        fling,
+        flingTry,
+        opts,
+        step,
+        log,
+        propagationMs,
+      })
+    } else {
+      step('soft delete: deletes are not recoverable here, or no admin browser session (skipped)')
     }
 
     // Conditional writes under a race: concurrent first deploys of one fresh name. Each creates
@@ -3773,6 +3802,311 @@ async function serversStep(ctx: {
       `remote MCP: fling_server_template → fling_publish ${mcpName} (no browser session, not called)`
     )
   }
+}
+
+/**
+ * Soft delete (`recoverableDeletes`): the owner deletes a site with a Path and a comment, it goes
+ * down and its name is free for anyone; an admin lists what is kept and, from their browser
+ * session only, restores it under a new name with its Path and comment, and a Path deleted on its
+ * own. It leaves nothing: the sites it made are deleted and every record they leave purged (with
+ * the admin's session; without one the records are left, and logged).
+ */
+async function softDeleteStep(ctx: {
+  appOrigin: string
+  nonce: string
+  work: string
+  levels: boolean
+  paths: boolean
+  comments: boolean
+  fling: (...args: string[]) => Promise<unknown>
+  flingTry: (...args: string[]) => Promise<{ ok: boolean; json: unknown; output: string }>
+  opts: ScenarioOptions
+  step: (line: string) => void
+  log: (line: string) => void
+  propagationMs: number
+}) {
+  const { appOrigin, nonce, fling, flingTry, opts, step } = ctx
+  const wait = { timeoutMs: ctx.propagationMs }
+  const gone = `e2e-${nonce}-gone`
+  const back = `e2e-${nonce}-back`
+  const folder = 'notes'
+  const access = ctx.levels ? ['--access', 'public'] : ['--public']
+  const admin = opts.admin
+  const session = admin?.cookie ? { cookie: admin.cookie } : undefined
+  /** As the admin's browser (cookie, with the app's Origin) or their API key. */
+  const asAdmin = (how: 'cookie' | 'key', method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      redirect: 'manual',
+      headers: {
+        accept: 'application/json',
+        ...(how === 'cookie'
+          ? { cookie: session?.cookie ?? '', origin: appOrigin }
+          : { authorization: `Bearer ${admin?.apiKey ?? ''}` }),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  /** `fling admin deleted <name>` as the admin: an API key is enough to list. */
+  const deletedAs = async (siteName: string): Promise<DeletedJson[]> => {
+    if (!admin) return []
+    const listed = (await runCli(['admin', 'deleted', siteName], {
+      serverUrl: appOrigin,
+      apiKey: admin.apiKey,
+      configDir: join(ctx.work, 'cli-admin-deleted'),
+    })) as { deleted: DeletedJson[] }
+    return listed.deleted
+  }
+  /** Live sites the step made, deleted at the end whatever happens. */
+  const live = new Set<string>()
+  const removed: string[] = []
+  let finished = false
+
+  try {
+    // 1. A site with a Path and a comment.
+    const dir = siteDir(ctx.work, 'gone', {
+      'index.html': page('gone', `gone ${nonce}`),
+      'about.html': page('about', `about gone ${nonce}`),
+    })
+    const deployed = (await fling('deploy', dir, '--name', gone, ...access)) as { site: CliSite }
+    live.add(gone)
+    const goneUrl = deployed.site.url
+    if (ctx.paths) {
+      const notes = siteDir(ctx.work, 'gone-notes', {
+        'index.html': page('notes', `notes gone ${nonce}`),
+      })
+      await fling('deploy', notes, '--name', gone, '--path', folder)
+      await eventually(
+        `/${folder}/ of ${gone} serves its Path`,
+        `${goneUrl}${folder}/`,
+        r => r.status === 200 && r.text.includes(`notes gone ${nonce}`),
+        wait
+      )
+    }
+    const comment = ctx.comments
+      ? ((await fling('comment', gone, `kept ${nonce}`)) as CommentJson)
+      : undefined
+    step(
+      `soft delete: published ${gone}${ctx.paths ? ` with the Path /${folder}/` : ''}${comment ? ' and a comment' : ''}`
+    )
+
+    // 2. Deleted with the CLI: it 404s, and the CLI says an admin can recover it.
+    const rm = await flingTry('rm', gone, '--yes')
+    check(rm.ok, `fling rm ${gone}: ${rm.output}`)
+    live.delete(gone)
+    check(
+      (rm.json as { recoverable?: boolean } | null)?.recoverable === true &&
+        rm.output.includes(deletedText(true, gone)),
+      `fling rm ${gone} does not say it is recoverable: ${JSON.stringify(rm.json)} ${rm.output}`
+    )
+    await eventually(`${gone} is gone`, goneUrl, r => r.status === 404, wait)
+    if (ctx.paths) {
+      await eventually(
+        `/${folder}/ of ${gone} is gone`,
+        `${goneUrl}${folder}/`,
+        r => r.status === 404,
+        wait
+      )
+    }
+    step(`fling rm ${gone}: it 404s, and the CLI says "${deletedText(true, gone)}"`)
+
+    // 3. The admin lists it, with its Path.
+    let kept: DeletedJson | undefined
+    if (admin) {
+      const listed = await deletedAs(gone)
+      kept = listed.find(d => d.kind === 'site' && d.name === gone)
+      check(
+        kept &&
+          kept.owner === opts.session.email &&
+          kept.deletedBy === opts.session.email &&
+          listed.every(d => d.name === gone) &&
+          (!ctx.paths || kept.paths?.some(p => p.folder === folder)),
+        `fling admin deleted ${gone}: ${JSON.stringify(listed)}`
+      )
+      step(
+        `fling admin deleted ${gone} (admin's API key): it is kept${ctx.paths ? `, with /${folder}/` : ''}, deleted by its owner`
+      )
+    } else {
+      step('soft delete: no admin, so the listing is skipped')
+    }
+
+    // 4. The name is free: anyone may claim it for a new site.
+    const named = await fetch(`${appOrigin}/api/names/${gone}`, {
+      headers: { authorization: `Bearer ${opts.session.apiKey}`, accept: 'application/json' },
+    })
+    const nameCheck = (await named.json()) as { status?: string }
+    check(
+      named.status === 200 && nameCheck.status === 'available',
+      `the name ${gone} after its delete: ${named.status} ${JSON.stringify(nameCheck)}`
+    )
+    const claimDir = siteDir(ctx.work, 'gone-claim', {
+      'index.html': page('claim', `claim ${nonce}`),
+    })
+    const claimed = (await fling('deploy', claimDir, '--name', gone, ...access)) as {
+      created?: boolean
+      site: CliSite
+    }
+    live.add(gone)
+    check(claimed.created === true, `claiming ${gone} again: ${JSON.stringify(claimed)}`)
+    await eventually(
+      `${gone} serves the new site`,
+      claimed.site.url,
+      r => r.status === 200 && r.text.includes(`claim ${nonce}`),
+      wait
+    )
+    step(`the name ${gone} is free once deleted: a new site claims it`)
+
+    if (!kept || !session) {
+      step(
+        'soft delete: no admin browser session, so restoring is skipped (the deleted records are left)'
+      )
+      finished = true
+      return
+    }
+
+    // 5. Restoring is the admin's browser session's alone; the name taken, it needs a new one.
+    const byKey = await asAdmin('key', 'POST', `/api/admin/deleted/${kept.siteId}/restore`, {
+      name: back,
+    })
+    const byKeyBody = (await byKey.json().catch(() => ({}))) as { error?: { code?: string } }
+    check(
+      byKey.status === 403 && byKeyBody.error?.code === 'session_required',
+      `restore with an API key: ${byKey.status} ${JSON.stringify(byKeyBody)}`
+    )
+    const taken = await asAdmin('cookie', 'POST', `/api/admin/deleted/${kept.siteId}/restore`, {})
+    const takenBody = (await taken.json().catch(() => ({}))) as { error?: { code?: string } }
+    check(
+      taken.status === 409 && takenBody.error?.code === 'name_taken',
+      `restore under its own name, which a live site holds: ${taken.status} ${JSON.stringify(takenBody)}`
+    )
+    const restoring = await asAdmin('cookie', 'POST', `/api/admin/deleted/${kept.siteId}/restore`, {
+      name: back,
+    })
+    const restored = (await restoring.json().catch(() => ({}))) as RestoreResult
+    if (restoring.status === 200) live.add(back)
+    check(
+      restoring.status === 200 &&
+        restored.name === back &&
+        (!ctx.paths || restored.paths?.includes(folder)),
+      `restore ${kept.siteId} as ${back}: ${restoring.status} ${JSON.stringify(restored)}`
+    )
+    await eventually(
+      `${back} serves what ${gone} held`,
+      restored.url,
+      r => r.status === 200 && r.text.includes(`gone ${nonce}`),
+      wait
+    )
+    if (ctx.paths) {
+      await eventually(
+        `/${folder}/ of ${back} serves its Path`,
+        `${restored.url}${folder}/`,
+        r => r.status === 200 && r.text.includes(`notes gone ${nonce}`),
+        wait
+      )
+    }
+    if (comment) {
+      const thread = (await fling('comments', back, '--all')) as { comments: CommentJson[] }
+      check(
+        thread.comments.some(c => c.id === comment.id),
+        `${back}'s comments after the restore: ${JSON.stringify(thread.comments)}`
+      )
+    }
+    const after = await deletedAs(gone)
+    check(
+      !after.some(d => d.siteId === kept.siteId),
+      `${kept.siteId} is still listed as deleted once restored: ${JSON.stringify(after)}`
+    )
+    step(
+      `restore: an API key is refused (session_required), its own name taken is a 409; the admin's session restores it as ${back}${ctx.paths ? `, its Path` : ''}${comment ? ' and its comment' : ''} with it`
+    )
+
+    // 6. A Path deleted on its own, and restored.
+    if (ctx.paths) {
+      const pathGone = await flingTry('paths', 'delete', back, folder, '--yes')
+      check(
+        pathGone.ok && (pathGone.json as { recoverable?: boolean } | null)?.recoverable === true,
+        `fling paths delete ${back} ${folder}: ${pathGone.output}`
+      )
+      await eventually(
+        `/${folder}/ of ${back} is gone`,
+        `${restored.url}${folder}/`,
+        r => r.status === 404,
+        wait
+      )
+      const listed = await deletedAs(back)
+      const keptPath = listed.find(d => d.kind === 'path' && d.folder === folder)
+      check(keptPath?.pathId, `fling admin deleted ${back}: ${JSON.stringify(listed)}`)
+      const pathBack = await asAdmin(
+        'cookie',
+        'POST',
+        `/api/admin/deleted/${keptPath.siteId}/paths/${keptPath.pathId}/restore`
+      )
+      const pathResult = (await pathBack.json().catch(() => ({}))) as RestoreResult
+      check(
+        pathBack.status === 200 && pathResult.folder === folder,
+        `restore /${folder}/ of ${back}: ${pathBack.status} ${JSON.stringify(pathResult)}`
+      )
+      await eventually(
+        `/${folder}/ of ${back} serves again`,
+        `${restored.url}${folder}/`,
+        r => r.status === 200 && r.text.includes(`notes gone ${nonce}`),
+        wait
+      )
+      step(
+        `fling paths delete ${back} ${folder}: it 404s, is listed as a Path kept, and the admin's session restores it`
+      )
+    }
+    finished = true
+  } finally {
+    // 7. Delete what is live, then purge every record left by either name. After a failure this
+    // only tidies up, so the failure is what is reported.
+    for (const site of live) {
+      await fling('rm', site, '--yes')
+        .then(() => removed.push(site))
+        .catch(err => ctx.log(`  ! could not remove ${site}: ${err}`))
+    }
+    if (admin && session) {
+      const purged: string[] = []
+      for (const siteName of [gone, back]) {
+        const records = await deletedAs(siteName).catch(err => {
+          ctx.log(`  ! could not list deleted ${siteName}: ${err}`)
+          return [] as DeletedJson[]
+        })
+        for (const d of records) {
+          const path =
+            d.kind === 'path'
+              ? `/api/admin/deleted/${d.siteId}/paths/${d.pathId}`
+              : `/api/admin/deleted/${d.siteId}`
+          const res = await asAdmin('cookie', 'DELETE', path)
+          if (res.status === 204)
+            purged.push(d.kind === 'path' ? `${d.folder}/ of ${d.name}` : d.name)
+          else ctx.log(`  ! could not purge ${path}: ${res.status} ${await res.text()}`)
+        }
+      }
+      if (finished) {
+        const left = [...(await deletedAs(gone)), ...(await deletedAs(back))]
+        check(left.length === 0, `deleted records left after the purge: ${JSON.stringify(left)}`)
+        step(
+          `soft delete: removed ${removed.join(', ')}, purged ${purged.join(', ')}: nothing kept`
+        )
+      }
+    } else {
+      ctx.log(
+        `  ! soft delete: no admin browser session to purge with, so the deleted records of ${gone} are left`
+      )
+    }
+  }
+}
+
+interface DeletedJson {
+  kind: 'site' | 'path'
+  siteId: string
+  name: string
+  folder?: string
+  pathId?: string
+  owner: string
+  deletedBy: string
+  paths?: { folder: string; pathId: string }[]
 }
 
 export { ScenarioError }

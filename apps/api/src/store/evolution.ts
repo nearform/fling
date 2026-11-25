@@ -67,6 +67,8 @@ export type Kind =
   | 'sitesecret'
   | 'serversite'
   | 'finalizeclaim'
+  | 'deletedsite'
+  | 'deletedtotals'
 
 export type Fields = Record<string, unknown>
 export type Upgrade = (fields: Fields) => Fields

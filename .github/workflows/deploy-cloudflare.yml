@@ -7,15 +7,13 @@ name: Deploy (Cloudflare)
 #
 # Everything instance-specific is one repository variable, CF_DEPLOY_CONFIG (the JSON setup.mjs
 # writes: account, Worker, zone, hostnames, resource ids and an INSTANCE object of the instance's
-# own values), plus two secrets: CLOUDFLARE_API_TOKEN, and FLING_E2E_API_KEY for the smoke test (an
-# API key of a test user; without it the smoke test is skipped with a warning). See
-# platforms/cloudflare/DEPLOY.md.
+# own values), plus one secret, CLOUDFLARE_API_TOKEN. See platforms/cloudflare/DEPLOY.md.
 #
 # The steps are the repository's own script, the same one a person runs (scripts/deploy.mjs):
 #   1. the D1 schema (`wrangler d1 migrations apply --remote`), additive, before the code;
 #   2. the Worker with its assets (the web UI, the sites' 404 page, the Claude Desktop extension);
 #   3. the data migrations, through a remote D1 binding (no admin endpoint on the Worker);
-#   4. /.well-known/fling answers for this instance, then the e2e scenario as a smoke test.
+#   4. /.well-known/fling answers for this instance.
 on:
   workflow_dispatch:
     inputs:
@@ -72,7 +70,6 @@ jobs:
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
         run: pnpm --filter @fling/platform-cloudflare run deploy
 
       - name: Summary

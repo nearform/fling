@@ -200,15 +200,6 @@ ingress:
 - **Storage.** The chart always uses the S3 store; `/data` is an `emptyDir` for scratch, and the
   root filesystem is read-only. The pods run as the image's unprivileged user.
 
-## Smoke test
-
-Against a deployed instance, the e2e scenario signs in with API keys of test users, as on the
-other platforms ([Smoke test](../cloudflare/DEPLOY.md#smoke-test)):
-
-```bash
-FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
-```
-
 ## Site servers
 
 Off. The Node host runs site servers as Node child processes, which isolate nothing from the host,

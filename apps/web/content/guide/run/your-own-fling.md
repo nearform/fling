@@ -4,7 +4,7 @@ part: run
 order: 10
 summary: What an instance is, on AWS, Cloudflare, Google Cloud, Azure, DigitalOcean or your own machines, and how its name, sign-in and brand are set.
 sources: [platforms/aws/DEPLOY.md, platforms/cloudflare/DEPLOY.md, platforms/gcp/DEPLOY.md, platforms/azure/DEPLOY.md, platforms/digitalocean/DEPLOY.md, platforms/node/DEPLOY.md, apps/api/src/config.ts, apps/api/src/instance.ts]
-verified: b4d7792
+verified: 0ead0eb
 ---
 
 Fling is open source. Anyone can run their own, on their own cloud account or machines, under their own

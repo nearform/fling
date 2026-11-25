@@ -283,7 +283,7 @@ guest's comments.
 - **Conformance**: the counter uses existing Table semantics; add a case (ifAbsent over an expired
   item, `add`, update on an expired item fails) if `packages/conformance/src/table.ts` lacks one.
   Hub tests cover `LiveRoom.close`.
-- **E2E** (`packages/e2e/src/scenario.ts`, both local runtimes and the smoke test), over HTTP with
+- **E2E** (`packages/e2e/src/scenario.ts`, every local runtime), over HTTP with
   a cookie jar, skipped without the capability:
   1. The owner publishes a throwaway site, makes it public and turns on guest review (CLI).
   2. A guest posts `…/guest`, comments, lists comments (member authors redacted), and deletes their

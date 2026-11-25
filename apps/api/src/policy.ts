@@ -468,7 +468,7 @@ export interface Principal {
 
 /**
  * - `admin`: an admin in their own browser session.
- * - `admin-token`: an admin through an API key or OAuth token (the CLI, MCP, the smoke test).
+ * - `admin-token`: an admin through an API key or OAuth token (the CLI, MCP).
  * - `impersonating`: an admin acting as another user (always a browser session). Acting as a
  *   guest, they are held to the guest's rules as well.
  * - `guest`: a user whose standing is `guest`.

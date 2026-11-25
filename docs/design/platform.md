@@ -71,7 +71,7 @@ Each choice lists the reason for it and the file that owns it.
      through the platform's own host.
 8. **Every platform passes everything.** Every adapter, the core's memory and fs adapters
    included, passes `packages/conformance`. Every platform's local runtime passes the e2e scenario
-   (`packages/e2e/src/scenario.ts`), and the deployed instance runs it as a smoke test.
+   (`packages/e2e/src/scenario.ts`).
 
 ## 2. Shape of a platform
 
@@ -189,8 +189,8 @@ Each element uses the same headings:
 - **Semantics:**
   - Reads happen on every site request, at the edge or in the sites host.
   - Eventual consistency is allowed. A platform with a delay supplies `waitReady`
-    (`apps/api/src/types.ts`), which the remote MCP polls. The smoke test waits it out with
-    `--propagation-seconds`.
+    (`apps/api/src/types.ts`), which the remote MCP polls. The e2e scenario polls a changed
+    route for up to `propagationMs`.
   - The sites host gives `routeSiteRequest` the lookups it needs: routes, the cookie key,
     revocations and HMAC-SHA256. It then maps the decision:
     - a rewrite to `/sites/<id>/<v><path>` in object storage, or to one of Fling's own pages;
@@ -294,8 +294,7 @@ Each element uses the same headings:
     1. builds the artefacts (API, web UI, the sites' 404, review and robots pages, the `.mcpb`);
     2. ships them;
     3. runs `migrate`;
-    4. waits for `/.well-known/fling` to report the release;
-    5. runs the smoke test.
+    4. waits for `/.well-known/fling` to report the release.
   - Infrastructure (the shape) and code (the deploy) are owned separately. The infrastructure is
     Terraform wherever the cloud has a maintained provider.
 

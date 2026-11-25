@@ -175,7 +175,7 @@ the grants, then turn it on). If your own resources sit at other addresses, add 
 | `SITE_ROUTER_FUNCTION` | `aws_cloudfront_function.site_router` | Updated and published with `edge/dist/site-router.js` (built by `edge/build.mjs`) |
 | `SERVER_STATUS_FUNCTION` | `aws_cloudfront_function.server_status` | With `servers.enabled` only: updated and published with `edge/dist/server-status.js`, before the API |
 | `APP_DISTRIBUTION_ID`, `SITES_DISTRIBUTION_ID` | the distributions | Invalidated after a deploy |
-| `APP_ORIGIN` | `https://<hostname>` | The smoke test's target and the Claude Desktop extension's default server |
+| `APP_ORIGIN` | `https://<hostname>` | What `/.well-known/fling` must answer with after a deploy, and the Claude Desktop extension's default server |
 | `INSTANCE` | `var.instance` | The [instance configuration](#instance-configuration), written into `lambda.zip` as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
 
 ## Instance configuration
@@ -431,7 +431,7 @@ the deploy role over OIDC:
    the function and waits until it is live.
    Then runs the pending [data migrations](#data-migrations): it invokes the function with
    `{"fling":"migrate"}` until the report says `done`. A failing migration stops the deploy here
-   (the API keeps working); missing permissions only warn. Then a smoke test: `/.well-known/fling`
+   (the API keeps working); missing permissions only warn. Then `/.well-known/fling`
    on `APP_ORIGIN` must answer from the new code for this instance, with the release being deployed
    as `release`, before the UI is touched.
 2. Syncs `apps/web/dist` to the UI bucket: `assets/` first (hashed, cached for a year, never deleted,
@@ -863,11 +863,6 @@ Comments, form responses and older versions don't come back this way; they stay 
   format. One written long before a change to the records may be refused with
   `recovery_unreadable`; its content is still in the bucket, to recover by hand. It is readable
   JSON, but not a stable interface for other tools.
-- **The smoke test leaves small kept sites behind.** Where a deploy runs the e2e scenario as its
-  smoke test (Cloudflare, GCP, Azure and DigitalOcean with `FLING_E2E_API_KEY`), it deletes the
-  sites it made (`e2e-<random>…`) with an API key, so they are kept like any other: about 15 small
-  ones a run, which an admin deletes for good on Admin → Deleted now and then. Its soft-delete
-  checks need an admin's browser session and run only locally (`pnpm e2e`).
 - **A late upload can land in a kept prefix.** A presigned upload URL handed out just before the delete
   (good for at most 15 minutes) can still write a file into the kept prefix. Nothing serves it, and
   Delete for good removes it with the rest.

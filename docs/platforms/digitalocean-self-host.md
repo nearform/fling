@@ -90,7 +90,7 @@ or SIGINT).
 - **DigitalOcean:** the **Deploy (DigitalOcean)** workflow (`deploy-digitalocean.yml`, by hand,
   with a release tag) builds the image, pushes it to the account's container registry, points the
   app at it and waits for the deployment, polls `/.well-known/fling` for the release, runs
-  `POST /ticks/migrate` until done and then the e2e smoke test. DigitalOcean has no OIDC for
+  `POST /ticks/migrate` until done. DigitalOcean has no OIDC for
   GitHub, so it signs in with a scoped API token kept as an environment secret.
 - **Self-host:** operators build or pull the image and `docker compose up` or `helm upgrade`.
 - **Local runtime:** the Node host is the e2e's `node` runtime in every gate (PGlite, fs blobs).

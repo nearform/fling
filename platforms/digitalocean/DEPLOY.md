@@ -187,8 +187,6 @@ servers run untrusted code and need a sandboxed runtime, which App Platform does
    scoped to the app (read, update) and the registry (read, write). DigitalOcean has no OIDC
    federation for GitHub Actions, so this is a long-lived token: scope it, give it an expiry and
    rotate it.
-6. **The smoke test's keys** (optional): `FLING_E2E_API_KEY` and the others, as for
-   [Cloudflare's smoke test](../cloudflare/DEPLOY.md#smoke-test).
 
 ### Secrets and state
 
@@ -214,8 +212,7 @@ with a release tag as `ref`. In order:
    rather than by pointing the app at an old digest. App Platform starts the new containers, waits for `/healthz`, then moves traffic.
    Each container applies the schema and data migrations on start, under a lock;
 3. waits until `https://$APP_HOST/.well-known/fling` answers for this instance with this release;
-4. calls `POST /ticks/migrate` with `FLING_TICK_SECRET` until it reports `done`;
-5. runs the e2e smoke test.
+4. calls `POST /ticks/migrate` with `FLING_TICK_SECRET` until it reports `done`.
 
 ## Ticks
 
@@ -271,7 +268,7 @@ scenario under Docker Compose (Postgres and MinIO,
 - App Platform's wildcard certificate and records with `zone` set, and its health check of
   `/healthz`;
 - the blobs conformance suite against Spaces, in MD5 mode and (to settle the question) SHA-256;
-- the deploy workflow end to end, and the smoke test against the deployed instance.
+- the deploy workflow end to end.
 
 ## Costs
 

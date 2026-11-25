@@ -91,7 +91,7 @@ There is no Terraform. Two scripts and the rendered wrangler config own the infr
 ## 6. Deploy and local runtime
 
 - **Deploy:** `deploy-cloudflare.yml` runs by hand, in the `cloudflare` environment, with
-  `CF_DEPLOY_CONFIG`, `CLOUDFLARE_API_TOKEN` and `FLING_E2E_API_KEY`. It runs `scripts/deploy.mjs`,
+  `CF_DEPLOY_CONFIG` and `CLOUDFLARE_API_TOKEN`. It runs `scripts/deploy.mjs`,
   which:
   1. renders `dist/wrangler.jsonc`;
   2. builds the `.mcpb` with the instance's address;
@@ -99,8 +99,7 @@ There is no Terraform. Two scripts and the rendered wrangler config own the infr
   4. runs `wrangler d1 migrations apply --remote`;
   5. runs `wrangler deploy`;
   6. runs `migrate.ts --remote`;
-  7. waits for `/.well-known/fling` to report the release;
-  8. runs the e2e smoke test (`packages/e2e`).
+  7. waits for `/.well-known/fling` to report the release.
 - **Local runtime:** `scripts/dev.mjs` applies the local D1 schema and migrations, then runs
   `wrangler dev` on :47103 with local D1, R2, KV, Durable Objects, the simulated `send_email` and
   the local Worker Loader. It runs no crons; `POST /dev/notify/drain` drains the outbox. `pnpm e2e`

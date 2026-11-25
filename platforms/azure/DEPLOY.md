@@ -152,7 +152,7 @@ module's `deploy` output. Nothing in it is secret.
 | `registry`, `repository` | Where the image is pushed (`<registry>/<repository>:<commit>`) |
 | `containerApp`, `jobs` | The app and the jobs updated to the new image; `jobs.migrate` is started for the data migrations |
 | `frontDoor` | The profile, endpoint and app domain whose cache is purged after a deploy |
-| `appOrigin`, `sitesDomain` | The smoke test's target and the Claude Desktop extension's default server |
+| `appOrigin`, `sitesDomain` | What `/.well-known/fling` must answer with after a deploy, and the Claude Desktop extension's default server |
 | `INSTANCE` | The [instance configuration](../aws/DEPLOY.md#instance-configuration), built into the image as `instance.json`. Must have `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` |
 
 Instance values (`INSTANCE`) are the same on every platform: see the
@@ -199,9 +199,6 @@ restart the app after changing one (`az containerapp revision restart`, or redep
 
 6. **Deploy**: run the **Deploy (Azure)** workflow (Actions → Deploy (Azure) → Run workflow) with
    the latest release tag as `ref` (e.g. `v0.7.0`).
-7. **The smoke test's key**: after the first deploy, sign in, create an API key for a test user
-   (API keys page) and store it as the repository secret `FLING_E2E_API_KEY` (from a file:
-   `gh secret set FLING_E2E_API_KEY -R "$GITHUB_REPO" < key.txt`).
 
 Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 
@@ -219,8 +216,7 @@ Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 5. purges Front Door's cache of the app's domain. The sites hosts need no purge: the app gives
    their responses at most a minute in Front Door (`s-maxage=60`) and makes a response to a site
    cookie `private`, which Front Door never stores, so a publish, a rollback or an access change
-   reaches every visitor within a minute (docs/platforms/azure.md, Edge and sites host);
-6. runs the e2e scenario against the instance (Smoke test, below), when `FLING_E2E_API_KEY` is set.
+   reaches every visitor within a minute (docs/platforms/azure.md, Edge and sites host).
 
 To roll back, run it with an earlier release tag. Data migrations are written to survive a rollback
 by one release ([Data migrations](../aws/DEPLOY.md#data-migrations)).
@@ -335,16 +331,6 @@ allowed domains**, on claude.ai in a web browser under **Organization settings �
 Code execution and file creation**. Only that host is needed. See
 [Claude's sandbox](../aws/DEPLOY.md#claudes-sandbox-allow-your-flings-host) in the AWS guide for
 the steps and how to check them.
-
-## Smoke test
-
-The deploy ends with the e2e scenario (`packages/e2e`) against the live instance, signed in with
-`FLING_E2E_API_KEY`; see the [Cloudflare guide's Smoke test](../cloudflare/DEPLOY.md#smoke-test)
-for what it does and the optional keys. By hand:
-
-```bash
-FLING_E2E_API_KEY="$(cat key.txt)" pnpm --filter @fling/e2e smoke https://$APP_DOMAIN
-```
 
 ## Secrets
 

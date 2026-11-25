@@ -5,7 +5,7 @@ order: 10
 summary: A small backend inside a site, run for /api/* at the site's own address.
 requires: [servers]
 sources: [packages/shared/src/site-server.ts, packages/shared/src/server-template.ts, apps/cli/src/server-build.ts, apps/cli/src/server/**, apps/api/src/servers/index.ts, apps/api/src/policy.ts, apps/api/src/instance.ts, packages/shared/src/mcp-tools.ts]
-verified: c82d9d4
+verified: 0ead0eb
 ---
 
 A site server is a small backend that ships inside a site. Put a `server.ts` (or `server.js`) next

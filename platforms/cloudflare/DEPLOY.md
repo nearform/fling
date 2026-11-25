@@ -156,8 +156,7 @@ neither header (see
    - secret `CLOUDFLARE_API_TOKEN`: an account API token (My Profile or Manage Account → API
      Tokens) with **Account**: Workers Scripts Edit, D1 Edit, Workers KV Storage Edit, Workers R2
      Storage Edit, Account Settings Read; **Zone** (`$ZONE`): Workers Routes Edit, DNS Edit (the
-     Custom Domain's record), Zone Read. If wrangler reports another missing permission, add it;
-   - secret `FLING_E2E_API_KEY` after the first deploy (see [Smoke test](#smoke-test)).
+     Custom Domain's record), Zone Read. If wrangler reports another missing permission, add it.
 8. **Deploy**: run the **Deploy (Cloudflare)** workflow (Actions → Deploy (Cloudflare) → Run
    workflow) with the latest release tag as `ref` (e.g. `v0.7.0`), or from a checkout of that tag:
 
@@ -357,8 +356,7 @@ itself, [Releasing](../../docs/development.md#releasing)), run the workflow with
    need a reload to load a lazy chunk;
 5. runs Fling's data migrations (below);
 6. waits until `https://$APP_HOST/.well-known/fling` answers for this instance, with the root
-   `package.json`'s version as `release`;
-7. runs the smoke test.
+   `package.json`'s version as `release`.
 
 The web UI: `index.html` (and every client-side route) is `no-cache`, `/assets/*` (content-hashed)
 `immutable` for a year, other files five minutes, with the same security headers the AWS
@@ -381,37 +379,6 @@ CF_DEPLOY_CONFIG="$(cat deploy-config.json)" node scripts/render-config.mjs
 pnpm migrate --remote --config dist/wrangler.jsonc --dry-run
 pnpm migrate --remote --config dist/wrangler.jsonc [--only 0002]
 ```
-
-## Smoke test
-
-The deploy ends with the e2e scenario (`packages/e2e`) against the live instance: deploy a site
-with the CLI, view it, a trailing-slash redirect and the 404 page, a second version and a rollback,
-make it private (anonymous visitors are sent to sign in), a share link, four concurrent first
-deploys of one name (conditional writes: exactly one site), an MCP publish, then it removes the
-three sites it made (`e2e-<random>…`). Where deletes are soft, those stay kept until an admin deletes them
-for good on Admin → Deleted ([Deleted sites](#deleted-sites)). With `MAIL`, the instance advertises the `email` capability
-and the test checks that the notification settings (`GET /api/me/notifications`) answer; it sends
-no email. What each person is sent is checked by the local e2e, which can drain the outbox at once
-(`POST /dev/notify/drain`, dev login only).
-
-It signs in with an API key: as a test user that `ALLOWED_EMAIL_DOMAINS` or `ALLOWED_EMAILS` admits, run
-`FLING_CONFIG_DIR=$(mktemp -d) fling login https://$APP_HOST` and take the server's `apiKey`
-(under `servers`) from the `config.json` in that directory (revoke it any time on the web UI's API keys page), and store it as
-the `FLING_E2E_API_KEY` secret. Without it the deploy warns and skips the test. By hand:
-
-```bash
-FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
-```
-
-`FLING_E2E_ADMIN_API_KEY`, a key of a user in `ADMIN_EMAILS`, adds the admin checks an API key
-can make (the users list; reading the test user's site, but not changing it; impersonation
-refused, as it is for any API key). Without it they are skipped; impersonation and an admin's
-changes to someone else's site are covered by the local e2e, which has browser sessions.
-With `FLING_E2E_MEMBER_API_KEY` (a second test user) and `FLING_E2E_OUTSIDER_API_KEY` (a third, not
-an admin), the smoke test also restricts its site to the member and checks through the API that
-the outsider finds no such site, then lets them in through a group the member makes (and shuts
-them out again). Without the outsider, the admin, who reads any site, checks the way in only. The
-site pass itself needs browser sessions, so the local e2e follows it.
 
 ## Routes, consistency and the KV fallback
 

@@ -14,10 +14,7 @@ name: Deploy (DigitalOcean)
 # `digitalocean` environment:
 # - DIGITALOCEAN_ACCESS_TOKEN: DigitalOcean has no GitHub OIDC, so a long-lived API token, scoped
 #   to what this needs (app read and update, registry read and write);
-# - FLING_TICK_SECRET: the module's `tick_secret` output, for the migrate endpoint;
-# - FLING_E2E_API_KEY (and optionally FLING_E2E_MEMBER_API_KEY, FLING_E2E_ADMIN_API_KEY,
-#   FLING_E2E_OUTSIDER_API_KEY): test users' API keys for the smoke test; without the first it is
-#   skipped with a warning.
+# - FLING_TICK_SECRET: the module's `tick_secret` output, for the migrate endpoint.
 # See platforms/digitalocean/DEPLOY.md.
 #
 # Order:
@@ -28,8 +25,7 @@ name: Deploy (DigitalOcean)
 #      traffic; each new container migrates the schema and the data on start);
 #   3. /.well-known/fling answers for this instance and this release;
 #   4. the data migrations through POST /ticks/migrate until it reports done (normally already
-#      done by the start-up run; this is the deploy's own check, as on AWS and Cloudflare);
-#   5. the e2e scenario as a smoke test.
+#      done by the start-up run; this is the deploy's own check, as on AWS and Cloudflare).
 on:
   workflow_dispatch:
     inputs:
@@ -172,27 +168,6 @@ jobs:
             if jq -e 'any(.migrations[]; .status == "busy")' "$out" >/dev/null; then sleep 20; fi
           done
           echo "::error::Data migrations still not done after 40 calls"; exit 1
-
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      - name: Smoke test
-        env:
-          FLING_E2E_API_KEY: ${{ secrets.FLING_E2E_API_KEY }}
-          FLING_E2E_MEMBER_API_KEY: ${{ secrets.FLING_E2E_MEMBER_API_KEY }}
-          FLING_E2E_ADMIN_API_KEY: ${{ secrets.FLING_E2E_ADMIN_API_KEY }}
-          FLING_E2E_OUTSIDER_API_KEY: ${{ secrets.FLING_E2E_OUTSIDER_API_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "$FLING_E2E_API_KEY" ]; then
-            echo "::warning::FLING_E2E_API_KEY is not set: the smoke test was skipped"
-            exit 0
-          fi
-          pnpm install --frozen-lockfile
-          pnpm --filter @fling/e2e smoke "$APP_ORIGIN" --propagation-seconds 30
 
       - name: Summary
         run: echo "### Deployed $TAG (\`$SHA\`) to $APP_ORIGIN" >> "$GITHUB_STEP_SUMMARY"

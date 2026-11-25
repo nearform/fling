@@ -357,7 +357,6 @@ Done. Left to do by hand (DEPLOY.md has the details):
        variable CF_DEPLOY_CONFIG = the contents of ${args.out}
          gh variable set CF_DEPLOY_CONFIG < platforms/cloudflare/${args.out}
        secret   CLOUDFLARE_API_TOKEN (permissions in DEPLOY.md)
-       secret   FLING_E2E_API_KEY, after the first deploy (an API key of a test user)
   4. Deploy: run the "Deploy (Cloudflare)" workflow, or locally:
        CF_DEPLOY_CONFIG="$(cat platforms/cloudflare/${args.out})" \\
          pnpm --filter @fling/platform-cloudflare run deploy

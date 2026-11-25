@@ -8,8 +8,8 @@
  * Content-MD5, the body's MD5 (400 BadDigest). Only a request that passes goes on to the store.
  *
  * So the Blobs conformance suite proves GcsBlobs signs what Cloud Storage would refuse to accept
- * otherwise. It does not prove Cloud Storage itself refuses it: that is checked against a real
- * bucket (platforms/gcp/DEPLOY.md, the smoke test).
+ * otherwise. It does not prove Cloud Storage itself refuses it: only a real bucket can, and no
+ * automated test reaches one.
  */
 import { createHash, createVerify, type KeyObject } from 'node:crypto'
 

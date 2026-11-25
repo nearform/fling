@@ -19,12 +19,11 @@ paths:
   in `platforms/aws/tests/services.ts`), and Miniflare's D1, R2 and KV. Don't test one adapter's
   semantics on its own when a conformance case can cover all of them.
 - **User-visible behaviour belongs in the e2e scenario** (`packages/e2e/src/scenario.ts`). It runs
-  on both local runtimes (`pnpm e2e`, after `pnpm build`) and against live instances as the smoke
-  test, so it must:
+  on every local runtime (`pnpm e2e`, after `pnpm build`), so it must:
   - act only through the CLI, HTTP and MCP;
   - clean up everything it creates;
   - poll for changes to existing routes, using `propagationMs`;
-  - skip any step whose credentials it was not given.
+  - skip any step the instance's capabilities (`/.well-known/fling`) do not offer.
 - The DynamoDB Local and MinIO suites only run where their env vars are set, which means CI. A
   change to the AWS adapters or the Lambda entry point can pass `pnpm gate` locally and fail in CI.
   Run them locally (see `services.ts`) before you push such a change.

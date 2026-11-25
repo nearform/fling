@@ -187,8 +187,7 @@ The `Deploy (Google Cloud)` workflow (`.github/workflows/deploy-gcp.yml`), by ha
 2. deploys a revision on that image (`gcloud run services update --image`); it takes the traffic
    once it is ready;
 3. runs the data migrations ([Data migrations](#data-migrations));
-4. waits until `/.well-known/fling` answers for this instance and release;
-5. runs the smoke test ([Smoke test](#smoke-test)).
+4. waits until `/.well-known/fling` answers for this instance and release.
 
 Changing `instance` takes a new `terraform output -json deploy` in `GCP_DEPLOY_CONFIG` and a
 deploy; changing `environment`, `mail` or `service` takes `terraform apply`, which starts a new
@@ -266,17 +265,6 @@ service sends `private` (every file of a site that isn't public, and everything 
 the same across versions, so the module caps the edge's copy at a minute (`max_ttl` 60 s, cache
 mode `CACHE_ALL_STATIC`): a publish, a rollback, a deletion or a site made private reaches every
 viewer within that minute. Browsers keep the max-age the service sends.
-
-## Smoke test
-
-The deploy ends with the e2e scenario against the live instance, signed in with an API key: see
-[Smoke test](../cloudflare/DEPLOY.md#smoke-test) in the Cloudflare guide. Store the key as the
-`FLING_E2E_API_KEY` secret of the `gcp` environment; without it the deploy warns and skips the
-test. By hand:
-
-```bash
-FLING_E2E_API_KEY=fling_… pnpm --filter @fling/e2e smoke https://$APP_HOST
-```
 
 ## Deleted sites
 

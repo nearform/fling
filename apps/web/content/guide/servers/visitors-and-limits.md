@@ -4,8 +4,8 @@ part: servers
 order: 50
 summary: Who can call a site's server, what it knows about them, and the limits it runs within.
 requires: [servers]
-sources: [packages/shared/src/site-routing.ts, packages/shared/src/site-server.ts, apps/api/src/servers/shell.ts, apps/api/src/servers/index.ts, apps/api/src/config.ts, apps/web/src/pages/Review.tsx, apps/web/src/components/site/SiteServer.tsx]
-verified: ee10036
+sources: [packages/shared/src/site-routing.ts, packages/shared/src/site-server.ts, apps/api/src/servers/shell.ts, apps/api/src/servers/index.ts, apps/api/src/config.ts, apps/api/src/deletion.ts, apps/web/src/pages/Review.tsx, apps/web/src/components/site/SiteServer.tsx]
+verified: 0ead0eb
 ---
 
 A site's server sits behind the site's access, like its pages. It learns who is calling from
@@ -82,7 +82,8 @@ once. Only an admin can change a site's limits, and some Flings serve a request 
 | A failed `fetch` to another service | Where servers may not reach the internet, every call to another host fails | Check **Outbound network** on the Server tab; ask an admin |
 | 429 | More requests a second than the site's limit | Slow down, or ask an admin to raise it |
 | 413 `too_large` | The request body is over the limit | Send less, or ask an admin |
-| 503 `server_stopped` | An admin stopped the site's server | Ask an admin |
+| 503 `server_stopped` | An admin stopped the site's server | Ask an admin |<!-- requires: recoverableDeletes -->
+| 503 `server_stopped`, on a site an admin restored | Its server waits for its [secrets](/guide/servers/secrets) to be set again, or didn't start once they were | Set them: it starts when the last is set, and each later set or removal tries again. Or fix the server and publish again |<!-- /requires -->
 | A 403 or 404 from your server arrives as a 300 with an `x-fling-status` header | {{instance:name}} hasn't finished setting up site servers | Ask whoever runs {{instance:name}} to deploy it again |
 
 ## Good to know

@@ -5,8 +5,9 @@
  * error is logged, without addresses, and swallowed). The drainer (drain.ts) does the rest.
  *
  * Event ids are derived from the cause (`comment.created:<siteId>:<commentId>`,
- * `site.shared:<siteId>:<site updatedAt>`, `site.owner_added:<siteId>:<site updatedAt>`, `group.member_added:<groupId>:<group updatedAt>`), so a
- * retried request records the event once.
+ * `site.shared:<siteId>:<site updatedAt>`, `site.owner_added:<siteId>:<site updatedAt>`, `group.member_added:<groupId>:<group updatedAt>`,
+ * `site.archive_due:<siteId>:<since>`: the activity the warning is about, so its due date), so a
+ * retried request (or maintenance run) records the event once.
  *
  * Nothing is recorded on an instance without a notifications channel, for an event whose
  * capability is off, or while an admin impersonates the actor: notifications are the user's, and
@@ -47,6 +48,18 @@ export interface EventData {
   'group.member_added': { groupId: string; emails: string[] }
   'comment.created': CommentEventData
   'comment.reply': CommentEventData
+  'site.archive_due': PolicyEventData
+  'site.delete_due': PolicyEventData
+}
+
+/**
+ * The archive policy's warning (archive-policy.ts): the site will be archived (or, archived by the
+ * policy, deleted) at `dueAt`; `since`: when it was last viewed or published (or was archived).
+ */
+export interface PolicyEventData {
+  siteName: string
+  dueAt: string
+  since: string
 }
 
 /**

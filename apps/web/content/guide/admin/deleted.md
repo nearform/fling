@@ -4,8 +4,8 @@ part: admin
 order: 24
 summary: Find a deleted site or Path whose files are kept, restore it, or delete it for good.
 audience: admin
-sources: [apps/web/src/pages/AdminDeleted.tsx, apps/web/src/lib/deleted.ts, packages/shared/src/deletion.ts, apps/api/src/routes/admin.ts, apps/api/src/deletion.ts, apps/cli/src/commands/admin.ts, apps/cli/src/deleted.ts]
-verified: b4d7792
+sources: [apps/web/src/pages/AdminDeleted.tsx, apps/web/src/lib/deleted.ts, packages/shared/src/deletion.ts, apps/api/src/routes/admin.ts, apps/api/src/deletion.ts, apps/cli/src/commands/admin.ts, apps/cli/src/deleted.ts, apps/api/src/archive-policy.ts]
+verified: 0a10243
 ---
 
 When someone deletes a site or a Path, its address stops working and the name is free for anyone.
@@ -42,7 +42,9 @@ a site name in the search box to see only the deletes under that name.
 Choose **Restore…** on a row:
 
 - **A site** asks for the name to restore it as, its own to start with. Its last live version goes
-  live again (a site archived before the delete comes back archived), with its Paths, older versions, comments and form responses, and the people and groups
+  live again (a site archived before the delete comes back archived<!-- requires: archivePolicy -->,
+  as its owners archive one, even when the archive policy archived and deleted it, so the policy
+  never deletes it again<!-- /requires -->), with its Paths, older versions, comments and form responses, and the people and groups
   it was shared with. If the name has been taken since, the dialog says so and suggests free ones:
   pick one or type another.
 - **A Path** goes back on its site under its own folder. Its site must exist, and the folder must be
@@ -85,8 +87,10 @@ Every restore and every delete for good is recorded on [Audit](/guide/admin/audi
 
 ## Good to know
 
-- Kept files stay in storage until they are restored or an admin deletes them for good.
-  {{instance:name}} never removes them itself.
+- Kept files stay in storage until they are restored or deleted for good: by an admin here, or by
+  the [archive policy](/guide/admin/archive-policy) where it purges deleted sites after a while.
+  Nothing else removes them.
+- A site the archive policy deleted shows `archive-policy` as who deleted it.
 - Sizes are a guide: the total of every kept version's files.
 - A Path deleted with its site comes back with the site. One deleted on its own before that has its
   own row and its own restore.

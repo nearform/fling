@@ -158,6 +158,8 @@ export const accessOf = (site: AccessFields): Access =>
  *   site.publishers  PATCH { publishers }
  *   site.archive     POST …/archive, …/unarchive, fling_archive
  *   site.delete      DELETE /api/sites/:name, fling_delete
+ *   site.keep        PUT …/keep, fling_keep, `fling keep`: exempt the site from the archive policy
+ *                    (archive-policy.ts), or stop exempting it
  *   site.thumbnail   PUT …/thumbnail: the home page's thumbnail, taken by the browser of an owner
  *                    or publisher who opens the site page (reading it is site.view)
  *   share.read       fling_share returning the existing link
@@ -206,6 +208,7 @@ export const ACTIONS = [
   'site.publishers',
   'site.archive',
   'site.delete',
+  'site.keep',
   'site.thumbnail',
   'site.metrics.read',
   'share.read',
@@ -262,6 +265,7 @@ const RULES: Record<Action, (role: Role, access: Access) => boolean> = {
   'site.publishers': ownerOrAdminSession,
   'site.archive': ownerOrAdminSession,
   'site.delete': ownerOrAdminSession,
+  'site.keep': ownerOrAdminSession,
   'site.thumbnail': role => role === 'publisher' || ownerOrAdminSession(role),
   'share.read': ownerOrAdmin,
   'share.create': ownerOrAdminSession,
@@ -352,6 +356,7 @@ export const SITE_CHANGES: ReadonlySet<Action> = new Set<Action>([
   'site.publishers',
   'site.archive',
   'site.delete',
+  'site.keep',
   'site.thumbnail',
   'share.create',
   'share.revoke',
@@ -518,6 +523,10 @@ export const PRINCIPAL_ROLES: readonly PrincipalRole[] = [
  *                            browser session only, a restore puts back what someone took down
  *   admin.deleted.purge      DELETE /api/admin/deleted/:siteId and …/paths/:pathId: delete what
  *                            was kept for good; browser session only, it can't be undone
+ *   admin.archive.read       GET /api/admin/archive-policy: the archive policy's settings, switch,
+ *                            preview and recent actions (archive-policy.ts)
+ *   admin.archive.write      PUT /api/admin/archive-policy: turn it live or back to dry run;
+ *                            browser session only, going live archives and deletes sites
  *
  * Admins see every site's listing (`admin.sites.list`: its name, owner, dates, state and access
  * level), and administer the sites themselves through `can` (the `admin` and `admin-token`
@@ -563,6 +572,8 @@ export const INSTANCE_ACTIONS = [
   'admin.deleted.read',
   'admin.deleted.restore',
   'admin.deleted.purge',
+  'admin.archive.read',
+  'admin.archive.write',
 ] as const
 
 export type InstanceAction = (typeof INSTANCE_ACTIONS)[number]
@@ -607,6 +618,9 @@ const INSTANCE_RULES: Record<InstanceAction, (role: PrincipalRole) => boolean> =
   'admin.deleted.restore': role => role === 'admin',
   // Nor delete for good what an admin could still put back.
   'admin.deleted.purge': role => role === 'admin',
+  'admin.archive.read': isAdminRole,
+  // Going live archives and deletes people's sites: a leaked key or token must not start it.
+  'admin.archive.write': role => role === 'admin',
 }
 
 export function principalRole(p: Principal): PrincipalRole {

@@ -5,7 +5,7 @@ order: 50
 summary: Start from what is live, change some files, and publish only what changed.
 requires: [pull]
 sources: [apps/cli/src/commands/pull.ts, apps/cli/src/pull.ts, apps/cli/src/commands/deploy.ts, apps/api/src/pull.ts, apps/api/src/publication.ts, apps/api/src/mcp/read-files.ts, apps/web/src/components/site/SiteOverview.tsx]
-verified: 0ead0eb
+verified: 0a10243
 ---
 
 To fix a typo, update a page or act on review comments, start from the files that are live, not

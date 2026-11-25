@@ -30,11 +30,15 @@ import {
   ACCESS_NOTE,
   type AccessLevel,
   accessChangeHint,
+  adminArchivePolicyUrl,
+  archivePolicyOf,
+  archivePolicyOnOf,
   COMMENTS_NOTE,
   changesAudience,
   checkFormsConfig,
   commentThreads,
   deletedText,
+  describeArchivePolicy,
   describeAudience,
   describeComments,
   describeFormsSummary,
@@ -53,6 +57,7 @@ import {
   describeServerLive,
   describeSharedSite,
   describeSiteAccess,
+  describeSiteArchive,
   describeSiteMetrics,
   describeUploadBegun,
   describeVersionFiles,
@@ -108,6 +113,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { type ApiClient, CliApiError, createApiClient, type FetchLike } from './api.ts'
+import { getArchivePolicy, requireArchivePolicy, setKeep } from './archive-policy.ts'
 import { type LoginResult, loginFlow } from './auth.ts'
 import { findClaudeDesktop, runClaude } from './claude.ts'
 import {
@@ -1587,7 +1593,13 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       const to = current?.path ? ` to /${current.path}/` : ''
       const published = by || to ? `\nCurrent version published${by}${to}` : ''
       const roles = site.owners ? `\n${describeRoles(site)}` : ''
-      return { summary: `${site.name}: ${site.url}${access}${roles}${published}`, data: site }
+      const archiving = describeSiteArchive(site)
+        .map(line => `\n${line}`)
+        .join('')
+      return {
+        summary: `${site.name}: ${site.url}${access}${roles}${published}${archiving}`,
+        data: site,
+      }
     })
   )
 
@@ -1826,6 +1838,43 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
       }
     })
   )
+
+  // The archive policy: fling_keep is offered when a Fling known at start archives sites, and
+  // checks the Fling each call goes to; the status when one has the policy in any form (archiving,
+  // or purging only), the server's to refuse (admins only, any credential).
+  if (servers.some(s => archivePolicyOf(s.instance))) {
+    server.registerTool(t.keep.name, serverTool(t.keep), args =>
+      run(t.keep.name, args.server, async target => {
+        const instance = await loadInstanceWith(store, target.config, fetchImpl, 'archivePolicy')
+        requireArchivePolicy(instance, ` (${serverLabel(target.url)})`)
+        const site = await setKeep(target.client, args.name, args.keep, {
+          appOrigin: instance?.appOrigin,
+        })
+        return {
+          summary: `${
+            args.keep
+              ? `${site.name} is kept: the archive policy never archives it for disuse (undo with fling_keep keep: false).`
+              : `${site.name} is no longer kept: it is archived like any site once nobody views or publishes it for a while.`
+          }${onFling(target.url, instance)}`,
+          data: site,
+        }
+      })
+    )
+  }
+
+  if (servers.some(s => archivePolicyOnOf(s.instance))) {
+    server.registerTool(t.adminArchivePolicy.name, serverTool(t.adminArchivePolicy), args =>
+      run(t.adminArchivePolicy.name, args.server, async target => {
+        const instance = await target.instance()
+        const status = await getArchivePolicy(target.client, { instanceName: instance?.name })
+        const appOrigin = instance?.appOrigin ?? target.url
+        return {
+          summary: `${describeArchivePolicy(status, { fling: instance?.name ?? serverLabel(target.url), appOrigin })}${onFling(target.url, instance)}`,
+          data: { ...status, switchUrl: adminArchivePolicyUrl(appOrigin) },
+        }
+      })
+    )
+  }
 
   const adminDeleted = t.adminDeleted
   server.registerTool(adminDeleted.name, serverTool(adminDeleted), args =>

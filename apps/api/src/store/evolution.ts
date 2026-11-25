@@ -61,6 +61,7 @@ export type Kind =
   | 'maintenancecursor'
   | 'routeformat'
   | 'viewcounting'
+  | 'archivepolicy'
   | 'counter'
   | 'sitemetric'
   | 'siteactivity'

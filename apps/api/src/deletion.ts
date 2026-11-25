@@ -45,7 +45,9 @@
  * someone never widens who can open it. When no person owner is left, the restoring admin becomes
  * the owner. The share link isn't restored. The current version goes live again on the site and
  * on its Paths by rewriting their routes from the records (the files passed the secret scan when
- * they were published); an archived site comes back archived. Its site server comes back waiting
+ * they were published); an archived site comes back archived, as its owners archive one: without
+ * the archive policy's marks (`archivedBy`, `policyWarning`), so the policy, which deletes only
+ * what it archived, never deletes it again. Its site server comes back waiting
  * (`server.awaiting` naming the live version, the route's `x`): with secrets to set it reports
  * `needs_secrets`, and setting the last starts it the usual way (servers/api.ts `startAwaiting`);
  * with none to set it is started now. The static site is live whatever the server does.
@@ -61,7 +63,8 @@
  * afresh.
  *
  * Purge (`purgeSite`, `purgePath`): an admin's, from their browser session only
- * (`admin.deleted.purge`), as a restore is. It deletes the files kept, `sites/<id>/` for the site
+ * (`admin.deleted.purge`), as a restore is, or the archive policy's (archive-policy.ts
+ * `purgeDue`, PURGE_DELETED_DAYS); both go through `purgeRecord`, with the same checks. It deletes the files kept, `sites/<id>/` for the site
  * and for each Path the record names (a site's: every Path deleted with it), and then the record.
  * The ids come from the record, never the recovery file, so it finishes whether or not that file is
  * still there. It never deletes the files of a live site or Path:
@@ -110,7 +113,7 @@ import {
   removePath,
   syncPathRoute,
 } from './paths.ts'
-import { type Actor, type Principal, restrictsToAudience } from './policy.ts'
+import { type Principal, restrictsToAudience } from './policy.ts'
 import { startAwaiting } from './servers/api.ts'
 import { SERVER_PATH_FOLDER, serverSite } from './servers/index.ts'
 import { nameTaken, writeSite } from './sites.ts'
@@ -304,10 +307,10 @@ async function readRecovery<S extends z.ZodType>(
 // --- deleting ------------------------------------------------------------------------------------
 
 /**
- * Delete a site `actor` (resolved against it) may delete, soft or hard as the instance deletes
- * (see the header).
+ * Delete a site, soft or hard as the instance deletes (see the header): `by` is who deletes it,
+ * a user who may (resolved against it) or the archive policy (ARCHIVE_POLICY_ACTOR).
  */
-export async function removeSite(deps: Deps, user: User, actor: Actor, site: SiteRecord) {
+export async function removeSite(deps: Deps, by: string, site: SiteRecord) {
   const soft = softDeletes(deps)
   const paths = await deps.store.listPaths(site.id)
   if (soft) {
@@ -316,7 +319,7 @@ export async function removeSite(deps: Deps, user: User, actor: Actor, site: Sit
     const pathBytes: number[] = []
     for (const path of paths) {
       await writeRecovery(deps, path.id, recorded, async () => {
-        const file = await pathRecovery(deps, site, path, user.email, at)
+        const file = await pathRecovery(deps, site, path, by, at)
         pathBytes.push(file.bytes)
         return file
       })
@@ -332,7 +335,7 @@ export async function removeSite(deps: Deps, user: User, actor: Actor, site: Sit
       return {
         format: RECOVERY_FORMAT,
         kind: 'site',
-        deletedBy: user.email,
+        deletedBy: by,
         deletedAt: at,
         bytes,
         site,
@@ -348,16 +351,17 @@ export async function removeSite(deps: Deps, user: User, actor: Actor, site: Sit
         siteId: site.id,
         name: site.name,
         owner: firstOwner(site),
-        deletedBy: user.email,
+        deletedBy: by,
         deletedAt: at,
         bytes,
         paths: paths.map(p => ({ folder: p.folder, pathId: p.id })),
+        ...(site.keep ? { keep: true as const } : {}),
       })
     }
   }
   await audit(deps, {
     action: 'site.delete',
-    actor: actor.kind === 'user' ? actor.email : user.email,
+    actor: by,
     target: site.name,
     owner: firstOwner(site),
     siteId: site.id,
@@ -398,6 +402,7 @@ export async function removeOwnPath(deps: Deps, user: User, site: SiteRecord, pa
         deletedBy: user.email,
         deletedAt: at,
         bytes,
+        ...(site.keep ? { keep: true as const } : {}),
       })
     }
   }
@@ -636,6 +641,10 @@ export async function restoreSite(
     paths: _paths,
     home: _home,
     revision: _revision,
+    // The policy's marks: a restored site is an ordinary one, archived as an owner archives, so
+    // the policy that deleted it never deletes it again (archive-policy.ts).
+    archivedBy: _archivedBy,
+    policyWarning: _policyWarning,
     ...kept
   } = original
   const created = await deps.store.createSite({
@@ -661,6 +670,8 @@ export async function restoreSite(
   await writeSite(deps, site, s => {
     s.currentVersionId = current ? current.id : null
     s.archived = original.archived
+    delete s.archivedBy
+    delete s.policyWarning
     if (withServer) s.server = waitingServer(original, withServer)
     else delete s.server
     return true
@@ -804,21 +815,21 @@ async function ensurePurgeable(
 /** Mark the purge under way, audit it, delete each prefix, then forget the record (see the header). */
 async function purge(
   deps: Deps,
-  user: User,
+  by: string,
   record: DeletedSiteRecord,
   storageIds: readonly string[],
   entry: { action: 'site.purge' | 'path.purge'; target: string },
   what: string
 ) {
   const at = deps.clock.now().toISOString()
-  if (!(await deps.store.markPurging(record, { by: user.email, at }))) {
+  if (!(await deps.store.markPurging(record, { by, at }))) {
     const now = await deps.store.getDeletedSite(record.kind, deletedIdOf(record))
     if (!now) throw notFound(`No deleted ${what}`)
     throw conflict(`${what} is being restored: it can't be deleted for good`, 'restore_in_progress')
   }
   await audit(deps, {
     action: entry.action,
-    actor: user.email,
+    actor: by,
     target: entry.target,
     owner: record.owner,
     siteId: record.siteId,
@@ -832,10 +843,7 @@ export async function purgeSite(deps: Deps, user: User, p: Principal, siteId: st
   ensure(p, 'admin.deleted.purge')
   const record = await deps.store.getDeletedSite('site', siteId)
   if (record?.kind !== 'site') throw notFound(`No deleted site ${siteId}`)
-  const what = `"${record.name}" (${siteId})`
-  const storageIds = [siteId, ...(record.paths ?? []).map(p => p.pathId)]
-  await ensurePurgeable(deps, record, what, storageIds, 'site_live')
-  await purge(deps, user, record, storageIds, { action: 'site.purge', target: record.name }, what)
+  await purgeRecord(deps, user.email, record)
 }
 
 /** DELETE /api/admin/deleted/:siteId/paths/:pathId: a Path deleted on its own, for good. */
@@ -851,16 +859,32 @@ export async function purgePath(
   if (record?.kind !== 'path' || record.siteId !== siteId) {
     throw notFound(`No deleted Path ${pathId} of ${siteId}`)
   }
+  await purgeRecord(deps, user.email, record)
+}
+
+/**
+ * Purge what a deleted-site record kept, with every check of the header's: an admin's purge, or
+ * the archive policy's (`by`: ARCHIVE_POLICY_ACTOR), which asks nothing of policy.
+ */
+export async function purgeRecord(deps: Deps, by: string, record: DeletedSiteRecord) {
+  if (record.kind === 'site') {
+    const what = `"${record.name}" (${record.siteId})`
+    const storageIds = [record.siteId, ...(record.paths ?? []).map(p => p.pathId)]
+    await ensurePurgeable(deps, record, what, storageIds, 'site_live')
+    await purge(deps, by, record, storageIds, { action: 'site.purge', target: record.name }, what)
+    return
+  }
+  const pathId = record.pathId as string
   const folder = record.folder ?? ''
   const what = `${displayPublishPath(folder)} of "${record.name}"`
   await ensurePurgeable(deps, record, what, [pathId], 'path_live')
   // Its Path record lives in its site's partition, which hasSiteRecords(pathId) doesn't read.
-  if ((await deps.store.getPath(siteId, folder))?.id === pathId) {
+  if ((await deps.store.getPath(record.siteId, folder))?.id === pathId) {
     throw conflict(`${what} is live again: its files are kept`, 'path_live')
   }
   await purge(
     deps,
-    user,
+    by,
     record,
     [pathId],
     { action: 'path.purge', target: `${record.name}/${folder}` },

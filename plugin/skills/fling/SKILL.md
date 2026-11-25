@@ -337,6 +337,31 @@ published as it is: no need to convert it to HTML.
   gives); no tool does either.
   Anyone else who wants a site back asks an admin.
 
+## Sites nobody uses (the archive policy)
+
+A Fling with the `archivePolicy` capability archives sites nobody views or publishes for a while:
+their owners are warned first (by email and on the site page), then the site is archived like
+`fling_archive` does it. Where the Fling deletes too, a site the policy archived is deleted some
+time later, warned the same way. A view or a publish starts the count again; publishing or
+unarchiving an archived site brings it back.
+
+- When the user asks about a site (`fling_info`), read `keep`, `archivedBy` and `archiveDue` and
+  say what applies: kept; *"Archived by the archive policy on …"*; or *"Will be archived on …"* /
+  *"Will be deleted on …"* (`archiveDue.at`; until `warned` is true it is the earliest it can be).
+  The result's text already says it in those words.
+- Offer `fling_keep { name, keep: true }` (`fling keep <name>`) when the user wants a site left
+  alone however rarely it is used (a reference page, an archive of record), when they are told a
+  site will be archived and don't want it to be, or when they ask why one was. `keep: false`
+  (`fling keep <name> --off`) stops keeping it. Only its owners can; a publisher asks an owner, and
+  an admin keeps someone else's site from their browser session, on the site's page.
+- A site the policy archived is back with `fling_archive { name, unarchive: true }` or a publish;
+  keep it too if the user wants it to stay.
+- Admins see the policy with `fling_admin_archive_policy` (`fling admin archive-policy`): its
+  settings, whether it is live or in dry run (working out what it would do, doing nothing), why it
+  is paused, what it would or will do in the next 7 days and what it did lately. Turning it live or
+  back to dry run is done in the browser by an admin, at Admin → Archive policy (the link the result
+  gives); no tool does it.
+
 ## Comments
 
 People review a site on its review page (`<their Fling>/review/<name>`) and leave comments on its
@@ -506,6 +531,6 @@ What was sent to them is on their settings page (`<their Fling>/settings/notific
 - `fling_rollback { name, versionId }` — serve an earlier version (ids from `fling_info`).
 
 CLI equivalents: `fling ls` (`--shared`), `fling info <name>`, `fling stats [name]`, `fling versions <name>`, `fling files <name>`, `fling share <name>
-[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling owners|publishers <name> [--add|--remove|--set <emails>|--group|--remove-group <slugs>]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`,
-`fling rm <name> --yes`, `fling admin deleted [name]` (admins), `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
+[--refresh|--revoke]`, `fling visibility <name> private|public`, `fling access <name> [--add|--remove <emails>|--group|--remove-group <slugs>|--clear]`, `fling owners|publishers <name> [--add|--remove|--set <emails>|--group|--remove-group <slugs>]`, `fling groups [list|show|create|add|remove|rename|delete]`, `fling notifications [set <event> <channel> on|off|default|mute|unmute|sent]`, `fling archive|unarchive <name>`, `fling keep <name> [--off]`,
+`fling rm <name> --yes`, `fling admin deleted [name]`, `fling admin archive-policy` (admins), `fling rollback <name> <versionId>` (prefix with `npx @nearform/fling`
 if it is not installed globally; add `--json` for machine-readable output).

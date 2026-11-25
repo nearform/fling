@@ -15,6 +15,10 @@
  *               MemoryMailer; outside invitations on; site servers on for members as Node child
  *               processes
  *
+ *
+ *   Each runs the archive policy (ARCHIVE_POLICY below), in dry run until the scenario turns it
+ *   live, and runs the dev clock the scenario moves on (`POST /dev/clock`).
+ *
  *   attached    an instance already running with dev login on, at FLING_E2E_ORIGIN (the self-host
  *               compose file under its local override: platforms/node/deploy/compose/smoke.sh);
  *               nothing is started or stopped, and it is never among the defaults
@@ -54,6 +58,17 @@ async function freePort(): Promise<number> {
 }
 
 const secret = () => randomBytes(32).toString('base64url')
+
+/**
+ * The archive policy on every runtime, in days (views are counted by default, which it needs). It
+ * acts only once the dev clock is moved on, which the scenario does last of all.
+ */
+const ARCHIVE_POLICY = {
+  ARCHIVE_INACTIVE_DAYS: '30',
+  ARCHIVE_WARN_DAYS: '7',
+  DELETE_ARCHIVED_DAYS: '30',
+  PURGE_DELETED_DAYS: '30',
+}
 const tsx = join(REPO, 'node_modules', '.bin', 'tsx')
 
 async function awsRuntime(): Promise<Runtime> {
@@ -80,6 +95,7 @@ async function awsRuntime(): Promise<Runtime> {
           MAIL_DRIVER: 'memory',
           MAIL_FROM: 'fling@mail.fling.lvh.me',
           INVITES: 'on',
+          ...ARCHIVE_POLICY,
         },
       }),
   }
@@ -110,7 +126,12 @@ async function cloudflareRuntime(): Promise<Runtime> {
           cwd: REPO,
           detached: true,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env, SESSION_SECRET: secret(), SITE_HMAC_KEY: secret() },
+          env: {
+            ...process.env,
+            SESSION_SECRET: secret(),
+            SITE_HMAC_KEY: secret(),
+            ...ARCHIVE_POLICY,
+          },
         }
       ),
   }
@@ -219,6 +240,7 @@ async function nodeRuntime(): Promise<Runtime> {
           MAIL_FROM: 'fling@mail.flingnode.lvh.me',
           INVITES: 'on',
           SERVERS: 'members',
+          ...ARCHIVE_POLICY,
         },
       }),
   }

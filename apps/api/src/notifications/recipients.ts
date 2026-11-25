@@ -10,11 +10,13 @@
  * role already reached them. A new thread goes to every owner of the site, the members of its owner groups
  * included; one on a page of a live Path (paths.ts) goes to the Path's owners instead, as it is
  * theirs to answer. Replies go to the thread's author and everyone who replied before, not to the site's
- * owners as such, so an owner in the thread gets `comment.reply` only.
+ * owners as such, so an owner in the thread gets `comment.reply` only. The archive policy's warnings
+ * (`site.archive_due`, `site.delete_due`) go to every owner of the site, its owner groups' members
+ * included.
  */
 import type { NotificationEventRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
-import type { CommentEventData, EventData, RoleEventData } from './notify.ts'
+import type { CommentEventData, EventData, PolicyEventData, RoleEventData } from './notify.ts'
 
 export interface Recipient {
   email: string
@@ -96,6 +98,17 @@ export async function recipientsOf(
       const owners = (await pathOwning(deps, site.id, site.paths, data.path)) ?? site.owners
       for (const email of owners.emails) add(email, { ...data })
       for (const groupId of [...owners.groups].sort()) {
+        for (const email of await deps.store.listGroupMembers(groupId)) add(email, { ...data })
+      }
+      break
+    }
+    case 'site.archive_due':
+    case 'site.delete_due': {
+      const data = event.data as unknown as PolicyEventData
+      const site = await deps.store.findSite(data.siteName)
+      if (site?.id !== event.siteId) break
+      for (const email of site.owners.emails) add(email, { ...data })
+      for (const groupId of [...site.owners.groups].sort()) {
         for (const email of await deps.store.listGroupMembers(groupId)) add(email, { ...data })
       }
       break

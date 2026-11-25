@@ -83,6 +83,10 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       serversEgress: config.servers.publish.kind !== 'off' && config.servers.egress === 'open',
       // A deleted site's files are kept and an admin can restore it (SITE_DELETE, deletion.ts).
       recoverableDeletes: config.siteDelete === 'soft',
+      // Sites nobody uses are archived (ARCHIVE_INACTIVE_DAYS, archive-policy.ts): the keep flag.
+      archivePolicy: config.archivePolicy.inactiveDays > 0,
+      // The policy purges deleted sites (PURGE_DELETED_DAYS), archiving or not.
+      purgeDeleted: config.archivePolicy.purgeDeletedDays > 0,
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,

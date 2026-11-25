@@ -24,11 +24,13 @@ export const EVENT_KEYS = [
   'group.member_added',
   'comment.created',
   'comment.reply',
+  'site.archive_due',
+  'site.delete_due',
 ] as const
 export const EventKeySchema = z.enum(EVENT_KEYS)
 export type EventKey = z.infer<typeof EventKeySchema>
 
-export type EventSection = 'sharing' | 'groups' | 'comments'
+export type EventSection = 'sharing' | 'groups' | 'comments' | 'sites'
 
 export interface EventDefinition {
   key: EventKey
@@ -106,6 +108,26 @@ export const EVENT_CATALOGUE: readonly EventDefinition[] = [
     defaults: { email: 'on' },
     coolDown: true,
     capability: 'comments',
+  },
+  {
+    key: 'site.archive_due',
+    title: 'Your site is about to be archived',
+    description:
+      'Nobody has viewed or published a site you own for a while: it will be archived unless someone does.',
+    section: 'sites',
+    defaults: { email: 'on' },
+    coolDown: false,
+    capability: 'archivePolicy',
+  },
+  {
+    key: 'site.delete_due',
+    title: 'Your archived site is about to be deleted',
+    description:
+      'A site you own that was archived for nobody using it will be deleted unless an owner unarchives it.',
+    section: 'sites',
+    defaults: { email: 'on' },
+    coolDown: false,
+    capability: 'archivePolicy',
   },
 ]
 
@@ -381,6 +403,7 @@ const SECTION_TITLES: Record<string, string> = {
   sharing: 'Sharing',
   groups: 'Groups',
   comments: 'Comments',
+  sites: 'Your sites',
 }
 
 /** A section's heading; an unknown section is shown as its key. */

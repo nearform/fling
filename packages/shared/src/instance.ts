@@ -215,6 +215,16 @@ export const CONFIGURED_CAPABILITIES = [
   'serversEgress',
   /** a deleted site's files are kept and an admin can restore it (`SITE_DELETE`, deletion.ts) */
   'recoverableDeletes',
+  /**
+   * sites nobody views or publishes are archived (`ARCHIVE_INACTIVE_DAYS`, archive-policy.ts): the
+   * keep flag, and a site page's "Will be archived on …"
+   */
+  'archivePolicy',
+  /**
+   * the archive policy purges deleted sites (`PURGE_DELETED_DAYS`, archive-policy.ts), with or
+   * without archiving: what offers an admin fling_admin_archive_policy where only that is on
+   */
+  'purgeDeleted',
 ] as const
 
 /** Every capability name an instance may advertise. */

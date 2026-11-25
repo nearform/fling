@@ -8,6 +8,7 @@
 import { UNSUBSCRIBE_PATH } from '@fling/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MailConfig } from '../src/config.ts'
+import { DevClock } from '../src/lib/dev-clock.ts'
 import { drain } from '../src/notifications/drain.ts'
 import { notifyComment } from '../src/notifications/notify.ts'
 import {
@@ -1005,5 +1006,37 @@ describe('dev routes', () => {
     await comment(env, bob.key, { body: 'Later' })
     await settle(env)
     expect(subjects(env, ALICE)).toHaveLength(1)
+  })
+
+  it('move the clock on with the outbox: nothing queued before is lost, what follows goes at once', async () => {
+    const { env, alice } = await world({ appEnv: 'development', devLogin: true })
+    vi.useFakeTimers({ toFake: ['Date'], now: env.deps.clock.now() })
+    try {
+      const clock = new DevClock()
+      env.deps.clock = clock
+      const drainNow = async () =>
+        json(await env.app.request('/dev/notify/drain', { method: 'POST' }))
+      // Carol's email meets the daily quota: it waits for the next UTC day, 24 hours on.
+      env.mailer.failNext({ ok: false, retry: true, reason: 'throttled', quota: true })
+      await share(env, alice.key, { emails: [CAROL] })
+      expect(await drainNow()).toMatchObject({ sent: 0, deferred: 1 })
+      // Bob's is queued and not yet drained when the clock moves.
+      vi.setSystemTime(Date.now() + 1000)
+      await share(env, alice.key, { emails: [CAROL, BOB] })
+      const moved = await env.app.request('/dev/clock', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ days: 31 }),
+      })
+      expect(moved.status).toBe(200)
+      expect(subjects(env, BOB)).toEqual(['Acme Fling: Alice shared q3-report with you'])
+      expect(subjects(env, CAROL)).toEqual(['Acme Fling: Alice shared q3-report with you'])
+      // The walk is just behind the new time, so what happens now goes with one drain.
+      await share(env, alice.key, { emails: [CAROL, BOB, DAN] })
+      expect(await drainNow()).toMatchObject({ sent: 1, complete: true })
+      expect(subjects(env, DAN)).toEqual(['Acme Fling: Alice shared q3-report with you'])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

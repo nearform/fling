@@ -98,6 +98,7 @@ import {
   signDenyHandoff,
   signPassHandoff,
 } from '@fling/shared/site-cookie'
+import { siteArchiveDue } from './archive-policy.ts'
 import { audit } from './audit.ts'
 import { admittedByConfig, asRequestUser } from './auth/standing.ts'
 import { manifestKey, thumbnailKey } from './blobs/types.ts'
@@ -228,6 +229,9 @@ export function toSite(deps: Deps, actor: Actor, site: SiteRecord): Site {
     canPull: canPullCurrent(actor, site),
     ...(site.thumbnail ? { thumbnail: site.thumbnail } : {}),
     ...(site.server?.live ? { hasServer: true } : {}),
+    ...(site.keep ? { keep: true } : {}),
+    ...(site.archived && site.archivedAt ? { archivedAt: site.archivedAt } : {}),
+    ...(site.archived && site.archivedBy ? { archivedBy: site.archivedBy } : {}),
     createdAt: site.createdAt,
     updatedAt: site.updatedAt,
   }
@@ -1046,10 +1050,11 @@ export async function siteArrival(
 
 export async function siteDetail(deps: Deps, user: User, name: string): Promise<SiteDetail> {
   const { site, actor } = await requireSiteAs(deps, user, name, 'site.read', 'version.list')
-  const [versions, audience, roles] = await Promise.all([
+  const [versions, audience, roles, due] = await Promise.all([
     deps.store.listVersions(site),
     audienceOf(deps, site),
     rolesView(deps, site),
+    siteArchiveDue(deps, site),
   ])
   return {
     ...toSite(deps, actor, site),
@@ -1081,6 +1086,7 @@ export async function siteDetail(deps: Deps, user: User, name: string): Promise<
     ...(serversOn(deps) && site.server?.awaiting
       ? { awaitingSecrets: { ...site.server.awaiting } }
       : {}),
+    ...(due ? { archiveDue: due } : {}),
   }
 }
 
@@ -1228,16 +1234,67 @@ export async function revokeShare(deps: Deps, user: User, name: string) {
   return toSite(deps, as, site)
 }
 
+/**
+ * Take the site out of the archive (an unarchive, or a version going live): what the archive
+ * held goes, and the archive policy counts it as activity (`unarchivedAt`, archive-policy.ts).
+ * A warning the policy gave goes too: nothing it warned of is due any more.
+ */
+export function unarchive(site: SiteRecord, at: string) {
+  if (site.archived) site.unarchivedAt = at
+  site.archived = false
+  delete site.archivedAt
+  delete site.archivedBy
+  delete site.policyWarning
+}
+
+/** Put the site in the archive: `by` the archive policy, or (absent) its owners or an admin. */
+export function archive(site: SiteRecord, at: string, by?: 'policy') {
+  if (!site.archived) site.archivedAt = at
+  site.archived = true
+  if (by) site.archivedBy = by
+  else delete site.archivedBy
+  delete site.policyWarning
+}
+
 export async function setArchived(deps: Deps, user: User, name: string, archived: boolean) {
   const { site, actor: resolved } = await requireSiteAs(deps, user, name, 'site.archive')
   const actor = await changeSite(deps, resolved, site, ['site.archive'], s => {
-    s.archived = archived
+    const at = deps.clock.now().toISOString()
+    if (archived) archive(s, at)
+    else unarchive(s, at)
     return true
   })
   // An archived site's server goes dark with it; restored, it runs again unless an admin stopped it.
   if (site.server && deps.servers) {
     await deps.servers.setEnabled(serverSite(site), !archived && !site.server.stopped)
   }
+  return toSite(deps, actor, site)
+}
+
+/**
+ * PUT /api/sites/:name/keep: exempt the site from the archive policy, or stop exempting it
+ * (`site.keep`: its owners, and admins from their browser session, audited as `site.change`).
+ * Keeping it takes back a warning the policy gave; the site's `updatedAt` stays.
+ */
+export async function setKeep(deps: Deps, user: User, name: string, keep: boolean) {
+  const { site, actor: resolved } = await requireSiteAs(deps, user, name, 'site.keep')
+  const actor = await changeSite(
+    deps,
+    resolved,
+    site,
+    ['site.keep'],
+    s => {
+      if ((s.keep === true) === keep) return false
+      if (keep) {
+        s.keep = true
+        delete s.policyWarning
+      } else delete s.keep
+      return true
+    },
+    { touch: false, routes: false }
+  )
+  // Not kept any more: the policy looks at it again now, rather than at the sweep.
+  if (!keep) await queueMaintenance(deps, site)
   return toSite(deps, actor, site)
 }
 
@@ -1342,6 +1399,6 @@ export async function signedInReturn(deps: Deps, user: User, ret: string): Promi
  * name can never reach it.
  */
 export async function deleteSite(deps: Deps, user: User, name: string) {
-  const { site, actor } = await requireSiteAs(deps, user, name, 'site.delete')
-  await removeSite(deps, user, actor, site)
+  const { site } = await requireSiteAs(deps, user, name, 'site.delete')
+  await removeSite(deps, user.email, site)
 }

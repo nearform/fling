@@ -46,7 +46,12 @@
  *   from the browser session only, restores it under a new name with its Path and comment; a Path
  *   deleted on its own is listed and restored; then both sites are deleted and their records
  *   purged) → conditional-write race (concurrent first deploys of one name) →
- *   MCP publish → clean up (every site it made is removed).
+ *   MCP publish → clean up (every site it made is removed) → archive policy (last, as it moves
+ *   the dev clock on for good; where on, with an admin session and the dev clock: an idle site and
+ *   a kept one; in dry run the preview lists the idle one and nothing is done or sent; live, its
+ *   owner is warned, it is archived and stops serving, warned again, deleted (listed as the
+ *   policy's in Admin → Deleted) and purged, the kept one untouched; back to dry run, the kept one
+ *   deleted and purged).
  *
  * Notifications ride along where their causes happen: the settings answer wherever the instance
  * has email, and where the dev drain exists (`POST /dev/notify/drain`, local runs only) the
@@ -75,6 +80,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
 import {
+  ARCHIVE_POLICY_ACTOR,
+  type ArchivePolicyStatus,
+  ArchivePolicyStatusSchema,
+  DeletedSitesSchema,
   defaultAccessOf,
   deletedText,
   GUIDE_ROUTE,
@@ -85,12 +94,13 @@ import {
   type LiveServerMessage,
   RELEASE_HEADER,
   type RestoreResult,
+  SiteDetailSchema,
 } from '@fling/shared'
 import { SITE_SEEN_PATH } from '@fling/shared/route-keys'
 import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { zipSync } from 'fflate'
 import { REPO, runCli, runCliOutcome } from './cli.ts'
-import { cookiePairs, type Session } from './sign-in.ts'
+import { cookiePairs, devSession, type Session } from './sign-in.ts'
 
 export interface ScenarioOptions {
   appOrigin: string
@@ -1196,6 +1206,10 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
     rmSync(work, { recursive: true, force: true })
   }
   step(`removed ${made.join(', ')}`)
+
+  // The archive policy, last: it moves the instance's clock on for good, so it runs once
+  // everything else is done and only its own sites are live.
+  await archivePolicyStep({ appOrigin, nonce, opts, step, log, propagationMs })
 }
 
 interface CommentJson {
@@ -4142,6 +4156,387 @@ async function softDeleteStep(ctx: {
       )
     }
   }
+}
+
+/**
+ * The archive policy, on an instance with it (`archivePolicy`), an admin's browser session and
+ * the dev clock (`POST /dev/clock`, local runs only). The clock is the runtime's, only goes
+ * forward and expires sessions as it goes, so this runs after every other step has cleaned up:
+ * the only live sites are its own, an idle one and a kept one. Days come from the instance's
+ * settings. In dry run, past ARCHIVE_INACTIVE_DAYS, the preview lists the idle site and nothing
+ * is done or sent; turned live (the admin's session only), its owner is warned, then it is
+ * archived (it stops serving) and, where it deletes what it archived, warned again and deleted
+ * (soft: listed as deleted by the policy), then purged past PURGE_DELETED_DAYS. The kept site is
+ * left alone throughout. Then back to dry run, and the kept site is deleted and purged.
+ */
+async function archivePolicyStep(ctx: {
+  appOrigin: string
+  nonce: string
+  opts: ScenarioOptions
+  step: (line: string) => void
+  log: (line: string) => void
+  propagationMs: number
+}) {
+  const { appOrigin, nonce, opts, step } = ctx
+  const wait = { timeoutMs: ctx.propagationMs }
+  const meta = InstanceMetadataSchema.parse(
+    await (await fetch(instanceMetadataUrl(appOrigin))).json()
+  )
+  const admin = opts.admin
+  if (meta.capabilities.archivePolicy !== true || !admin?.cookie) {
+    step('archive policy: not on this instance, or no admin browser session (skipped)')
+    return
+  }
+  const clockRes = await fetch(`${appOrigin}/dev/clock`, {
+    headers: { accept: 'application/json' },
+  })
+  if (
+    clockRes.status !== 200 ||
+    !(clockRes.headers.get('content-type') ?? '').includes('application/json')
+  ) {
+    await clockRes.arrayBuffer()
+    step('archive policy: no dev clock to move on here (skipped)')
+    return
+  }
+  const startedAt = ((await clockRes.json()) as { now: string }).now
+
+  const idle = `e2e-${nonce}-idle`
+  const kept = `e2e-${nonce}-kept`
+  const work = mkdtempSync(join(tmpdir(), 'fling-e2e-archive-'))
+  const fling = (...args: string[]) =>
+    runCli(args, {
+      serverUrl: appOrigin,
+      apiKey: opts.session.apiKey,
+      configDir: join(work, 'cli'),
+    })
+  const api = (method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${opts.session.apiKey}`,
+        accept: 'application/json',
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const mail = meta.capabilities.email === true ? await devMailbox(appOrigin, [opts.session]) : null
+  // The admin's browser session, signed in again whenever the clock has moved past its expiry.
+  let adminCookie = admin.cookie
+  const signInAdmin = async () => {
+    adminCookie = (await devSession(appOrigin, admin.email)).join('; ')
+  }
+  const asAdmin = (how: 'cookie' | 'key', method: string, path: string, body?: unknown) =>
+    fetch(`${appOrigin}${path}`, {
+      method,
+      redirect: 'manual',
+      headers: {
+        accept: 'application/json',
+        ...(how === 'cookie'
+          ? { cookie: adminCookie, origin: appOrigin }
+          : { authorization: `Bearer ${admin.apiKey}` }),
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  const status = async (): Promise<ArchivePolicyStatus> => {
+    const res = await asAdmin('key', 'GET', '/api/admin/archive-policy')
+    check(
+      res.status === 200,
+      `GET /api/admin/archive-policy: ${res.status} ${await res.clone().text()}`
+    )
+    return ArchivePolicyStatusSchema.parse(await res.json())
+  }
+  const setLive = async (live: boolean) => {
+    const res = await asAdmin('cookie', 'PUT', '/api/admin/archive-policy', { live })
+    const body = (await res.json().catch(() => ({}))) as { live?: boolean }
+    check(
+      res.status === 200 && body.live === live,
+      `PUT archive-policy ${live}: ${res.status} ${JSON.stringify(body)}`
+    )
+  }
+  /**
+   * Move the clock on by `days`, and sign the admin in again as of then. The outbox moves with the
+   * clock (what was queued is sent first), so what the policy sends next goes with the mailbox's
+   * drain.
+   */
+  const advance = async (days: number) => {
+    const res = await fetch(`${appOrigin}/dev/clock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ days }),
+    })
+    check(res.status === 200, `POST /dev/clock ${days}: ${res.status} ${await res.clone().text()}`)
+    await res.arrayBuffer()
+    await signInAdmin()
+  }
+  const maintain = async (): Promise<PolicyCountsJson> => {
+    const res = await fetch(`${appOrigin}/dev/maintain`, {
+      method: 'POST',
+      headers: { accept: 'application/json' },
+    })
+    check(res.status === 200, `POST /dev/maintain: ${res.status} ${await res.clone().text()}`)
+    const result = (await res.json()) as { policy?: PolicyCountsJson }
+    check(result.policy, `POST /dev/maintain: no policy counts in ${JSON.stringify(result)}`)
+    return result.policy
+  }
+  const detail = async (siteName: string) => {
+    const res = await api('GET', `/api/sites/${siteName}`)
+    check(
+      res.status === 200,
+      `GET /api/sites/${siteName}: ${res.status} ${await res.clone().text()}`
+    )
+    return SiteDetailSchema.parse(await res.json())
+  }
+  const deletedOf = async (siteName: string) => {
+    const res = await asAdmin(
+      'key',
+      'GET',
+      `/api/admin/deleted?name=${encodeURIComponent(siteName)}`
+    )
+    check(res.status === 200, `GET /api/admin/deleted?name=${siteName}: ${res.status}`)
+    return DeletedSitesSchema.parse(await res.json()).deleted.filter(d => d.name === siteName)
+  }
+  const live = new Set<string>()
+  let finished = false
+
+  try {
+    const before = await status()
+    const { inactiveDays, warnDays, deleteArchivedDays, purgeDeletedDays } = before.settings
+    check(
+      before.on && !before.live && inactiveDays > warnDays && warnDays > 0,
+      `archive policy before the step: ${JSON.stringify({ ...before, preview: undefined, recent: undefined })}`
+    )
+
+    // 1. Two sites, one kept.
+    const urls: Record<string, string> = {}
+    for (const siteName of [idle, kept]) {
+      const dir = siteDir(work, siteName, { 'index.html': page(siteName, `${siteName} ${nonce}`) })
+      const deployed = (await fling('deploy', dir, '--name', siteName, '--access', 'public')) as {
+        site: CliSite
+      }
+      live.add(siteName)
+      urls[siteName] = deployed.site.url
+    }
+    const keep = await api('PUT', `/api/sites/${kept}/keep`, { keep: true })
+    const keepBody = (await keep.json().catch(() => ({}))) as { keep?: boolean }
+    check(
+      keep.status === 200 && keepBody.keep === true,
+      `PUT keep ${kept}: ${keep.status} ${JSON.stringify(keepBody)}`
+    )
+    check((await detail(kept)).keep === true, `${kept} is not kept once its owner keeps it`)
+    // Maintenance sees the counting now, which the policy measures from.
+    await maintain()
+    const counting = await status()
+    check(
+      counting.countingSince !== null &&
+        (!counting.paused || counting.paused.reason === 'counting_too_short'),
+      `view counting before the clock moves: ${JSON.stringify({ paused: counting.paused, countingSince: counting.countingSince })}`
+    )
+    step(
+      `archive policy (${inactiveDays} days, warned ${warnDays} before): published ${idle} and ${kept}, its owner keeps ${kept}; ${counting.paused ? `paused (${counting.paused.reason}) until ${counting.paused.until}` : 'counting'}`
+    )
+
+    // 2. Dry run, past ARCHIVE_INACTIVE_DAYS: the preview lists the idle site, nothing is done.
+    await advance(inactiveDays + 1)
+    const dry = await maintain()
+    check(
+      dry.warned === 0 &&
+        dry.archived === 0 &&
+        dry.deleted === 0 &&
+        dry.purged === 0 &&
+        dry.wouldAct >= 1,
+      `dry run maintenance: ${JSON.stringify(dry)}`
+    )
+    const preview = await status()
+    check(
+      preview.paused === null &&
+        preview.preview.sites.some(
+          s => s.name === idle && s.action === 'warn_archive' && s.owner === opts.session.email
+        ) &&
+        !preview.preview.sites.some(s => s.name === kept),
+      `dry run preview: ${JSON.stringify({ paused: preview.paused, sites: preview.preview.sites })}`
+    )
+    const idleDry = await detail(idle)
+    check(
+      !idleDry.archived && idleDry.archiveDue === undefined,
+      `${idle} in dry run: ${JSON.stringify(idleDry)}`
+    )
+    await eventually(
+      `${idle} still serves in dry run`,
+      urls[idle] as string,
+      r => r.status === 200,
+      wait
+    )
+    if (mail) noEmail(await mail.take(opts.session), 'owner in dry run')
+    step(
+      `dry run, ${inactiveDays + 1} days on: the preview would warn ${idle} (not ${kept}); nothing archived${mail ? ', no email' : ''}`
+    )
+
+    // 3. Live (the admin's browser session only): the owner is warned, the site still serves.
+    const byKey = await asAdmin('key', 'PUT', '/api/admin/archive-policy', { live: true })
+    const byKeyBody = (await byKey.json().catch(() => ({}))) as { error?: { code?: string } }
+    check(
+      byKey.status === 403 && byKeyBody.error?.code === 'session_required',
+      `PUT archive-policy with an API key: ${byKey.status} ${JSON.stringify(byKeyBody)}`
+    )
+    await setLive(true)
+    const warned = await maintain()
+    check(
+      warned.warned >= 1 && warned.archived === 0,
+      `live maintenance: ${JSON.stringify(warned)}`
+    )
+    const idleWarned = await detail(idle)
+    check(
+      !idleWarned.archived &&
+        idleWarned.archiveDue?.action === 'archive' &&
+        idleWarned.archiveDue.warned,
+      `${idle} once warned: ${JSON.stringify({ archived: idleWarned.archived, archiveDue: idleWarned.archiveDue })}`
+    )
+    check((await detail(kept)).archiveDue === undefined, `${kept} is kept, yet due for the policy`)
+    await eventually(
+      `${idle} still serves once warned`,
+      urls[idle] as string,
+      r => r.status === 200,
+      wait
+    )
+    if (mail) oneEmail(await mail.take(opts.session), ['site.archive_due'], meta.name, 'owner')
+    step(
+      `live (an API key is refused, session_required): ${idle}'s owner is warned${mail ? ' (site.archive_due)' : ''}, archiveDue ${idleWarned.archiveDue.at}; it still serves`
+    )
+
+    // 4. Past the warning: the idle site is archived by the policy and stops serving.
+    await advance(warnDays + 1)
+    const archived = await maintain()
+    check(archived.archived >= 1, `maintenance past the warning: ${JSON.stringify(archived)}`)
+    const idleArchived = await detail(idle)
+    check(
+      idleArchived.archived && idleArchived.archivedBy === 'policy',
+      `${idle} past its warning: ${JSON.stringify({ archived: idleArchived.archived, archivedBy: idleArchived.archivedBy })}`
+    )
+    const keptLater = await detail(kept)
+    check(!keptLater.archived && keptLater.keep === true, `${kept}: ${JSON.stringify(keptLater)}`)
+    await eventually(
+      `${idle} stops serving once archived`,
+      urls[idle] as string,
+      r => r.status === 404,
+      wait
+    )
+    await eventually(`${kept} still serves`, urls[kept] as string, r => r.status === 200, wait)
+    const afterArchive = await status()
+    check(
+      afterArchive.recent.some(a => a.action === 'site.archive' && a.target === idle),
+      `recent actions after the archive: ${JSON.stringify(afterArchive.recent)}`
+    )
+    step(
+      `${warnDays + 1} days on: ${idle} archived by the policy (it 404s, listed in its recent actions); ${kept} untouched`
+    )
+
+    // 5. Deleting what it archived: warned again, then deleted (soft: kept for an admin).
+    if (deleteArchivedDays > 0 && afterArchive.mail) {
+      await advance(deleteArchivedDays - warnDays + 1)
+      const deleteWarned = await maintain()
+      check(
+        deleteWarned.warned >= 1 && deleteWarned.deleted === 0,
+        `maintenance before the delete: ${JSON.stringify(deleteWarned)}`
+      )
+      const due = await detail(idle)
+      check(
+        due.archiveDue?.action === 'delete' && due.archiveDue.warned,
+        `${idle} warned of its delete: ${JSON.stringify(due.archiveDue)}`
+      )
+      if (mail) oneEmail(await mail.take(opts.session), ['site.delete_due'], meta.name, 'owner')
+      await advance(warnDays + 1)
+      const deleted = await maintain()
+      check(deleted.deleted >= 1, `maintenance past the delete warning: ${JSON.stringify(deleted)}`)
+      const gone = await api('GET', `/api/sites/${idle}`)
+      await gone.arrayBuffer()
+      check(
+        gone.status === 404,
+        `GET /api/sites/${idle} once the policy deleted it: ${gone.status}`
+      )
+      live.delete(idle)
+      if (afterArchive.siteDelete === 'soft') {
+        const records = await deletedOf(idle)
+        check(
+          records.length === 1 &&
+            records[0]?.kind === 'site' &&
+            records[0].deletedBy === ARCHIVE_POLICY_ACTOR &&
+            records[0].owner === opts.session.email,
+          `Admin → Deleted for ${idle}: ${JSON.stringify(records)}`
+        )
+      }
+      step(
+        `${idle}'s owner warned of its delete${mail ? ' (site.delete_due)' : ''}, then it is deleted by the policy${afterArchive.siteDelete === 'soft' ? ' and listed in Admin → Deleted' : ''}`
+      )
+
+      // 6. Past PURGE_DELETED_DAYS, its record is purged.
+      if (purgeDeletedDays > 0 && afterArchive.siteDelete === 'soft') {
+        await advance(purgeDeletedDays + 1)
+        const purged = await maintain()
+        check(purged.purged >= 1, `maintenance past the purge: ${JSON.stringify(purged)}`)
+        const left = await deletedOf(idle)
+        check(left.length === 0, `${idle} is still kept after its purge: ${JSON.stringify(left)}`)
+        const afterPurge = await status()
+        check(
+          afterPurge.recent.some(a => a.action === 'site.delete' && a.target === idle) &&
+            afterPurge.recent.some(a => a.action === 'site.purge' && a.target === idle),
+          `recent actions after the purge: ${JSON.stringify(afterPurge.recent)}`
+        )
+        step(
+          `${purgeDeletedDays + 1} days on: ${idle} purged by the policy, gone from Admin → Deleted`
+        )
+      } else {
+        step('archive policy: no purging, or deletes are not kept (purge skipped)')
+      }
+    } else {
+      step(
+        'archive policy: it deletes nothing here (DELETE_ARCHIVED_DAYS off, or no mail; skipped)'
+      )
+    }
+    check((await detail(kept)).keep === true, `${kept} is no longer kept`)
+    finished = true
+  } finally {
+    // 7. Back to dry run; delete what is left and purge its records. After a failure this only
+    // tidies up, so the failure is what is reported.
+    await signInAdmin().catch(err => ctx.log(`  ! could not sign the admin in again: ${err}`))
+    await setLive(false).catch(err =>
+      ctx.log(`  ! could not switch the archive policy back to dry run: ${err}`)
+    )
+    for (const site of live) {
+      await fling('rm', site, '--yes').catch(err => ctx.log(`  ! could not remove ${site}: ${err}`))
+    }
+    const purged: string[] = []
+    for (const siteName of [idle, kept]) {
+      const records = await deletedOf(siteName).catch(err => {
+        ctx.log(`  ! could not list deleted ${siteName}: ${err}`)
+        return []
+      })
+      for (const d of records) {
+        const res = await asAdmin('cookie', 'DELETE', `/api/admin/deleted/${d.siteId}`)
+        if (res.status === 204) purged.push(d.name)
+        else ctx.log(`  ! could not purge ${d.name}: ${res.status} ${await res.text()}`)
+      }
+    }
+    rmSync(work, { recursive: true, force: true })
+    if (finished) {
+      const after = await status()
+      const left = [...(await deletedOf(idle)), ...(await deletedOf(kept))]
+      check(!after.live, 'the archive policy is still live after the step')
+      check(left.length === 0, `deleted records left after the purge: ${JSON.stringify(left)}`)
+      const clock = (await (await fetch(`${appOrigin}/dev/clock`)).json()) as { now: string }
+      step(
+        `back to dry run; removed ${[...live].join(', ')}, purged ${purged.join(', ')}: nothing kept (the clock went from ${startedAt} to ${clock.now})`
+      )
+    }
+  }
+}
+
+interface PolicyCountsJson {
+  warned: number
+  archived: number
+  deleted: number
+  purged: number
+  wouldAct: number
 }
 
 interface DeletedJson {

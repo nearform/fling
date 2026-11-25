@@ -4,6 +4,7 @@
  * package cannot import (the CLI's) is pinned here, and a test in apps/web compares it with the
  * real value.
  */
+import { ARCHIVE_PREVIEW_DAYS } from './archive-policy.ts'
 import { AUDIENCE_EMAILS_MAX, AUDIENCE_GROUPS_MAX } from './audience.ts'
 import { COMMENT_MAX_CHARS, COMMENTS_PER_SITE_MAX, RESPONSES_PER_SITE_MAX } from './comments.ts'
 import { CLI_PACKAGE, REPO_SLUG, REPO_URL, WHY_SITE_NAME } from './distribution.ts'
@@ -108,5 +109,7 @@ export const GUIDE_FACTS: Readonly<Record<string, string>> = {
   'metric-days': `${METRIC_DAYS} days`,
   'metric-weeks': `${METRIC_WEEKS} weeks`,
   'metric-months': `${METRIC_MONTHS} months`,
+  /** how far ahead Admin → Archive policy's preview looks */
+  'archive-preview-days': `${ARCHIVE_PREVIEW_DAYS} days`,
   ...PINNED_GUIDE_FACTS,
 }

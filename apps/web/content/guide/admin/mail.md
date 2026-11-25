@@ -6,11 +6,11 @@ summary: Check how the instance sends email, send a test, and see how sending we
 audience: admin
 requires: [email]
 sources: [apps/web/src/pages/AdminMail.tsx, apps/api/src/notifications/mail-admin.ts, apps/api/src/notifications/drain.ts, apps/api/src/policy.ts, apps/api/src/config.ts]
-verified: 0ead0eb
+verified: 0a10243
 ---
 
-{{instance:name}} sends email: notifications when someone shares a site or comments, and sign-in
-links for invited people. The **Mail** page shows how it sends them, lets you send a test, and
+{{instance:name}} sends email: notifications when someone shares a site or comments<!-- requires: archivePolicy --> or a
+site is about to be archived<!-- /requires -->, and sign-in links for invited people. The **Mail** page shows how it sends them, lets you send a test, and
 counts what happened to the last day's messages, so you can tell whether mail is getting through.
 
 It shows no addresses but the instance's own, and no message content. Nothing on it sends

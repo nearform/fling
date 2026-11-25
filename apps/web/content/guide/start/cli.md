@@ -4,7 +4,7 @@ part: start
 order: 50
 summary: Install the fling command, sign in, and keep it up to date.
 sources: [apps/cli/src/cli.ts, apps/cli/src/commands/setup.ts, apps/cli/src/commands/auth.ts, apps/cli/src/commands/doctor.ts, apps/cli/src/doctor.ts, apps/cli/src/update-check.ts, apps/cli/src/config.ts, apps/cli/package.json, apps/web/src/pages/GetStarted.tsx]
-verified: b4d7792
+verified: 0a10243
 ---
 
 The `fling` command publishes from a terminal: a build folder, a page, a zip. It suits scripts,
@@ -100,6 +100,13 @@ problem, each warning and problem with its fix. It only looks; it changes nothin
 <!-- requires: servers -->
 - `fling dev`, `fling secrets` and `fling logs` are for [site servers](/guide/servers/what-is-a-site-server).
 <!-- /requires -->
+<!-- requires: archivePolicy -->
+- `fling keep <name>` keeps a site you own from being archived for nobody using it, and
+  `--off` stops keeping it. See [Sites nobody uses](/guide/publish/sites-nobody-uses).
+<!-- /requires -->
+- `fling admin deleted` and `fling admin archive-policy` are for {{instance:name}}'s admins: they
+  list the deleted sites kept and show the archive policy. Restoring a site, or turning the policy
+  live, is done in the web app, at the link each prints.
 - `fling ls` lists all your sites. With many, `fling ls --limit 20` lists the first 20 and prints
   the command for the next page (the same flags with `--after`).
 - `fling help <command>` explains any command. Add `--json` to any command for output a script can

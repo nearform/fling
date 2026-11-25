@@ -185,6 +185,16 @@ including everything due in the next hour (`flush`), and answers what it did:
 `curl -X POST http://localhost:47101/dev/notify/drain` on Node (or `http://flingcf.lvh.me:47103/dev/notify/drain`).
 `wrangler dev` runs no crons, so there the drain route is the only way mail goes out.
 
+**Moving the clock on.** With the dev login on, the API's clock can be moved forward, to see what
+happens days from now (the archive policy's warnings, archives, deletes and purges):
+`curl -X POST -H 'content-type: application/json' -d '{"days":31}' http://localhost:47101/dev/clock`
+moves it on 31 days for this process (a Worker isolate under `wrangler dev`) until it restarts, and
+`GET /dev/clock` says where it is. The outbox moves with it: what was waiting is sent first, and
+mail sent after the jump goes with the next drain. `POST /dev/maintain` runs maintenance at once, as the platforms'
+schedulers do. Sessions are signed against the same clock, so a browser session may need signing in
+again after a big jump; API keys don't expire. Turn the policy on with `ARCHIVE_INACTIVE_DAYS` (and
+`DELETE_ARCHIVED_DAYS`, `PURGE_DELETED_DAYS`) and go live on Admin → Archive policy.
+
 **The CLI against local.** Run `pnpm cli login http://fling.lvh.me:47100` (with the UI dev server running), then
 `pnpm cli deploy <folder>`. The CLI remembers it beside any other Fling you are signed in to:
 `pnpm cli use` lists them and `pnpm cli use <url>` switches back. To keep a throwaway login away
@@ -202,7 +212,14 @@ Node by `apps/api/src/dev.ts`'s default (`SERVERS=members` unless set) and the N
 `SERVERS=members`, each server a Node child process, and the Worker with `--servers members`, each
 server a local Worker Loader isolate. The
 scenario publishes the workshop-quote example, which waits for its site secret and goes live once
-`fling secrets set --from` sets it, calls its `/api/*`, reads its logs and rolls back.
+`fling secrets set --from` sets it, calls its `/api/*`, reads its logs and rolls back. Each
+runtime also runs with the archive policy on (`ARCHIVE_INACTIVE_DAYS`, `ARCHIVE_WARN_DAYS`,
+`DELETE_ARCHIVED_DAYS` and `PURGE_DELETED_DAYS` from `packages/e2e/src/local.ts`), in dry run. The
+scenario's archive policy step runs last, because it moves the dev clock on (`POST /dev/clock`)
+for good and the jump expires sessions: with an idle site and a kept one, it checks the dry run's
+preview, turns the policy live from an admin's browser session, and runs maintenance
+(`POST /dev/maintain`) through the warning, the archive, the second warning, the delete and the
+purge, the kept site untouched throughout.
 
 ## Adding a feature
 

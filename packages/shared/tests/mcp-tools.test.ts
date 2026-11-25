@@ -103,6 +103,12 @@ describe('mcp tool catalogue', () => {
     )
   })
 
+  it('says only owners keep a site over MCP: an admin keeps one from the web app', () => {
+    expect(mcpTools.keep.description).not.toMatch(/and admins/)
+    expect(mcpTools.keep.description).toMatch(/Only the site's owners can here/)
+    expect(mcpTools.keep.description).toMatch(/web app/)
+  })
+
   it('validates publish input', () => {
     const schema = z.object(mcpTools.publish.inputSchema)
     expect(

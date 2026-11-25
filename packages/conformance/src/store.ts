@@ -230,6 +230,26 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.deleteDeletedSite(path)
       })
 
+      it('lists every name oldest first, a page on from one it returned', async () => {
+        const store = await factory()
+        // Older than anything else in a shared table, so these are the oldest.
+        const a = deleted(siteName(), { deletedAt: '1970-01-01T00:00:01.000Z' })
+        const b = deleted(siteName(), { deletedAt: '1970-01-01T00:00:02.000Z', keep: true })
+        const c: DeletedSiteRecord = {
+          ...deleted(siteName(), { deletedAt: '1970-01-01T00:00:03.000Z' }),
+          kind: 'path',
+          folder: 'PAY-3',
+          pathId: uid(),
+        }
+        for (const r of [c, a, b]) await store.putDeletedSite(r)
+        const ours = (list: DeletedSiteRecord[]) =>
+          list.filter(r => [a, b, c].some(x => x.name === r.name))
+        expect(ours(await store.oldestDeletedSites({ limit: 100 }))).toEqual([a, b, c])
+        expect(ours(await store.oldestDeletedSites({ limit: 100, after: a }))).toEqual([b, c])
+        expect(ours(await store.oldestDeletedSites({ limit: 100, after: c }))).toEqual([])
+        for (const r of [a, b, c]) await store.deleteDeletedSite(r)
+      })
+
       it('marks a restore under way, forgets a record with its copies, and keeps the totals', async () => {
         const store = await factory()
         const name = siteName()
@@ -1824,6 +1844,26 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
           ...chosen,
           format: 'json',
           rewrite: { after: null, sites: 0 },
+        })
+      })
+
+      it('keeps the archive policy, each update setting only its own fields', async () => {
+        const store = await factory()
+        const by = email()
+        await store.updateArchivePolicy({ live: true, setBy: by, setAt: NOW })
+        await store.updateArchivePolicy({ countingSince: LATER })
+        expect(await store.getArchivePolicy()).toMatchObject({
+          live: true,
+          setBy: by,
+          setAt: NOW,
+          countingSince: LATER,
+        })
+        await store.updateArchivePolicy({ countingSince: null })
+        await store.updateArchivePolicy({ live: false, setBy: by, setAt: LATER })
+        expect(await store.getArchivePolicy()).toMatchObject({
+          live: false,
+          setAt: LATER,
+          countingSince: null,
         })
       })
     })

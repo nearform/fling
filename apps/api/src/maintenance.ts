@@ -20,6 +20,10 @@
  * - **Rollouts** that reach every site, a page of the directory at a time, before the sweep: the
  *   route format an admin chose (route-format.ts `rewriteRoutes`) and view counting turned on or
  *   off (views.ts `rolloutViewCounting`).
+ * - **The archive policy** (archive-policy.ts): each site maintained, from the queue or the sweep,
+ *   is also warned, archived or deleted when that is due (`policySite`), and queued for when it
+ *   next will be; before the sweep, the deleted sites due a purge are purged (`purgeDue`). How
+ *   the policy stands (live or dry run, paused) is read once a run.
  *
  * Every run is safe to repeat and to overlap another: claims are conditional writes, and work
  * found done costs only its reads.
@@ -52,6 +56,14 @@
  * instance has this tick, mail or not.
  */
 import { renderedObjectKey, siteVersionPrefix } from '@fling/shared'
+import {
+  emptyPolicyCounts,
+  type PolicyCounts,
+  type PolicyRun,
+  policyRun,
+  policySite,
+  purgeDue,
+} from './archive-policy.ts'
 import { formsKey, manifestKey, stagedPrefix, UPLOAD_URL_TTL_SECONDS } from './blobs/types.ts'
 import { ApiError } from './lib/errors.ts'
 import { pathRef } from './paths.ts'
@@ -100,6 +112,8 @@ export interface MaintainResult {
   routes: number
   /** sites view counting was rolled out to (views.ts `rolloutViewCounting`) */
   viewCounting: number
+  /** what the archive policy did (archive-policy.ts), or in dry run would have done now */
+  policy: PolicyCounts
   /** stopped at the deadline with work left (queued, or the sweep's lap unfinished) */
   partial: boolean
   /** the sweep reached the end of the directory, a lap that began then (ISO) */
@@ -120,9 +134,19 @@ export async function maintain(
     revocations: 0,
     routes: 0,
     viewCounting: 0,
+    policy: emptyPolicyCounts(),
     partial: false,
   }
   const started = Date.now()
+  // How the archive policy stands this run; one that can't be read leaves it out of this run.
+  let policy: PolicyRun | undefined
+  try {
+    policy = await policyRun(deps, { observe: true })
+  } catch (err) {
+    console.warn(
+      JSON.stringify({ level: 'warn', msg: 'archive policy not read', err: String(err) })
+    )
+  }
   // A sweep that fails is logged and left to the next run; the rest of maintenance still runs.
   try {
     result.revocations = await sweepRevocations(deps, opts)
@@ -142,7 +166,7 @@ export async function maintain(
     opts.deadline === undefined || !sweep
       ? opts.deadline
       : opts.deadline - Math.max(0, opts.deadline - started) * SWEEP_SHARE
-  if (!(await drainQueue(deps, queueDeadline, done, result))) result.partial = true
+  if (!(await drainQueue(deps, queueDeadline, done, result, policy))) result.partial = true
   try {
     result.routes = await rewriteRoutes(deps, opts.deadline)
   } catch (err) {
@@ -155,7 +179,18 @@ export async function maintain(
       JSON.stringify({ level: 'warn', msg: 'view counting rollout failed', err: String(err) })
     )
   }
-  if (sweep && !(await sweepDirectory(deps, opts.deadline, done, result))) result.partial = true
+  if (policy) {
+    try {
+      await purgeDue(deps, policy, result.policy, opts.deadline)
+    } catch (err) {
+      console.warn(
+        JSON.stringify({ level: 'warn', msg: 'archive policy purge failed', err: String(err) })
+      )
+    }
+  }
+  if (sweep && !(await sweepDirectory(deps, opts.deadline, done, result, policy))) {
+    result.partial = true
+  }
   await logRouteTableUsage(deps)
   return result
 }
@@ -169,7 +204,8 @@ async function drainQueue(
   deps: Deps,
   deadline: number | undefined,
   done: Set<string>,
-  result: MaintainResult
+  result: MaintainResult,
+  policy: PolicyRun | undefined
 ): Promise<boolean> {
   const now = deps.clock.now().toISOString()
   for (;;) {
@@ -181,7 +217,9 @@ async function drainQueue(
         done.add(entry.siteId)
         const site = await deps.store.findSite(entry.name)
         // A site deleted since (or its name taken by another) has nothing left to do.
-        if (site?.id === entry.siteId && (await maintainSite(deps, site, result))) result.queued++
+        if (site?.id === entry.siteId && (await maintainSite(deps, site, result, policy))) {
+          result.queued++
+        }
       }
       await deps.store.deleteMaintenance(entry)
     }
@@ -196,7 +234,8 @@ async function sweepDirectory(
   deps: Deps,
   deadline: number | undefined,
   done: Set<string>,
-  result: MaintainResult
+  result: MaintainResult,
+  policy: PolicyRun | undefined
 ): Promise<boolean> {
   const now = deps.clock.now().toISOString()
   const started = Date.now()
@@ -212,11 +251,13 @@ async function sweepDirectory(
       for (const entry of page.sites) {
         if (deadline !== undefined && Date.now() > deadline) return false
         const site = await deps.store.findSite(entry.name)
+        const deleted = result.policy.deleted
         if (site && !done.has(entry.siteId)) {
           done.add(entry.siteId)
-          await maintainSite(deps, site, result)
+          await maintainSite(deps, site, result, policy)
         }
-        if (site) {
+        // One the policy deleted just now is gone, from the tally too.
+        if (site && result.policy.deleted === deleted) {
           try {
             await tallySite(deps, tally, site)
           } catch (err) {
@@ -279,14 +320,16 @@ async function sweepDirectory(
 }
 
 /**
- * One site's maintenance: retention for it and each of its Paths, then its replaced home pages.
- * It queues the site again for the next time something it holds falls due. A site that fails is
- * logged and queued again after GRACE_MS, and the run goes on; returns whether it succeeded.
+ * One site's maintenance: retention for it and each of its Paths, then its replaced home pages,
+ * then the archive policy's step. It queues the site again for the next time something it holds
+ * falls due. A site that fails is logged and queued again after GRACE_MS, and the run goes on;
+ * returns whether it succeeded.
  */
 async function maintainSite(
   deps: Deps,
   site: SiteRecord,
-  result: MaintainResult
+  result: MaintainResult,
+  policy?: PolicyRun
 ): Promise<boolean> {
   const now = deps.clock.now().getTime()
   try {
@@ -296,6 +339,14 @@ async function maintainSite(
       next = earliest(next, await maintainTarget(deps, ref, path.id, path.currentVersionId, result))
     }
     next = earliest(next, await sweepHomes(deps, site, result))
+    if (policy) {
+      const due = await policySite(deps, policy, site, result.policy)
+      if (due === 'gone') {
+        result.sites++
+        return true
+      }
+      next = earliest(next, due)
+    }
     result.sites++
     if (next !== undefined) await queueMaintenance(deps, site, next)
     return true

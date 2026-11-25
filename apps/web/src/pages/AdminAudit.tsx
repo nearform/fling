@@ -2,13 +2,15 @@
  * Admin → Audit (`/admin/audit`; admins only, the API answers 404 to anyone else): the
  * latest entries of the audit log (audit.ts), newest first: impersonations, invitations, admins'
  * changes to other people's sites and what they opened of restricted ones, the route table
- * format chosen, and every site or Path deleted and restored.
+ * format chosen, every site or Path deleted and restored, and what the archive policy did and
+ * who turned it live or back to dry run.
  */
 import type { AuditEntry } from '@fling/shared'
 import { PageHeader } from '../components/PageHeader'
 import { useAdminAudit, useMe } from '../hooks/queries'
 import { showsAdmin } from '../lib/admin'
 import { errorMessage } from '../lib/api'
+import { auditActorLabel, auditTargetLabel } from '../lib/archive-policy'
 import { fullDate, timeAgo } from '../lib/format'
 
 function When({ iso }: { iso: string }) {
@@ -32,6 +34,8 @@ const ACTION_LABEL: Record<AuditEntry['action'], string> = {
   'path.restore': 'restored the Path',
   'site.purge': 'permanently deleted',
   'path.purge': 'permanently deleted the Path',
+  'site.archive': 'archived',
+  'archive_policy.switch': 'set the archive policy to',
 }
 
 /** What an admin did to someone else's site (a policy action), as a verb for its name. */
@@ -40,6 +44,7 @@ const CHANGE_LABEL: Record<string, string> = {
   'site.audience': 'changed the audience of',
   'site.settings': 'changed the settings of',
   'site.archive': 'archived or unarchived',
+  'site.keep': 'changed whether the archive policy keeps',
   'site.rollback': 'rolled back',
   'site.delete': 'deleted',
   'share.create': 'made a share link for',
@@ -72,8 +77,8 @@ function AuditLog() {
           <ul className="space-y-1.5 text-sm">
             {audit.data.map(e => (
               <li key={e.id}>
-                <span className="font-medium">{e.actor}</span> {labelOf(e)}{' '}
-                <span className="font-medium">{e.target}</span>
+                <span className="font-medium">{auditActorLabel(e.actor)}</span> {labelOf(e)}{' '}
+                <span className="font-medium">{auditTargetLabel(e)}</span>
                 {e.owner && <span className="text-secondary">, {e.owner}’s site</span>}
                 {invitedHow(e)}
                 {e.lapsed && <span className="text-secondary"> (it had lapsed)</span>}
@@ -108,7 +113,7 @@ export default function AdminAudit() {
       <div className="space-y-4">
         <PageHeader
           title="Audit"
-          description="What admins did, kept for 180 days: every impersonation's start and stop, every invitation made or revoked, what they changed on other people's sites or opened of their restricted ones, and the route table format they chose."
+          description="What admins did, kept for 180 days: every impersonation's start and stop, every invitation made or revoked, what they changed on other people's sites or opened of their restricted ones, the route table format they chose and the archive policy's switch, and what the archive policy did."
         />
       </div>
       <AuditLog />

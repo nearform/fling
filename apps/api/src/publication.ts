@@ -202,6 +202,7 @@ import {
   type StoredManifest,
   siteActor,
   toSite,
+  unarchive,
   writeSite,
 } from './sites.ts'
 import type { PathRecord, ServerMark, SiteRecord, User, VersionRecord } from './store/types.ts'
@@ -695,7 +696,7 @@ async function prepare(
       layer,
       s => {
         applySettings(s, req)
-        s.archived = false
+        unarchive(s, deps.clock.now().toISOString())
       },
       recheck
     )
@@ -724,7 +725,7 @@ async function prepare(
         layer,
         s => {
           s.currentVersionId = versionId
-          s.archived = false
+          unarchive(s, deps.clock.now().toISOString())
           applySettings(s, req)
           applyServer(s, live, target)
         },
@@ -1272,7 +1273,7 @@ async function goLive(
   try {
     as = await saveOnBase(deps, actor, site, layer, (s, a) => {
       s.currentVersionId = version.id
-      s.archived = false
+      unarchive(s, deps.clock.now().toISOString())
       applySettings(s, settingsFor(a, s, version))
       applyServer(s, version, started ?? s.server?.target ?? null)
     })

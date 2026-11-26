@@ -26,7 +26,8 @@ export interface SlackClient {
 export class SlackWebClient implements SlackClient {
   constructor(
     private readonly token: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    // Called as a plain function: the Workers runtime refuses a `fetch` called on another object.
+    private readonly fetchImpl: typeof fetch = (input, init) => fetch(input, init),
     private readonly base = SLACK_API
   ) {}
 

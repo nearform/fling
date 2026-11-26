@@ -9,7 +9,8 @@ name: Release
 # Jobs, each after the one before:
 #   1. check: the tag matches every version file (scripts/release.mjs --check) and the tagged commit
 #      is on main;
-#   2. the gate (ci.yml) on the tagged commit;
+#   2. the gate (ci.yml) on the tagged commit, unless it already passed on a commit with the same
+#      tree: the release PR's run, or main's (`gated`);
 #   3. publish the CLI, @nearform/fling, to public npm: `pnpm pack` writes the tarball (it rewrites
 #      any workspace: ranges), `npm publish` uploads it;
 #   4. the GitHub Release v<version>, its notes that version's CHANGELOG.md section, with the
@@ -60,14 +61,54 @@ jobs:
       - name: The CHANGELOG has the release's notes
         run: node scripts/release.mjs --notes "$GITHUB_REF_NAME" > /dev/null
 
+  # A release commit has normally been through the gate twice already: on its pull request and
+  # when it reached main. A rebase merge gives it a new hash, but the same tree, and two commits
+  # with one tree hold byte for byte the same files (workflows and lockfile among them), so a
+  # successful CI run on any commit with this tree is this commit's gate. Only without one does
+  # the release run CI itself.
+  gated:
+    name: CI already passed on this tree?
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tree=$(git rev-parse "HEAD^{tree}")
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?status=success&per_page=50" \
+            --jq '.workflow_runs[] | "\(.id) \(.head_sha)"')
+          while read -r id sha; do
+            [ -n "$id" ] || continue
+            if [ "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$sha" --jq .tree.sha)" = "$tree" ]; then
+              echo "CI passed on $sha (run $id), the same tree as $GITHUB_SHA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+              echo "run=$id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done <<< "$runs"
+          echo "No successful CI run on tree $tree: running it"
+
   ci:
     name: CI
-    needs: check
+    needs: gated
+    if: needs.gated.outputs.run == ''
     uses: ./.github/workflows/ci.yml
 
   publish:
     name: Publish @nearform/fling
-    needs: ci
+    needs: [gated, ci]
+    # After the gate: reused (ci skipped) or run here.
+    if: >-
+      !cancelled() && needs.gated.result == 'success' &&
+      (needs.ci.result == 'success' || (needs.ci.result == 'skipped' && needs.gated.outputs.run != ''))
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -112,6 +153,8 @@ jobs:
   github-release:
     name: GitHub Release
     needs: publish
+    # Its own condition: a skipped job upstream (ci, when the gate is reused) would skip it.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

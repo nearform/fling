@@ -52,8 +52,9 @@ pnpm --filter <package> test                    # one package's vitest
 pnpm gate                                       # lint, terraform, typecheck, test, build, e2e: what CI runs
 ```
 
-Run `pnpm gate` before every commit. CI runs exactly that command and adds only DynamoDB Local and
-MinIO. Those suites skip locally unless you start the services (`platforms/aws/tests/services.ts`).
+Run `pnpm gate` before every commit. CI runs exactly its parts, as parallel jobs, and adds only
+DynamoDB Local and MinIO. Those suites skip locally unless you start the services
+(`platforms/aws/tests/services.ts`).
 
 ## Architecture rules
 

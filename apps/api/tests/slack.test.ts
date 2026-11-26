@@ -195,6 +195,22 @@ describe('siteNameOf', () => {
 })
 
 describe('SlackWebClient', () => {
+  it('calls the global fetch as the Workers runtime requires, on nothing but itself', async () => {
+    const real = globalThis.fetch
+    // Workers throw "Illegal invocation" for a fetch called with any other `this`.
+    globalThis.fetch = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+      return Promise.resolve(
+        Response.json({ ok: true, user: { profile: { email: 'a@example.test' } } })
+      )
+    } as typeof fetch
+    try {
+      expect(await new SlackWebClient('xoxb-1').userEmail('U-1')).toBe('a@example.test')
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+
   it('reads a person’s email and refuses a bot’s', async () => {
     const answers: Record<string, unknown> = {
       'U-1': { ok: true, user: { profile: { email: 'Alice@Example.test' } } },

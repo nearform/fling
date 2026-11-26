@@ -64,7 +64,7 @@
  * sites host the check lands on. New sites must not need it: the CLI's readiness
  * wait covers them, and the scenario fails if a new site is not routed when the CLI says it is.
  */
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import {
   cpSync,
   existsSync,
@@ -100,6 +100,10 @@ import { SITE_SEEN_PATH } from '@fling/shared/route-keys'
 import { VIEW_BEACON } from '@fling/shared/view-beacon'
 import { zipSync } from 'fflate'
 import { REPO, runCli, runCliOutcome } from './cli.ts'
+
+/** The Slack app's request URL on the app origin (routes/slack.ts in @fling/api). */
+const SLACK_EVENTS_PATH = '/api/integrations/slack/events'
+
 import { cookiePairs, devSession, type Session } from './sign-in.ts'
 
 export interface ScenarioOptions {
@@ -122,6 +126,12 @@ export interface ScenarioOptions {
    * add the admin to the group; without either, those checks are skipped.
    */
   outsider?: Session
+  /**
+   * The instance's Slack app's signing secret (SLACK_SIGNING_SECRET), where the runtime set one:
+   * a signed URL check proves Slack's events reach the API through the instance's own host.
+   * Without it, or without `slackUnfurls`, skipped.
+   */
+  slackSigningSecret?: string
   /** how long a changed route may take to show (default 5 s) */
   propagationMs?: number
   log?: (line: string) => void
@@ -590,6 +600,36 @@ export async function runScenario(opts: ScenarioOptions): Promise<void> {
       )
     } else {
       step('notifications: no email on this instance (skipped)')
+    }
+
+    // Slack's events: through the instance's own host to the API, where only a signed request is
+    // read. The URL check is what Slack sends when an admin sets the app's request URL.
+    if (meta.capabilities.slackUnfurls === true && opts.slackSigningSecret) {
+      const url = `${appOrigin}${SLACK_EVENTS_PATH}`
+      const body = JSON.stringify({ type: 'url_verification', challenge: nonce })
+      const unsigned = await fetch(url, { method: 'POST', body })
+      check(unsigned.status === 401, `POST ${SLACK_EVENTS_PATH} unsigned: ${unsigned.status}`)
+      const ts = String(Math.floor(Date.now() / 1000))
+      const sig = `v0=${createHmac('sha256', opts.slackSigningSecret).update(`v0:${ts}:${body}`).digest('hex')}`
+      const signed = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-slack-request-timestamp': ts,
+          'x-slack-signature': sig,
+        },
+        body,
+      })
+      const answer = (await signed.json().catch(() => null)) as { challenge?: string } | null
+      check(
+        signed.status === 200 && answer?.challenge === nonce,
+        `POST ${SLACK_EVENTS_PATH} signed: ${signed.status} ${JSON.stringify(answer)}`
+      )
+      step(
+        `Slack events: ${SLACK_EVENTS_PATH} refuses an unsigned request, answers Slack's URL check`
+      )
+    } else {
+      step('Slack events: no Slack app on this instance (skipped)')
     }
 
     // Deploy (the CLI: manifest, presigned uploads, finalize, readiness wait) and view.

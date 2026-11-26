@@ -956,7 +956,7 @@ they open for anyone.
    Delete the files afterwards. While either secret holds `unset`, the app stays off. New
    function instances read the secrets, so redeploy (or wait for a cold start).
 4. Under **Event Subscriptions** in the Slack app, check that the request URL shows **Verified**:
-   Slack sends a signed challenge to `/integrations/slack/events`, which only answers once both
+   Slack sends a signed challenge to `/api/integrations/slack/events`, which only answers once both
    secrets are set.
 
 `/.well-known/fling` then advertises `slackUnfurls`, and Admin → Settings lists

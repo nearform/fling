@@ -16,7 +16,8 @@
 // of the local Worker Loader, as deployed, except that local workerd doesn't enforce SERVER_CPU_MS.
 //
 // The archive policy (ARCHIVE_INACTIVE_DAYS, ARCHIVE_WARN_DAYS, DELETE_ARCHIVED_DAYS,
-// PURGE_DELETED_DAYS) goes as vars from the environment when set, as the e2e sets them.
+// PURGE_DELETED_DAYS) goes as vars from the environment when set, as the e2e sets them. So does a
+// Slack app's SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN.
 //
 // Secrets: SESSION_SECRET and SITE_HMAC_KEY from the environment when both are set (the e2e),
 // else from .dev.vars, created with random values the first time. SITE_SECRETS_KEY (site servers)
@@ -57,12 +58,15 @@ if (args.mail) {
   if (args.invites) vars.INVITES = 'on'
 }
 if (args.servers !== undefined) vars.SERVERS = args.servers.trim()
-// The archive policy's settings, from the environment when set (the e2e sets them).
+// The archive policy's settings and a Slack app's secrets, from the environment when set (the e2e
+// sets them).
 for (const key of [
   'ARCHIVE_INACTIVE_DAYS',
   'ARCHIVE_WARN_DAYS',
   'DELETE_ARCHIVED_DAYS',
   'PURGE_DELETED_DAYS',
+  'SLACK_SIGNING_SECRET',
+  'SLACK_BOT_TOKEN',
 ]) {
   if (process.env[key]) vars[key] = process.env[key]
 }

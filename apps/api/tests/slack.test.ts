@@ -56,7 +56,7 @@ async function world() {
   const post = (body: unknown, opts: { ts?: string; sig?: string; headers?: object } = {}) => {
     const raw = JSON.stringify(body)
     const ts = opts.ts ?? now()
-    return app.request('/integrations/slack/events', {
+    return app.request('/api/integrations/slack/events', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -99,10 +99,21 @@ describe('the Slack events route', () => {
     expect(await res.json()).toEqual({ challenge: 'abc123' })
   })
 
-  it('is not there without the Slack app', async () => {
+  it('is not there without the Slack app: even a signed URL check gets the API’s sign-in refusal', async () => {
     const env = setup({})
-    const res = await env.app.request('/integrations/slack/events', { method: 'POST', body: '{}' })
-    expect(res.status).toBe(404)
+    const body = JSON.stringify({ type: 'url_verification', challenge: 'abc123' })
+    const ts = String(Math.floor(env.deps.clock.now().getTime() / 1000))
+    const res = await env.app.request('/api/integrations/slack/events', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-slack-request-timestamp': ts,
+        'x-slack-signature': slackSignature(SECRET, ts, body),
+      },
+      body,
+    })
+    expect(res.status).toBe(401)
+    expect(await res.text()).not.toContain('abc123')
     expect(instanceMetadata(env.config).capabilities.slackUnfurls).toBe(false)
   })
 

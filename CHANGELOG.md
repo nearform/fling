@@ -14,6 +14,7 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 ## Unreleased
 
 - **The web app shows the Fling release.** Small, at the bottom of the side navigation above **Collapse**: "Fling 0.24.3", or "v0.24.3" while the navigation is collapsed, linked to that release's notes. It is the `release` the instance publishes in `/.well-known/fling`, so it shows what the server runs, and nothing where an older server doesn't say.
+- **Slack cards say who can open a site only when it isn't everyone signed in.** A members-level site's card shows when it was published and by whom; a site limited to its owners, named people or teams, or a public one, still says so.
 
 ## 0.24.3 (2026-11-26)
 

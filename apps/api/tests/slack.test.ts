@@ -154,6 +154,11 @@ describe('link previews', () => {
       'https://team.fling.test/slides/2.html',
       `${APP_ORIGIN}/review/team`,
     ])
+    // Everyone signed in can open it, as most sites: the card doesn't say so.
+    const card = JSON.stringify(slack.calls[0]?.unfurls['https://team.fling.test/slides/2.html'])
+    expect(card).toContain('team deck')
+    expect(card).not.toContain('can open it')
+    expect(card).toContain('Published')
   })
 
   /** The card each link got, as text. */

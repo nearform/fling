@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **The web app shows the Fling release.** Small, at the bottom of the side navigation above **Collapse**: "Fling 0.24.3", or "v0.24.3" while the navigation is collapsed, linked to that release's notes. It is the `release` the instance publishes in `/.well-known/fling`, so it shows what the server runs, and nothing where an older server doesn't say.
+
 ## 0.24.3 (2026-11-26)
 
 - **Slack previews: short and wide, and on every link.** The site's card is one block: the title, who can open it and when it was last published, then **Review** and **Open** as links, with the thumbnail small beside them. The title opens the site's review page (the site itself where comments are off), and the card no longer links the site's page in the app. A link whose site the poster can't open gets a neutral card with only the site's name, the same whether the site exists or not; so do archived sites, share links and other pages of the instance. Slack makes no preview of its own for a domain an app claims, so these links showed nothing. Each Slack event logs one line: how many links, how many name a site, whether the poster was recognised and how many got the site's card.

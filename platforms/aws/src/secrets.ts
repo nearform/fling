@@ -2,7 +2,7 @@
  * Secrets from SSM SecureString parameters under `SSM_PREFIX` (e.g. `/example/fling/`):
  * oidc-client-secret (the OIDC_ISSUER client's), google-client-id + google-client-secret (the
  * Google client), session-secret, site-hmac-key, origin-verify-secret and, with site servers on,
- * site-secrets-key. An instance signs in with either client or both (see @fling/api
+ * site-secrets-key; slack-signing-secret and slack-bot-token for a Slack app. An instance signs in with either client or both (see @fling/api
  * auth/oidc.ts), so it needs at least one. Loaded once per cold start with
  * GetParametersByPath(WithDecryption).
  *
@@ -20,6 +20,8 @@ const NAMES = {
   'site-hmac-key': 'siteHmacKey',
   'origin-verify-secret': 'originVerifySecret',
   'site-secrets-key': 'siteSecretsKey',
+  'slack-signing-secret': 'slackSigningSecret',
+  'slack-bot-token': 'slackBotToken',
 } as const
 
 /** Parameters that are settings, by the environment name each stands for. */

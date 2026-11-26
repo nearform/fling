@@ -225,6 +225,11 @@ export const CONFIGURED_CAPABILITIES = [
    * without archiving: what offers an admin fling_admin_archive_policy where only that is on
    */
   'purgeDeleted',
+  /**
+   * the instance's Slack app is set up (`SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`): a site's link
+   * posted in its workspace by someone who can open the site gets a rich preview
+   */
+  'slackUnfurls',
 ] as const
 
 /** Every capability name an instance may advertise. */

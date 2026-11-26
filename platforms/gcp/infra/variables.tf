@@ -199,8 +199,8 @@ variable "manual_secrets" {
     Secret Manager secrets that someone fills by hand (gcloud secrets versions add). Terraform
     creates each with the placeholder "unset", which the service reads as not set, and never looks
     at the value again. oidc-client-secret is the OIDC_ISSUER client's secret; a Google client's id
-    and secret are google-client-id and google-client-secret (either client, or both). With
-    var.mail, smtp-password is added.
+    and secret are google-client-id and google-client-secret (either client, or both); a Slack
+    app's are slack-signing-secret and slack-bot-token. With var.mail, smtp-password is added.
   EOT
   type        = list(string)
   default     = ["oidc-client-secret"]

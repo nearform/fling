@@ -167,7 +167,8 @@ neither header (see
 
 Then open `https://$APP_HOST`, sign in, and `fling login https://$APP_HOST`.
 Optionally, publish the repository's `why/` page as a public site, `fling deploy why --name why-fling
---access public`: once it is live, the Get started page links to it.
+--access public`: once it is live, the Get started page links to it. Also optional: rich
+previews of your Fling's links in Slack ([Link previews in Slack](#link-previews-in-slack)).
 
 ## The deploy config (CF_DEPLOY_CONFIG)
 
@@ -418,6 +419,15 @@ version, use R2's S3-compatible API with an R2 API token (read on the bucket):
 `aws s3 cp --recursive --region auto --endpoint-url https://<account id>.r2.cloudflarestorage.com
 s3://$R2_BUCKET/sites/<siteId>/<versionId>/ ./recovered`. The bucket's lifecycle rule touches only
 `server-logs/`, never a kept prefix.
+
+## Link previews in Slack
+
+**Optional.** With a Slack app, a site's link posted in your workspace gets a rich preview when the
+person who posted it can open the site. Create the app from
+[docs/slack/manifest.yml](../../docs/slack/manifest.yml) and give the instance its two secrets,
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, as Worker secrets (`wrangler secret put
+SLACK_SIGNING_SECRET`, then the same for `SLACK_BOT_TOKEN`). See [Link previews in
+Slack](../aws/DEPLOY.md#link-previews-in-slack) in the AWS guide for the steps.
 
 ## Claude's sandbox: allow your Fling's host
 

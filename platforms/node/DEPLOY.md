@@ -98,6 +98,8 @@ and `S3_*`, `APP_ENV=production`) from a few values; the instance's own part is 
 Generate each secret once (`openssl rand -base64 32`) and keep it: a new `SESSION_SECRET` signs
 everyone out, a new `SITE_HMAC_KEY` voids every share link.
 
+Optional: rich previews of your Fling's links in Slack ([Link previews in Slack](#link-previews-in-slack)).
+
 ## Docker Compose
 
 ```bash
@@ -226,6 +228,15 @@ another S3-compatible store, in the bucket `SITES_BUCKET` names. With MinIO's cl
 `mc cp --recursive local/fling-sites/sites/<siteId>/<versionId>/ ./recovered` downloads a
 version. With `STORAGE_DRIVER=fs` (one machine) they are directories under `FS_ROOT`
 (`<FS_ROOT>/sites/<siteId>/`). The bucket's lifecycle rule touches only `uploads/`.
+
+## Link previews in Slack
+
+**Optional.** With a Slack app, a site's link posted in your workspace gets a rich preview when the
+person who posted it can open the site. Create the app from
+[docs/slack/manifest.yml](../../docs/slack/manifest.yml) and give the instance its two secrets,
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, in its secret environment (the Compose env file, or
+the Helm chart's secret values). See [Link previews in
+Slack](../aws/DEPLOY.md#link-previews-in-slack) in the AWS guide for the steps.
 
 ## Claude's sandbox: allow your Fling's host
 

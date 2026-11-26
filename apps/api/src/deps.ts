@@ -22,6 +22,8 @@ import type { RouteTable } from './route-table/types.ts'
 import { MemoryServerLogs } from './servers/memory-logs.ts'
 import { parseSiteSecretsKey } from './servers/secrets.ts'
 import type { ServerLogs, SiteServers } from './servers/types.ts'
+import { type SlackClient, SlackWebClient } from './slack/client.ts'
+import { slackOn } from './slack/config.ts'
 import { Records } from './store/records.ts'
 import type { Store } from './store/types.ts'
 import { MemoryTable } from './table/memory.ts'
@@ -42,6 +44,8 @@ export interface Adapters {
   servers?: SiteServers
   /** site servers' logs; default: kept in memory */
   serverLogs?: ServerLogs
+  /** the Slack Web API; default: slack.com, when the Slack app's secrets are set */
+  slack?: SlackClient
 }
 
 const missing = (driver: string): never => {
@@ -79,6 +83,11 @@ export function buildDeps(
   const serverLogs = opts.serverLogs ?? (servers ? new MemoryServerLogs() : undefined)
   // Local development's clock can be moved on (lib/dev-clock.ts); production's is the system's.
   const clock = config.devLogin ? devClock : systemClock
+  const slack =
+    opts.slack ??
+    (slackOn(config) && config.secrets.slackBotToken
+      ? new SlackWebClient(config.secrets.slackBotToken)
+      : undefined)
   return {
     config,
     store,
@@ -89,6 +98,7 @@ export function buildDeps(
     ...(mailer ? { mailer } : {}),
     ...(servers ? { servers } : {}),
     ...(serverLogs ? { serverLogs } : {}),
+    ...(slack ? { slack } : {}),
     ...(config.viewCounts
       ? {
           views: new ViewCounter(store, clock, FLUSH_INTERVAL_MS, () =>

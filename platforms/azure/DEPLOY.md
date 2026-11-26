@@ -199,6 +199,8 @@ restart the app after changing one (`az containerapp revision restart`, or redep
 
 6. **Deploy**: run the **Deploy (Azure)** workflow (Actions → Deploy (Azure) → Run workflow) with
    the latest release tag as `ref` (e.g. `v0.7.0`).
+7. **Link previews in Slack (optional).** To give a site's link a rich preview in your Slack
+   workspace, set up a Slack app: see [Link previews in Slack](#link-previews-in-slack).
 
 Then open `https://$APP_DOMAIN`, sign in, and `fling login https://$APP_DOMAIN`.
 
@@ -324,6 +326,15 @@ lists one, `az storage blob download --account-name <account> -c sites -n sites/
 reads its recovery file, and
 `az storage blob download-batch --account-name <account> -s sites -d ./recovered --pattern "sites/<siteId>/<versionId>/*" --auth-mode login`
 downloads a version. The container's lifecycle rule touches only `uploads/`.
+
+## Link previews in Slack
+
+**Optional.** With a Slack app, a site's link posted in your workspace gets a rich preview when the
+person who posted it can open the site. Create the app from
+[docs/slack/manifest.yml](../../docs/slack/manifest.yml) and give the instance its two secrets,
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, by adding `slack-signing-secret` and
+`slack-bot-token` to `manual_secrets` and filling them with `az keyvault secret set`. See [Link
+previews in Slack](../aws/DEPLOY.md#link-previews-in-slack) in the AWS guide for the steps.
 
 ## Claude's sandbox: allow your Fling's host
 

@@ -323,6 +323,10 @@ and nothing counted, the counts so far kept. Maintenance's **rollout** (`rollout
 applies a change to every live site without a new version, and the first time, adds the copies to
 the sites live before view counting existed.
 
+**Slack preview** — the card Fling posts under a site's link in its Slack workspace (Slack calls
+it an unfurl), when the person who posted the link can open the site: title, thumbnail, who can
+open it, last published. Needs the instance's Slack app (`slackUnfurls`). `apps/api/src/slack/`.
+
 **Thumbnail** — a small PNG of a site's home page (at most 480 × 300 and 200 KB), kept beside its
 files (`thumbnailKey`, `apps/api/src/blobs/types.ts`) and recorded on the site as the version it was
 taken of and when (`SiteRecord.thumbnail`; listings carry when, as `thumbnailAt`). Browsers take

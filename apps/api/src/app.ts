@@ -24,6 +24,7 @@ import { devRoutes } from './routes/dev.ts'
 import { mcpRoutes } from './routes/mcp.ts'
 import { notificationRoutes } from './routes/notifications.ts'
 import { oauthRoutes } from './routes/oauth.ts'
+import { slackRoutes } from './routes/slack.ts'
 import type { AppEnv, Deps } from './types.ts'
 
 export interface AppOptions {
@@ -77,6 +78,8 @@ export function createApp(deps: Deps, opts: AppOptions = {}) {
   app.route('/mcp', mcpRoutes)
   // Email unsubscribe links: a page on the app origin, no session needed.
   app.route('/notifications', notificationRoutes)
+  // The instance's Slack app's events (link previews): signed by Slack, no session.
+  if (deps.slack) app.route('/integrations/slack', slackRoutes)
   // Local only: drain the notifications outbox on demand, read the mail sent.
   if (deps.config.devLogin) app.route('/dev', devRoutes)
 

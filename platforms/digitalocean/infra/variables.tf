@@ -128,7 +128,7 @@ variable "instance" {
 }
 
 variable "instance_secrets" {
-  description = "The instance's secrets, passed as encrypted App Platform environment variables: OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, SMTP_PASSWORD. They are kept in Terraform state too."
+  description = "The instance's secrets, passed as encrypted App Platform environment variables: OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET, SMTP_PASSWORD, SLACK_SIGNING_SECRET / SLACK_BOT_TOKEN. They are kept in Terraform state too."
   type        = map(string)
   default     = {}
   sensitive   = true

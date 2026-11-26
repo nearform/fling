@@ -196,6 +196,9 @@ Claude Desktop extension.
   **Anyone with a share link can view the site without signing in** — say so when you hand it over,
   and only create one when the user wants to share with people who can't sign in.
 - `refresh: true` replaces the link (the old one stops working); `revoke: true` removes it.
+- Where the Fling's capabilities include `slackUnfurls`, the site's own link (or its review link) posted
+  in Slack shows a preview card to the channel when the poster can open the site, so there is no need
+  for a share link just for a nicer preview in Slack.
 - `fling_set_visibility { name, visibility: "public" }` makes the site itself public (anyone can open it;
   its review page and comments still need sign-in); `"private"` gives it back the access it had
   (only the user, everyone signed in, or its list). Prefer a share link over making a site public.

@@ -153,17 +153,18 @@ variable "manual_secrets" {
     Key Vault secrets someone fills by hand or by script (az keyvault secret set). Terraform creates
     them with the value "unset" and never looks at the value again. oidc-client-secret is the
     OIDC_ISSUER client's secret; a Google client's id and secret are google-client-id and
-    google-client-secret (either client, or both). Each one reaches the app as its env name
-    (OIDC_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET).
+    google-client-secret (either client, or both); a Slack app's are slack-signing-secret and
+    slack-bot-token. Each one reaches the app as its env name (OIDC_CLIENT_SECRET,
+    GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN).
   EOT
   type        = list(string)
   default     = ["oidc-client-secret"]
 
   validation {
     condition = alltrue([
-      for s in var.manual_secrets : contains(["oidc-client-secret", "google-client-id", "google-client-secret"], s)
+      for s in var.manual_secrets : contains(["oidc-client-secret", "google-client-id", "google-client-secret", "slack-signing-secret", "slack-bot-token"], s)
     ])
-    error_message = "manual_secrets holds oidc-client-secret, google-client-id and/or google-client-secret."
+    error_message = "manual_secrets holds oidc-client-secret, google-client-id, google-client-secret, slack-signing-secret and/or slack-bot-token."
   }
 }
 

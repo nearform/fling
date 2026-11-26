@@ -21,23 +21,30 @@ an API key or an assistant can list deleted sites but never restore or remove th
 - "Which sites were deleted lately?"
 - "Was q3-report deleted, and by whom?"
 
-Your assistant lists them and links to **Admin → Deleted**, where you restore one or delete it for
+Your assistant lists them, a page at a time, newest or oldest first, and links to **Admin → Deleted**, where you restore one or delete it for
 good.
 
 ## On the command line
 
 ```sh
-fling admin deleted              # every deleted site and Path still kept, newest first
+fling admin deleted              # the newest 50 deleted sites and Paths still kept
+fling admin deleted --oldest     # the oldest first
+fling admin deleted --all        # every one, however many
 fling admin deleted q3-report    # the ones deleted under one name
 ```
+
+When there are more than a page holds, it says so and prints the `--cursor` for the next page.
+`--limit` sets how many a page holds, up to 500.
 
 To restore one, or delete it for good, open the link it prints: **Admin → Deleted** in the web app.
 
 ## In the web app
 
 Open **Admin → Deleted**. Each row is a deleted site, or a Path deleted on its own: its owner, who
-deleted it and when, and about how much is kept. A site's row names the Paths deleted with it. Type
-a site name in the search box to see only the deletes under that name.
+deleted it and when, and about how much is kept. A site's row names the Paths deleted with it. The
+newest are first: choose **Oldest first** to work through the ones kept longest. The list shows 50 at
+a time; **Load more** at the bottom shows the next 50. Type a site name in the search box to see only
+the deletes under that name, however long ago they were.
 
 Choose **Restore…** on a row:
 

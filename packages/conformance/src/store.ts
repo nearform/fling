@@ -195,9 +195,31 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.putDeletedSite(longer)).toBe(true)
         expect(await store.getDeletedSite('site', first.siteId)).toEqual(first)
         expect(await store.getDeletedSite('path', first.siteId)).toBeNull()
-        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([second, first])
-        expect(await store.listDeletedSites({ name: `${name}-deck`, limit: 10 })).toEqual([longer])
-        expect(await store.listDeletedSites({ name, limit: 1 })).toEqual([second])
+        expect((await store.listDeletedSites({ name, limit: 10 })).records).toEqual([second, first])
+        expect((await store.listDeletedSites({ name: `${name}-deck`, limit: 10 })).records).toEqual(
+          [longer]
+        )
+        const page1 = await store.listDeletedSites({ name, limit: 1 })
+        expect(page1.records).toEqual([second])
+        expect(page1.cursor).toBeTruthy()
+        const page2 = await store.listDeletedSites({ name, limit: 1, cursor: page1.cursor })
+        expect(page2.records).toEqual([first])
+        const after = page2.cursor
+          ? (await store.listDeletedSites({ name, limit: 1, cursor: page2.cursor })).records
+          : []
+        expect(after).toEqual([])
+        const oldest = await store.listDeletedSites({ name, limit: 1, order: 'oldest' })
+        expect(oldest.records).toEqual([first])
+        expect(
+          (
+            await store.listDeletedSites({
+              name,
+              limit: 10,
+              order: 'oldest',
+              cursor: oldest.cursor,
+            })
+          ).records
+        ).toEqual([second])
       })
 
       it('lists every name newest first, a Path deleted on its own under its site', async () => {
@@ -219,8 +241,8 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         await store.putDeletedSite(site1)
         await store.putDeletedSite(path)
         expect(await store.getDeletedSite('path', path.pathId as string)).toEqual(path)
-        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([path, site1])
-        const all = await store.listDeletedSites({ limit: 100 })
+        expect((await store.listDeletedSites({ name, limit: 10 })).records).toEqual([path, site1])
+        const all = (await store.listDeletedSites({ limit: 100 })).records
         const ours = all.filter(r => r.name === name)
         expect(ours).toEqual([path, site1])
         expect(all.indexOf(ours[0] as DeletedSiteRecord)).toBeLessThan(
@@ -247,6 +269,15 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(ours(await store.oldestDeletedSites({ limit: 100 }))).toEqual([a, b, c])
         expect(ours(await store.oldestDeletedSites({ limit: 100, after: a }))).toEqual([b, c])
         expect(ours(await store.oldestDeletedSites({ limit: 100, after: c }))).toEqual([])
+        // The admin's list, oldest first, a page at a time across every name.
+        const first = await store.listDeletedSites({ order: 'oldest', limit: 2 })
+        expect(first.records).toEqual([a, b])
+        const next = await store.listDeletedSites({
+          order: 'oldest',
+          limit: 1,
+          cursor: first.cursor,
+        })
+        expect(next.records).toEqual([c])
         for (const r of [a, b, c]) await store.deleteDeletedSite(r)
       })
 
@@ -271,9 +302,9 @@ export function storeConformance(name: string, factory: () => Store | Promise<St
         expect(await store.deleteDeletedSite(record)).toBe(false)
         expect(await store.markRestoring(record, restoring)).toBe(false)
         expect(await store.getDeletedSite('site', record.siteId)).toBeNull()
-        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([path])
+        expect((await store.listDeletedSites({ name, limit: 10 })).records).toEqual([path])
         await store.deleteDeletedSite(path)
-        expect(await store.listDeletedSites({ name, limit: 10 })).toEqual([])
+        expect((await store.listDeletedSites({ name, limit: 10 })).records).toEqual([])
       })
 
       it('marks a purge or a restore under way, never both', async () => {

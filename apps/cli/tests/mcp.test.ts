@@ -1128,7 +1128,7 @@ describe('MCP server', () => {
     expect(text(r)).toContain(
       `Restore or delete for good from Admin → Deleted: ${SERVER}/admin/deleted`
     )
-    expect(dataOf(r)).toEqual({ deleted, restoreUrl: `${SERVER}/admin/deleted` })
+    expect(dataOf(r)).toEqual({ deleted, cursor: null, restoreUrl: `${SERVER}/admin/deleted` })
 
     const refused = await connect(
       store,

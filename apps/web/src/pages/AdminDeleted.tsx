@@ -1,7 +1,7 @@
 /**
  * Admin → Deleted (`/admin/deleted`; admins only, the API answers 404 to anyone else): the
- * deleted sites, and the Paths deleted on their own, whose files are still kept, newest first,
- * with a name filter, and a Restore and a Delete for good on each row. Both are the admin's, from
+ * deleted sites, and the Paths deleted on their own, whose files are still kept, a page at a time
+ * (Load more), newest or oldest first, with a name filter, and a Restore and a Delete for good on each row. Both are the admin's, from
  * this browser session only (deletion.ts). Deleting for good asks first, removes the files from
  * storage (a site's Paths' with it) and can't be undone; it is refused while a restore is under
  * way or while the site is live. A restore: a site's asks for the name to restore it under, its own by default,
@@ -9,7 +9,12 @@
  * left out, whether the admin became its owner and which secrets its server waits for. Offered on
  * every instance: sites kept before it switched to hard deletes stay restorable.
  */
-import { type DeletedSite, type RestoreResult, recoverableDeletesOf } from '@fling/shared'
+import {
+  type DeletedOrder,
+  type DeletedSite,
+  type RestoreResult,
+  recoverableDeletesOf,
+} from '@fling/shared'
 import {
   ArrowUturnLeftIcon,
   MagnifyingGlassIcon,
@@ -358,7 +363,8 @@ export default function AdminDeleted() {
   const allowed = showsAdmin(me)
   const [search, setSearch] = useState('')
   const name = useDebouncedValue(search.trim().toLowerCase())
-  const list = useAdminDeleted(name, allowed)
+  const [order, setOrder] = useState<DeletedOrder>('newest')
+  const list = useAdminDeleted({ name, order }, allowed)
   const [restoring, setRestoring] = useState<DeletedSite | null>(null)
   const [result, setResult] = useState<RestoreResult | null>(null)
   const [purging, setPurging] = useState<DeletedSite | null>(null)
@@ -384,14 +390,14 @@ export default function AdminDeleted() {
     setResult(null)
     setPurged(purgedText(d))
   }
-  const rows = list.data ?? []
+  const rows = list.data?.pages.flatMap(p => p.deleted) ?? []
 
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <div className="space-y-4">
         <PageHeader
           title="Deleted"
-          description="Sites and Paths people deleted whose files are still kept, newest first. Restore one to put it back online, or delete it for good."
+          description="Sites and Paths people deleted whose files are still kept, newest or oldest first. Restore one to put it back online, or delete it for good."
         />
         <p className="text-sm text-secondary">
           {recoverableDeletesOf(instance)
@@ -406,16 +412,27 @@ export default function AdminDeleted() {
       {purged && <Purged text={purged} onDismiss={() => setPurged(null)} />}
 
       <section className="space-y-3">
-        <label className="input input-sm w-full sm:w-80">
-          <MagnifyingGlassIcon className="size-4 text-muted" />
-          <input
-            type="search"
-            placeholder="Site name"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            aria-label="Show one site name's deletes"
-          />
-        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="input input-sm min-w-0 flex-1 sm:w-80 sm:flex-none">
+            <MagnifyingGlassIcon className="size-4 text-muted" />
+            <input
+              type="search"
+              placeholder="Site name"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Show one site name's deletes"
+            />
+          </label>
+          <select
+            className="select select-sm w-auto shrink-0"
+            aria-label="Order deleted sites by"
+            value={order}
+            onChange={e => setOrder(e.target.value === 'oldest' ? 'oldest' : 'newest')}
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </div>
         <div className="surface-panel !p-0 overflow-clip">
           {list.isPending ? (
             <div className="p-6 text-center">
@@ -438,6 +455,20 @@ export default function AdminDeleted() {
             <DeletedTable rows={rows} onRestore={setRestoring} onPurge={setPurging} />
           )}
         </div>
+        {list.hasNextPage && (
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => list.fetchNextPage()}
+            disabled={list.isFetchingNextPage}
+          >
+            {list.isFetchingNextPage ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              'Load more'
+            )}
+          </button>
+        )}
       </section>
 
       <RestoreSiteModal

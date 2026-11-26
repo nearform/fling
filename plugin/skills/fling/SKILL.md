@@ -331,8 +331,10 @@ published as it is: no need to convert it to HTML.
   *"…This can't be undone."* when it is not. A Path: *"Delete PAY-412/ of team? Its pages stop
   being served."* and the same ending. The result says the same: *"Deleted pitch-deck. An admin
   can recover it."* or *"Deleted pitch-deck for good."*
-- Admins list deleted sites and Paths with `fling_admin_deleted { name? }` (`fling admin deleted
-  [name]`): owner, who deleted it and when, the size kept. Restoring, or deleting for good, is done
+- Admins list deleted sites and Paths with `fling_admin_deleted { name?, order?, limit?, cursor? }`
+  (`fling admin deleted [name] [--oldest] [--all]`): owner, who deleted it and when, the size kept,
+  a page at a time, newest first (`order: "oldest"` for the oldest). When the result has a
+  `cursor`, pass it back for the next page. Restoring, or deleting for good, is done
   in the browser by an admin, at Admin → Deleted in the Fling's web app (the link the result
   gives); no tool does either.
   Anyone else who wants a site back asks an admin.

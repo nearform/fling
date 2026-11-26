@@ -283,7 +283,10 @@ includes `recoverable`. `fling paths delete` says the same of a Path.
 An admin lists what was deleted, and restores it from the web app:
 
 ```sh
-fling admin deleted              # deleted sites and Paths, newest first: owner, who and when, size kept, Paths
+fling admin deleted              # deleted sites and Paths, newest first, 50 a page: owner, who and when, size kept, Paths
+fling admin deleted --oldest     # oldest first
+fling admin deleted --all        # every page
+fling admin deleted --limit 200 --cursor <cursor>   # a page of 200, from the cursor the last page printed
 fling admin deleted pitch-deck   # only that name's deletes and its Paths'
 ```
 
@@ -634,7 +637,7 @@ The MCP tools:
 - `fling_check_name`, `fling_list`, `fling_info`, `fling_files`, `fling_share`,
   `fling_set_visibility`, `fling_archive`, `fling_keep` (where a Fling has the archive policy), `fling_rollback`, `fling_delete` (needs
   `confirm: true`; its result says whether an admin can recover the site), `fling_admin_deleted`
-  (admins: deleted sites and Paths, with the link to Admin → Deleted to restore one or delete it for good), `fling_admin_archive_policy` (admins, where a Fling has the archive policy: what it would or will do, with the link to Admin → Archive policy to switch it), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
+  (admins: deleted sites and Paths, a page at a time, newest or oldest first, with the link to Admin → Deleted to restore one or delete it for good), `fling_admin_archive_policy` (admins, where a Fling has the archive policy: what it would or will do, with the link to Admin → Archive policy to switch it), `fling_whoami`, the comment tools when a Fling has comments, the forms tools when it has forms
   (`fling_forms`, `fling_forms_template`, `fling_forms_check`, `fling_responses_list`, and
   `fling_response_submit`, which answers a form as you, only when you ask), and
   `fling_set_audience` (`add`, `remove`, `set` or `clear` the people who can open a private site,

@@ -814,7 +814,7 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
   // Admins only (any credential): the deleted sites kept; restoring and purging are the browser's.
   if (canInstance(principal, 'admin.deleted.read')) {
     register(mcpTools.adminDeleted, async args => {
-      const { deleted } = await listDeleted(deps, principal, args.name)
+      const { deleted, cursor } = await listDeleted(deps, principal, args)
       const restoreUrl = `${deps.config.appOrigin}${ADMIN_DELETED_PATH}`
       const what = (d: DeletedSite) => (d.kind === 'path' ? `${d.folder}/ of ${d.name}` : d.name)
       const lines = deleted.map(d => {
@@ -823,14 +823,16 @@ export function createRemoteMcpServer(deps: Deps, user: User, principal: Princip
           : ''
         return `- ${what(d)} (${d.kind === 'path' ? 'a Path' : 'site'} ${d.siteId}): owner ${d.owner}, deleted by ${d.deletedBy} at ${d.deletedAt}, ${d.bytes} bytes kept${withPaths}`
       })
+      const order = args.order === 'oldest' ? 'oldest first' : 'newest first'
       const head = deleted.length
-        ? `${deleted.length} deleted site(s) and Path(s), newest first:\n${lines.join('\n')}`
+        ? `${deleted.length} deleted site(s) and Path(s), ${order}:\n${lines.join('\n')}`
         : args.name
           ? `Nothing named ${args.name} was deleted.`
           : 'No deleted sites.'
+      const more = cursor ? `\nThere are more: pass cursor "${cursor}" for the next page.` : ''
       return {
-        text: `${head}\nRestore or delete for good from Admin → Deleted: ${restoreUrl} (an admin's browser session; there is no tool for either)`,
-        data: { deleted, restoreUrl },
+        text: `${head}${more}\nRestore or delete for good from Admin → Deleted: ${restoreUrl} (an admin's browser session; there is no tool for either)`,
+        data: { deleted, cursor, restoreUrl },
       }
     })
   }

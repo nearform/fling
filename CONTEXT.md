@@ -168,7 +168,7 @@ responses, its Paths' ids; a Path's: its Path record and versions), the names of
 Read only by a restore (`SiteRecoverySchema`, `PathRecoverySchema`).
 
 **Deleted-site record** — `DELETED/SITE#<siteId>` (or `DELETED/PATH#<pathId>` for a Path deleted on
-its own), with copies to list them newest first and by exact site name (`DeletedSiteRecord`,
+its own), with copies to list them by when (newest or oldest first, a page at a time) and by exact site name (`DeletedSiteRecord`,
 `apps/api/src/store/types.ts`): name, owner, who deleted it, when, bytes kept and a site's Paths. No
 expiry. `DELETED/TOTALS` adds them up for Admin → Usage. Admins list them (`GET
 /api/admin/deleted`, `fling admin deleted`, `fling_admin_deleted`; `admin.deleted.read`).

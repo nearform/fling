@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.24.1 (2026-11-26)
+
 - **Slack's events reach the API on every platform.** The Slack app's request URL is `https://<app host>/api/integrations/slack/events`, under `/api/`, which every platform's host and edge send to the API; 0.24.0's `/integrations/slack/events` went to the web UI instead, so Slack could not verify it. The e2e scenario checks the route through each local runtime's host. Upgrade note: in the Slack app, under **Event Subscriptions**, change the request URL to the new address (`docs/slack/manifest.yml` has it).
 
 ## 0.24.0 (2026-11-26)

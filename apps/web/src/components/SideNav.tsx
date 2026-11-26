@@ -1,4 +1,4 @@
-import { GUIDE_ROUTE, type InstanceMetadata, type Me } from '@fling/shared'
+import { GUIDE_ROUTE, type InstanceMetadata, type Me, REPO_URL } from '@fling/shared'
 import {
   BookOpenIcon,
   ChevronLeftIcon,
@@ -133,6 +133,21 @@ export default function SideNav() {
           </div>
         ))}
       </nav>
+
+      {/* The Fling release the instance runs (`release` in its metadata), linked to its notes. */}
+      {instance?.release && (
+        <a
+          href={`${REPO_URL}/releases/tag/v${instance.release}`}
+          target="_blank"
+          rel="noreferrer"
+          title={`Fling ${instance.release}: what's in this release`}
+          className={`block py-1.5 text-[11px] leading-none text-base-content/50 hover:text-base-content/80 tabular-nums ${
+            isCollapsed ? 'text-center' : 'px-5'
+          }`}
+        >
+          {isCollapsed ? `v${instance.release}` : `Fling ${instance.release}`}
+        </a>
+      )}
 
       <div className="p-3 hidden lg:block border-t border-[color:var(--border-subtle)]">
         <button

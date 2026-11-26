@@ -71,6 +71,13 @@ const ARCHIVE_POLICY = {
 }
 const tsx = join(REPO, 'node_modules', '.bin', 'tsx')
 
+/**
+ * A Slack app on every runtime, so the scenario can check Slack's events reach the API through
+ * each one's host. The bot token is never used: the scenario sends only Slack's URL check.
+ */
+const SLACK_SIGNING_SECRET = secret()
+const SLACK = { SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN: 'xoxb-e2e-never-used' }
+
 async function awsRuntime(): Promise<Runtime> {
   const [api, sites] = [await freePort(), await freePort()]
   const appOrigin = `http://fling.lvh.me:${api}`
@@ -96,6 +103,7 @@ async function awsRuntime(): Promise<Runtime> {
           MAIL_FROM: 'fling@mail.fling.lvh.me',
           INVITES: 'on',
           ...ARCHIVE_POLICY,
+          ...SLACK,
         },
       }),
   }
@@ -131,6 +139,7 @@ async function cloudflareRuntime(): Promise<Runtime> {
             SESSION_SECRET: secret(),
             SITE_HMAC_KEY: secret(),
             ...ARCHIVE_POLICY,
+            ...SLACK,
           },
         }
       ),
@@ -196,7 +205,14 @@ async function run(runtime: Runtime): Promise<boolean> {
     const admin = await devLogin(runtime.appOrigin, 'admin@example.test')
     const outsider = await devLogin(runtime.appOrigin, 'e2e-outsider@example.test')
     const t0 = Date.now()
-    await runScenario({ appOrigin: runtime.appOrigin, session, member, admin, outsider })
+    await runScenario({
+      appOrigin: runtime.appOrigin,
+      session,
+      member,
+      admin,
+      outsider,
+      ...(runtime.start ? { slackSigningSecret: SLACK_SIGNING_SECRET } : {}),
+    })
     console.log(`  passed in ${((Date.now() - t0) / 1000).toFixed(1)} s`)
     return true
   } catch (err) {
@@ -241,6 +257,7 @@ async function nodeRuntime(): Promise<Runtime> {
           INVITES: 'on',
           SERVERS: 'members',
           ...ARCHIVE_POLICY,
+          ...SLACK,
         },
       }),
   }

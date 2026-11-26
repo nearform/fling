@@ -1,5 +1,5 @@
 /**
- * `POST /integrations/slack/events`: the instance's Slack app's Events API endpoint, mounted only
+ * `POST /api/integrations/slack/events`: the instance's Slack app's Events API endpoint, mounted only
  * when the app is set up (`slackUnfurls`, slack/config.ts). No session: each request is proven
  * Slack's by its signature (slack/signature.ts) before anything else is read from it.
  *
@@ -36,6 +36,9 @@ interface SlackEnvelope {
     links?: { url?: string }[]
   }
 }
+
+/** Where the routes are mounted: the Slack app's request URL is this plus `/events`. */
+export const SLACK_EVENTS_BASE = '/api/integrations/slack'
 
 export const slackRoutes = new Hono<AppEnv>()
 

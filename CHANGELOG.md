@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Slack's events reach the API on every platform.** The Slack app's request URL is `https://<app host>/api/integrations/slack/events`, under `/api/`, which every platform's host and edge send to the API; 0.24.0's `/integrations/slack/events` went to the web UI instead, so Slack could not verify it. The e2e scenario checks the route through each local runtime's host. Upgrade note: in the Slack app, under **Event Subscriptions**, change the request URL to the new address (`docs/slack/manifest.yml` has it).
+
 ## 0.24.0 (2026-11-26)
 
 - **Rich previews in Slack.** With a Slack app set up for the instance (`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, from `docs/slack/manifest.yml`), a site's link posted in the workspace gets a card: the home page's title and thumbnail, who can open it, when it was last published and by whom, and **Open**, **Review** and **Details** buttons. A card appears only when the person who posted the link can open the site, as Fling knows them by their Slack profile's email; any other link keeps Slack's plain card. The events arrive at `POST /integrations/slack/events`, and `/.well-known/fling` advertises `slackUnfurls`. Each deploy guide has a **Link previews in Slack** section.

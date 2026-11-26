@@ -7,7 +7,7 @@
 #   (ephemeral) and written with a write-only attribute, so never in state. Bump secrets_version
 #   to regenerate them.
 # - manual_secrets (oidc-client-secret; google-client-id and google-client-secret for a Google
-#   client): created with the value "unset". Someone writes the real value with
+#   client; slack-signing-secret and slack-bot-token for a Slack app): created with the value "unset". Someone writes the real value with
 #   `az keyvault secret set` (DEPLOY.md). Terraform never reads it back, so that is not drift.
 # - origin-verify-secret and live-events-secret: Terraform must know them, so they are in state.
 #   Front Door sends the first to the app as the X-Origin-Verify header (edge.tf), and Web PubSub
@@ -26,6 +26,8 @@ locals {
     "oidc-client-secret"   = "OIDC_CLIENT_SECRET"
     "google-client-id"     = "GOOGLE_CLIENT_ID"
     "google-client-secret" = "GOOGLE_CLIENT_SECRET"
+    "slack-signing-secret" = "SLACK_SIGNING_SECRET"
+    "slack-bot-token"      = "SLACK_BOT_TOKEN"
   }
 
   secret_ids = merge(

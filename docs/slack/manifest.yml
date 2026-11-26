@@ -1,0 +1,29 @@
+# A Fling's Slack app: rich previews of its links (platforms/aws/DEPLOY.md, "Link previews in
+# Slack"). Replace the three placeholders with your Fling's own hosts before you create the app:
+#   fling.example.com     the host of APP_ORIGIN (the app)
+#   sites.example.com     SITES_DOMAIN (the sites)
+display_information:
+  name: Fling
+  description: Previews of Fling links for people who can open them
+features:
+  bot_user:
+    display_name: Fling
+    always_online: false
+  unfurl_domains:
+    - fling.example.com
+    - sites.example.com
+oauth_config:
+  scopes:
+    bot:
+      - links:read
+      - links:write
+      - users:read
+      - users:read.email
+settings:
+  event_subscriptions:
+    request_url: https://fling.example.com/integrations/slack/events
+    bot_events:
+      - link_shared
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

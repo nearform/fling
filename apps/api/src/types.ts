@@ -6,6 +6,7 @@ import type { LiveHub } from './live.ts'
 import type { Mailer } from './mail/types.ts'
 import type { RouteTable } from './route-table/types.ts'
 import type { ServerLogs, SiteServers } from './servers/types.ts'
+import type { SlackClient } from './slack/client.ts'
 import type { Store, User } from './store/types.ts'
 import type { ViewCounter } from './views.ts'
 
@@ -46,6 +47,11 @@ export interface Deps {
    * batches; one per runtime instance. Absent: SITE_VIEW_COUNTS is off.
    */
   views?: ViewCounter
+  /**
+   * The instance's Slack app (slack/client.ts), when it has one (`slackUnfurls`): previews for
+   * links posted in its workspace. Absent: no Slack app, and no events route.
+   */
+  slack?: SlackClient
   /** outbound fetch (OAuth Client ID Metadata Documents); defaults to global fetch */
   fetch?: typeof fetch
   /**

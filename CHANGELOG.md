@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Rich previews in Slack.** With a Slack app set up for the instance (`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, from `docs/slack/manifest.yml`), a site's link posted in the workspace gets a card: the home page's title and thumbnail, who can open it, when it was last published and by whom, and **Open**, **Review** and **Details** buttons. A card appears only when the person who posted the link can open the site, as Fling knows them by their Slack profile's email; any other link keeps Slack's plain card. The events arrive at `POST /integrations/slack/events`, and `/.well-known/fling` advertises `slackUnfurls`. Each deploy guide has a **Link previews in Slack** section.
+
 ## 0.23.0 (2026-11-26)
 
 - **Admin → Deleted pages through any number of deleted sites.** It shows 50 at a time with **Load more**, newest or oldest first, so an admin can reach and clear the ones kept longest; the name search still finds a delete however old. `GET /api/admin/deleted` takes `order` (`newest`, `oldest`), `limit` (up to 500) and `cursor`, and returns the next page's `cursor`; `fling admin deleted` takes `--oldest`, `--limit`, `--cursor` and `--all`, and `fling_admin_deleted` on both MCP servers takes `order`, `limit` and `cursor`. Upgrade note: without `limit` the endpoint returns a page of 50, where it returned the newest 500 at once; a CLI or MCP server older than this release lists the newest 50.

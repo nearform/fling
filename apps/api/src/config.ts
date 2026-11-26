@@ -377,6 +377,13 @@ export interface Secrets {
    * 32 characters, as `Authorization: Bearer <secret>`). Unset: the endpoints answer 404.
    */
   tickSecret?: string
+  /**
+   * The instance's Slack app (`SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`; slack/): with both set,
+   * links posted in its workspace get a rich preview (`slackUnfurls`). The signing secret proves an
+   * event came from Slack; the bot token answers it.
+   */
+  slackSigningSecret?: string
+  slackBotToken?: string
 }
 
 /**
@@ -394,6 +401,8 @@ export const SECRET_SETTINGS: Record<keyof Secrets, { name: string; group: Setti
   smtpPassword: { name: 'SMTP_PASSWORD', group: 'mail' },
   databaseUrl: { name: 'DATABASE_URL', group: 'platform' },
   tickSecret: { name: 'TICK_SECRET', group: 'platform' },
+  slackSigningSecret: { name: 'SLACK_SIGNING_SECRET', group: 'features' },
+  slackBotToken: { name: 'SLACK_BOT_TOKEN', group: 'features' },
 }
 
 /** The secrets by name, set or not: no value leaves here. */
@@ -933,6 +942,8 @@ export function secretsFromEnv(env: Record<string, string | undefined> = process
     smtpPassword: env.SMTP_PASSWORD?.trim() || undefined,
     databaseUrl: env.DATABASE_URL?.trim() || undefined,
     tickSecret: tickSecretOf(env.TICK_SECRET),
+    slackSigningSecret: env.SLACK_SIGNING_SECRET?.trim() || undefined,
+    slackBotToken: env.SLACK_BOT_TOKEN?.trim() || undefined,
   }
 }
 

@@ -14,6 +14,7 @@ import {
 // platform's bundler (esbuild on AWS, wrangler on Cloudflare) inlines it at build time.
 import rootPackage from '../../../package.json'
 import { signInProviders } from './auth/oidc.ts'
+import { slackOn } from './slack/config.ts'
 
 /** The release this server runs: `release` in the metadata and the `Fling-Release` header. */
 export const RELEASE: string | undefined = rootPackage.version || undefined
@@ -87,6 +88,8 @@ export function instanceMetadata(config: Config): InstanceMetadata {
       archivePolicy: config.archivePolicy.inactiveDays > 0,
       // The policy purges deleted sites (PURGE_DELETED_DAYS), archiving or not.
       purgeDeleted: config.archivePolicy.purgeDeletedDays > 0,
+      // Links posted in the instance's Slack workspace get a rich preview (slack/).
+      slackUnfurls: slackOn(config),
     },
     installCommand: config.installCommand,
     defaultAccess: config.siteDefaultAccess,

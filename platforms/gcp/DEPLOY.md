@@ -177,6 +177,8 @@ gh workflow run deploy-gcp.yml -R <owner>/<repo> -f ref=v<x.y.z>
 
 It ships the commit only if it is on `main`. Then sign in at `https://$APP_HOST`.
 
+Optional: rich previews of your Fling's links in Slack ([Link previews in Slack](#link-previews-in-slack)).
+
 ## How a deploy ships
 
 The `Deploy (Google Cloud)` workflow (`.github/workflows/deploy-gcp.yml`), by hand only:
@@ -283,6 +285,15 @@ In the console, **Cloud Storage → Buckets →** the bucket, then `sites/<siteI
 `gcloud storage cat gs://$BUCKET/sites/<siteId>/deleted.json` reads one, and
 `gcloud storage cp -r "gs://$BUCKET/sites/<siteId>/<versionId>/*" ./recovered` downloads a version.
 The bucket's lifecycle rules remove only `uploads/` leftovers and unfinished uploads.
+
+## Link previews in Slack
+
+**Optional.** With a Slack app, a site's link posted in your workspace gets a rich preview when the
+person who posted it can open the site. Create the app from
+[docs/slack/manifest.yml](../../docs/slack/manifest.yml) and give the instance its two secrets,
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, by adding `slack-signing-secret` and
+`slack-bot-token` to `manual_secrets` and filling them as in [Secrets](#secrets). See [Link
+previews in Slack](../aws/DEPLOY.md#link-previews-in-slack) in the AWS guide for the steps.
 
 ## Claude's sandbox: allow your Fling's host
 

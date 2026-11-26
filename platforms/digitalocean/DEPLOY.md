@@ -187,6 +187,8 @@ servers run untrusted code and need a sandboxed runtime, which App Platform does
    scoped to the app (read, update) and the registry (read, write). DigitalOcean has no OIDC
    federation for GitHub Actions, so this is a long-lived token: scope it, give it an expiry and
    rotate it.
+6. **Link previews in Slack (optional).** To give a site's link a rich preview in your Slack
+   workspace, set up a Slack app: see [Link previews in Slack](#link-previews-in-slack).
 
 ### Secrets and state
 
@@ -240,6 +242,14 @@ key that reads the bucket, any S3 client works:
 s3://<bucket>/sites/<siteId>/<versionId>/ ./recovered` downloads a version, and
 `aws s3 cp --endpoint-url … s3://<bucket>/sites/<siteId>/deleted.json -` reads the recovery file.
 The bucket's lifecycle rule touches only `uploads/`.
+
+## Link previews in Slack
+
+**Optional.** With a Slack app, a site's link posted in your workspace gets a rich preview when the
+person who posted it can open the site. Create the app from
+[docs/slack/manifest.yml](../../docs/slack/manifest.yml) and give the instance its two secrets,
+`SLACK_SIGNING_SECRET` and `SLACK_BOT_TOKEN`, among the module's secrets. See [Link previews in
+Slack](../aws/DEPLOY.md#link-previews-in-slack) in the AWS guide for the steps.
 
 ## Claude's sandbox: allow your Fling's host
 

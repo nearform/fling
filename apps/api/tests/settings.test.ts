@@ -113,6 +113,8 @@ describe('GET /api/admin/settings', () => {
       siteSecretsKey: 'b2'.repeat(32),
       originVerifySecret: 'origin-verify-value-0123456789',
       smtpPassword: 'smtp-password-value-0123456789',
+      slackSigningSecret: 'slack-signing-secret-0123456789',
+      slackBotToken: 'xoxb-slack-bot-token-0123456789',
       databaseUrl: 'postgres://fling:db-password-value-0123456789@db.example.test/fling',
       tickSecret: 'tick-secret-value-0123456789abcdefgh',
     }

@@ -36,7 +36,8 @@ import {
   ConnectionListSchema,
   type CreateCommentRequest,
   type CreateGroupRequest,
-  type DeletedSite,
+  type DeletedOrder,
+  type DeletedSites,
   DeletedSitesSchema,
   type DeleteSiteSecretResponse,
   DeleteSiteSecretResponseSchema,
@@ -509,10 +510,15 @@ export const api = {
   /** Admins, on an instance with metrics: every site's views and pushes, and the last lap's tally. */
   adminUsage: (): Promise<InstanceUsage> => request('/api/admin/usage', InstanceUsageSchema),
   /** Admins: the deleted sites and Paths still kept, newest first; `name`: one site name's. */
-  async adminDeleted(name = ''): Promise<DeletedSite[]> {
-    const query = name ? `?${new URLSearchParams({ name })}` : ''
-    const { deleted } = await request(`/api/admin/deleted${query}`, DeletedSitesSchema)
-    return deleted
+  adminDeleted(
+    filter: { name: string; order: DeletedOrder },
+    cursor?: string
+  ): Promise<DeletedSites> {
+    const params = new URLSearchParams()
+    if (filter.name) params.set('name', filter.name)
+    if (filter.order !== 'newest') params.set('order', filter.order)
+    if (cursor) params.set('cursor', cursor)
+    return request(`/api/admin/deleted${params.size ? `?${params}` : ''}`, DeletedSitesSchema)
   },
   /** Admins, in a browser session: restore a deleted site, under `name` when not its own. */
   restoreSite: (siteId: string, name?: string): Promise<RestoreResult> =>

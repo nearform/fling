@@ -943,10 +943,16 @@ export interface Store extends NotificationStore {
   /** A deleted site by its id, or a Path deleted on its own by its storage id. */
   getDeletedSite(kind: DeletedSiteRecord['kind'], id: string): Promise<DeletedSiteRecord | null>
   /**
-   * Deleted sites and Paths, newest first, at most `limit`; with `name`, only those deleted under
-   * exactly that site name (its Paths' included).
+   * Deleted sites and Paths, a page of at most `limit`, newest first (`order: 'oldest'`, oldest
+   * first); with `name`, only those deleted under exactly that site name (its Paths' included).
+   * `cursor`: set when more may follow, passed back (with the same `name` and `order`) for the next.
    */
-  listDeletedSites(opts: { name?: string; limit: number }): Promise<DeletedSiteRecord[]>
+  listDeletedSites(opts: {
+    name?: string
+    limit: number
+    cursor?: string
+    order?: 'newest' | 'oldest'
+  }): Promise<{ records: DeletedSiteRecord[]; cursor?: string }>
   /**
    * Every name's deleted sites and Paths, oldest first, at most `limit`, from the first after
    * `after` (one a page returned) or from the oldest: the archive policy's purge.

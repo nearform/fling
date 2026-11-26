@@ -41,8 +41,23 @@ export const DeletedSiteSchema = z.object({
 })
 export type DeletedSite = z.infer<typeof DeletedSiteSchema>
 
-/** `GET /api/admin/deleted[?name=]`: newest first; `name` lists one site name's deletes and its Paths'. */
-export const DeletedSitesSchema = z.object({ deleted: z.array(DeletedSiteSchema) })
+/** The order `GET /api/admin/deleted` lists in: by when each was deleted. */
+export const DeletedOrderSchema = z.enum(['newest', 'oldest'])
+export type DeletedOrder = z.infer<typeof DeletedOrderSchema>
+
+/** Deleted sites a page of `GET /api/admin/deleted` holds unless `limit` says, and at most. */
+export const DELETED_PAGE = 50
+export const DELETED_PAGE_MAX = 500
+
+/**
+ * `GET /api/admin/deleted?name=&order=&limit=&cursor=`: one page, newest first unless `order` is
+ * `oldest`; `name` lists one site name's deletes and its Paths'.
+ */
+export const DeletedSitesSchema = z.object({
+  deleted: z.array(DeletedSiteSchema),
+  /** pass back as `cursor` (with the same `name` and `order`) for the next page; null or absent: no more */
+  cursor: z.string().nullable().optional(),
+})
 export type DeletedSites = z.infer<typeof DeletedSitesSchema>
 
 /** `POST /api/admin/deleted/:siteId/restore`: the name to restore it under, when not its own. */

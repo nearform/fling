@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Admin → Deleted pages through any number of deleted sites.** It shows 50 at a time with **Load more**, newest or oldest first, so an admin can reach and clear the ones kept longest; the name search still finds a delete however old. `GET /api/admin/deleted` takes `order` (`newest`, `oldest`), `limit` (up to 500) and `cursor`, and returns the next page's `cursor`; `fling admin deleted` takes `--oldest`, `--limit`, `--cursor` and `--all`, and `fling_admin_deleted` on both MCP servers takes `order`, `limit` and `cursor`. Upgrade note: without `limit` the endpoint returns a page of 50, where it returned the newest 500 at once; a CLI or MCP server older than this release lists the newest 50.
+
 ## 0.22.0 (2026-11-25)
 
 - **Review mode counts views.** Each page that loads on a site's review page (`/review/<name>`) counts a view, as it would opened directly, including each page a reviewer moves to inside the frame. The review shell reports it for the framed page, once per load, through the same access checks as any view, and records no viewer, cookie or page address. The preview on a site's page in the web app still counts none. Sites already live count review-mode views without being published again.

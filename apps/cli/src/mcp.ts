@@ -1880,14 +1880,18 @@ export function createMcpServer(deps: McpDeps = {}): McpServer {
   server.registerTool(adminDeleted.name, serverTool(adminDeleted), args =>
     run(adminDeleted.name, args.server, async target => {
       const instance = await target.instance()
-      const deleted = await listDeleted(target.client, {
+      const { deleted, cursor } = await listDeleted(target.client, {
         name: args.name,
+        order: args.order,
+        limit: args.limit,
+        cursor: args.cursor,
         instanceName: instance?.name,
       })
       const appOrigin = instance?.appOrigin ?? target.url
+      const more = cursor ? `\nThere are more: pass cursor "${cursor}" for the next page.` : ''
       return {
-        summary: `${describeDeleted(deleted, instance, args.name)}\n${restoreLine(appOrigin)} (an admin's browser session; there is no tool for either)${onFling(target.url, instance)}`,
-        data: { deleted, restoreUrl: adminDeletedUrl(appOrigin) },
+        summary: `${describeDeleted(deleted, instance, args)}${more}\n${restoreLine(appOrigin)} (an admin's browser session; there is no tool for either)${onFling(target.url, instance)}`,
+        data: { deleted, cursor, restoreUrl: adminDeletedUrl(appOrigin) },
       }
     })
   )

@@ -18,6 +18,7 @@ import {
   ArchivePolicyStatusSchema,
   ArchivePolicySwitchRequestSchema,
   AuditListSchema,
+  DeletedOrderSchema,
   DeletedSitesSchema,
   ImpersonateRequestSchema,
   InviteRequestSchema,
@@ -37,7 +38,7 @@ import { archivePolicyStatus, setArchivePolicyLive } from '../archive-policy.ts'
 import { principalOf } from '../auth/middleware.ts'
 import { IMPERSONATION_TTL_SECONDS, reissueSession } from '../auth/session.ts'
 import * as deletion from '../deletion.ts'
-import { notFound } from '../lib/errors.ts'
+import { badRequest, notFound } from '../lib/errors.ts'
 import { jsonBody } from '../lib/validate.ts'
 import { routeTableStatus, setRouteFormat } from '../route-format.ts'
 import * as servers from '../servers/api.ts'
@@ -147,7 +148,18 @@ adminRoutes.put('/archive-policy', async c => {
 // Deleted sites (deletion.ts): any admin credential lists them; only a browser session restores
 // them or deletes them for good.
 adminRoutes.get('/deleted', async c => {
-  const list = await deletion.listDeleted(c.get('deps'), principalOf(c), c.req.query('name'))
+  const p = principalOf(c)
+  // Only admins learn that the query was wrong: everyone else gets the 404 first.
+  admin.ensure(p, 'admin.deleted.read')
+  const limit = c.req.query('limit')
+  const order = DeletedOrderSchema.safeParse(c.req.query('order') ?? 'newest')
+  if (!order.success) throw badRequest('order is newest or oldest')
+  const list = await deletion.listDeleted(c.get('deps'), p, {
+    name: c.req.query('name'),
+    order: order.data,
+    cursor: c.req.query('cursor'),
+    limit: limit ? Number(limit) || undefined : undefined,
+  })
   return c.json(DeletedSitesSchema.parse(list))
 })
 

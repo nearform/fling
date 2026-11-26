@@ -1,7 +1,8 @@
 /**
  * Admin commands (an admin's credential; everyone else is refused with exit 3).
  *
- * - `fling admin deleted [name]` lists deleted sites and Paths, newest first: what, owner, who
+ * - `fling admin deleted [name]` lists deleted sites and Paths, a page at a time, newest first
+ *   (`--oldest`, oldest first; `--all`, every page): what, owner, who
  *   deleted it and when, the bytes kept and a site's Paths; then the link to Admin → Deleted, where
  *   an admin restores one, or deletes it for good, from their browser session (deleted.ts).
  * - `fling admin archive-policy` shows the archive policy: its settings, live or dry run, why it is
@@ -28,13 +29,22 @@ import { formatBytes, formatDate, renderTable } from '../utils/output.ts'
 
 export async function runAdminDeleted(
   ctx: CommandContext,
-  name: string | undefined
+  name: string | undefined,
+  opts: { oldest?: boolean; limit?: number; cursor?: string; all?: boolean } = {}
 ): Promise<void> {
   const client = requireClient(ctx)
   const instance = await loadInstance(ctx.store, ctx.config, ctx.fetch)
-  const deleted = await listDeleted(client, { name, instanceName: instance?.name })
+  const order = opts.oldest ? 'oldest' : 'newest'
+  const { deleted, cursor } = await listDeleted(client, {
+    name,
+    order,
+    limit: opts.limit,
+    cursor: opts.cursor,
+    all: opts.all,
+    instanceName: instance?.name,
+  })
   const appOrigin = instance?.appOrigin ?? ctx.config.serverUrl ?? client.serverUrl
-  ctx.out.data({ deleted }, () =>
+  ctx.out.data({ deleted, cursor }, () =>
     [
       deleted.length
         ? renderTable<DeletedSite>(deleted, [
@@ -47,6 +57,14 @@ export async function runAdminDeleted(
             { header: 'PATHS', value: d => d.paths?.map(p => `${p.folder}/`).join(', ') },
           ])
         : chalk.dim(name ? `Nothing named ${name} was deleted.` : 'No deleted sites.'),
+      ...(cursor
+        ? [
+            '',
+            chalk.dim(
+              `There are more: --all lists every one, --cursor ${cursor} the next ${deleted.length}.`
+            ),
+          ]
+        : []),
       '',
       restoreLine(appOrigin),
     ].join('\n')

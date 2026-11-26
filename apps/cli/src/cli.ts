@@ -7,6 +7,8 @@
  */
 import {
   DEFAULT_SITE_SORT,
+  DELETED_PAGE,
+  DELETED_PAGE_MAX,
   FORM_TEMPLATE_NAMES,
   FORMS_FILE,
   RESPONSE_EXPORT_FORMATS,
@@ -874,9 +876,25 @@ const admin = program
 admin
   .command('deleted [name]')
   .description(
-    "list deleted sites and Paths, newest first (name: one site name's): owner, who deleted it and when, size kept, Paths; restore or delete one for good from Admin → Deleted in the app"
+    "list deleted sites and Paths, a page at a time, newest first (name: one site name's): owner, who deleted it and when, size kept, Paths; restore or delete one for good from Admin → Deleted in the app"
   )
-  .action(action((ctx, name: string | undefined) => runAdminDeleted(ctx, name)))
+  .option('--oldest', 'oldest first')
+  .option(
+    '--limit <n>',
+    `how many on a page (default ${DELETED_PAGE}, at most ${DELETED_PAGE_MAX})`,
+    positiveInt('--limit')
+  )
+  .option('--cursor <cursor>', 'the next page, from the cursor the last one printed')
+  .option('--all', 'every page')
+  .action(
+    action(
+      (
+        ctx,
+        name: string | undefined,
+        opts: { oldest?: boolean; limit?: number; cursor?: string; all?: boolean }
+      ) => runAdminDeleted(ctx, name, opts)
+    )
+  )
 admin
   .command('archive-policy')
   .description(

@@ -24,7 +24,12 @@ import {
   commentThreads,
   reviewUrl,
 } from './comments.ts'
-import { ADMIN_DELETED_PATH } from './deletion.ts'
+import {
+  ADMIN_DELETED_PATH,
+  DELETED_PAGE,
+  DELETED_PAGE_MAX,
+  DeletedOrderSchema,
+} from './deletion.ts'
 import {
   FORMS_FILE,
   FORMS_TITLE_MAX,
@@ -1286,8 +1291,9 @@ export function mcpToolsFor(w: McpWording) {
       name: 'fling_admin_deleted',
       title: 'List deleted sites (admins)',
       description:
-        "List the deleted sites and Paths an admin can recover, newest first: name (a Path's folder), owner, who " +
-        "deleted it and when, the size kept and a site's Paths. For admins only. An admin restores one, or deletes it for good, in " +
+        "List the deleted sites and Paths an admin can recover, a page at a time, newest first (or oldest first): name (a Path's folder), owner, who " +
+        "deleted it and when, the size kept and a site's Paths. For admins only. When there are more, the result has a `cursor`: pass it back, " +
+        'with the same name and order, for the next page. An admin restores one, or deletes it for good, in ' +
         `their browser, at Admin → Deleted (${ADMIN_DELETED_PATH} of the ${w.name} web app, the link in the result); ` +
         'no tool restores or deletes for good.',
       inputSchema: {
@@ -1295,6 +1301,17 @@ export function mcpToolsFor(w: McpWording) {
           .string()
           .optional()
           .describe("Only this site name's deletes and its Paths' (default: every deleted site)"),
+        order: DeletedOrderSchema.optional().describe(
+          'newest (the default) or oldest first, by when each was deleted'
+        ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(DELETED_PAGE_MAX)
+          .optional()
+          .describe(`How many on a page (default ${DELETED_PAGE})`),
+        cursor: z.string().optional().describe("The previous page's cursor, for the next page"),
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     }),

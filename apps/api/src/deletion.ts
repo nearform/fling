@@ -86,6 +86,9 @@
  * restored: a restore refuses it, 409 `purge_in_progress`.
  */
 import {
+  DELETED_PAGE,
+  DELETED_PAGE_MAX,
+  type DeletedOrder,
   type DeletedSite,
   type DeletedSites,
   displayPublishPath,
@@ -134,9 +137,6 @@ import type { Deps } from './types.ts'
 
 /** The recovery file's format: the one this code writes and reads. */
 export const RECOVERY_FORMAT = 1
-
-/** Deleted sites `GET /api/admin/deleted` lists at most, newest first. */
-export const DELETED_LIST_MAX = 500
 
 /** Whether a delete on this instance keeps the files (`SITE_DELETE=soft`, the default). */
 export const softDeletes = (deps: Pick<Deps, 'config'>) => deps.config.siteDelete === 'soft'
@@ -433,15 +433,26 @@ const toDeletedSite = (r: DeletedSiteRecord): DeletedSite => ({
 })
 
 /**
- * GET /api/admin/deleted[?name=]: the deleted sites and Paths kept, newest first (at most
- * DELETED_LIST_MAX); `name`, only those deleted under exactly that site name.
+ * GET /api/admin/deleted?name=&order=&limit=&cursor=: one page of the deleted sites and Paths
+ * kept, newest first unless `order` is `oldest`, DELETED_PAGE unless `limit` says (at most
+ * DELETED_PAGE_MAX); `name`, only those deleted under exactly that site name.
  */
-export async function listDeleted(deps: Deps, p: Principal, name?: string): Promise<DeletedSites> {
+export async function listDeleted(
+  deps: Deps,
+  p: Principal,
+  opts: { name?: string; order?: DeletedOrder; limit?: number; cursor?: string } = {}
+): Promise<DeletedSites> {
   ensure(p, 'admin.deleted.read')
-  const named = name?.trim().toLowerCase() || undefined
-  if (named !== undefined && !isValidSiteName(named)) return { deleted: [] }
-  const records = await deps.store.listDeletedSites({ name: named, limit: DELETED_LIST_MAX })
-  return { deleted: records.map(toDeletedSite) }
+  const named = opts.name?.trim().toLowerCase() || undefined
+  if (named !== undefined && !isValidSiteName(named)) return { deleted: [], cursor: null }
+  const limit = Math.min(Math.max(1, Math.floor(opts.limit ?? DELETED_PAGE)), DELETED_PAGE_MAX)
+  const page = await deps.store.listDeletedSites({
+    name: named,
+    limit,
+    order: opts.order ?? 'newest',
+    ...(opts.cursor ? { cursor: opts.cursor } : {}),
+  })
+  return { deleted: page.records.map(toDeletedSite), cursor: page.cursor ?? null }
 }
 
 // --- restoring -----------------------------------------------------------------------------------

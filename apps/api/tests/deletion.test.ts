@@ -219,7 +219,7 @@ describe('a soft delete (the default)', () => {
     env.advance(60_000)
     expect((await api(env, alice.key, 'DELETE', '/api/sites/deck')).status).toBe(204)
     expect(await recovery(site.id)).toEqual(first)
-    const records = await env.store.listDeletedSites({ name: 'deck', limit: 10 })
+    const records = (await env.store.listDeletedSites({ name: 'deck', limit: 10 })).records
     expect(records).toHaveLength(1)
     expect(records[0]?.deletedAt).toBe(first?.deletedAt)
     expect((await restore(site.id)).status).toBe(200)
@@ -245,7 +245,7 @@ describe('a hard delete (SITE_DELETE=hard)', () => {
     expect(await env.blobs.head(`sites/${site.id}/${site.currentVersionId}/index.html`)).toBeNull()
     expect(await recovery(site.id)).toBeNull()
     expect(await env.store.getDeletedSite('site', site.id)).toBeNull()
-    expect(await env.store.listDeletedSites({ limit: 10 })).toEqual([])
+    expect((await env.store.listDeletedSites({ limit: 10 })).records).toEqual([])
     const entry = (await env.store.listAuditEntries(10)).find(e => e.action === 'site.delete')
     expect(entry).toMatchObject({ siteId: site.id, change: 'hard' })
   })
@@ -264,6 +264,37 @@ describe('a hard delete (SITE_DELETE=hard)', () => {
 })
 
 describe('restoring a site', () => {
+  it('lists a page at a time, newest or oldest first, and only an admin learns of a bad order', async () => {
+    for (const name of ['one', 'two', 'three']) {
+      await liveSite(name)
+      await api(env, alice.key, 'DELETE', `/api/sites/${name}`)
+    }
+    const pages = async (order: string) => {
+      const names: string[] = []
+      let cursor: string | null | undefined
+      let pageCount = 0
+      do {
+        const query = new URLSearchParams({ order, limit: '2', ...(cursor ? { cursor } : {}) })
+        const page = await json(await asBoss('GET', `/api/admin/deleted?${query}`))
+        expect(page.deleted.length).toBeLessThanOrEqual(2)
+        names.push(...page.deleted.map((d: { name: string }) => d.name))
+        cursor = page.cursor
+        pageCount++
+      } while (cursor)
+      return { names, pageCount }
+    }
+    const newest = await pages('newest')
+    expect(newest.pageCount).toBeGreaterThanOrEqual(2)
+    expect([...newest.names].sort()).toEqual(['one', 'three', 'two'])
+    expect((await pages('oldest')).names).toEqual([...newest.names].reverse())
+    const first = await json(await asBoss('GET', '/api/admin/deleted'))
+    expect(first.deleted).toHaveLength(3)
+    expect(first.cursor ?? null).toBeNull()
+
+    expect((await api(env, boss.key, 'GET', '/api/admin/deleted?order=size')).status).toBe(400)
+    expect((await api(env, alice.key, 'GET', '/api/admin/deleted?order=size')).status).toBe(404)
+  })
+
   it('only an admin lists deleted sites; only their browser session restores', async () => {
     const site = await liveSite()
     await api(env, alice.key, 'DELETE', '/api/sites/deck')
@@ -616,7 +647,7 @@ describe('Admin → Usage', () => {
     await api(env, alice.key, 'DELETE', '/api/sites/team/paths/PAY-1')
     await api(env, alice.key, 'DELETE', '/api/sites/team')
     const usage = await json(await api(env, boss.key, 'GET', '/api/admin/usage'))
-    const records = await env.store.listDeletedSites({ limit: 10 })
+    const { records } = await env.store.listDeletedSites({ limit: 10 })
     expect(usage.deleted).toEqual({
       sites: 1,
       paths: 1,

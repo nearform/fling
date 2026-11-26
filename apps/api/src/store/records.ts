@@ -1052,12 +1052,25 @@ export class Records implements Store {
     return this.read<DeletedSiteRecord>('deletedsite', key.deleted(kind, id))
   }
 
-  async listDeletedSites(opts: { name?: string; limit: number }) {
+  async listDeletedSites(opts: {
+    name?: string
+    limit: number
+    cursor?: string
+    order?: 'newest' | 'oldest'
+  }) {
+    const paging = {
+      reverse: opts.order !== 'oldest',
+      limit: opts.limit,
+      ...(opts.cursor ? { cursor: opts.cursor } : {}),
+    }
     const page =
       opts.name === undefined
-        ? await this.table.query('DELETED', { skPrefix: 'AT#', reverse: true, limit: opts.limit })
-        : await this.table.query(`DELETEDNAME#${opts.name}`, { reverse: true, limit: opts.limit })
-    return page.items.map(i => decode<DeletedSiteRecord>('deletedsite', i))
+        ? await this.table.query('DELETED', { skPrefix: 'AT#', ...paging })
+        : await this.table.query(`DELETEDNAME#${opts.name}`, paging)
+    return {
+      records: page.items.map(i => decode<DeletedSiteRecord>('deletedsite', i)),
+      ...(page.cursor ? { cursor: page.cursor } : {}),
+    }
   }
 
   async oldestDeletedSites(opts: { limit: number; after?: DeletedSiteRecord }) {

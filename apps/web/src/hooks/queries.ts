@@ -3,6 +3,7 @@ import {
   type CommentAnchor,
   type CreateCommentRequest,
   type CreateGroupRequest,
+  type DeletedOrder,
   type DeletedSite,
   deletedText,
   type GroupDetail,
@@ -60,7 +61,7 @@ export const queryKeys = {
   adminRouteTable: ['admin', 'route-table'] as const,
   adminUsage: ['admin', 'usage'] as const,
   adminArchivePolicy: ['admin', 'archive-policy'] as const,
-  adminDeleted: (name: string) => ['admin', 'deleted', name] as const,
+  adminDeleted: (name: string, order: DeletedOrder) => ['admin', 'deleted', name, order] as const,
   allAdminDeleted: ['admin', 'deleted'] as const,
   // Under the site's key, so whatever refetches the site refetches these too.
   secrets: (name: string) => ['site', name, 'secrets'] as const,
@@ -680,13 +681,19 @@ export function useAdminUsage(enabled: boolean) {
   })
 }
 
-/** Admins: the deleted sites and Paths still kept, or one site name's (`name`). */
-export function useAdminDeleted(name: string, enabled: boolean) {
-  return useQuery({
+/**
+ * Admins: the deleted sites and Paths still kept, or one site name's (`name`), newest or oldest
+ * first; a page at a time ("Load more").
+ */
+export function useAdminDeleted(filter: { name: string; order: DeletedOrder }, enabled: boolean) {
+  return useInfiniteQuery({
     enabled,
-    queryKey: queryKeys.adminDeleted(name),
-    queryFn: () => api.adminDeleted(name),
+    queryKey: queryKeys.adminDeleted(filter.name, filter.order),
+    // The last answer stays up while the next search runs, so the list doesn't flash empty.
     placeholderData: keepPreviousData,
+    queryFn: ({ pageParam }) => api.adminDeleted(filter, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => last.cursor ?? undefined,
   })
 }
 

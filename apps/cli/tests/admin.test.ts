@@ -65,7 +65,28 @@ describe('fling admin deleted', () => {
     })
     await runAdminDeleted(ctx, 'pitch-deck')
     expect(m.calls.at(-1)?.url.searchParams.get('name')).toBe('pitch-deck')
-    expect(JSON.parse(out.content())).toEqual({ deleted: [DELETED[0]] })
+    expect(JSON.parse(out.content())).toEqual({ deleted: [DELETED[0]], cursor: null })
+  })
+
+  it('prints one page and how to get the next, or every page with --all', async () => {
+    const [a, b] = DELETED as [DeletedSite, DeletedSite]
+    const m = mockFetch({
+      'GET /api/admin/deleted': url =>
+        url.searchParams.get('cursor') === 'c1'
+          ? jsonResponse({ deleted: [b], cursor: null })
+          : jsonResponse({ deleted: [a], cursor: 'c1' }),
+    })
+    const page = await testContext({ store: await loggedInStore(), fetch: m.fetch })
+    await runAdminDeleted(page.ctx, undefined, { oldest: true, limit: 1 })
+    expect(m.calls.at(-1)?.url.searchParams.get('order')).toBe('oldest')
+    expect(m.calls.at(-1)?.url.searchParams.get('limit')).toBe('1')
+    expect(page.out.content()).toContain('There are more: --all lists every one, --cursor c1')
+    expect(page.out.content()).not.toContain('PAY-2/ of team')
+
+    const all = await testContext({ store: await loggedInStore(), fetch: m.fetch, json: true })
+    await runAdminDeleted(all.ctx, undefined, { all: true })
+    expect(m.calls.at(-1)?.url.searchParams.get('cursor')).toBe('c1')
+    expect(JSON.parse(all.out.content())).toEqual({ deleted: [a, b], cursor: null })
   })
 
   it('says when nothing was deleted', async () => {

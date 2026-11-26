@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.24.2 (2026-11-26)
+
 - **Slack previews work on Cloudflare.** The Worker answered every link posted in Slack with no card: its call back to Slack failed (`Illegal invocation`, a `fetch` the Workers runtime refuses to run on another object). It now calls Slack as every runtime allows.
 
 ## 0.24.1 (2026-11-26)

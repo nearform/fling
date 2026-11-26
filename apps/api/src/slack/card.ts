@@ -1,12 +1,15 @@
 /**
- * A site's preview in Slack (Block Kit): its home page's title linked to the address posted, its
- * home page's thumbnail, who can open it, when it was last published and by whom, and buttons to
- * open it, review it (with comments on) and see it in the app. Pure: unfurl.ts reads what it shows.
+ * Previews in Slack (Block Kit), short and wide. `siteCard`, a site's: its home page's title linked
+ * to its review page (with comments on; else the address posted), who can open it, when it was last
+ * published and by whom, links to review and open it, and its thumbnail small beside them.
+ * `linkCard`, for a link whose poster can't open it (or that names no site): only what its address
+ * shows. Pure: unfurl.ts reads what they show.
  *
  * Everyone in the channel sees the card, so it says who can open the site in the third person
  * ("Only its owners"), never as the poster sees it ("Only you").
  */
 import { type AccessLevel, reviewUrl } from '@fling/shared'
+import type { Config } from '../config.ts'
 import type { SlackUnfurl } from './client.ts'
 
 export interface SiteCard {
@@ -26,7 +29,7 @@ export interface SiteCard {
   publishedBy?: string
   /** a URL Slack can fetch the thumbnail from (presigned) */
   imageUrl?: string
-  /** comments are on: the Review button */
+  /** comments are on: the title and the first link go to its review page */
   review: boolean
 }
 
@@ -55,59 +58,65 @@ function slackDate(iso: string): string {
   return `<!date^${seconds}^{date_short_pretty} at {time}|${iso}>`
 }
 
-const button = (text: string, url: string, actionId: string, primary = false) => ({
-  type: 'button',
-  text: { type: 'plain_text', text },
-  url,
-  action_id: actionId,
-  ...(primary ? { style: 'primary' } : {}),
-})
-
+/**
+ * Short and wide: one section, the title on the first line, who can open it and when it was
+ * published on the second, the links on the third, and the thumbnail small beside them.
+ */
 export function siteCard(card: SiteCard): SlackUnfurl {
   const title = card.title?.trim() || card.name
   const published = `Published ${slackDate(card.publishedAt)}${
     card.publishedBy ? ` by ${mrkdwn(card.publishedBy)}` : ''
   }`
-  const blocks: unknown[] = [
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*<${card.url}|${mrkdwn(title)}>*\n\`${mrkdwn(card.name)}\` on ${mrkdwn(card.instanceName)}`,
-      },
-    },
-  ]
-  if (card.imageUrl) {
-    blocks.push({
-      type: 'image',
-      image_url: card.imageUrl,
-      alt_text: `The home page of ${card.name}`,
-    })
-  }
-  blocks.push(
-    {
-      type: 'context',
-      elements: [
-        {
+  // Review is where a link in a conversation leads, where the instance has it; else the site.
+  const review = card.review ? reviewUrl(card.appOrigin, card.name) : null
+  const links = [...(review ? [`<${review}|Review>`] : []), `<${card.siteUrl}|Open>`].join(' · ')
+  return {
+    blocks: [
+      {
+        type: 'section',
+        text: {
           type: 'mrkdwn',
-          text: `${accessText(card.access, mrkdwn(card.instanceName))} · ${published}`,
+          text: [
+            `*<${review ?? card.url}|${mrkdwn(title)}>*`,
+            `${accessText(card.access, mrkdwn(card.instanceName))} · ${published}`,
+            links,
+          ].join('\n'),
         },
-      ],
-    },
-    {
-      type: 'actions',
-      elements: [
-        button('Open', card.siteUrl, 'fling_open', true),
-        ...(card.review
-          ? [button('Review', reviewUrl(card.appOrigin, card.name), 'fling_review')]
-          : []),
-        button(
-          'Details',
-          `${card.appOrigin.replace(/\/+$/, '')}/sites/${encodeURIComponent(card.name)}`,
-          'fling_details'
-        ),
-      ],
-    }
-  )
-  return { blocks }
+        ...(card.imageUrl
+          ? {
+              accessory: {
+                type: 'image',
+                image_url: card.imageUrl,
+                alt_text: `The home page of ${card.name}`,
+              },
+            }
+          : {}),
+      },
+    ],
+  }
+}
+
+/**
+ * The neutral card: the site's name as the address gives it (or, for a page that names no site,
+ * the instance's name), linked to the address. It reads the same whether the site exists or not.
+ */
+export function linkCard(
+  config: Pick<Config, 'instanceName'>,
+  url: string,
+  name: string | null
+): SlackUnfurl {
+  const instance = mrkdwn(config.instanceName)
+  return {
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: name
+            ? `*<${url}|${mrkdwn(name)}>*\nA site on ${instance}`
+            : `*<${url}|${instance}>*`,
+        },
+      },
+    ],
+  }
 }

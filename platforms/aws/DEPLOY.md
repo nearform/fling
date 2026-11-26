@@ -917,19 +917,20 @@ records due a purge in the next 7 days (in pages of 50), and the latest 500 audi
 
 ## Link previews in Slack
 
-**Optional.** Without it, Slack shows its plain card for every link.
+**Optional.** Without it, Slack previews a private site's link as the sign-in page.
 
 Slack builds a link's preview on its own servers, signed in as nobody, so a private site's link
 only ever shows the sign-in page's card. With a Slack app, Fling makes the preview itself. When
 someone posts a link to a site (any page of it, or its review or site page on the app), Slack
 tells Fling who posted it. If that person can open the site, Fling sends a card with the home
 page's title and thumbnail, who can open it, when it was last published and by whom, and
-**Open**, **Review** and **Details** buttons. Otherwise Slack keeps its plain card.
+**Review** and **Open** links (the title opens the review page too, with comments on). Every other link gets a neutral card with only what
+the address shows (the site's name), since Slack makes no preview of its own for a domain an app
+claims.
 
 Fling knows the poster by the email address on their Slack profile, so they must have signed in
 to this Fling at least once with that address. The card is posted for the whole channel, as a
-screenshot would be. Opening the site still needs access. Share links are left to Slack, since
-they open for anyone.
+screenshot would be. Opening the site still needs access.
 
 1. Create the app at <https://api.slack.com/apps> → **Create New App** → **From a manifest**, in
    your organisation's workspace. Paste

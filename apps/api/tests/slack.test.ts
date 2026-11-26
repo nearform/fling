@@ -1,9 +1,10 @@
 /**
  * Link previews in Slack (slack/, routes/slack.ts): only Slack's signed requests are read, the
- * URL check is answered, and a link to a site gets a card only when the person who posted it can
- * open the site. A member who is not the author gets one for a members-level site; nobody gets one
- * for a site they can't open, an archived site, or from a Slack account with no Fling user. A
- * retry does no work twice.
+ * URL check is answered, and a link to a site gets the site's card only when the person who posted
+ * it can open the site. A member who is not the author gets one for a members-level site. Every
+ * other link gets the neutral card, which reads the same for a site that doesn't exist: a site the
+ * poster can't open, an archived site, a Slack account with no Fling user, a share link, any other
+ * page. A retry does no work twice.
  */
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.ts'
@@ -128,7 +129,7 @@ describe('the Slack events route', () => {
 })
 
 describe('link previews', () => {
-  it('gives the owner a card for their only-me site, with its title and buttons', async () => {
+  it('gives the owner a card for their only-me site: its title, opening its review page, and its links', async () => {
     const { post, shared, slack } = await world()
     expect((await post(shared('U-ALICE', 'https://secret.fling.test/'))).status).toBe(200)
     expect(slack.calls).toHaveLength(1)
@@ -136,7 +137,12 @@ describe('link previews', () => {
     const text = JSON.stringify(slack.calls[0]?.unfurls['https://secret.fling.test/'])
     expect(text).toContain('secret deck')
     expect(text).toContain('Only its owners can open it')
-    expect(text).toContain(`${APP_ORIGIN}/sites/secret`)
+    // Review is the title's link and the first one; no link to the site's page in the app.
+    expect(text).toContain(`*<${APP_ORIGIN}/review/secret|secret deck>*`)
+    expect(text).toContain(
+      `<${APP_ORIGIN}/review/secret|Review> · <https://secret.fling.test/|Open>`
+    )
+    expect(text).not.toContain(`${APP_ORIGIN}/sites/secret`)
   })
 
   it('gives a member who is not the author a card for a members-level site', async () => {
@@ -150,24 +156,56 @@ describe('link previews', () => {
     ])
   })
 
-  it('gives no card for a site the poster cannot open', async () => {
+  /** The card each link got, as text. */
+  const cardsOf = (slack: FakeSlack) =>
+    Object.fromEntries(
+      Object.entries(slack.calls[0]?.unfurls ?? {}).map(([url, card]) => [
+        url,
+        JSON.stringify(card),
+      ])
+    )
+
+  it('gives a site the poster cannot open the neutral card, the same as a name nobody holds', async () => {
     const { post, shared, slack } = await world()
-    await post(shared('U-BOB', 'https://secret.fling.test/'))
-    expect(slack.calls).toEqual([])
+    await post(shared('U-BOB', 'https://secret.fling.test/', 'https://nothing-here.fling.test/'))
+    const cards = cardsOf(slack)
+    const secret = cards['https://secret.fling.test/'] ?? ''
+    expect(secret).toContain('A site on Fling')
+    expect(secret).not.toContain('secret deck')
+    expect(secret).not.toContain('can open it')
+    expect(cards['https://nothing-here.fling.test/']).toBe(
+      secret
+        .replaceAll('https://secret.fling.test/', 'https://nothing-here.fling.test/')
+        .replaceAll('secret', 'nothing-here')
+    )
   })
 
-  it('gives no card to a Slack account with no Fling user', async () => {
+  it('gives a Slack account with no Fling user the neutral card', async () => {
     const { post, shared, slack } = await world()
     await post(shared('U-ROBOT', 'https://team.fling.test/'))
     await post(shared('U-UNKNOWN', 'https://team.fling.test/'))
-    expect(slack.calls).toEqual([])
+    expect(slack.calls).toHaveLength(2)
+    for (const call of slack.calls) {
+      const card = JSON.stringify(call.unfurls['https://team.fling.test/'])
+      expect(card).toContain('A site on Fling')
+      expect(card).not.toContain('team deck')
+    }
   })
 
-  it('gives no card for an archived site', async () => {
+  it('gives an archived site the neutral card, even for its owner', async () => {
     const { post, shared, slack, env, alice } = await world()
     await api(env, alice.key, 'POST', '/api/sites/team/archive')
     await post(shared('U-ALICE', 'https://team.fling.test/'))
-    expect(slack.calls).toEqual([])
+    expect(cardsOf(slack)['https://team.fling.test/']).not.toContain('team deck')
+  })
+
+  it('gives a share link and a page that names no site the neutral card, without asking who posted', async () => {
+    const { post, shared, slack } = await world()
+    const share = 'https://s--abcdefabcdefabcdefabcdef.fling.test/'
+    await post(shared('U-ALICE', share, `${APP_ORIGIN}/guide`))
+    const cards = cardsOf(slack)
+    expect(cards[share]).toContain('*<https://s--abcdefabcdefabcdefabcdef.fling.test/|Fling>*')
+    expect(cards[`${APP_ORIGIN}/guide`]).toContain('Fling')
   })
 
   it('does no work on a retry', async () => {

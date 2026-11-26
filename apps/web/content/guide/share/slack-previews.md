@@ -8,9 +8,12 @@ sources: [apps/api/src/slack/**, apps/api/src/routes/slack.ts]
 verified: 08b20a3
 ---
 
-When you post a link to a site in Slack, {{instance:name}} shows a preview card under it: the
-title of the site's home page, a picture of it, who can open it, when it was last published and by
-whom. The card has buttons to open the site, review it and see its details in {{instance:name}}.
+When you post a link to a site in Slack, {{instance:name}} shows a small preview card under it:
+the title of the site's home page, who can open it, when it was last published and by whom, a link
+to open it, and a small picture of it.
+<!-- requires: comments -->
+The title and the **Review** link open the site's review page, where people leave comments.
+<!-- /requires -->
 Anyone in the channel sees the card, but only people who can open the site get in when they
 click.
 
@@ -27,12 +30,12 @@ everyone signed in can see gets a card for it too.
 
 ## When it goes wrong
 
-- **The link shows a plain card.** {{instance:name}} knows you by the email address on your Slack
-  profile. Check it is the address you sign in to {{instance:name}} with, and that you have
-  signed in at least once. You also get a plain card for a site you can't open, an archived site
-  or a site with nothing published yet.
-- **A share link shows the site's own preview.** Share links open for anyone, so Slack previews
-  them itself.
+- **The card shows only the site's name.** That is the card for a link whose site you can't open,
+  and nobody learns more from it than from the address. {{instance:name}} knows you by the email
+  address on your Slack profile: check it is the address you sign in to {{instance:name}} with,
+  that you have signed in at least once, and that this address can open the site. An archived
+  site, a site with nothing published yet, a share link and any other page of {{instance:name}}
+  get the same card.
 
 ## Good to know
 

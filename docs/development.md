@@ -15,7 +15,9 @@ pnpm install
 pnpm gate     # lint (Biome, de-branding check), terraform validate, typecheck, test, build, e2e
 ```
 
-CI runs `pnpm gate` and nothing else, so if it passes locally it passes in CI. The one exception is
+CI runs the parts of `pnpm gate` and nothing else, in parallel jobs (checks, tests, and the e2e
+once per runtime) that the **Gate** check waits for, so if it passes locally it passes in CI. The
+one exception is
 the suites backed by DynamoDB Local, MinIO, a Postgres server, the Cosmos DB emulator and
 Azurite, which run only when their endpoints are set. To run them locally:
 
@@ -367,7 +369,8 @@ say when a newer one is out (`apps/cli/src/update-check.ts`). Up to 0.6.0, relea
 The tag starts the **Release** workflow (`.github/workflows/release-cli.yml`):
 
 1. it checks that the tag matches every version file and that the commit is on `main`;
-2. it runs the gate (`ci.yml`) on that commit;
+2. it runs the gate (`ci.yml`) on that commit, unless CI already passed on a commit with the same
+   tree (the release PR's run, or main's): a rebase merge changes the hash but not the files;
 3. it publishes the CLI to npm through trusted publishing (OIDC: no stored token, provenance added
    automatically);
 4. it creates the GitHub Release `v0.7.0`, with the version's CHANGELOG section as its notes and

@@ -1,13 +1,20 @@
 name: CI
 
-# The quality gate, in one job: `pnpm gate` (lint, terraform, typecheck, test, build, and the e2e
-# scenario on each platform's local runtime: apps/api's dev server, `wrangler dev` and the Node
-# host), the same
-# command a person runs before committing. The workflow adds no check of its own, so what passes
-# here is exactly what passes on a laptop. It also installs terraform and helm, which the gate's
-# Terraform and Helm checks only skip when they are missing outside CI.
+# The quality gate: `pnpm gate` (lint, terraform, typecheck, test, build, and the e2e scenario on
+# each platform's local runtime: apps/api's dev server, `wrangler dev` and the Node host), the same
+# command a person runs before committing, in jobs that run side by side:
 #
-# The one addition is local stand-ins for the cloud services: DynamoDB Local, MinIO, Postgres, the
+#   checks  lint, the Terraform and Helm checks, typecheck
+#   test    the unit and conformance suites, with the cloud services' stand-ins
+#   e2e     build, then the e2e scenario, one job per local runtime
+#   Gate    the check branch protection requires: passes only when every job above passed
+#
+# Between them they run exactly the parts of `pnpm gate`, and the checks job fails if the gate
+# gains a part they don't run, so what passes here is what passes on a laptop. The workflow adds no
+# check of its own. It installs terraform and helm, which the gate's Terraform and Helm checks only
+# skip when they are missing outside CI.
+#
+# The test job adds local stand-ins for the cloud services: DynamoDB Local, MinIO, Postgres, the
 # Cosmos DB emulator and Azurite as service containers, the Firestore emulator and fake-gcs-server
 # started in a step, and the env vars that point the adapter conformance suites in platforms/aws,
 # platforms/s3, platforms/node, platforms/gcp and platforms/azure at them. Without those env vars
@@ -15,11 +22,12 @@ name: CI
 # suites still run on PGlite, in process); with them, the adapters must behave like the core's
 # memory/fs ones. The tests create their own table, bucket, schemas and containers. To run them
 # locally, see the `tests/services.ts` of platforms/aws, platforms/s3, platforms/node,
-# platforms/gcp and platforms/azure.
+# platforms/gcp and platforms/azure. The e2e needs none of them: each runtime runs on its own
+# local stores.
 #
 # The Release workflow (release-cli.yml) calls it (workflow_call) on the tagged commit before
-# publishing; a successful release then deploys. Every dependency is public, so no npm token is
-# needed.
+# publishing, unless CI already passed on a commit with the same tree. A successful release then
+# deploys. Every dependency is public, so no npm token is needed.
 on:
   pull_request:
   push:
@@ -35,8 +43,43 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    name: Gate
+  checks:
+    name: Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # pnpm version comes from `packageManager` in the root package.json. Must precede setup-node
+      # so `cache: pnpm` can find the store.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # These jobs run the gate's parts: a part added to `pnpm gate` must be added here too.
+      - name: The jobs run every part of pnpm gate
+        run: |
+          gate=$(node -p "require('./package.json').scripts.gate")
+          expected='pnpm lint && pnpm infra && pnpm typecheck && pnpm test && pnpm build && pnpm e2e'
+          [ "$gate" = "$expected" ] ||
+            { echo "::error::pnpm gate is now '$gate': run its new parts in ci.yml's jobs, then update this check"; exit 1; }
+      # For the Terraform part of the gate (scripts/check-terraform.mjs): ubuntu-24.04 runners don't
+      # ship terraform. No wrapper: the script reads terraform's own output and exit code.
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+      # For the Helm part of the gate (scripts/check-helm.mjs): lint and template the charts.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: pnpm lint
+      - run: pnpm infra
+      - run: pnpm typecheck
+
+  test:
+    name: Test
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -108,14 +151,36 @@ jobs:
           done
           docker logs firestore; docker logs gcs
           echo "::error::the Google Cloud emulators did not start"; exit 1
-      # For the Terraform part of the gate (scripts/check-terraform.mjs): ubuntu-24.04 runners don't
-      # ship terraform. No wrapper: the script reads terraform's own output and exit code.
-      - uses: hashicorp/setup-terraform@v4
+      - run: pnpm test
+
+  e2e:
+    name: e2e (${{ matrix.runtime }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [aws, cloudflare, node]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
-          terraform_version: 1.16.6
-          terraform_wrapper: false
-      # For the Helm part of the gate (scripts/check-helm.mjs): lint and template the charts.
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.19.0
-      - run: pnpm gate
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm e2e ${{ matrix.runtime }}
+
+  gate:
+    name: Gate
+    needs: [checks, test, e2e]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        run: |
+          echo 'checks: ${{ needs.checks.result }}, test: ${{ needs.test.result }}, e2e: ${{ needs.e2e.result }}'
+          [ '${{ needs.checks.result }}' = success ] && [ '${{ needs.test.result }}' = success ] &&
+            [ '${{ needs.e2e.result }}' = success ]

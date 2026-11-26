@@ -4,7 +4,8 @@
  * it can open the site. A member who is not the author gets one for a members-level site. Every
  * other link gets the neutral card, which reads the same for a site that doesn't exist: a site the
  * poster can't open, an archived site, a Slack account with no Fling user, a share link, any other
- * page. A retry does no work twice.
+ * page. A retry does no work twice. A card's picture is a signed link that doesn't expire, served
+ * while the site is live.
  */
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.ts'
@@ -13,7 +14,7 @@ import type { SlackClient, SlackUnfurl, UnfurlTarget } from '../src/slack/client
 import { SlackWebClient } from '../src/slack/client.ts'
 import { slackSignature } from '../src/slack/signature.ts'
 import { siteNameOf } from '../src/slack/unfurl.ts'
-import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
+import { APP_ORIGIN, api, createUser, type Env, file, json, PNG, setup, upload } from './helpers.ts'
 
 const SECRET = 'slack-signing-secret-for-tests'
 const ALICE = 'alice@example.test'
@@ -266,5 +267,41 @@ describe('SlackWebClient', () => {
     const client = new SlackWebClient('xoxb-1', fetchImpl)
     expect(await client.userEmail('U-1')).toBe('alice@example.test')
     expect(await client.userEmail('U-2')).toBeNull()
+  })
+})
+
+describe("a card's picture", () => {
+  /** Alice's `team` with a thumbnail, and the image link of the card Bob gets for it. */
+  async function pictured() {
+    const w = await world()
+    const site = await w.env.deps.store.findSite('team')
+    await w.env.app.request(`/api/sites/team/thumbnail?version=${site?.currentVersionId}`, {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${w.alice.key}`, 'content-type': 'image/png' },
+      body: PNG,
+    })
+    await w.post(w.shared('U-BOB', 'https://team.fling.test/'))
+    const card = JSON.stringify(w.slack.calls[0]?.unfurls['https://team.fling.test/'])
+    const imageUrl = card.match(/"image_url":"([^"]+)"/)?.[1] ?? ''
+    return { ...w, imageUrl, path: imageUrl.slice(APP_ORIGIN.length) }
+  }
+
+  it('is a signed link on the app that never expires: Slack fetches it with no session, days later', async () => {
+    const { app, env, imageUrl, path } = await pictured()
+    expect(imageUrl).toMatch(new RegExp(`^${APP_ORIGIN}/api/integrations/slack/thumbnails/`))
+    expect(imageUrl).not.toMatch(/X-Amz|expires|Expires/i)
+    env.advance(30 * 24 * 60 * 60 * 1000)
+    const res = await app.request(path)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array(PNG))
+  })
+
+  it('serves nothing for a forged signature, or once the site is archived', async () => {
+    const { app, env, alice, path } = await pictured()
+    const forged = `${path.slice(0, path.lastIndexOf('/') + 1)}${'A'.repeat(43)}`
+    expect((await app.request(forged)).status).toBe(404)
+    await api(env, alice.key, 'POST', '/api/sites/team/archive')
+    expect((await app.request(path)).status).toBe(404)
   })
 })

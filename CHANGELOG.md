@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **A Slack card keeps its picture.** The thumbnail is a link signed by Fling that doesn't expire, served from `/api/integrations/slack/thumbnails/…` while the site is live, instead of a storage link that expired after an hour. Slack fetches the picture again whenever it shows the message, so older cards showed a broken image. Cards posted before this release keep the broken one; post the link again for a new card.
+
 ## 0.24.4 (2026-11-26)
 
 - **The web app shows the Fling release.** Small, at the bottom of the side navigation above **Collapse**: "Fling 0.24.3", or "v0.24.3" while the navigation is collapsed, linked to that release's notes. It is the `release` the instance publishes in `/.well-known/fling`, so it shows what the server runs, and nothing where an older server doesn't say.

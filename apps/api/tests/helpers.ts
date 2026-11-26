@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { crc32, deflateSync } from 'node:zlib'
 import type { ManifestFile } from '@fling/shared'
 import { createApp } from '../src/app.ts'
 import { mintApiKey } from '../src/auth/api-keys.ts'
@@ -158,3 +159,30 @@ export function cookiesOf(res: Response): Record<string, { value: string; raw: s
   }
   return out
 }
+
+function chunk(type: string, data: Uint8Array) {
+  const out = Buffer.alloc(12 + data.length)
+  out.writeUInt32BE(data.length, 0)
+  out.write(type, 4, 'latin1')
+  Buffer.from(data).copy(out, 8)
+  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
+  return out
+}
+
+/** A grey 480×300 PNG: a thumbnail's size. */
+export const PNG = (() => {
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(480, 0)
+  ihdr.writeUInt32BE(300, 4)
+  ihdr.set([8, 0, 0, 0, 0], 8)
+  const rows = Buffer.alloc(481 * 300, 0x80)
+  for (let y = 0; y < 300; y++) rows[y * 481] = 0
+  return Uint8Array.from(
+    Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', deflateSync(rows)),
+      chunk('IEND', new Uint8Array()),
+    ])
+  )
+})()

@@ -18,18 +18,17 @@
 
 import { isValidSiteName, parseLabel, siteLabel, siteUrl } from '@fling/shared'
 import { withStanding } from '../auth/standing.ts'
-import { thumbnailKey } from '../blobs/types.ts'
 import { can } from '../policy.ts'
 import { siteActor } from '../sites.ts'
 import { accessOfSite, type SiteRecord } from '../store/types.ts'
 import type { Deps } from '../types.ts'
 import { linkCard, siteCard } from './card.ts'
 import type { SlackClient, SlackUnfurl } from './client.ts'
+import { SLACK_BASE } from './config.ts'
+import { thumbnailSignature } from './signature.ts'
 
 /** At most this many links of one message get a card (Slack sends up to five). */
 export const UNFURL_LINKS_MAX = 5
-/** How long Slack may fetch a card's thumbnail URL for: it copies the picture on first fetch. */
-const IMAGE_URL_TTL_SECONDS = 60 * 60
 
 /** The site a link names, if it names one (see the header). */
 export function siteNameOf(deps: Pick<Deps, 'config'>, link: string): string | null {
@@ -104,11 +103,12 @@ async function cardOf(
   const { config } = deps
   const version = await deps.store.getVersion(site, versionId)
   const publisher = version?.publishedBy ? await deps.store.getUser(version.publishedBy) : null
-  const imageUrl = site.thumbnail
-    ? await deps.blobs
-        .presignGet(thumbnailKey(site.id), { expiresIn: IMAGE_URL_TTL_SECONDS })
-        .catch(() => undefined)
-    : undefined
+  // Signed, not expiring: Slack fetches the picture again whenever it shows the message.
+  const secret = config.secrets.slackSigningSecret
+  const imageUrl =
+    site.thumbnail && secret
+      ? `${config.appOrigin}${SLACK_BASE}/thumbnails/${encodeURIComponent(site.id)}/${thumbnailSignature(secret, site.id)}`
+      : undefined
   return siteCard({
     name: site.name,
     url,

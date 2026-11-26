@@ -3,6 +3,10 @@
  * `X-Slack-Signature: v0=<hex HMAC-SHA256 of "v0:<timestamp>:<raw body>">` with the app's signing
  * secret, and `X-Slack-Request-Timestamp` within five minutes of now, so a captured request can't
  * be replayed later.
+ *
+ * Fling signs the other way too: a card's thumbnail link (`thumbnailSignature`) carries an HMAC of
+ * the site's id with the same secret, so only Fling can make one. It has no expiry: Slack fetches
+ * the picture again whenever it shows the message, however old.
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
@@ -23,6 +27,21 @@ export function verifySlackRequest(
   if (!timestamp || !signature || !/^\d{1,12}$/.test(timestamp)) return false
   if (Math.abs(nowSeconds - Number(timestamp)) > SLACK_TIMESTAMP_WINDOW_SECONDS) return false
   const expected = Buffer.from(slackSignature(secret, timestamp, body))
+  const given = Buffer.from(signature)
+  return expected.length === given.length && timingSafeEqual(expected, given)
+}
+
+/** The signature in a card's thumbnail link (routes/slack.ts `GET /thumbnails/:siteId/:signature`). */
+export function thumbnailSignature(secret: string, siteId: string): string {
+  return createHmac('sha256', secret).update(`thumbnail:${siteId}`).digest('base64url')
+}
+
+export function verifyThumbnailSignature(
+  secret: string,
+  siteId: string,
+  signature: string
+): boolean {
+  const expected = Buffer.from(thumbnailSignature(secret, siteId))
   const given = Buffer.from(signature)
   return expected.length === given.length && timingSafeEqual(expected, given)
 }

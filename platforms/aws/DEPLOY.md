@@ -935,8 +935,14 @@ they open for anyone.
    your organisation's workspace. Paste
    [docs/slack/manifest.yml](../../docs/slack/manifest.yml) with its placeholders replaced: your
    app's host (`APP_ORIGIN`) and your `SITES_DOMAIN`.
-2. **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`, under OAuth &
-   Permissions) and the **Signing Secret** (under Basic Information) into files.
+2. **Install to Workspace**, then copy two values into files:
+   - the **Bot User OAuth Token** (`xoxb-…`), under **OAuth & Permissions** (Slack may call it
+     the bot token);
+   - the **Signing Secret**, under **Basic Information → App Credentials** (click **Show**). It is
+     not a token, so Slack doesn't list it with them.
+
+   Fling needs no **App-Level Token** (`xapp-…`): that is for Socket Mode, and Fling takes Slack's
+   events over HTTPS. Leave **Socket Mode** off, or Slack sends Fling nothing.
 3. Add `slack-signing-secret` and `slack-bot-token` to the module's `manual_secrets`, apply, and
    write them:
 

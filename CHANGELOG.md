@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+## 0.23.0 (2026-11-26)
+
 - **Admin → Deleted pages through any number of deleted sites.** It shows 50 at a time with **Load more**, newest or oldest first, so an admin can reach and clear the ones kept longest; the name search still finds a delete however old. `GET /api/admin/deleted` takes `order` (`newest`, `oldest`), `limit` (up to 500) and `cursor`, and returns the next page's `cursor`; `fling admin deleted` takes `--oldest`, `--limit`, `--cursor` and `--all`, and `fling_admin_deleted` on both MCP servers takes `order`, `limit` and `cursor`. Upgrade note: without `limit` the endpoint returns a page of 50, where it returned the newest 500 at once; a CLI or MCP server older than this release lists the newest 50.
 
 ## 0.22.0 (2026-11-25)

@@ -85,7 +85,8 @@ slackRoutes.post('/events', async c => {
 
   const links = (event.links ?? []).flatMap(l => (typeof l.url === 'string' ? [l.url] : []))
   try {
-    const unfurls = await unfurlLinks(deps, slack, event.user, links)
+    const { unfurls, summary } = await unfurlLinks(deps, slack, event.user, links)
+    console.log(JSON.stringify({ level: 'info', msg: 'slack: link_shared', ...summary }))
     if (Object.keys(unfurls).length) {
       const source = event.source
       const target: UnfurlTarget | null =

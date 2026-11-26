@@ -13,6 +13,8 @@ Up to 0.6.0, each release was the CLI's alone (tagged `cli-v<version>`).
 
 ## Unreleased
 
+- **Slack previews: short and wide, and on every link.** The site's card is one block: the title, who can open it and when it was last published, then **Review** and **Open** as links, with the thumbnail small beside them. The title opens the site's review page (the site itself where comments are off), and the card no longer links the site's page in the app. A link whose site the poster can't open gets a neutral card with only the site's name, the same whether the site exists or not; so do archived sites, share links and other pages of the instance. Slack makes no preview of its own for a domain an app claims, so these links showed nothing. Each Slack event logs one line: how many links, how many name a site, whether the poster was recognised and how many got the site's card.
+
 ## 0.24.2 (2026-11-26)
 
 - **Slack previews work on Cloudflare.** The Worker answered every link posted in Slack with no card: its call back to Slack failed (`Illegal invocation`, a `fetch` the Workers runtime refuses to run on another object). It now calls Slack as every runtime allows.

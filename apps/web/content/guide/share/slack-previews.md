@@ -9,8 +9,8 @@ verified: 08b20a3
 ---
 
 When you post a link to a site in Slack, {{instance:name}} shows a small preview card under it:
-the title of the site's home page, who can open it, when it was last published and by whom, a link
-to open it, and a small picture of it.
+the title of the site's home page, when it was last published and by whom, who can open it when
+that isn't everyone signed in, a link to open it, and a small picture of it.
 <!-- requires: comments -->
 The title and the **Review** link open the site's review page, where people leave comments.
 <!-- /requires -->

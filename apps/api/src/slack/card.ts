@@ -6,7 +6,8 @@
  * shows. Pure: unfurl.ts reads what they show.
  *
  * Everyone in the channel sees the card, so it says who can open the site in the third person
- * ("Only its owners"), never as the poster sees it ("Only you").
+ * ("Only its owners"), never as the poster sees it ("Only you"), and only when that is narrower or
+ * wider than everyone signed in.
  */
 import { type AccessLevel, reviewUrl } from '@fling/shared'
 import type { Config } from '../config.ts'
@@ -33,12 +34,16 @@ export interface SiteCard {
   review: boolean
 }
 
-function accessText(access: AccessLevel, instanceName: string): string {
+/**
+ * Who can open it, where that isn't what everyone expects: nothing for a members-level site, the
+ * default, which anyone signed in can open.
+ */
+function accessText(access: AccessLevel): string | null {
   switch (access) {
     case 'only_me':
       return 'Only its owners can open it'
     case 'members':
-      return `Everyone signed in to ${instanceName} can open it`
+      return null
     case 'groups':
       return 'Only the teams it names can open it'
     case 'people':
@@ -78,7 +83,7 @@ export function siteCard(card: SiteCard): SlackUnfurl {
           type: 'mrkdwn',
           text: [
             `*<${review ?? card.url}|${mrkdwn(title)}>*`,
-            `${accessText(card.access, mrkdwn(card.instanceName))} · ${published}`,
+            [accessText(card.access), published].filter(Boolean).join(' · '),
             links,
           ].join('\n'),
         },

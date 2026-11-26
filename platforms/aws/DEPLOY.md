@@ -923,7 +923,8 @@ Slack builds a link's preview on its own servers, signed in as nobody, so a priv
 only ever shows the sign-in page's card. With a Slack app, Fling makes the preview itself. When
 someone posts a link to a site (any page of it, or its review or site page on the app), Slack
 tells Fling who posted it. If that person can open the site, Fling sends a card with the home
-page's title and thumbnail, who can open it, when it was last published and by whom, and
+page's title and thumbnail, when it was last published and by whom, who can open it (unless
+that is everyone signed in), and
 **Review** and **Open** links (the title opens the review page too, with comments on). Every other link gets a neutral card with only what
 the address shows (the site's name), since Slack makes no preview of its own for a domain an app
 claims.

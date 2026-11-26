@@ -7,5 +7,8 @@ import type { Config } from '../config.ts'
 
 const isSet = (value: string | undefined) => Boolean(value && value.trim() !== 'unset')
 
+/** Where the Slack routes are mounted: the app's request URL is this plus `/events`. */
+export const SLACK_BASE = '/api/integrations/slack'
+
 export const slackOn = (config: Pick<Config, 'secrets'>): boolean =>
   isSet(config.secrets.slackSigningSecret) && isSet(config.secrets.slackBotToken)

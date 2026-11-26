@@ -5,11 +5,10 @@
  * server. Each change is made deterministically inside the request, by a one-shot hook on a store
  * or blob method the request calls after its read.
  */
-import { crc32, deflateSync } from 'node:zlib'
 import { shareKvsKey, siteKvsKey } from '@fling/shared'
 import { describe, expect, it } from 'vitest'
 import type { SiteServers } from '../src/servers/types.ts'
-import { APP_ORIGIN, api, createUser, type Env, file, json, setup, upload } from './helpers.ts'
+import { APP_ORIGIN, api, createUser, type Env, file, json, PNG, setup, upload } from './helpers.ts'
 import { SESSION } from './oauth-helpers.ts'
 
 const ALICE = 'alice@example.test'
@@ -28,33 +27,6 @@ const servers: SiteServers = {
 }
 
 const pageOf = (text: string) => [file('index.html', `<h1>${text}</h1>`)]
-
-function chunk(type: string, data: Uint8Array) {
-  const out = Buffer.alloc(12 + data.length)
-  out.writeUInt32BE(data.length, 0)
-  out.write(type, 4, 'latin1')
-  Buffer.from(data).copy(out, 8)
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length)
-  return out
-}
-
-/** A grey 480×300 PNG: a thumbnail's size. */
-const PNG = (() => {
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(480, 0)
-  ihdr.writeUInt32BE(300, 4)
-  ihdr.set([8, 0, 0, 0, 0], 8)
-  const rows = Buffer.alloc(481 * 300, 0x80)
-  for (let y = 0; y < 300; y++) rows[y * 481] = 0
-  return Uint8Array.from(
-    Buffer.concat([
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-      chunk('IHDR', ihdr),
-      chunk('IDAT', deflateSync(rows)),
-      chunk('IEND', new Uint8Array()),
-    ])
-  )
-})()
 
 /** Stage and upload `files` to `team` with the key: the version to finalize. */
 async function stage(env: Env, key: string, text: string, extra: object = {}) {

@@ -12,11 +12,18 @@
  *
  * Every other event is acknowledged and ignored. A failure is logged and answered 200 too: Slack's
  * retry would fail the same way.
+ *
+ * `GET /api/integrations/slack/thumbnails/<site id>/<signature>`: a site card's picture. Slack
+ * fetches it with no session, and again each time it shows the message, so the link is signed
+ * (slack/signature.ts) rather than expiring. It serves the site's current thumbnail while the site
+ * is live, and nothing once it is archived or deleted.
  */
 import { Hono } from 'hono'
+import { thumbnailKey } from '../blobs/types.ts'
 import { bodyUpTo } from '../lib/body.ts'
 import type { UnfurlTarget } from '../slack/client.ts'
-import { verifySlackRequest } from '../slack/signature.ts'
+import { SLACK_BASE } from '../slack/config.ts'
+import { verifySlackRequest, verifyThumbnailSignature } from '../slack/signature.ts'
 import { unfurlLinks } from '../slack/unfurl.ts'
 import type { AppEnv } from '../types.ts'
 
@@ -38,7 +45,10 @@ interface SlackEnvelope {
 }
 
 /** Where the routes are mounted: the Slack app's request URL is this plus `/events`. */
-export const SLACK_EVENTS_BASE = '/api/integrations/slack'
+export const SLACK_EVENTS_BASE = SLACK_BASE
+
+/** How long Slack's image proxy may keep a picture before asking again. */
+const THUMBNAIL_MAX_AGE_SECONDS = 24 * 60 * 60
 
 export const slackRoutes = new Hono<AppEnv>()
 
@@ -101,4 +111,21 @@ slackRoutes.post('/events', async c => {
     console.error('slack: link_shared', err instanceof Error ? err.message : err)
   }
   return c.body(null, 200)
+})
+
+slackRoutes.get('/thumbnails/:siteId/:signature', async c => {
+  const deps = c.get('deps')
+  const secret = deps.config.secrets.slackSigningSecret
+  const notFound = () => c.json({ error: { code: 'not_found', message: 'Not found' } }, 404)
+  const { siteId, signature } = c.req.param()
+  if (!secret || !verifyThumbnailSignature(secret, siteId, signature)) return notFound()
+  const site = await deps.store.getSiteById(siteId)
+  if (!site || site.archived || !site.currentVersionId || !site.thumbnail) return notFound()
+  const bytes = await deps.blobs.get(thumbnailKey(site.id))
+  if (!bytes) return notFound()
+  return c.body(new Uint8Array(bytes), 200, {
+    'Content-Type': 'image/png',
+    'Cache-Control': `public, max-age=${THUMBNAIL_MAX_AGE_SECONDS}`,
+    'X-Content-Type-Options': 'nosniff',
+  })
 })
